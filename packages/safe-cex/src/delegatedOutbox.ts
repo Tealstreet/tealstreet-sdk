@@ -11,6 +11,7 @@ import {
   isDelegatedFullWriteAction,
 } from './delegatedActions';
 import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
+import { unsupportedAlgoAmendField } from './delegatedAlgoActions';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -524,7 +525,7 @@ export class DelegatedOutbox {
       requireDelegatedAction(action, params);
       return this.enqueue(params);
     }
-    if (!isDelegatedAction(action)) throw new Error('Invalid delegated action');
+    if (!isDelegatedAction(action)) throw new Error(unsupportedAlgoAmendField(action) ?? 'Invalid delegated action');
     return this.enqueueIntent({}, clone(action), paramsOrOptions as EnqueueOptions | undefined);
   }
 

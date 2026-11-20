@@ -14,7 +14,14 @@ describe('typed running algo amendments', () => {
 
   it('refuses immutable identities, total quantity, empty and malformed updates', () => {
     for (const op of ['chaser:amend', 'twap:amend']) {
-      for (const update of [{ size: 2 }, { side: 'sell' }, { symbol: 'other' }, {}, { intervalMs: -1 }, { maxAttempts: '20' }]) {
+      for (const update of [
+        { size: 2 },
+        { side: 'sell' },
+        { symbol: 'other' },
+        {},
+        { intervalMs: -1 },
+        { maxAttempts: '20' },
+      ]) {
         expect(isDelegatedAction({ kind: 'algo', op, data: { id: 'job', update } })).toBe(false);
       }
     }

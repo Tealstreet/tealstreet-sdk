@@ -28,6 +28,42 @@ async fn typed_algo_amend_updates_the_existing_job_without_a_new_order() {
             let refused = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(refused["d"]["outcome"], "refused", "{refused}");
             assert!(refused["d"]["error"]["message"].as_str().unwrap().contains("not amendable"));
+            for field in ["size", "side", "symbol"] {
+                j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":{field:2}}}), 0).await;
+                let unsupported = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(unsupported["d"]["outcome"], "unsupported", "{unsupported}");
+                assert!(unsupported["d"]["error"]["message"].as_str().unwrap().contains("unsupported amend field"));
+            }
+            assert_eq!(account.running.jobs().0, jobs);
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            let stop = if family == "chaser" { "chaser:terminate" } else { "twap:stop" };
+            action(&mut session, json!({"kind":"algo","op":stop,"data":jobs[0].id}), 1, false).await;
+            assert_eq!(action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
+            j6b_wait_idle(&account).await;
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":update}}), 0).await;
+            let ended = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(ended["d"]["outcome"], "refused", "{ended}");
+            assert!(ended["d"]["error"]["message"].as_str().unwrap().contains("not amendable"));
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn delegated_algo_amend_never_bypasses_the_typed_ledger_with_a_legacy_message() {
+    tokio::task::LocalSet::new().run_until(async {
+        for op in ["chaser:amend", "twap:amend"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":op,"data":{"id":"missing","update":{"size":2}}}}).to_string()).await.unwrap();
+            let error = action_frame(&mut sent, "error").await;
+            assert!(error.to_string().contains("DelegatedActionUnavailable"), "{error}");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert!(account.running.jobs().0.is_empty());
             session.close();
             registry.dispose(&account, Disposal::PageDisposed);
         }

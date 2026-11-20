@@ -7,6 +7,7 @@
 //! [`TwapBook::placement_settled`], and executes the returned [`TwapEffect`]s
 //! against the engine and the hosted protocol.
 
+mod amend;
 pub mod factory;
 mod instance;
 mod math;
@@ -15,6 +16,7 @@ mod validate;
 
 pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SCHEDULE_GRACE_MS};
 
+pub use amend::{TwapAmendment, TwapUpdate};
 pub use instance::TwapInstance;
 pub use types::{
     InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapOwner,
@@ -296,6 +298,18 @@ impl TwapBook {
     ) -> Vec<TwapEffect> {
         let mut effects = Vec::new();
         match op {
+            "twap:amend" => match TwapAmendment::parse(data) {
+                Ok(amendment) => {
+                    let (result, amended) = self.amend(amendment, env, view);
+                    effects.extend(amended);
+                    if let Err(message) = result {
+                        effects.push(TwapEffect::Log { message });
+                    }
+                }
+                Err(message) => effects.push(TwapEffect::Log {
+                    message: message.into(),
+                }),
+            },
             "twap:start" => match serde_json::from_value::<TwapOptions>(data.clone()) {
                 Ok(options) => {
                     if let Err(message) = self.start_with(options, env, view, &mut effects) {
@@ -343,6 +357,26 @@ impl TwapBook {
         };
         self.settle(&mut effects);
         (found, effects)
+    }
+
+    pub fn amend(
+        &mut self,
+        amendment: TwapAmendment,
+        env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
+    ) -> (Result<(), String>, Vec<TwapEffect>) {
+        if let Err(message) = amendment.validate() {
+            return (Err(message.into()), Vec::new());
+        }
+        let result = self
+            .managed_mut(&amendment.id)
+            .ok_or_else(|| {
+                "TWAP job is not amendable: finished, stopping, unknown or missing".to_owned()
+            })
+            .and_then(|instance| instance.amend(&amendment.update, env, view));
+        let mut effects = Vec::new();
+        self.settle(&mut effects);
+        (result, effects)
     }
 
     fn start_with(

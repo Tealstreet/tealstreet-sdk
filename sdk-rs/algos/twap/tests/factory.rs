@@ -197,6 +197,61 @@ async fn amend_refuses_unknown_twap_and_immutable_quantity() {
         .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn amend_during_a_pending_slice_keeps_its_quantity_and_waits_for_its_answer() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            port.answer_ms.set(5000);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({"ordersCount":4})), &cx)
+                .unwrap();
+            settle().await;
+            let id = factory.active_twaps("a")[0]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let before = placed_amounts(&port);
+            assert_eq!(before, vec![0.25]);
+            factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000,"remainingSlices":2}}).to_string(),
+                    &cx,
+                )
+                .unwrap();
+            assert_eq!(placed_amounts(&port), before);
+            tokio::time::advance(Duration::from_millis(5001)).await;
+            settle().await;
+            assert_eq!(
+                placed_amounts(&port),
+                before,
+                "pending answer never resets the amended interval to the old 15 seconds"
+            );
+            tokio::time::advance(Duration::from_millis(1001)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375]);
+            factory
+                .handle("twap:stop", &json!(id).to_string(), &cx)
+                .unwrap();
+            assert!(
+                factory
+                    .handle(
+                        "twap:amend",
+                        &json!({"id":id,"update":{"intervalMs":500}}).to_string(),
+                        &cx
+                    )
+                    .unwrap_err()
+                    .contains("not amendable")
+            );
+            cx.scope.dispose();
+        })
+        .await;
+}
+
 async fn settle() {
     for _ in 0..8 {
         tokio::task::yield_now().await;

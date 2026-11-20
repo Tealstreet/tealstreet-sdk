@@ -1022,6 +1022,7 @@ export class ExchangeWorker {
       'exec-result',
       // `chaser:complete` lets the browser attach TP/SL to a finished chase.
       'chaser:complete',
+      'chaser:amended',
       'grafana-info',
       'grafana-error',
       'grafana-pws',

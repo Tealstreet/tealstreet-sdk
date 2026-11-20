@@ -287,6 +287,36 @@ impl ChaserBook {
             .collect()
     }
 
+    pub fn amend(&self, amendment: crate::ChaserAmendment) -> Result<(), String> {
+        amendment.validate()?;
+        let chase = self
+            .find(&amendment.id)
+            .filter(|chase| {
+                !chase.is_stopped() && !chase.scope.is_disposed() && !chase.order_may_be_open()
+            })
+            .ok_or("Chaser job is not amendable: finished, stopping, unknown or missing")?;
+        let mut current = chase.amendment.borrow().clone();
+        if let Some(value) = amendment.update.limit_price {
+            current.limit_price = Some(value);
+        }
+        if let Some(value) = amendment.update.offset {
+            current.offset = Some(value);
+        }
+        if let Some(value) = amendment.update.max_attempts {
+            current.max_attempts = Some(value);
+        }
+        if amendment.update.limit_price.is_some() || amendment.update.offset.is_some() {
+            self.best_price_with(&chase, &current)?;
+        }
+        chase.amendment.replace(current.clone());
+        // No wake/cancel/place: only the next ordinary attempt reads these settings.
+        self.cx.port.emit(
+            "chaser:amended",
+            serde_json::json!({"id":amendment.id,"update":current}).to_string(),
+        );
+        Ok(())
+    }
+
     /// User STOP: stop and cancel the resting order.
     pub fn remove(self: &Rc<Self>, id: &str) {
         if let Some(chase) = self.find(id) {
@@ -505,6 +535,14 @@ impl ChaserBook {
     }
 
     fn best_price(&self, chase: &Chase) -> Result<f64, String> {
+        self.best_price_with(chase, &chase.amendment.borrow())
+    }
+
+    fn best_price_with(
+        &self,
+        chase: &Chase,
+        amendment: &crate::ChaserUpdate,
+    ) -> Result<f64, String> {
         let store = self.store();
         let symbol = &chase.options.symbol;
         let (Some(market), Some(ticker)) = (store.markets.get(symbol), store.tickers.get(symbol))
@@ -538,7 +576,40 @@ impl ChaserBook {
         if !(raw.is_finite() && step.is_finite() && step > 0.0) {
             return Err("No usable quote".into());
         }
-        Ok(adjust(raw.max(step), step))
+        if amendment.limit_price.is_none() && amendment.offset.is_none() {
+            return Ok(adjust(raw.max(step), step));
+        }
+        let offset = amendment.offset.unwrap_or(0.0);
+        let constrained = match chase.options.side {
+            OrderSide::Buy => (raw - offset).min(amendment.limit_price.unwrap_or(f64::INFINITY)),
+            OrderSide::Sell => (raw + offset).max(amendment.limit_price.unwrap_or(0.0)),
+        };
+        let units = constrained / step;
+        let mut price = match chase.options.side {
+            OrderSide::Buy => units.floor() * step,
+            OrderSide::Sell => units.ceil() * step,
+        };
+        price = adjust(price, step);
+        if let Some(limit) = amendment.limit_price {
+            if chase.options.side == OrderSide::Buy && price > limit {
+                price = adjust(price - step, step);
+            }
+            if chase.options.side == OrderSide::Sell && price < limit {
+                price = adjust(price + step, step);
+            }
+        }
+        if !price.is_finite()
+            || price < step
+            || amendment
+                .limit_price
+                .is_some_and(|limit| match chase.options.side {
+                    OrderSide::Buy => price > limit,
+                    OrderSide::Sell => price < limit,
+                })
+        {
+            return Err("Chaser price constraint leaves no usable quote".into());
+        }
+        Ok(price)
     }
 
     fn check_and_mark_if_complete(&self, chase: &Chase) {
@@ -866,7 +937,9 @@ impl ChaserBook {
             .iter()
             .find(|order| order.status == OrderStatus::Open)
             .map(|order| order.price);
-        let best = self.best_price(chase)?;
+        // Keep the existing re-quote trigger; new constraints apply only when
+        // that next ordinary attempt constructs its replacement order.
+        let best = self.best_price_with(chase, &crate::ChaserUpdate::default())?;
         if chase.options.reduce_only() && self.position_gone(chase) {
             chase.mark_complete("Completed");
             return Ok(());

@@ -22,9 +22,11 @@ export type StoreWorkerIncomingOp =
   | 'unsubscribeOrderBook'
   // Trading
   | 'chaser:start'
+  | 'chaser:amend'
   | 'chaser:terminate'
   | 'chaser:terminateAll'
   | 'twap:start'
+  | 'twap:amend'
   | 'twap:resume'
   | 'twap:cleanup'
   | 'twap:pause'
@@ -67,6 +69,7 @@ export type StoreWorkerOutgoingOp =
   | 'callMethod:done'
   | 'twap:stateUpdate'
   | 'chaser:complete'
+  | 'chaser:amended'
   // A Hosted TWAP's own end: `{id, end, ordersExecuted, ordersCount}`.
   | 'twap:complete'
   // Native order attribution, independent of RPC settlement and store frames.

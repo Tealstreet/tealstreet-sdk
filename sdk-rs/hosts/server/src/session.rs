@@ -2099,15 +2099,21 @@ impl Session {
             )),
             (op, _, _)
                 if self.joined[&name].account.delegated().is_some()
-                    && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
-                        || op == "twap:state"
-                            && msg.data.as_array().is_some_and(|rows| {
-                                rows.iter().any(|row| {
-                                    serde_json::from_value::<PersistedTwap>(row.clone()).is_ok_and(
-                                        |entry| entry.state.status == TwapStatus::Running,
-                                    )
-                                })
-                            })) =>
+                    && (matches!(
+                        op,
+                        "exec"
+                            | "chaser:start"
+                            | "chaser:amend"
+                            | "twap:start"
+                            | "twap:amend"
+                            | "twap:resume"
+                    ) || op == "twap:state"
+                        && msg.data.as_array().is_some_and(|rows| {
+                            rows.iter().any(|row| {
+                                serde_json::from_value::<PersistedTwap>(row.clone())
+                                    .is_ok_and(|entry| entry.state.status == TwapStatus::Running)
+                            })
+                        })) =>
             {
                 let message = format!(
                     "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"

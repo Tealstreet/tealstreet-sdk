@@ -370,6 +370,10 @@ async fn amend_changes_only_the_next_chaser_attempt() {
         assert!(port.cancels().is_empty(), "amend never cancels or replaces a job/order");
         assert_eq!(factory.book().active_chasers()[0].id, id);
         assert_eq!(factory.book().active_chasers()[0].max_attempts, 20.0);
+        let acknowledged = port.emitted.borrow().iter().find_map(|(op, data)|
+            (op == "chaser:amended").then(|| serde_json::from_str::<serde_json::Value>(data).unwrap())).unwrap();
+        assert_eq!(acknowledged["id"], id);
+        assert_eq!(acknowledged["update"]["limitPrice"], 101.0);
         port.set_ticker(102.0, 102.5);
         settle(100).await;
         assert_eq!(port.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
@@ -417,6 +421,77 @@ async fn amend_refuses_immutable_chaser_fields_and_ended_jobs() {
             .unwrap_err();
         assert!(error.contains("not amendable"), "{error}");
         assert_eq!(port.placements(), vec![(100.0, 1.0)]);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_keeps_a_placement_on_the_wire_unchanged_and_rejects_unknown_jobs() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        port.place_answer_ms.set(5000);
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        assert_eq!(port.placements(), vec![(100.0, 1.0)]);
+        factory
+            .handle(
+                "chaser:amend",
+                &serde_json::json!({"id":id,"update":{"offset":0.5,"maxAttempts":20}}).to_string(),
+                &cx,
+            )
+            .unwrap();
+        settle(5100).await;
+        assert_eq!(port.placements(), vec![(100.0, 1.0)]);
+        assert!(port.cancels().is_empty());
+        factory.book().halt_keep_order(&id);
+        assert!(
+            factory
+                .handle(
+                    "chaser:amend",
+                    &serde_json::json!({"id":id,"update":{"maxAttempts":30}}).to_string(),
+                    &cx
+                )
+                .unwrap_err()
+                .contains("not amendable")
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_sell_limit_rounds_outward_and_invalid_updates_are_atomic() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(
+            &port,
+            r#"{"symbol":"BTCUSDT","size":1,"side":"sell","maxAttempts":10}"#,
+        );
+        settle(1100).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory
+            .handle(
+                "chaser:amend",
+                &serde_json::json!({"id":id,"update":{"limitPrice":100.6,"offset":0.1}})
+                    .to_string(),
+                &cx,
+            )
+            .unwrap();
+        assert!(
+            factory
+                .handle(
+                    "chaser:amend",
+                    &serde_json::json!({"id":id,"update":{"maxAttempts":20,"size":2}}).to_string(),
+                    &cx
+                )
+                .is_err()
+        );
+        assert_eq!(factory.book().active_chasers()[0].max_attempts, 10.0);
+        port.set_ticker(99.0, 99.5);
+        settle(100).await;
+        assert_eq!(port.placements(), vec![(100.5, 1.0), (101.0, 1.0)]);
     })
     .await;
 }

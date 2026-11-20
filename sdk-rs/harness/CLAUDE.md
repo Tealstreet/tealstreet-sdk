@@ -1,5 +1,10 @@
 # Rust harness: replay evidence and WASM budgets
 
+AGT-97 shared chaser/TWAP amendments change LOCAL and hosted algo inputs.
+Fresh optimized family/combined artifacts and executed native/SDK consumers
+must cover future-only edits, immutable quantities and retained issued outcomes.
+No profile, byte ceiling or replay policy is relaxed by this change.
+
 BloFin whole-position trigger projection recognizes native `size: -1` without
 negative display quantities. Its hedge closing-side controls preserve wire behavior;
 native changes require fresh BloFin/combined artifacts with existing caps and flags.
