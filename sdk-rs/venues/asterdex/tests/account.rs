@@ -477,6 +477,23 @@ fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
     );
 }
 
+// A trade id of 0 is a non-trade update: no execution id, so the cumulative path delivers it.
+#[test]
+fn zero_trade_id_is_not_a_fill_identity() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(order(10.0, "PARTIALLY_FILLED", "0.5", 0));
+    let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        vec![(Some("123".to_owned()), "123".to_owned(), 0.5)]
+    );
+}
+
 #[test]
 fn fill_without_execution_id_uses_cumulative_progress() {
     let mut h = H::new();
