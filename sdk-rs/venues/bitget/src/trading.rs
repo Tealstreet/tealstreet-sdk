@@ -37,6 +37,10 @@ const DETECTION: &str = "Bitget account detection did not complete";
 const UNKNOWN_TEXT: &str =
     "We couldn’t confirm this change. Check your open orders before trying again.";
 
+fn unproven_cancel_text(message: String) -> String {
+    format!("{message}. This change wasn’t confirmed. Check your open orders before trying again.")
+}
+
 /// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
 /// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
 /// (pinned by account::write_and_read_key_refusals_agree), and any other code is
@@ -4246,10 +4250,7 @@ impl BitgetFutures {
             let inherited = cx.inherit_plan_uncertainty(plan);
             debug_assert!(inherited.is_ok(), "{inherited:?}");
         }
-        let error = VenueError::new(format!(
-            "{unproven}. This change wasn’t confirmed. Check your open orders before trying again."
-        ))
-        .outcome(Outcome::Unknown);
+        let error = VenueError::new(unproven_cancel_text(unproven)).outcome(Outcome::Unknown);
         self.end(cx, job, current, error);
         self.refresh_orders(cx, false);
     }
@@ -4989,5 +4990,26 @@ impl Planned {
             }];
         }
         vec![]
+    }
+}
+
+// Rule 5 (#3726): retain each cancel identity and its existing guidance exactly once.
+#[cfg(test)]
+mod cancel_display_tests {
+    use super::*;
+    #[test]
+    fn guided_cancel_is_not_decorated_again() {
+        for message in [
+            "Bitget didn’t confirm cancellation of BTCUSDT target. Check your open orders before trying again.",
+            "Cancellation is unknown. Check Open Orders",
+        ] {
+            assert_eq!(unproven_cancel_text(message.into()), message);
+        }
+    }
+    #[test]
+    fn unguided_cancel_receives_one_action() {
+        let text = unproven_cancel_text("BTCUSDT target (confirmed [kept])".into());
+        assert!(text.contains("target (confirmed [kept])"));
+        assert_eq!(text.matches("Check your open orders").count(), 1);
     }
 }

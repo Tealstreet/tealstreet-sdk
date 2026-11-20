@@ -3080,3 +3080,32 @@ fn context_command(context: &Context) -> CommandId {
 fn disabled_product() -> VenueError {
     not_sent("Bybit product is not enabled").kind(ErrorKind::InvalidInput)
 }
+
+// Rule 5 (#3726): Hyro order identity and its specific replacement action stay intact.
+#[cfg(test)]
+mod notification_display_tests {
+    use super::*;
+    #[test]
+    fn hyro_guidance_is_not_prefixed_again() {
+        let original = crate::hyro::unknown("retained-link", "lost")
+            .kind(safe_cex_engine::ErrorKind::Network)
+            .venue_code("native-code");
+        let shown = unknown_outcome(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.kind, original.kind);
+        assert_eq!(shown.venue_code, original.venue_code);
+        assert!(shown.presents);
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+    }
+    #[test]
+    fn unguided_unknown_and_ordinary_refusals_keep_their_distinction() {
+        let shown = unknown_outcome(VenueError::new("lost").outcome(Outcome::Unknown));
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        let shown = unknown_outcome(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.presents, original.presents);
+    }
+}

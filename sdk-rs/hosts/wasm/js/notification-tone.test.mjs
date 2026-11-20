@@ -163,3 +163,95 @@ for (const venue of ['blofin', 'binance', 'kraken']) {
     }
   });
 }
+
+function rustFunctionSource(path, name) {
+  const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+  const start = source.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, name);
+  const end = source.indexOf('\n}', start);
+  assert.ok(end > start, name);
+  return source.slice(start, end + 2);
+}
+
+function bitgetCancelDisplay(message) {
+  const path = '../../../venues/bitget/src/trading.rs';
+  const body = rustFunctionSource(path, 'unproven_cancel_text');
+  const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+  assert.ok(source.includes('VenueError::new(unproven_cancel_text(unproven))'));
+  const guard = /if (message\.contains[\s\S]*?)\{/.exec(body)?.[1];
+  if (guard && new Function('message', `return (${guard.replaceAll('.contains(', '.includes(')});`)(message)) return message;
+  const template = /format!\(\s*"([^"\n]+)"/.exec(body)?.[1];
+  assert.ok(template);
+  return template.replace('{message}', message);
+}
+
+function bybitUnknownDisplay(error) {
+  const body = rustFunctionSource('../../../venues/bybit/src/trading/ordinary.rs', 'unknown_outcome');
+  const canonical = /let canonical =\s*"([^"\n]+)"/.exec(body)?.[1];
+  const outer = /if (error\.outcome[^\n{]+)\{/.exec(body)?.[1];
+  const inner = /if (!error\.message[\s\S]*?)\{/.exec(body)?.[1];
+  const template = /format!\(\s*"([^"\n]+)"/.exec(body)?.[1];
+  assert.ok(canonical && outer && inner && template);
+  const condition = `(${outer}) && (${inner})`.replaceAll('Some(Outcome::Unknown)', "'unknown'").replaceAll('.contains(', '.includes(');
+  return new Function('error', 'canonical', `return (${condition});`)(error, canonical)
+    ? template.replace('{canonical}', canonical).replace('{}', error.message) : error.message;
+}
+
+function bitunixFinalDisplay(detail) {
+  const source = readFileSync(new URL('../../../venues/bitunix/src/lib.rs', import.meta.url), 'utf8');
+  const start = source.indexOf('fn command_failure_summary(');
+  assert.ok(start >= 0);
+  const summaryBody = source.slice(start, source.indexOf('\n    }', start));
+  let summary = /"([^"\n]+)"/.exec(summaryBody)?.[1];
+  assert.ok(summary);
+  const body = rustFunctionSource('../../../engine/src/engine.rs', 'command_failure_message');
+  const engine = readFileSync(new URL('../../../engine/src/engine.rs', import.meta.url), 'utf8');
+  assert.ok(engine.includes('error.message = command_failure_message(&summary, &error.message)'));
+  assert.ok(engine.includes('*report = command_failure_message(&summary, report)'));
+  if (!detail) return summary;
+  const guard = /if (detail\.contains[\s\S]*?)\{/.exec(body)?.[1];
+  if (guard && new Function('detail', `return (${guard.replaceAll('.contains(', '.includes(')});`)(detail)) {
+    const suffixes = [...body.matchAll(/summary\.strip_suffix\("([^"\n]+)"\)/g)].map((match) => match[1]);
+    assert.ok(suffixes.length);
+    for (const suffix of suffixes) if (summary.endsWith(suffix)) { summary = summary.slice(0, -suffix.length); break; }
+  }
+  const template = /format!\(\s*"([^"\n]+)"/.exec(body)?.[1];
+  assert.ok(template);
+  return template.replaceAll('\\n', '\n').replace('{summary}', summary).replace('{detail}', detail);
+}
+
+const actionCount = (text) => (text.match(/(?:Check|check) (?:your open orders|Open Orders)/g) ?? []).length;
+// Rule 5 (#3726): final display composition retains native identity/context and one action.
+test('Bitget keeps guided unproven cancellation text and its IDs', () => {
+  const message = 'Bitget didn’t confirm cancellation of target (confirmed [kept]). Check your open orders before trying again.';
+  assert.equal(bitgetCancelDisplay(message), message);
+  assert.equal(actionCount(bitgetCancelDisplay(message)), 1);
+});
+test('Bitget adds one action when its cancellation detail is unguided', () => {
+  assert.equal(actionCount(bitgetCancelDisplay('target (confirmed [kept])')), 1);
+  assert.match(bitgetCancelDisplay('target (confirmed [kept])'), /target \(confirmed \[kept\]\)/);
+});
+test('Bybit retains the actual Hyro link and specific replacement guidance once', () => {
+  const source = readFileSync(new URL('../../../venues/bybit/src/hyro.rs', import.meta.url), 'utf8');
+  const template = /"(HyroTrader didn’t confirm order[^"\n]+)"/.exec(source)?.[1];
+  assert.ok(template);
+  const message = template.replace('{link}', 'retained-link').replace('{cause}', 'lost');
+  assert.equal(bybitUnknownDisplay({ message, outcome: 'unknown' }), message);
+  assert.equal(actionCount(bybitUnknownDisplay({ message, outcome: 'unknown' })), 1);
+});
+test('Bybit guides an unguided Unknown and leaves a refusal unchanged', () => {
+  assert.equal(actionCount(bybitUnknownDisplay({ message: 'lost', outcome: 'unknown' })), 1);
+  assert.equal(bybitUnknownDisplay({ message: 'declined', outcome: 'rejected' }), 'declined');
+});
+test('Bitunix keeps summary context but never repeats a guided terminal or warning action', () => {
+  for (const detail of ['The exchange reply didn’t confirm this change. Check your open orders before trying again.', 'A previous change is unknown. Check Open Orders']) {
+    const message = bitunixFinalDisplay(detail);
+    assert.ok(message.endsWith(`\nContext: ${detail}`));
+    assert.equal(actionCount(message), 1);
+  }
+});
+test('Bitunix guides raw warning details and empty details without losing context', () => {
+  assert.equal(actionCount(bitunixFinalDisplay('raw warning')), 1);
+  assert.ok(bitunixFinalDisplay('raw warning').endsWith('\nContext: raw warning'));
+  assert.equal(actionCount(bitunixFinalDisplay('')), 1);
+});

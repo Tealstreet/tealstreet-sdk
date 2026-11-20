@@ -660,6 +660,13 @@ fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
     .outcome(crate::Outcome::NotSent)
 }
 
+fn command_failure_message(summary: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        return summary.to_owned();
+    }
+    format!("{summary}\nContext: {detail}")
+}
+
 /// Every order of this placement is reduce-only and its venue enforces that.
 #[cfg(feature = "order-locks")]
 fn enforced_close<V: Venue>(venue: &V, store: &Store, command: &Command) -> bool {
@@ -3947,17 +3954,9 @@ impl crate::engine::CoreCx<'_> {
         if let Err(error) = &mut result
             && let Some(summary) = (self.io.core.command_failure_summary)(error)
         {
-            error.message = if error.message.is_empty() {
-                summary.clone()
-            } else {
-                format!("{summary}\nContext: {}", error.message)
-            };
+            error.message = command_failure_message(&summary, &error.message);
             for report in &mut reports {
-                *report = if report.is_empty() {
-                    summary.clone()
-                } else {
-                    format!("{summary}\nContext: {report}")
-                };
+                *report = command_failure_message(&summary, report);
             }
         }
         for message in reports {
@@ -8876,6 +8875,42 @@ mod streaming_tests {
             Action::Notice(Notice::CommandError { command: 7, message }),
             Action::Notice(Notice::CommandFailed { command: 7, error }),
         ] if message == "SUMMARY\nContext: MASTER: journal warning" && *error == presented)
+        );
+    }
+
+    // Rule 5 (#3726): terminal errors and each warning retain their own single action.
+    #[test]
+    fn summary_keeps_guidance_once_and_retains_context() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        for detail in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "A previous change is unknown. Check Open Orders",
+        ] {
+            let message = command_failure_message(summary, detail);
+            assert_eq!(
+                message,
+                format!("Bitunix couldn’t confirm this change.\nContext: {detail}")
+            );
+            assert_eq!(
+                message.matches("Check your open orders").count()
+                    + message.matches("Check Open Orders").count(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn summary_guides_unguided_details_and_keeps_empty_details() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            command_failure_message(summary, "native diagnostic"),
+            format!("{summary}\nContext: native diagnostic")
+        );
+        assert_eq!(command_failure_message(summary, ""), summary);
+        assert_eq!(
+            command_failure_message("SUMMARY", "detail"),
+            "SUMMARY\nContext: detail"
         );
     }
 
