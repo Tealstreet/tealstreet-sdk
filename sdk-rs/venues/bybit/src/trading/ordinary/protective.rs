@@ -49,7 +49,13 @@ impl BybitLinear {
             return Ok(None);
         };
         self.select_category(self.category_for(readiness.symbol()));
-        let refused = || readiness.unconfirmed();
+        let what = readiness.what();
+        // The read never reached Bybit: keep this refusal's kind unset, as before.
+        let refused = || {
+            not_sent(format!(
+                "Couldn't check your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+            ))
+        };
         let context = cx
             .preflight_read_context(
                 &entry.preflight,

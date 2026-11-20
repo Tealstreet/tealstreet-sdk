@@ -385,16 +385,41 @@ fn readiness_without_evidence_says_the_edit_was_not_sent_and_to_try_again() {
         let expected = format!(
             "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
         );
-        for answer in ["http", "empty", "other-order"] {
+        for answer in [
+            "http",
+            "empty",
+            "other-order",
+            "two-rows",
+            "missing-trigger-source",
+            "null-trigger-source",
+            "missing-kind",
+        ] {
             let mut h = frame_fed(kind);
             start(&mut h, kind);
             match answer {
                 "http" => h.respond("&orderId=partial", 503, "unavailable"),
                 "empty" => page(&mut h, "&orderId=partial", vec![]),
-                _ => {
+                "two-rows" => {
+                    let row = original(&h);
+                    page(&mut h, "&orderId=partial", vec![row.clone(), row]);
+                }
+                "other-order" => {
                     let mut other = original(&h);
                     other["orderId"] = "other".into();
                     page(&mut h, "&orderId=partial", vec![other]);
+                }
+                // The edited order's own live row with a field Bybit left out is missing
+                // evidence, not a change: refreshing would show the same stop.
+                missing => {
+                    let mut own = original(&h);
+                    match missing {
+                        "missing-trigger-source" => {
+                            own.as_object_mut().unwrap().remove("triggerBy");
+                        }
+                        "null-trigger-source" => own["triggerBy"] = serde_json::Value::Null,
+                        _ => own["tpslMode"] = "".into(),
+                    }
+                    page(&mut h, "&orderId=partial", vec![own]);
                 }
             }
             refused_with(&h, &format!("{kind} {answer}"), &expected);
@@ -413,16 +438,19 @@ fn readiness_on_a_changed_or_triggered_stop_says_so_instead_of_try_again() {
         for (axis, change) in [
             (0, "Triggered"),
             (0, "price"),
+            (0, "trigger-source"),
             (1, "Filled"),
+            (1, "size"),
             (2, "Cancelled"),
         ] {
             let mut h = frame_fed(kind);
             let healthy = original(&h);
             let mut changed = healthy.clone();
-            if change == "price" {
-                changed["triggerPrice"] = "89".into();
-            } else {
-                changed["orderStatus"] = change.into();
+            match change {
+                "price" => changed["triggerPrice"] = "89".into(),
+                "trigger-source" => changed["triggerBy"] = "LastPrice".into(),
+                "size" => changed["qty"] = "6".into(),
+                status => changed["orderStatus"] = status.into(),
             }
             start(&mut h, kind);
             for (index, path) in [
