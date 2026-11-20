@@ -186,6 +186,24 @@ pub enum TwapEffect {
     StateUpdate { data: Value },
     /// Host-side diagnostics the TS worker wrote to `console.error`.
     Diagnostic { message: String },
+    /// A TWAP left `activeTWAPs` by its own end. Hosts send it as `twap:complete`: no
+    /// Completed row is ever listed, so without it a normal end reads as a lost TWAP.
+    Ended {
+        twap_id: String,
+        end: TwapEnd,
+        orders_executed: u32,
+        orders_count: u32,
+    },
+}
+
+/// Why a TWAP ended on its own (`twap:complete`'s `end`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TwapEnd {
+    /// Every slice was handed off.
+    Completed,
+    /// The user's `twap:stop`.
+    Stopped,
 }
 
 /// One account's TWAPs, in insertion order like the TS `Map`.
@@ -292,7 +310,7 @@ impl TwapBook {
             "twap:resume" => self.with_id(data, |instance| instance.resume(env)),
             "twap:cleanup" => self.with_id(data, TwapInstance::cleanup),
             "twap:pause" => self.with_id(data, TwapInstance::pause),
-            "twap:stop" => self.with_id(data, TwapInstance::terminate),
+            "twap:stop" => self.with_id(data, TwapInstance::stop),
             "twap:state" => self.restore(data, env, &mut effects),
             _ => {}
         }
@@ -319,7 +337,7 @@ impl TwapBook {
         let mut effects = Vec::new();
         let found = match self.managed_mut(id) {
             Some(instance) => {
-                instance.terminate();
+                instance.stop();
                 true
             }
             None => false,
@@ -687,6 +705,14 @@ impl TwapBook {
             if entry.managed && entry.instance.state.status == TwapStatus::Completed {
                 entry.managed = false;
                 finished.push(entry.instance.id.clone());
+                if let Some(end) = entry.instance.end() {
+                    effects.push(TwapEffect::Ended {
+                        twap_id: entry.instance.id.clone(),
+                        end,
+                        orders_executed: entry.instance.state.orders_executed,
+                        orders_count: entry.instance.state.orders_count,
+                    });
+                }
             }
         }
         for id in finished {

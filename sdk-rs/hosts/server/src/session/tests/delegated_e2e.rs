@@ -11,11 +11,11 @@ use hpke::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-const USER: &str = "synthetic-tenant:alice";
-const ACCOUNT: &str = "synthetic-e2e";
-const INSTANCE: &str = "e2e-registration";
+pub(super) const USER: &str = "synthetic-tenant:alice";
+pub(super) const ACCOUNT: &str = "synthetic-e2e";
+pub(super) const INSTANCE: &str = "e2e-registration";
 
-fn vectors() -> Vec<Value> {
+pub(super) fn vectors() -> Vec<Value> {
     let data: Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/delegated-handover-vectors.json"
     ))
@@ -24,7 +24,7 @@ fn vectors() -> Vec<Value> {
 }
 
 /// Use the S5 fixture bytes before sealing the same plaintext to a fresh server offer.
-fn plaintext(vector: &Value) -> Vec<u8> {
+pub(super) fn plaintext(vector: &Value) -> Vec<u8> {
     let input = &vector["input"];
     let sealed: Sealed = serde_json::from_value(vector["sealed"].clone()).unwrap();
     let private = <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(
@@ -84,7 +84,7 @@ fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
     )
 }
 
-async fn wire(session: &mut Session, message: Value) {
+pub(super) async fn wire(session: &mut Session, message: Value) {
     session.handle(&message.to_string()).await.unwrap();
 }
 
@@ -106,11 +106,11 @@ async fn next_text(sent: &mut crate::out::Receiver, op: &str) -> String {
     .expect("bounded test reply")
 }
 
-async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
+pub(super) async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
     serde_json::from_str(&next_text(sent, op).await).unwrap()
 }
 
-async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
+pub(super) async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
     let mut loaded = session.take_loaded();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -128,7 +128,7 @@ async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Val
     .expect("loaded snapshot reaches the connection")
 }
 
-async fn sealed_init(
+pub(super) async fn sealed_init(
     session: &mut Session,
     sent: &mut crate::out::Receiver,
     vector: &Value,
@@ -167,7 +167,9 @@ async fn sealed_init_for_offer(
     json!({"t":"init","d":{"accountName":ACCOUNT,"exchangeName":venue,"key":key,"instanceId":INSTANCE,"signingMode":"delegated","sealed":sealed}})
 }
 
-async fn completed(results: &mut mpsc::UnboundedReceiver<JoinCompletion>) -> JoinCompletion {
+pub(super) async fn completed(
+    results: &mut mpsc::UnboundedReceiver<JoinCompletion>,
+) -> JoinCompletion {
     tokio::time::timeout(Duration::from_secs(5), results.recv())
         .await
         .expect("native probe settles")
@@ -195,7 +197,7 @@ async fn assert_empty(session: &Session, registry: &Registry) {
     .expect("temporary probe is released");
 }
 
-fn mock(vector: &Value) -> MockVenue {
+pub(super) fn mock(vector: &Value) -> MockVenue {
     MockVenue::new(
         vector["input"]["key"].as_str().unwrap().into(),
         vector["input"]["secret"].as_str().unwrap().into(),

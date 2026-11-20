@@ -193,8 +193,59 @@ struct Job {
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
     continue_cancel_errors: bool,
+    /// Every settled cancel row across this job's batches (AGT-69).
+    cancel_report: CancelReport,
     /// A step took effect, so a later rejection cannot mean nothing happened.
     effective: bool,
+}
+/// A cancellation's per-row results across its batches, so a partial batch
+/// never hides the later algo batch and the terminal names what is still open.
+#[derive(Default)]
+struct CancelReport {
+    outcomes: Vec<ElementOutcome>,
+    left: Vec<String>,
+    first_code: Option<String>,
+    /// The terminal's "still open" summary, appended to the projected message.
+    note: Option<String>,
+}
+impl CancelReport {
+    fn record(&mut self, mut outcomes: ElementOutcomes, acks: &[Ack<'_>], requested: &[Requested]) {
+        let offset = self.outcomes.len();
+        for outcome in &mut outcomes.0 {
+            outcome.element.index += offset;
+        }
+        self.outcomes.extend(outcomes.0);
+        for (ack, target) in acks.iter().zip(requested) {
+            if matches!(ack.s_code, "" | "0" | "51400") {
+                continue;
+            }
+            self.first_code.get_or_insert_with(|| ack.s_code.to_owned());
+            self.left.push(format!(
+                "{}: {} (code {})",
+                target.id(),
+                ack.s_msg,
+                ack.s_code
+            ));
+        }
+    }
+    /// The terminal refusal when any target was definitively refused.
+    fn refusal(&mut self, status: u16) -> Option<VenueError> {
+        if self.left.is_empty() {
+            return None;
+        }
+        let message = format!(
+            "OKX left {} of {} orders open: {}",
+            self.left.len(),
+            self.outcomes.len(),
+            self.left.join_with("; ")
+        );
+        self.note = Some(message.clone());
+        let mut error = rejection(message, self.first_code.as_deref(), status);
+        error.elements = Some(Box::new(ElementOutcomes(std::mem::take(
+            &mut self.outcomes,
+        ))));
+        Some(error)
+    }
 }
 #[derive(Clone, Copy, PartialEq)]
 enum LookupStage {
@@ -376,6 +427,30 @@ struct OrderPayload {
     callback_ratio: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     callback_spread: Option<String>,
+}
+
+const FULL_POSITION_HELD: &str =
+    "OKX allows one full-position TP/SL. Edit the existing order or remove it first.";
+
+/// `Some(true)` for a lone full-position SL, `Some(false)` for a lone full TP.
+fn single_full_leg(payload: &OrderPayload) -> Option<bool> {
+    if payload.ord_type != "conditional" || payload.close_fraction != Some("1") {
+        return None;
+    }
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        _ => None,
+    }
+}
+
+fn complements(placed: &OrderPayload, payload: &OrderPayload) -> bool {
+    matches!(
+        (single_full_leg(placed), single_full_leg(payload)),
+        (Some(a), Some(b)) if a != b
+    ) && placed.inst_id == payload.inst_id
+        && placed.side == payload.side
+        && placed.pos_side == payload.pos_side
 }
 
 #[derive(Serialize)]
@@ -748,6 +823,7 @@ impl Okx {
             .into_iter()
             .map(|o| self.order_payload(cx, &o, o.amount))
             .collect::<Result<Vec<_>, _>>()?;
+        let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
             steps.push(placement_step(
@@ -766,6 +842,59 @@ impl Okx {
             )?);
         }
         Ok(job(steps, Finish::Ids))
+    }
+
+    /// OKX keeps ONE entire-position TP/SL algo per position and refuses a
+    /// second with 51088. A full SL and TP placed together become one `oco`
+    /// algo (as ccxt places them). A full leg for a position that already holds
+    /// a full algo is refused before any write: adding a leg to an existing
+    /// close-all algo through amend-algos is undocumented and unverified.
+    fn full_position_algos(
+        &self,
+        cx: &Cx<'_, Pending>,
+        payloads: Vec<OrderPayload>,
+    ) -> Result<Vec<OrderPayload>, String> {
+        let mut placed: Vec<OrderPayload> = Vec::new();
+        for payload in payloads {
+            if let Some(partner) = placed.iter_mut().find(|p| complements(p, &payload)) {
+                partner.ord_type = "oco";
+                if payload.sl_trigger_px.is_some() {
+                    partner.sl_trigger_px = payload.sl_trigger_px;
+                    partner.sl_ord_px = payload.sl_ord_px;
+                    partner.sl_trigger_px_type = payload.sl_trigger_px_type;
+                } else {
+                    partner.tp_trigger_px = payload.tp_trigger_px;
+                    partner.tp_ord_px = payload.tp_ord_px;
+                    partner.tp_trigger_px_type = payload.tp_trigger_px_type;
+                }
+                continue;
+            }
+            placed.push(payload);
+        }
+        if placed
+            .iter()
+            .any(|p| p.close_fraction == Some("1") && self.holds_full_position_algo(cx, p))
+        {
+            return Err(FULL_POSITION_HELD.into());
+        }
+        Ok(placed)
+    }
+
+    /// The position already has an open entire-position TP or SL. Full rows
+    /// carry the zero-size sentinel; trigger rows always have a size.
+    fn holds_full_position_algo(&self, cx: &Cx<'_, Pending>, payload: &OrderPayload) -> bool {
+        cx.store.orders().iter().any(|o| {
+            o.symbol == payload.symbol
+                && o.side == payload.side
+                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && o.amount == 0.0
+                && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+                && !self
+                    .trading
+                    .algo_orders
+                    .get(&o.id)
+                    .is_some_and(|observed| observed.trigger)
+        })
     }
 
     fn order_payload(
@@ -1999,8 +2128,17 @@ impl Okx {
         }
         let read_after =
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
+        // A cancellation whose rows are all identity-validated and proven settles
+        // per row, whatever the envelope code: OKX answers a partial batch `2`,
+        // and stopping there left every later algo cancel unsent (AGT-69).
+        let cancel_rows = continue_cancel_errors
+            && matches!(envelope.code, "0" | "1" | "2")
+            && matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            );
         // Legacy TS's response interceptor throws on every nonzero envelope.
-        if envelope.code != "0" {
+        if envelope.code != "0" && !cancel_rows {
             let mut error = if errors.is_empty() {
                 // A satisfied cancel row stays quiet unless the empty envelope
                 // would otherwise erase its only available native diagnostic.
@@ -2063,8 +2201,24 @@ impl Okx {
         {
             trailing.phase = TrailingPhase::Replace;
         }
-        job.effective = true;
-        if job.steps.is_empty() {
+        if cancel_rows {
+            job.cancel_report.record(
+                cancel_outcomes(&response, &acks, &requested),
+                &acks,
+                &requested,
+            );
+            job.effective |= acks.iter().any(|a| matches!(a.s_code, "" | "0"));
+        } else {
+            job.effective = true;
+        }
+        let cancel_refusal = if job.steps.is_empty() {
+            job.cancel_report.refusal(response.status)
+        } else {
+            None
+        };
+        if let Some(refusal) = cancel_refusal {
+            self.end(cx, request.command, Some(&request), refusal, false);
+        } else if job.steps.is_empty() {
             let restored = job
                 .trailing
                 .as_mut()
@@ -2307,6 +2461,12 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
+        if let Some(left) = job.cancel_report.note.take() {
+            note = Some(match note {
+                Some(note) => format!("{note}; {left}"),
+                None => left,
+            });
+        }
         if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
             cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
             let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
@@ -2764,6 +2924,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         finish,
         optimistic: Vec::new(),
         continue_cancel_errors: false,
+        cancel_report: CancelReport::default(),
         effective: false,
         replacing_stop: None,
         trailing: None,

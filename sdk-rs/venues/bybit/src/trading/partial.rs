@@ -296,6 +296,9 @@ pub(super) struct Flow {
     lost_reads: u8,
     /// The failed check that sent the plan to its final orderId read.
     first_failure: Option<String>,
+    /// AGT-57: the old stop's row as stored when the proof retired it. Demo and HyroTrader
+    /// then remove it, which must not erase a fill or amount change it already showed.
+    retired: Option<Order>,
 }
 
 pub(super) enum Observation {
@@ -459,6 +462,19 @@ impl Flow {
     pub(super) fn target_id(&self) -> &str {
         &self.guard.original.id
     }
+    /// Keeps the old stop's stored row before the proof retires it from the store.
+    pub(super) fn retire(&mut self, store: &Store) {
+        if let Some(row) = store.order(&self.guard.original.id) {
+            self.retired = Some(row.clone());
+        }
+    }
+    /// The post-cancel order check against the latest row, still stored or retired.
+    fn validate_order(&self, store: &Store) -> Result<(), VenueError> {
+        let current = store
+            .order(&self.guard.original.id)
+            .or(self.retired.as_ref());
+        self.guard.validate_order_row(current, store, true)
+    }
     pub(super) fn new(guard: PartialStopGuard) -> Self {
         Self {
             guard,
@@ -473,6 +489,7 @@ impl Flow {
             unproven: false,
             lost_reads: 0,
             first_failure: None,
+            retired: None,
         }
     }
 
@@ -612,8 +629,7 @@ impl Flow {
     pub(super) fn replacement_refusal(&self, store: &Store, now: f64) -> Option<String> {
         self.validate(store, now, false).err()?;
         let raw = self
-            .guard
-            .validate_order(store, true)
+            .validate_order(store)
             .and_then(|()| self.guard.validate(store, now));
         Some(raw.err().map_or_else(
             || "the replacement could not be placed".to_owned(),
@@ -631,7 +647,7 @@ impl Flow {
         if !self.unproven && (self.terminal.is_none() || !self.history_done) {
             return Err(VenueError::new("The old stop’s cancellation hasn’t been confirmed. Check your open orders before adding protection.").outcome(Outcome::NotSent));
         }
-        let validation = self.guard.validate_order(store, true).and_then(|()| {
+        let validation = self.validate_order(store).and_then(|()| {
             if restoring {
                 let mut guard = self.guard.clone();
                 guard.kind = guard.original.kind;

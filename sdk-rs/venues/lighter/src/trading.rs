@@ -1727,6 +1727,9 @@ impl Lighter {
                 let job = self.trading.active.as_ref().unwrap();
                 let prove = matches!(job.steps.front(), Some(Step::Place(_)))
                     && !job.protection.as_ref().is_some_and(|edit| edit.restoring);
+                // A plain limit modify the venue refuses (margin) fails its tx (AGT-77).
+                let prove_modify =
+                    matches!(job.steps.front(), Some(Step::Modify(_))) && job.protection.is_none();
                 let shapes: Vec<placement::Shape> = match job.steps.front() {
                     Some(Step::Place(orders)) => orders
                         .iter()
@@ -1734,7 +1737,7 @@ impl Lighter {
                         .collect(),
                     _ => Vec::new(),
                 };
-                let receipt = if prove {
+                let receipt = if prove || prove_modify {
                     cx.http_pending_placement(&context).ok()
                 } else {
                     self.trading
@@ -1745,8 +1748,9 @@ impl Lighter {
                         .extend(ids.iter().cloned());
                     None
                 };
-                if (prove && receipt.is_none())
+                if ((prove || prove_modify) && receipt.is_none())
                     || (!prove
+                        && !prove_modify
                         && cx
                             .http_write_fact(
                                 &context,
@@ -1863,7 +1867,20 @@ impl Lighter {
                     }
                 }
                 if let Some(receipt) = receipt {
-                    self.trade_await_proof(cx, receipt, ids, hashes, shapes);
+                    if !prove_modify {
+                        self.trade_await_proof(cx, |deadline, token| {
+                            placement::Proof::new(receipt, ids, hashes, shapes, deadline, token)
+                        });
+                        return;
+                    }
+                    let (Some(id), Some(hash)) = (ids.first().cloned(), hashes.first().cloned())
+                    else {
+                        self.trade_finish(cx, uncertain("Invalid Lighter write evidence"));
+                        return;
+                    };
+                    self.trade_await_proof(cx, |deadline, token| {
+                        placement::Proof::modify(receipt, id, hash, deadline, token)
+                    });
                     return;
                 }
                 let job = self.trading.active.as_mut().unwrap();
@@ -1885,15 +1902,12 @@ impl Lighter {
         }
     }
 
-    /// Settle the acknowledged placement call and park its Plan until the
-    /// venue proves the orders; the bound's expiry reports Unknown.
+    /// Settle the acknowledged placement or modify call and park its Plan until
+    /// the venue proves it; the bound's expiry reports Unknown.
     fn trade_await_proof(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        receipt: safe_cex_engine::request_context::PendingPlacement,
-        ids: Vec<String>,
-        hashes: Vec<String>,
-        shapes: Vec<placement::Shape>,
+        proof: impl FnOnce(f64, u64) -> placement::Proof,
     ) {
         self.trading.proof_token += 1;
         let token = self.trading.proof_token;
@@ -1910,14 +1924,7 @@ impl Lighter {
                 job.condition = Some(wait);
                 job.waiting_plan = true;
                 job.handoff = Some(context);
-                job.proof = Some(placement::Proof::new(
-                    receipt,
-                    ids,
-                    hashes,
-                    shapes,
-                    cx.now + f64::from(placement::PROOF_BOUND_MS),
-                    token,
-                ));
+                job.proof = Some(proof(cx.now + f64::from(placement::PROOF_BOUND_MS), token));
             }
             Err(_) => {
                 job.slot = Some(slot);
@@ -3048,6 +3055,10 @@ impl Lighter {
         {
             let proven = proof.outcome.is_some();
             self.trading.active.as_mut().unwrap().condition = None;
+            if !proven {
+                // The unproven transaction may yet fail without consuming its nonce.
+                self.trading.next_nonce.invalidate();
+            }
             self.refresh_orders(cx);
             let error = if proven {
                 // Only a held reduce-only position read outlives a concluded proof.

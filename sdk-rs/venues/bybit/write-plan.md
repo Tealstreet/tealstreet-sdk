@@ -82,6 +82,10 @@ put-back); `filled` and every other field still compare.
 Put-back preserves the original
 native size, trigger source and conditional execution fields. Its passive report
 appends an Applied TradingStop or failure row without erasing the refused replacement.
+Demo and HyroTrader retire the old stop's row from the store once the proof reads it
+cancelled; the post-cancel check then reads the row as it stood when retired, so a
+fill or changed qty the private stream showed before the proof still refuses the
+replacement and the put-back (AGT-57: both were sent at the original size).
 
 The legacy TS cancel/replace context is `bybit.exchange.ts:3221–3224`, and its batch
 catch is at `:3015–3042`. Those TS paths lack this put-back and catch more batch

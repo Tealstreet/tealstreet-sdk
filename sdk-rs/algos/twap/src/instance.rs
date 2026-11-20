@@ -6,7 +6,8 @@ use crate::types::{
     InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
 };
 use crate::{
-    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest,
+    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnd, TwapEnv, TwapMarketView,
+    TwapOrderRequest,
 };
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
@@ -56,6 +57,9 @@ pub struct TwapInstance {
     terminal_unknown: Option<VenueError>,
     next_element_index: usize,
     elements_per_slice: usize,
+    /// How it ended when that was its own doing: every slice handed off, or the user's stop.
+    /// None for a halt or a disposal, which report themselves (or must not read as an end).
+    end: Option<TwapEnd>,
 }
 
 impl TwapInstance {
@@ -107,6 +111,7 @@ impl TwapInstance {
             terminal_unknown: None,
             next_element_index: restored_in_flight,
             elements_per_slice,
+            end: None,
         }
     }
 
@@ -504,6 +509,7 @@ impl TwapInstance {
         self.state_changed = true;
         if self.state.orders_sizes.is_empty() {
             self.state.status = TwapStatus::Completed;
+            self.end.get_or_insert(TwapEnd::Completed);
             return;
         }
         self.state.next_order_at = next_order_at;
@@ -718,6 +724,18 @@ impl TwapInstance {
         self.slice_due_at = None;
         self.slice_timeouts.clear();
         self.chaser_watch_at = None;
+    }
+
+    /// The user's `twap:stop`: unlike [`Self::terminate`] (halts, disposal), an end clients hear.
+    pub fn stop(&mut self) {
+        if self.state.status != TwapStatus::Completed {
+            self.end = Some(TwapEnd::Stopped);
+        }
+        self.terminate();
+    }
+
+    pub fn end(&self) -> Option<TwapEnd> {
+        self.end
     }
 
     pub fn cleanup(&mut self) {

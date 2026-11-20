@@ -78,6 +78,7 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
+| `TEALSTREET_HOST_NOTIFY_URL`, `TEALSTREET_HOST_NOTIFY_TOKEN` | unset | AGT-37 host notification lane to the gateway; unset URL is off. The token is required with the URL, and `TEALSTREET_BOX` (else `TEALSTREET_ROUTER_BOX_ID`) names the box. See `DELEGATED_RETENTION.md` |
 | `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for hosted venues' `order.*` frames: `0` disables, `1` enables only with compiled protocol support and hosted signing/origin support; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
 
@@ -625,7 +626,7 @@ update reapplies a preference. No preference is inherited from a shared account.
 
 | `t` | `d` | When |
 |---|---|---|
-| `session` | `{resumeId, resumed}` | On open, for `resumable=1` sockets |
+| `session` | `{resumeId, resumed, resumeProof?, delegatedResume?}` | On open, for `resumable=1` sockets; `resumeProof` authorizes a later DELEGATED claim, `delegatedResume` lists labels this socket may claim |
 | `msg` | `{op, accountName, data, ...}` | Account output (see Frames and Replies) |
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
@@ -1132,7 +1133,7 @@ Sessions and resume (same semantics as today):
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
-- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts use a fresh handover and shared admission; their previous parked holders retain the original expiry while verification is pending.
+- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts are not adopted at open. The socket whose resume consumed the id (and only it) may claim each parked DELEGATED label, within the same grace, with `init {signingMode:"delegated", resume:true, resumeProof}` and no `sealed`. `resumeProof` is the parking socket's in-band session-frame value, never sent in a URL; owner, label, venue, identity digest and handover settings must match the parked account. The claim keeps the resident actor and signer, with no key offer, handover or venue probe (AGT-54). Any mismatch, an expired grace, a foreign or second socket, a router fence or the DELEGATED kill switch answers the transient `resume_unavailable` init refusal, and the client falls back to the ordinary handover. Unclaimed parked holders retain their original expiry; a sealed init always takes shared admission.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different private fingerprint is refused until an admitted client uses an
     explicit settings action; parked clients and resident copies keep their settings.
@@ -1383,6 +1384,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An engine `rejected` error (every released leg definitively refused by the venue)
+with no partial IDs/counts, protection change or non-`notSent` element is that
+proof and settles `refused`/`notSent`, as placement intents already do (AGT-68).
 Every cancel-all leg settles through its shared completion group, including
 pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.

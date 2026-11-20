@@ -353,6 +353,8 @@ struct Port {
     /// Errors raised so far, to tell whether a shutdown raised any.
     errors: Cell<u64>,
     running: Arc<Running>,
+    /// AGT-37 host notifications; `None` when the lane is off.
+    tap: Option<Rc<crate::algo_notify::Tap>>,
 }
 
 /// A nuke belongs to the registration that requested it, even while another
@@ -453,6 +455,9 @@ impl AccountPort for Port {
         })
     }
     fn emit(&self, op: &str, data: String) {
+        if let Some(tap) = &self.tap {
+            tap.observe(op, &data);
+        }
         drop_superseded(&mut self.unheard.borrow_mut(), op, &data);
         if op == "error" {
             self.errors.set(self.errors.get() + 1);
@@ -468,7 +473,7 @@ impl AccountPort for Port {
             // end reports it as lost ("Hosted server stopped reporting it").
             let replay = algo_msg(&self.name, op, replayed(op, &data));
             let holding = (self.broadcast)(Some(algo_msg(&self.name, op, data)));
-            self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
+            self.keep_unheard(None, replay, holding, retrying, is_algo_end(op));
             return;
         }
         // Every tab on the account, not only the one that signs.
@@ -705,6 +710,11 @@ impl Port {
     }
 }
 
+/// A rejoin batch starts from a snapshot: its fills are not reported as new.
+fn live_fills(tap: &Option<Rc<crate::algo_notify::Tap>>, batch: &Batch) -> Option<Vec<Fill>> {
+    (tap.is_some() && !batch.rejoined && !batch.fills.is_empty()).then(|| batch.fills.clone())
+}
+
 /// Algo clients are trusted and in-process: a deep queue keeps a burst from
 /// dropping them (and the fills its frames carry) as slow peers.
 pub const ALGO_QUEUE: usize = 4096;
@@ -918,6 +928,7 @@ pub async fn run(
         running,
         twap_owner,
         None,
+        None,
         inbox,
     )
     .await;
@@ -936,6 +947,7 @@ pub(crate) async fn run_with_identity(
     running: Arc<Running>,
     twap_owner: Arc<crate::twap_owner::Binding>,
     identity: Option<String>,
+    notify: Option<crate::algo_notify::AlgoNotify>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -949,6 +961,7 @@ pub(crate) async fn run_with_identity(
     };
     let name = who.account.clone();
     handle.configure_store_frames(&name, &who.venue);
+    let tap = notify.map(|notify| Rc::new(crate::algo_notify::Tap::new(notify)));
     let port = Rc::new(Port {
         handle: handle.clone(),
         client: Cell::new(client),
@@ -968,16 +981,50 @@ pub(crate) async fn run_with_identity(
         unheard: RefCell::default(),
         errors: Cell::new(0),
         running: running.clone(),
+        tap: tap.clone(),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
-    let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
+    // Chase and TWAP placements are server-initiated; exec and nuke keep `cx`.
+    let tapped = |algo| match &tap {
+        Some(tap) => AlgoCx::new(
+            Rc::new(crate::algo_notify::RejectTap {
+                port: port.clone(),
+                tap: tap.clone(),
+                algo,
+            }),
+            scope.clone(),
+        ),
+        None => cx.clone(),
+    };
+    let chasers = safe_cex_chaser::ChaserFactory::new(tapped(crate::host_notify::Algo::Chase));
     let book = chasers.book();
+    if let Some(tap) = &tap {
+        let book = Rc::downgrade(&book);
+        tap.set_chases(Box::new(move || {
+            book.upgrade()
+                .map_or_else(Vec::new, |book| book.active_chasers())
+        }));
+        // On its own task, like the recount: `feed.next()` must not race a timer.
+        let (tap, port) = (tap.clone(), port.clone());
+        cx.spawn(async move {
+            loop {
+                match tap.next_fill_due() {
+                    Some(due) => tokio::select! {
+                        () = tokio::time::sleep_until(due) => {}
+                        () = tap.wake.notified() => {}
+                    },
+                    None => tap.wake.notified().await,
+                }
+                tap.flush_fills(&port.store(), false);
+            }
+        });
+    }
     let binding = twap_owner.clone();
     let factory = if identity.is_some() {
         safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
             &name,
-            cx.clone(),
+            tapped(crate::host_notify::Algo::Twap),
             Rc::new(book.clone()),
             twap_owner.snapshot(),
         )
@@ -985,7 +1032,7 @@ pub(crate) async fn run_with_identity(
         safe_cex_algo_twap::factory::TwapFactory::with_owner(
             &name,
             twap_owner.snapshot(),
-            cx.clone(),
+            tapped(crate::host_notify::Algo::Twap),
             Rc::new(book.clone()),
         )
     };
@@ -1067,13 +1114,18 @@ pub(crate) async fn run_with_identity(
                 if (batch.frames > 0 || batch.rejoined)
                     && let Some(snapshot) = handle.read(projection::project).await
                 {
+                    let live_fills = live_fills(&tap, &batch);
                     let change = port.apply(snapshot, batch.fills, batch.rejoined);
+                    if let (Some(tap), Some(fills)) = (&tap, live_fills) {
+                        tap.record_fills(&fills, &port.store());
+                    }
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     publish();
                 }
             }
             input = inbox.recv() => match input {
                 Some(AlgoInput::RouterFence { stopped }) => {
+                    if let Some(tap) = &tap { tap.end(); tap.flush_fills(&port.store(), true); }
                     for row in twap.active_twaps(&name) {
                         if let Some(id) = row["id"].as_str() {
                             let _ = registry.dispatch("twap:pause", &serde_json::to_string(id).unwrap(), &cx);
@@ -1167,6 +1219,11 @@ pub(crate) async fn run_with_identity(
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
+                    let client_stop = tap.as_ref().filter(|_| matches!(op.as_str(), "twap:stop" | "twap:cleanup"))
+                        .and_then(|tap| Some((tap, serde_json::from_str::<String>(&data).ok()?)));
+                    if let Some((tap, id)) = &client_stop {
+                        tap.client_stop(id);
+                    }
                     let dispatched = if crate::user_drain::starts_job(&op) {
                         if let Some(user) = running.user.get() {
                             match user.admit() {
@@ -1191,6 +1248,9 @@ pub(crate) async fn run_with_identity(
                         && let Some(id) = &resume && let Some(guard) = running.restores.get()
                         && twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "running") {
                         guard.acknowledge_resume(id, epoch);
+                    }
+                    if let Some((tap, id)) = &client_stop && !matches!(dispatched, Some(Ok(()))) {
+                        tap.client_stop_refused(id);
                     }
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
@@ -1278,6 +1338,12 @@ pub(crate) async fn run_with_identity(
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
+                            // A nuke is a client stop for every TWAP it ends.
+                            if let Some(tap) = &tap {
+                                for row in twap.active_twaps(&name) {
+                                    if let Some(id) = row["id"].as_str() { tap.client_stop(id); }
+                                }
+                            }
                             exec.nuke(mode, &nuke_cx)
                         }
                         _ => {
@@ -1349,6 +1415,9 @@ pub(crate) async fn run_with_identity(
             },
         }
     };
+    if let Some(tap) = &tap {
+        tap.end();
+    }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
     let (disposing, reason, stopped) = match ended {
         Some((reason, stopped)) => (true, reason, stopped),
@@ -1419,7 +1488,11 @@ pub(crate) async fn run_with_identity(
                     if (batch.frames > 0 || batch.rejoined)
                         && let Some(snapshot) = handle.read(projection::project).await
                     {
+                        let live_fills = live_fills(&tap, &batch);
                         let change = port.apply(snapshot, batch.fills, batch.rejoined);
+                        if let (Some(tap), Some(fills)) = (&tap, live_fills) {
+                            tap.record_fills(&fills, &port.store());
+                        }
                         port.subscribers
                             .borrow_mut()
                             .retain(|tx| tx.send(change.clone()).is_ok());
@@ -1431,6 +1504,10 @@ pub(crate) async fn run_with_identity(
     let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, pumped)
         .await
         .is_err();
+    // The debounce task dies with the scope: send what it was holding now.
+    if let Some(tap) = &tap {
+        tap.flush_fills(&port.store(), true);
+    }
     if deadline_passed {
         crate::state::Log::error(
             &format!(
@@ -1530,7 +1607,7 @@ fn completion(notice: &Value) -> Result<String, VenueError> {
 /// once, since the fill toast it would have shown went with the page.
 fn replayed(op: &str, data: &str) -> String {
     match serde_json::from_str::<Value>(data) {
-        Ok(Value::Object(mut end)) if op == "chaser:complete" => {
+        Ok(Value::Object(mut end)) if is_algo_end(op) => {
             end.insert("replayed".into(), Value::Bool(true));
             Value::Object(end).to_string()
         }
@@ -1538,9 +1615,14 @@ fn replayed(op: &str, data: &str) -> String {
     }
 }
 
-/// A chase's end and its outcome warnings are owed to a page that was away, as errors are.
+/// An algo's end and its outcome warnings are owed to a page that was away, as errors are.
 fn owed_on_rejoin(op: &str) -> bool {
-    matches!(op, "warning" | "chaser:complete")
+    op == "warning" || is_algo_end(op)
+}
+
+/// A chase's or TWAP's own end: without it a page reads the vanished row as lost.
+fn is_algo_end(op: &str) -> bool {
+    matches!(op, "chaser:complete" | "twap:complete")
 }
 
 fn error_kind(kind: &str) -> Option<ErrorKind> {
@@ -1613,6 +1695,12 @@ mod tests {
         let replay: Value = serde_json::from_str(&replayed("chaser:complete", end)).unwrap();
         assert_eq!(replay["replayed"], true);
         assert_eq!(replay["filled"], 0.001);
+        let twap: Value = serde_json::from_str(&replayed(
+            "twap:complete",
+            r#"{"id":"t1","end":"completed"}"#,
+        ))
+        .unwrap();
+        assert_eq!(twap["replayed"], true);
         assert_eq!(
             replayed("warning", "\"Chaser stopped: x\""),
             "\"Chaser stopped: x\""
@@ -1622,6 +1710,7 @@ mod tests {
     #[test]
     fn a_chase_end_and_its_warnings_are_replayed_to_a_page_that_was_away() {
         assert!(owed_on_rejoin("chaser:complete"));
+        assert!(owed_on_rejoin("twap:complete"));
         assert!(owed_on_rejoin("warning"));
         assert!(!owed_on_rejoin("log"));
         assert!(!owed_on_rejoin("twap:stateUpdate"));

@@ -64,5 +64,20 @@ TP/SL keep their stream proof and a guarded put-back keeps its `RestoreProof`.
 An unguarded limit edit is one native `ModifyOrder` (tx 17) of the resting order,
 with trigger price 0 (the venue's nil trigger) and the left-of-total amount. A
 refusal leaves the original untouched. Edits that cannot be one modify (split
-lots) refuse before any write; there is no cancel-then-replace fallback. A tx 17
-acknowledgement is still the result; it is not yet proven like a placement.
+lots) refuse before any write; there is no cancel-then-replace fallback.
+
+The tx 17 acknowledgement is not the result (AGT-77): a size-up the venue
+refuses for margin is queued, then fails at execution and leaves the order
+unchanged. The ACK records an engine pending receipt (the engine allows one for
+an Amend intent as well as a Place) and parks the Plan under the same 10-second
+bound while `tx?by=hash` proves it. An executed transaction (status 2-5) completes
+the amend; a failed one (status 0) refuses it `Rejected`, "Lighter order not
+changed: <venue text>"; anything else is Unknown by the bound. Guarded
+protective modifies keep their own proofs.
+
+**A failed or unproven transaction resyncs the nonce.** A failed tx did not
+take its nonce, so continuing the local sequence made the next write fail
+`21104 invalid nonce`. A status-0 transaction (placement or modify) and a proof
+that expires invalidate the counter, so the next write reads `nextNonce` first.
+An order-status refusal (`canceled-margin-not-allowed`) executed its transaction
+and keeps the sequence.

@@ -404,6 +404,79 @@ describe('audit regression: Aster builder attribution', () => {
     ).toBe(signerAddress);
   });
 
+  it.each([
+    ['get', '/fapi/v3/positionSide/dual'],
+    ['get', '/fapi/v3/account'],
+    ['get', '/fapi/v3/positionRisk'],
+    ['delete', '/fapi/v3/order'],
+    ['post', '/fapi/v3/listenKey'],
+    ['put', '/fapi/v3/listenKey'],
+  ])('uses the current EIP-712 signature for V3 %s %s', async (method, path) => {
+    vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
+    vi.spyOn(asterDEXVirtualClock, 'getCurrentTimeMs').mockReturnValue(1_700_000_000_000);
+    const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
+      config,
+      data: {},
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const api = createAPI(createExchange(), {
+      apiKey: signerAddress,
+      apiSecret: signerPrivateKey,
+      apiVersion: 'v3',
+      v3UserAddress: userAddress,
+      v3SignerAddress: signerAddress,
+      v3SignerPrivateKey: signerPrivateKey,
+    });
+    api.defaults.adapter = adapter;
+    await api.request({ method, url: path });
+    const sent = adapter.mock.calls[0][0];
+    expect(sent.params).toBeUndefined();
+    const [query, signature] = (sent.url ?? '').split('?')[1].split('&signature=');
+    expect(query).toContain(`signer=${signerAddress}`);
+    expect(query).toContain('nonce=');
+    expect(query).not.toContain('recvWindow=');
+    expect(query).not.toContain('timestamp=');
+    expect(
+      ethers.verifyTypedData(
+        {
+          name: 'AsterSignTransaction',
+          version: '1',
+          chainId: 1666,
+          verifyingContract: '0x0000000000000000000000000000000000000000',
+        },
+        { Message: [{ name: 'msg', type: 'string' }] },
+        { msg: query },
+        signature,
+      ),
+    ).toBe(signerAddress);
+  });
+
+  it('surfaces a V3 signature refusal once with actionable key guidance', async () => {
+    vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
+    const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
+      config,
+      data: { code: -1000, msg: 'Signature check failed' },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const api = createAPI(createExchange(), {
+      apiKey: signerAddress,
+      apiSecret: signerPrivateKey,
+      apiVersion: 'v3',
+      v3UserAddress: userAddress,
+      v3SignerAddress: signerAddress,
+      v3SignerPrivateKey: signerPrivateKey,
+    });
+    api.defaults.adapter = adapter;
+    await expect(api.get('/fapi/v3/positionSide/dual')).rejects.toThrow(
+      'Aster API key signature rejected: re-create the key (V3)',
+    );
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps V3 order nonces strictly increasing for rapid attributed requests', async () => {
     vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
     vi.spyOn(asterDEXVirtualClock, 'getCurrentTimeMs').mockReturnValue(1_700_000_000_000);

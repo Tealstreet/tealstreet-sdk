@@ -29,6 +29,8 @@ pub(crate) struct MockVenue {
     coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
     hyperliquid: bool,
     placement_fixture: bool,
+    /// Simulated venue round trip before each REST answer.
+    latency: Option<std::time::Duration>,
 }
 #[derive(Clone)]
 struct Registration {
@@ -47,6 +49,14 @@ impl MockVenue {
             coinbase: None,
             hyperliquid: false,
             placement_fixture: false,
+            latency: None,
+        }
+    }
+
+    pub(crate) fn with_latency(self, latency: std::time::Duration) -> Self {
+        Self {
+            latency: Some(latency),
+            ..self
         }
     }
 
@@ -207,6 +217,17 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(delay) = self.latency {
+            let venue = Self {
+                latency: None,
+                ..self.clone()
+            };
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                venue.request(request, events);
+            });
+            return;
+        }
         if let Some(io) = &self.coinbase {
             io.request(request, events);
             return;

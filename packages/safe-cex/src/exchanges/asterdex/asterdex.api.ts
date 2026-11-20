@@ -15,22 +15,22 @@ import { ExchangeOptions, LogSeverity } from '../../types';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import { isReadOnlyMethod, onlyReads } from '../../utils/retryReadsOnly';
 import {
-  SIGNATURE_RETRY_CONFIG_KEY,
   hasRetriedSignature,
   isBinanceStyleSignatureRejection,
+  SIGNATURE_RETRY_CONFIG_KEY,
 } from '../../utils/signatureRejection';
-import {
-  ASTERDEX_ENDPOINTS,
-  isAsterDEXV3PrivateKey,
-  resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
-} from './asterdex.types';
 import {
   buildAsterDEXQueryString as buildQueryString,
   isAsterDEXPublicEndpoint as isPublicEndpoint,
   stripQueryString,
   withoutAsterDEXSigningFields as withoutSigningFields,
 } from './asterdex.signing';
+import {
+  ASTERDEX_ENDPOINTS,
+  isAsterDEXV3PrivateKey,
+  resolveAsterDEXApiVersion,
+  resolveAsterDEXV3AuthContext,
+} from './asterdex.types';
 import { asterDEXVirtualClock } from './asterdex.virtualClock';
 
 // The listen key is a POSTed read; its path is versioned, so match the suffix.
@@ -100,52 +100,6 @@ const generateV1Signature = (queryString: string, secret: string): string => {
   return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 };
 
-const buildV3SigningPayload = (params: Record<string, any>): Record<string, string> => {
-  const result: Record<string, string> = {};
-  const sortedKeys = Object.keys(params).sort();
-
-  for (const key of sortedKeys) {
-    const value = params[key];
-    if (value === undefined || value === null || value === '') {
-      continue;
-    }
-    result[key] = String(value);
-  }
-
-  return result;
-};
-
-const generateV3Signature = (
-  params: Record<string, any>,
-  userAddress: string,
-  signerAddress: string,
-  signerPrivateKey: string,
-  nonce: string,
-): string => {
-  const payload = buildV3SigningPayload(params);
-  const serializedPayload = JSON.stringify(payload);
-  const encodedPayload = ethers.AbiCoder.defaultAbiCoder().encode(
-    ['string', 'address', 'address', 'uint256'],
-    [serializedPayload, userAddress, signerAddress, BigInt(nonce)],
-  );
-  const payloadHash = ethers.keccak256(encodedPayload);
-  const ethSignedHash = ethers.hashMessage(ethers.getBytes(payloadHash));
-  const normalizedPrivateKey = signerPrivateKey.startsWith('0x') ? signerPrivateKey : `0x${signerPrivateKey}`;
-  const signerKey = new ethers.SigningKey(normalizedPrivateKey);
-  const signature = signerKey.sign(ethSignedHash);
-  return ethers.Signature.from(signature).serialized;
-};
-
-const isAsterDEXCodeSignedEndpoint = (url?: string, method?: string): boolean => {
-  if (!url) return false;
-  const path = stripQueryString(url);
-  const normalizedMethod = String(method || 'get').toLowerCase();
-  return (
-    (normalizedMethod === 'post' && path.endsWith('/fapi/v3/order')) ||
-    (normalizedMethod === 'get' && (path.endsWith('/fapi/v3/builder') || path.endsWith('/fapi/v3/agent')))
-  );
-};
-
 const shouldSuppressUnknownOrderError = (config: any, code: unknown, message?: string): boolean =>
   Boolean(
     config?.__suppressAsterUnknownOrderError &&
@@ -158,6 +112,9 @@ const shouldSuppressUnknownOrderError = (config: any, code: unknown, message?: s
 const getAsterDEXErrorDetail = (message: unknown, code: unknown): string => {
   const rawMessage = typeof message === 'string' ? message : String(message || 'Unknown error');
   const normalizedMessage = rawMessage.toLowerCase();
+  if (String(code) === '-1022' || (String(code) === '-1000' && normalizedMessage.trim() === 'signature check failed')) {
+    return 'Aster API key signature rejected: re-create the key (V3)';
+  }
   if (String(code) === '-5025' || normalizedMessage.includes('cannot found builder config')) {
     return [
       'Aster builder attribution is not synced for this API key.',
@@ -307,28 +264,19 @@ export const createAPI = (
           const nonceScopeKey = `${userAddress}:${signerAddress}`;
           const nonce = buildV3Nonce(nonceScopeKey);
 
-          if (isAsterDEXCodeSignedEndpoint(urlPath, config.method)) {
-            const codeParams = {
-              ...data,
-              asterChain: getAsterDEXAsterChain(options.testnet),
-              user: userAddress,
-              signer: signerAddress,
-              nonce,
-            };
-            const queryString = buildAsterDEXCodeQueryString(codeParams);
-            signature = generateAsterDEXCodeMessageSignature(queryString, v3SignerPrivateKey, options.testnet);
-            config.url = `${urlPath}?${queryString}&signature=${signature}`;
-            delete config.params;
-            if (config.data) {
-              delete config.data;
-            }
-            return config;
-          } else {
-            signature = generateV3Signature(params, userAddress, signerAddress, v3SignerPrivateKey, nonce);
-            params.user = userAddress;
-            params.signer = signerAddress;
-            params.nonce = nonce;
-          }
+          const codeParams = {
+            ...data,
+            asterChain: getAsterDEXAsterChain(options.testnet),
+            user: userAddress,
+            signer: signerAddress,
+            nonce,
+          };
+          const queryString = buildAsterDEXCodeQueryString(codeParams);
+          signature = generateAsterDEXCodeMessageSignature(queryString, v3SignerPrivateKey, options.testnet);
+          config.url = `${urlPath}?${queryString}&signature=${signature}`;
+          delete config.params;
+          delete config.data;
+          return config;
         } else {
           if (!options.apiSecret) {
             throw new Error('AsterDEX v1 signing requires API secret');

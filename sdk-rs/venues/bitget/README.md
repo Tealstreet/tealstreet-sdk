@@ -115,6 +115,12 @@ preset children retain only their returned `fill_price` / `mark_price` reference
 UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
 See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
 
+A whole-position TP/SL (`pos_loss`/`pos_profit`, or UTA `tpslMode: full`) is
+stored with amount 0 even when its row reports the current position size: it
+closes whatever is open when it triggers and holds no size. The close
+reservation (`reduceOrdersLockPositionSize`) therefore never counts it against a
+manual partial close (AGT-70); sized `loss_plan`/`profit_plan` rows keep their size.
+
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
 

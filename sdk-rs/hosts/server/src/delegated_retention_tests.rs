@@ -35,6 +35,26 @@ fn resident_with_authority(
     Arc<Account>,
     mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
 ) {
+    resident_from(registry, user, key, proxy, |init| {
+        prepare_delegated(
+            init,
+            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
+        )
+        .unwrap()
+        .resident
+    })
+}
+
+fn resident_from(
+    registry: &Registry,
+    user: &str,
+    key: Option<&str>,
+    proxy: bool,
+    resident: impl FnOnce(&InitPayload) -> Arc<ResidentCopy>,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let init = InitPayload {
         account_name: "synthetic-main".into(),
         exchange_name: "bybit".into(),
@@ -59,14 +79,7 @@ fn resident_with_authority(
     if key.is_some() {
         inner.identity = identity::digest(user, &init).unwrap();
     }
-    inner.signing.set_test_resident(
-        prepare_delegated(
-            &init,
-            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
-        )
-        .unwrap()
-        .resident,
-    );
+    inner.signing.set_test_resident(resident(&init));
     testing::register(registry, &account);
     hold(&account, 7);
     (account, inbox)
@@ -978,5 +991,218 @@ async fn unpublished_settings_successor_cannot_clear_the_residents_retention_dea
 async fn published_settings_successor_cancels_the_residents_old_retention_deadline() {
     tokio::task::LocalSet::new()
         .run_until(successor_publication_control(true))
+        .await;
+}
+
+/// Owns no key material, so these tests also run where protected key setup
+/// is unsupported (protected allocation is Linux-only).
+struct KeylessSigner;
+impl safe_cex_engine::signing::ProtectedSigner for KeylessSigner {}
+impl safe_cex_engine::signing::Signer for KeylessSigner {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn can_sign(&self, _: &KeyRef, _: Algorithm) -> Capability {
+        Capability::Unsupported
+    }
+    fn sign_ready(
+        &self,
+        _: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        Some(Err(safe_cex_engine::signing::SignError::Refused))
+    }
+    fn sign(
+        &self,
+        _: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        Box::pin(std::future::ready(Err(
+            safe_cex_engine::signing::SignError::Refused,
+        )))
+    }
+}
+
+fn keyless_resident(
+    registry: &Registry,
+    user: &str,
+    proxy: bool,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
+    resident_from(registry, user, Some("synthetic-key"), proxy, |_| {
+        ResidentCopy::test_protected_provider(
+            safe_cex_engine::signing::ProtectedProvider::new(Arc::new(KeylessSigner)).unwrap(),
+            safe_cex_engine::signing::Identities::default(),
+        )
+    })
+}
+
+fn notifying_registry() -> (Arc<Registry>, crate::host_notify::HostNotifier) {
+    let notifier = crate::host_notify::HostNotifier::unstarted();
+    let mut registry = Registry::new(
+        EngineThreads::start(1).unwrap(),
+        Duration::from_millis(1),
+        Duration::from_secs(60),
+    )
+    .with_host_notify(Some(notifier.clone()));
+    testing::set_join_admission(&mut registry, false);
+    (Arc::new(registry), notifier)
+}
+
+fn notified(notifier: &crate::host_notify::HostNotifier) -> Vec<serde_json::Value> {
+    notifier
+        .queued()
+        .iter()
+        .map(|notification| serde_json::to_value(notification).unwrap())
+        .collect()
+}
+
+const LEAD: Duration = crate::host_notify::WARNING_LEAD;
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_warning_fires_one_hour_before_retention_expiry_then_shutdown() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) = keyless_resident(&registry, "warned", false);
+            advance(RETAIN).await;
+            assert!(notified(&notifier).is_empty(), "a held account arms nothing");
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(RETAIN - LEAD - Duration::from_secs(1)).await;
+            assert!(notified(&notifier).is_empty());
+            advance(Duration::from_secs(1)).await;
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1);
+            let warning = &queued[0];
+            assert_eq!(warning["kind"], "delegated.shutdownWarning");
+            assert_eq!(warning["severity"], "warning");
+            assert_eq!(warning["user"], "warned");
+            assert_eq!(warning["venue"], "bybit");
+            assert_eq!(warning["clientPresent"], false);
+            assert_eq!(warning["fields"], serde_json::json!({"cause": "noClient48h"}));
+            // The wall clock does not move under paused Tokio time.
+            let lead = warning["deadline"].as_u64().unwrap() - warning["occurredAt"].as_u64().unwrap();
+            let retain_ms = RETAIN.as_millis() as u64;
+            assert!((retain_ms - 5_000..=retain_ms).contains(&lead), "{lead}");
+            assert!(inbox.try_recv().is_err(), "the warning stops nothing");
+            advance(LEAD).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { reason, .. }) if reason == "no client for 48 h"
+            ));
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 2);
+            let shutdown = &queued[1];
+            assert_eq!(shutdown["kind"], "delegated.shutdown");
+            assert_eq!(shutdown["severity"], "critical");
+            assert_eq!(shutdown["clientPresent"], false);
+            assert_eq!(shutdown["fields"], serde_json::json!({"cause": "noClient48h"}));
+            assert!(shutdown.get("deadline").is_none());
+            assert_eq!(shutdown["accountDigest"], warning["accountDigest"]);
+            assert_ne!(shutdown["id"], warning["id"]);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn admitted_reconnect_cancels_the_pending_warning_and_rearms_with_the_next_interval() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) = keyless_resident(&registry, "returning", false);
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(10)).await;
+            hold(&account, 8);
+            advance(RETAIN).await;
+            assert!(
+                notified(&notifier).is_empty(),
+                "retention cancel aborts the warning"
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.release(&account, 8, Disposal::SocketClosed);
+            advance(RETAIN - LEAD).await;
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0]["kind"], "delegated.shutdownWarning");
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn short_proxy_interval_skips_the_warning_and_reports_its_cause() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) =
+                keyless_resident(&registry, "short-proxy", true);
+            account
+                .token
+                .set(Some(("synthetic-token".into(), now_ms() + 30 * 60 * 1000)));
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(31 * 60)).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { reason, .. }) if reason == "proxy-token-expired"
+            ));
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1, "an interval under one hour has no warning");
+            assert_eq!(queued[0]["kind"], "delegated.shutdown");
+            assert_eq!(
+                queued[0]["fields"],
+                serde_json::json!({"cause": "proxyTokenExpired"})
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn drain_reports_server_restart_for_delegated_residents_with_client_presence() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (held, _held_inbox) = keyless_resident(&registry, "held-user", false);
+            let (retained, _retained_inbox) = keyless_resident(&registry, "retained-user", false);
+            registry.release(&retained, 7, Disposal::SocketClosed);
+            let started = tokio::time::Instant::now();
+            registry.drain(Duration::from_millis(100)).await;
+            // The unstarted outbox never empties: the flush bound ends the wait.
+            assert!(
+                started.elapsed() <= crate::host_notify::RESTART_FLUSH + Duration::from_millis(100)
+            );
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 2);
+            for notification in &queued {
+                assert_eq!(notification["kind"], "delegated.shutdown");
+                assert_eq!(
+                    notification["fields"],
+                    serde_json::json!({"cause": "serverRestart"})
+                );
+                let present = notification["user"] == "held-user";
+                assert_eq!(notification["clientPresent"], present, "{notification}");
+            }
+            assert_eq!(
+                queued.iter().filter(|n| n["user"] == "held-user").count(),
+                1
+            );
+            drop(held);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_notifier_retention_arms_no_warning_and_queues_nothing() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = keyless_resident(&registry, "off", false);
+            assert!(registry.host_notify.is_none());
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(RETAIN).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+        })
         .await;
 }

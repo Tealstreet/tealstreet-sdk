@@ -2,6 +2,7 @@
 pub mod access;
 pub mod accounts;
 pub mod admission;
+mod algo_notify;
 pub mod algos;
 pub mod audit;
 pub mod auth;
@@ -12,6 +13,7 @@ mod delegated_e2e_io;
 pub mod delegated_memory;
 pub mod envelope;
 mod full_writes;
+pub mod host_notify;
 pub mod http;
 pub mod interruption;
 pub mod methods;

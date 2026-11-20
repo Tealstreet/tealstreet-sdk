@@ -469,11 +469,18 @@ See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 
 ## Algo outcome notices
 
-`warning` and `chaser:complete` reach every live tab/device holding the account,
-as algo errors do, not only the signing socket: a non-signing tab that missed a
-chase end reported it as lost ("Hosted server stopped reporting it"). The unheard
-record lists every socket told, so a rejoining page still gets its replay.
-Correlated `callMethod:done` replies stay on the signing socket.
+`warning`, `chaser:complete` and `twap:complete` reach every live tab/device
+holding the account, as algo errors do, not only the signing socket: a
+non-signing tab that missed an algo's end reported it as lost. Both ends are
+kept as unheard, replayed with `replayed: true`, and survive a dispose like
+chase ends. Correlated `callMethod:done` replies stay on the signing socket.
+
+`twap:complete` (`{id, end: "completed" | "stopped", ordersExecuted,
+ordersCount}`) is `TwapEffect::Ended`: every slice handed off, or the user's
+`twap:stop`. No completed TWAP is ever listed in `activeTWAPs`, so without it a
+page reads a normal finish as a lost TWAP (AGT-58). A halt on an unknown outcome
+(`twap:outcome` tells it) and an account disposal (`terminate_all`) send none:
+a disposal must never read as a normal end.
 
 ## Classified admission refusals
 
@@ -497,11 +504,39 @@ Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
 cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
-For a selected proxy transport, token expiry has an explicitly interim terminal
-stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
-fallback or authority extension is implied. Sam still owns the long-term policy.
+For a selected proxy transport, token expiry is a terminal stop/erase with
+recorded reason `proxy-token-expired`; there is no issuer renewal, direct
+fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
 
+## Host notifications (AGT-37)
+
+`src/host_notify.rs` queues DELEGATED notifications for the gateway when
+`TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
+timer. Retention arms `delegated.shutdownWarning` in its own task and emits
+`delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
+emits `fill`, `orderRejected` (chase/TWAP placements only, through
+`RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
+the key owner's life. Build notifications only through
+`HostNotification::build` and the typed `Fields` setters: never add a free-text
+field, and never log the token. Contract, env vars and delivery semantics:
+`DELEGATED_RETENTION.md` "Host notification lane".
+
+
+## DELEGATED reconnect resume
+
+AGT-54: a reconnect inside the 60-second resume grace re-attaches a parked
+DELEGATED label without a key offer, handover or venue probe. `open()` advertises
+claimable labels as `session.delegatedResume`; the client then sends
+`init {signingMode:"delegated", resume:true, resumeProof}` without `sealed`.
+`resumeProof` is the parking socket's in-band session-frame value: the resume id
+rides the URL (with the proxy token), so it alone must never authorize a signer.
+Only the socket whose resume consumed the id may claim, one label at a time, and
+owner, label, venue, identity digest and `same_handover_settings` must match.
+The claim cancels retention like any admitted hold and never revives a disposed,
+replaced or retention-expired account. Every refusal is the transient
+`resume_unavailable` init error; the client falls back to the ordinary handover.
+Clients send `resume` only for advertised labels, so an older box never sees it.
 
 ## DELEGATED intent clock skew
 
@@ -520,3 +555,10 @@ Order/action receipt messages and algo interruption notices use plain wording
 and at most one action; typed outcomes and receipt fields remain unchanged.
 Proof-check details stay in `partial.proof_failed` diagnostics rather than the
 Bybit action message. Cancel-warning cleanup still recognizes retained old text.
+## Venue rejections in typed action outcomes
+
+`order_actions::settle` treats an engine `rejected` error with no partial
+evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
+`refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
+definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
+"still unconfirmed" toast. Partial or uncertain failures stay `unknown`.

@@ -6,6 +6,10 @@ The bounded server audit projection grants no resend or reconciliation authority
 Its peer scope decoder and identity checks share existing codec/sort machinery;
 size-only changes still require fresh canonical artifacts, with profiles and caps unchanged.
 
+Aster's independent request oracle validates every authenticated V3 method with
+network-specific EIP-712 exact-query signing and a fresh, unreused agent nonce.
+Timestamp/recvWindow and ABI/EIP-191 requests are rejected; V1 HMAC stays independent.
+
 Sam removed the CPU gate matrix, shared certification, Bitget paired ratio gate,
 planner and nightly monitor on 2026-11-17, for both master and pull requests.
 The root `CLAUDE.md` records that decision; historical CPU thresholds and
@@ -80,8 +84,13 @@ recurring merge conflict.
   permission**: Actions PR creation/approval stays OFF in this repo because these
   images run on boxes holding user keys (coordinator, #3686). Sam's local
   `fleet-watch` opens "chore(wasm): restore rule-17 reserve" with his token when
-  the branch's caps differ from master and no PR is open, so CI runs on it
-  normally; nothing auto-merges.
+  the branch's caps differ from master and no PR is open; nothing auto-merges.
+  **A bot push to the open PR queues its pull_request runs as
+  `action_required`**, and those empty suites shadow any dispatched run's
+  checks in the PR rollup, so #3690 stayed BLOCKED with green dispatched `ci`
+  and `Rust / required coverage` at 16b8c590. The job therefore skips the push
+  when the caps equal the bot branch's, and after a push approves that head's
+  queued runs (its only use of `actions: write`). Do not go back to dispatching.
 - **Ceilings that are decisions, not measurements** (a combined raise ahead of
   measurement, a new family) are hand edits to `wasm-caps.json` with a dated
   line in `wasm-caps-history.md`, which also holds every pre-cutover provenance
