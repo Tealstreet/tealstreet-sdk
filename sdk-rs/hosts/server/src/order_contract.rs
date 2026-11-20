@@ -229,10 +229,14 @@ pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Valu
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot") && trigger_shape(order)
 }
 
-/// AGT-46: BloFin's adapter refuses a caller ID on order-algo triggers and on
-/// attached TP/SL ("cannot honor caller clientOrderId"), so those submits omit it.
-pub(crate) fn blofin_trigger(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
-    venue == "blofin" && trigger_shape(order)
+/// Adapters that refuse a caller ID on triggers and attached TP/SL, so those submits
+/// omit it: BloFin "cannot honor caller clientOrderId" (AGT-46, #3754, which named
+/// this `blofin_trigger`) and Phemex "requires a plain order" (live 2026-11-20).
+pub(crate) fn trigger_refuses_caller_id(
+    venue: &str,
+    order: &serde_json::Map<String, Value>,
+) -> bool {
+    matches!(venue, "blofin" | "phemex") && trigger_shape(order)
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
@@ -397,32 +401,54 @@ mod activation_tests {
     }
 
     // AGT-46 live: blofin-t reduce-only stop-market and stop-limit submits were
-    // refused "cannot honor caller clientOrderId" after the order-algo shape fix.
+    // refused "cannot honor caller clientOrderId" after the order-algo shape fix;
+    // phemex-t reduce-only stop_market and an attached stopLoss were refused
+    // "requires a plain order" (2026-11-20). Was `blofin_trigger_omission_*` (#3754).
     #[test]
-    fn blofin_trigger_omission_covers_triggers_and_attached_protection_only() {
+    fn trigger_caller_id_omission_covers_triggers_and_attached_protection_only() {
         let plain = json!({"type":"limit","amount":0.01,"price":0.05});
-        assert!(!super::blofin_trigger("blofin", plain.as_object().unwrap()));
         let market = json!({"type":"market","amount":0.01,"reduceOnly":true});
-        assert!(!super::blofin_trigger(
-            "blofin",
-            market.as_object().unwrap()
-        ));
-        let stop_market = json!({"type":"conditional","side":"sell","amount":0.01,
+        let conditional = json!({"type":"conditional","side":"sell","amount":0.01,
             "triggerPrice":0.04,"reduceOnly":true});
-        let mut stop_limit = stop_market.clone();
+        let mut stop_limit = conditional.clone();
         stop_limit["price"] = 0.039.into();
-        for order in [&stop_market, &stop_limit] {
-            assert!(super::blofin_trigger("blofin", order.as_object().unwrap()));
-            for other in ["okx", "bitget", "bybit", "not-blofin"] {
-                assert!(!super::blofin_trigger(other, order.as_object().unwrap()));
+        let stop_market = json!({"type":"stop_market","side":"sell","amount":25,
+            "price":0.04,"reduceOnly":true});
+        for venue in ["blofin", "phemex"] {
+            for order in [&plain, &market] {
+                assert!(!super::trigger_refuses_caller_id(
+                    venue,
+                    order.as_object().unwrap()
+                ));
+            }
+            for order in [&conditional, &stop_limit, &stop_market] {
+                assert!(super::trigger_refuses_caller_id(
+                    venue,
+                    order.as_object().unwrap()
+                ));
+            }
+            for field in ["stopLoss", "takeProfit"] {
+                let mut order = plain.clone();
+                order[field] = 0.04.into();
+                assert!(super::trigger_refuses_caller_id(
+                    venue,
+                    order.as_object().unwrap()
+                ));
+                order[field] = Value::Null;
+                assert!(!super::trigger_refuses_caller_id(
+                    venue,
+                    order.as_object().unwrap()
+                ));
             }
         }
-        for field in ["stopLoss", "takeProfit"] {
-            let mut order = plain.clone();
-            order[field] = 0.04.into();
-            assert!(super::blofin_trigger("blofin", order.as_object().unwrap()));
-            order[field] = Value::Null;
-            assert!(!super::blofin_trigger("blofin", order.as_object().unwrap()));
+        // Not the full set with this adapter rule: at least OKX, Bitget, Crypto.com, ApeX
+        // Omni, Bitunix, KuCoin, BingX, Paradex and Coinbase share it and are a tracked gap
+        // (sdk-rs/hosts/server/CLAUDE.md). #3758 dropped "okx" and "bitget" from this list.
+        for other in ["bybit", "bitrue", "weex", "not-blofin"] {
+            assert!(!super::trigger_refuses_caller_id(
+                other,
+                stop_market.as_object().unwrap()
+            ));
         }
     }
 

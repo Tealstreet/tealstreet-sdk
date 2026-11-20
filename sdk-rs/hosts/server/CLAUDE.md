@@ -374,8 +374,15 @@ remains primary dedupe in every case. Backpack and GRVT also omit the caller ID:
 the UUID losslessly. HyroTrader omits it because the native codec supports no
 caller IDs. Those native validators are unchanged; explicit unsupported caller
 IDs still refuse. Bybit protection also omits its unsupported caller ID and
-reports null, as do BloFin triggers and attached TP/SL (AGT-46): BloFin's adapter
-refuses a caller ID on those, so a reduce-only stop failed after its shape fix. Other modes keep `callMethod` unchanged. Pending joins
+reports null, as do BloFin and Phemex triggers and attached TP/SL (AGT-46; Phemex
+live 2026-11-20): both adapters refuse a caller ID on those, so reduce-only stops
+failed. This is not yet every hosted venue with that adapter rule: at least OKX
+(all four), Bitget (all three), Crypto.com, ApeX Omni, Bitunix, KuCoin Futures, BingX
+and Paradex refuse a caller ID on non-plain orders too (BingX/Paradex also on `close`,
+Coinbase on `stop_market`/`close`),
+so their hosted trigger submits still refuse visibly. Add each to
+`trigger_refuses_caller_id` only with a live check.
+Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
