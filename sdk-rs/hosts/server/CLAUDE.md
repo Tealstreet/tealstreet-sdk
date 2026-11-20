@@ -365,10 +365,11 @@ condition; receipts keep `clientOrderId: null`. WOO also receives none: until
 2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
 before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
 to accept it before the box emits one. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Backpack and GRVT retain their current
-refusal pending their separate bounded-hash mapping. Bybit protection also omits
-its unsupported caller ID and reports null. HyroTrader retains its native
-caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
+remains primary dedupe in every case. Backpack and GRVT also omit the caller ID: their numeric fields cannot carry
+the UUID losslessly. HyroTrader omits it because the native codec supports no
+caller IDs. Those native validators are unchanged; explicit unsupported caller
+IDs still refuse. Bybit protection also omits its unsupported caller ID and
+reports null. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
