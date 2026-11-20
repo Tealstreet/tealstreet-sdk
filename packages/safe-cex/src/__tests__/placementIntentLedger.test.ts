@@ -85,6 +85,15 @@ describe('placement intent identity', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('does not advance its rejection floor into an incoming action clock rollback', async () => {
+    const ledger = new PlacementIntentLedger<string[]>(1);
+    await ledger.run(intent(100), order, async () => ['future-known']);
+    const send = vi.fn(async () => ['extra']);
+    await expect(ledger.run(intent(1), order, send)).rejects.toMatchObject({ code: 'intentCapacity', outcome: 'notSent' });
+    expect(send).not.toHaveBeenCalled();
+    await expect(ledger.run(intent(100), order, send)).resolves.toEqual(['future-known']);
+  });
+
   it('never evicts an unanswered intent to admit another', async () => {
     const ledger = new PlacementIntentLedger<string[]>(1);
     let finish = (_ids: string[]) => {};

@@ -94,6 +94,19 @@ describe('durable caller-intent retirement', () => {
     box.close();
   });
 
+  it('never advances a durable retirement floor past the current protocol clock', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const future = createDelegatedIntentId(0xffffffffffff, f.options.random);
+    await completed(box, future);
+    try {
+      for (let i = 0; i < 34; i++) await completed(box, f.id());
+      expect(f.floor()).toBeLessThan(1_764_000_000_100);
+      expect(f.rows.has(future)).toBe(true);
+      expect(box.entries().length).toBeLessThanOrEqual(32);
+    } finally { box.close(); }
+  });
+
   it('legacy storage keeps permanent caller reservations instead of forgetting replay protection', async () => {
     const f = fixture(1);
     const box = await DelegatedOutbox.open(f.options);
