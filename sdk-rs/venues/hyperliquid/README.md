@@ -39,6 +39,8 @@ stream must not leave a confirmed fill waiting indefinitely for a position updat
 The reply never creates a position: only a usable account snapshot or live fill
 does. Failed reads preserve state, newer stream evidence wins, and no write is
 retried. Resting replies and quiet accounts gain no position polling.
+Frame-fed page engines leave reconciliation to their account-frame provider;
+they do not arm local position-refresh timers or account reads.
 
 ## Cancellation reporting
 

@@ -1200,6 +1200,9 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn schedule_position_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if cx.frame_fed() {
+            return;
+        }
         let dex = self.dex_of(cx, symbol).to_owned();
         self.account.state_dirty.insert(dex);
         if self.account.state_refresh_timer.is_none() {
