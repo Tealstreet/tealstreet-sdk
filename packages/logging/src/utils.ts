@@ -1,7 +1,9 @@
+import { getDefaultStore } from 'jotai';
 import { nanoid } from 'nanoid';
 
 import { compress } from '@tealstreet/utils/src/compression';
 import { LogSeverity } from './LogSeverity';
+import { logAtom } from './logAtom';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -374,6 +376,8 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
   if (queue.length === 0) return true;
 
   const maxRetries = MAX_RETRIES;
+  let failureStatus: number | undefined;
+  let failureUpstreamStatus: number | undefined;
   for (let retries = 0; retries <= maxRetries; retries++) {
     if (!isAuthorized()) return true;
     if (!isPageReadyForLogging()) return false;
@@ -405,6 +409,8 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
       ],
     };
     try {
+      failureStatus = undefined;
+      failureUpstreamStatus = undefined;
       loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
       const logIngestOrigin = getLogIngestOrigin();
@@ -423,7 +429,15 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
         headers,
       });
       if (!isAuthorized()) return true;
-      if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
+      failureStatus = response.status;
+      const upstreamStatus = response.headers?.get('X-Log-Ingest-Upstream-Status');
+      if (response.status === 502 && upstreamStatus && /^[45]\d{2}$/.test(upstreamStatus)) {
+        failureUpstreamStatus = Number(upstreamStatus);
+      }
+      if (!response.ok)
+        throw new Error(
+          `Logs API responded with status ${response.status}${failureUpstreamStatus === undefined ? '' : ` (upstream HTTP ${failureUpstreamStatus})`}`,
+        );
       if (isLoggingOwnerCurrent(userId, ownerEpoch)) {
         loggingMetrics.uploadsSucceeded++;
         if (metricsSnapshot) {
@@ -437,7 +451,15 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
     } catch (error) {
       if (!isAuthorized()) return true;
       if (retries === maxRetries) {
-        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${maxRetries} retries`);
+        loggingMetrics.droppedBatches++;
+        // Keep the failure in the existing local log; logging it through log()
+        // would enqueue another upload into the same failing sink.
+        const message = `Diagnostic log upload failed; ${queue.length} log entries were dropped after ${maxRetries} retries${failureStatus === undefined ? '' : ` (HTTP ${failureStatus}${failureUpstreamStatus === undefined ? '' : `; upstream HTTP ${failureUpstreamStatus}`})`}.`;
+        const store = getDefaultStore();
+        store.set(logAtom, (previous) =>
+          previous.concat({ timestamp: Date.now(), message, severity: LogSeverity.Warning }).slice(-200),
+        );
+        console.error(message);
         return true;
       }
       const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);
