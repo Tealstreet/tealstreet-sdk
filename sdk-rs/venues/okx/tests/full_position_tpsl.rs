@@ -321,7 +321,7 @@ fn attach_success(held: OrderType, added: OrderType, prefix: &str) {
             6.,
         );
         let done = prepared(&mut e, 6.);
-        assert!(done.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,data}) if data=="[\"77\"]")),"one proven placement outcome: {done:?}");
+        assert!(done.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,result}) if result=="[\"77\"]")),"one proven placement outcome: {done:?}");
         assert!(
             !done
                 .iter()
