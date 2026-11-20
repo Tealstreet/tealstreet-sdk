@@ -2403,7 +2403,7 @@ impl PhemexPerpetuals {
             }
         }
         cx.fill(Fill {
-            id: None,
+            id: Some(id.to_string()),
             order_id: row.order_id.to_string(),
             symbol: row.symbol.to_string(),
             side,

@@ -1867,7 +1867,7 @@ impl Woo {
                 .execution_cumulative
                 .insert(order.id.clone(), delivery.next().quantity());
             let fill = Fill {
-                id: None,
+                id: (!r.trade_id.is_empty()).then(|| r.trade_id.clone()),
                 order_id: order.id,
                 symbol: order.symbol,
                 side: order.side,

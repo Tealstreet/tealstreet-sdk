@@ -584,6 +584,31 @@ fn duplicate_fill_is_emitted_once_and_same_second_distinct_ids_are_not_collapsed
     assert!(fills(&mut e).is_empty());
 }
 
+// AGT-83: the fill id (else matchFillId) is the fill identity; an idless row keeps the order id.
+#[test]
+fn fill_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket) = ready();
+    e.take_frame(99.0);
+    let first = fill("exec-1", "entry", "0.5");
+    let matched = fill("", "entry", "0.5").replace(r#""id":"""#, r#""matchFillId":"match-2""#);
+    let idless = fill("", "entry", "0.5").replace(r#""id":"","#, "");
+    let text = frame(
+        "delta",
+        &format!(r#"{{"fills":[{first},{matched},{idless}]}}"#),
+    );
+    ws(&mut e, socket, 100.0, &text);
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(100.0).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["exec-1", "match-2", "entry"].map(|id| (Some(id.to_owned()), "entry".to_owned(), 0.5))
+    );
+}
+
 #[test]
 fn snapshot_fills_seed_dedup_without_live_notifications() {
     let (mut e, socket) = ready();

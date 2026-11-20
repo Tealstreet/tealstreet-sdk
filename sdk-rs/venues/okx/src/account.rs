@@ -2171,7 +2171,8 @@ impl Okx {
         if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
             entry.insert(cx.now);
             cx.fill(Fill {
-                id: None,
+                id: (!row.trade_id.is_empty() && row.trade_id != "0")
+                    .then(|| row.trade_id.to_owned()),
                 order_id: row.ord_id.into(),
                 symbol: m.symbol.clone(),
                 side: side(row.side),

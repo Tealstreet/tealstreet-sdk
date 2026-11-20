@@ -1150,14 +1150,14 @@ impl Cryptocom {
                     if !self.account.executions.insert(trade.clone()) {
                         return;
                     }
-                    self.account.execution_queue.push_back(trade);
+                    self.account.execution_queue.push_back(trade.clone());
                     if self.account.execution_queue.len() > 4096
                         && let Some(old) = self.account.execution_queue.pop_front()
                     {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
-                        id: None,
+                        id: (!trade.is_empty()).then_some(trade),
                         order_id: id(row.order_id),
                         symbol: row.instrument_name.into(),
                         side: side(row.side),

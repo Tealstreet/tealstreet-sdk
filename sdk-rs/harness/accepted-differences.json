@@ -37,6 +37,30 @@
           "category": "rust-better",
           "rationale": "K7: Rust moves a stop with the native editorder and keeps its id; TS cancels and replaces it under a new id, leaving a moment with no stop.",
           "evidence": "sdk-rs/harness/private-tape-kraken.mjs amendOrder 202, tagged impl rust and ts (#2742)."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"fill-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The kraken TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/kraken-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -7737,6 +7761,38 @@
           "category": "rust-better",
           "rationale": "min_notional is dollars, not a size. TS publishes it as the minimum amount, so SOL shows a minimum of 10 contracts, about 940 dollars, and an order defaulting to the minimum sends that.",
           "evidence": "Live SOL market row from deaws2; venues/paradex/tests/public.rs."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "account fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "account fills[2].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 17 account.fills[2].executionId: ts=null rust=\"fill-1\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"fill-3001-b\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"fill-3001-a\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"fill-3001-b\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The paradex TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/paradex-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -8256,6 +8312,15 @@
           "category": "rust-better",
           "rationale": "AGT-45: Rust edits a resting limit in place with the native ModifyOrder (tx 17), so 7002 keeps its id at the new price and size; TS cancels it and places a replacement under a new index, which its later snapshot omits. Every later row shifts by that one retained order.",
           "evidence": "sdk-rs/harness/private-tape-lighter.mjs amendOrder 7002, tagged impl rust (tx 17) and ts (cancel and replace); sdk-rs/venues/lighter/tests/trading.rs a_limit_amend_is_one_native_modify_that_keeps_the_order."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"execution-1\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The lighter TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/lighter-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -8365,6 +8430,15 @@
           "category": "rust-better",
           "rationale": "AGT-45: Rust edits a resting limit in place with the native ModifyOrder (tx 17), so 7002 keeps its id at the new price and size; TS cancels it and places a replacement under a new index, which its later snapshot omits. Every later row shifts by that one retained order.",
           "evidence": "sdk-rs/harness/private-tape-lighter.mjs amendOrder 7002, tagged impl rust (tx 17) and ts (cancel and replace); sdk-rs/venues/lighter/tests/trading.rs a_limit_amend_is_one_native_modify_that_keeps_the_order."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"execution-1\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The lighter TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -8474,6 +8548,15 @@
           "category": "rust-better",
           "rationale": "AGT-45: Rust edits a resting limit in place with the native ModifyOrder (tx 17), so 7002 keeps its id at the new price and size; TS cancels it and places a replacement under a new index, which its later snapshot omits. Every later row shifts by that one retained order.",
           "evidence": "sdk-rs/harness/private-tape-lighter.mjs amendOrder 7002, tagged impl rust (tx 17) and ts (cancel and replace); sdk-rs/venues/lighter/tests/trading.rs a_limit_amend_is_one_native_modify_that_keeps_the_order."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"execution-1\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The lighter-robinhood TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/lighter-robinhood-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -8583,6 +8666,15 @@
           "category": "rust-better",
           "rationale": "AGT-45: Rust edits a resting limit in place with the native ModifyOrder (tx 17), so 7002 keeps its id at the new price and size; TS cancels it and places a replacement under a new index, which its later snapshot omits. Every later row shifts by that one retained order.",
           "evidence": "sdk-rs/harness/private-tape-lighter.mjs amendOrder 7002, tagged impl rust (tx 17) and ts (cancel and replace); sdk-rs/venues/lighter/tests/trading.rs a_limit_amend_is_one_native_modify_that_keeps_the_order."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"execution-1\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The lighter-robinhood TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -10508,6 +10600,71 @@
           "category": "rust-better",
           "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
           "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"7001\"",
+            "account fills[1].executionId: ts=null rust=\"7002\"",
+            "account fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 13 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 14 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 15 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 16 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 17 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 18 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 18 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 19 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 19 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 19 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 20 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 21 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 21 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 21 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 22 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 22 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 22 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"7002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The okx TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/okx-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -10546,6 +10703,71 @@
           "category": "rust-better",
           "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
           "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"7001\"",
+            "account fills[1].executionId: ts=null rust=\"7002\"",
+            "account fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 13 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 14 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 15 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 16 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 17 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 18 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 18 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 19 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 19 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 19 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 20 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 21 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 21 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 21 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 22 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 22 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 22 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"7002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The okxdemo TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/okxdemo-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -10593,6 +10815,117 @@
           "category": "rust-better",
           "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
           "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"7001\"",
+            "account fills[1].executionId: ts=null rust=\"7002\"",
+            "account fills[2].executionId: ts=null rust=\"13011\"",
+            "account fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 13 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 14 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 15 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 16 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 16 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 17 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 17 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 18 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 18 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 18 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 19 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 19 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 19 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 19 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 20 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 20 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 21 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 21 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 21 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 21 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 22 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 22 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 22 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 22 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 23 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 23 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 23 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 23 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 24 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 24 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 24 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 24 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 25 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 25 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 25 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 25 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 26 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 26 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 26 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 26 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 27 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 27 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 27 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 27 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 28 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 28 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 28 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 28 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 29 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 29 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 29 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 29 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 30 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 30 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 30 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 30 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 31 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 31 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 31 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 31 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"7002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The okxeu TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/okxeu-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     },
@@ -10640,6 +10973,599 @@
           "category": "rust-better",
           "rationale": "A trailing stop's row price is where Tealstreet draws and drags its line. OKX documents moveTriggerPx as the move_order_stop trigger price, so Rust shows it (100) once published; with activePx pending it sits a callback behind activePx, otherwise behind the current last (#3174). TS shows last + (min(entry, callbackSpread) - max(entry, callbackSpread)) for a sell with a position, where last is the algo row's placement-time fill price: 3000 + (100 - 2900) = 200, a level mixed with a distance.",
           "evidence": "sdk-rs/harness/private-tape-okx.mjs trailing algo 204 (ETH sell, callbackSpread 100, moveTriggerPx 100, last 3000, no activePx) with the ETH position avgPx 2900; venues/okx/tests/trailing_display.rs."
+        },
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"7001\"",
+            "account fills[1].executionId: ts=null rust=\"7002\"",
+            "account fills[2].executionId: ts=null rust=\"13011\"",
+            "account fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 11 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 12 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 13 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 14 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 15 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 15 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 16 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 16 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 17 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 17 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 18 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 18 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 18 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 19 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 19 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 19 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 19 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 20 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 20 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 20 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 21 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 21 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 21 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 21 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 22 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 22 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 22 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 22 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 23 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 23 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 23 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 23 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 24 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 24 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 24 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 24 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 25 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 25 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 25 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 25 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 26 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 26 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 26 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 26 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 27 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 27 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 27 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 27 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 28 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 28 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 28 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 28 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 29 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 29 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 29 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 29 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 30 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 30 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 30 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 30 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 31 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 31 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 31 account.fills[2].executionId: ts=null rust=\"13011\"",
+            "checkpoint 31 account.fills[3].executionId: ts=null rust=\"23011\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"7002\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"7001\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"7002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The okxeudemo TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/okxeudemo-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bybit",
+      "tape": "sdk-rs/harness/tapes/bybit-private.jsonl",
+      "tapeSha256": "56798558c75cb19e17c87699cdac6e458702c96fe225fdf77fddf3861208990b",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "account fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"exec-0.60\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"exec-0.40\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"exec-0.60\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bybit TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bybit-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bybitinverse",
+      "tape": "sdk-rs/harness/tapes/bybitinverse-private.jsonl",
+      "tapeSha256": "f9253b219a9a58c3bb6ec891ace5540d156a31bef858789e3567dc9fc7afb719",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"exec-1\"",
+            "account fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"exec-2\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bybitinverse TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bybitinverse-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bybitspot",
+      "tape": "sdk-rs/harness/tapes/bybitspot-private.jsonl",
+      "tapeSha256": "c0cf53f0f968673ce7878e2728f0623c6821257299e8849c3cbf309a58b312f8",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"exec-1\"",
+            "account fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"exec-2\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bybitspot TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bybitspot-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bybitdemo",
+      "tape": "sdk-rs/harness/tapes/bybitdemo-private.jsonl",
+      "tapeSha256": "54fb571d1e33aea9a1f14c235ed45c69c3b2198cb40e82cad27fdfc634bcab14",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"exec-1\"",
+            "account fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"exec-2\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"exec-1\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"exec-2\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bybitdemo TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bybitdemo-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "cryptocom",
+      "tape": "sdk-rs/harness/tapes/cryptocom-private.jsonl",
+      "tapeSha256": "4f8906f32518d5ef67894073bc93b78897dda4aa6a66cb5e9738b8e41e6894fd",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"9007199254740997\"",
+            "account fills[1].executionId: ts=null rust=\"9007199254740998\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The cryptocom TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/cryptocom-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "apexomni",
+      "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
+      "tapeSha256": "d851f4fbe8ee28b264d7e949b44de4bfc50e4dbf755cb3314eef02a177922eaf",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"exec-a\"",
+            "account fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 11 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 12 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 13 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 14 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 15 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 16 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 17 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 18 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 19 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 19 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 20 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 20 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 21 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 21 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 22 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 22 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 23 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 23 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 24 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 24 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 25 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 25 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 26 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 26 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 27 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 27 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"exec-b\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"exec-a\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"exec-b\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The apexomni TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/apexomni-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "asterdex",
+      "tape": "sdk-rs/harness/tapes/asterdex-private.jsonl",
+      "tapeSha256": "9941df213c594643872536d4633d7ed57a1d0b221df103420205a38f384731f3",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"1\"",
+            "account fills[1].executionId: ts=null rust=\"2\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"1\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"1\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"2\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The asterdex TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/asterdex-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "asterdex",
+      "tape": "sdk-rs/harness/tapes/asterdex-v3-private.jsonl",
+      "tapeSha256": "a872dbb008f36ca38d09b0912fd32ba0173d4ecd1b044e31928579bddb4e63e7",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"1\"",
+            "account fills[1].executionId: ts=null rust=\"2\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"1\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"1\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"2\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The asterdex TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/asterdex-v3-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "txflow",
+      "tape": "sdk-rs/harness/tapes/txflow-private.jsonl",
+      "tapeSha256": "85e711ab02327f1c678c4bc935e2d7e3e85e456aca97a87d4fda649f45338226",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"9001\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"9001\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The txflow TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/txflow-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "kucoin",
+      "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
+      "tapeSha256": "7271b023a3dfbb91dc2a5d8e0223d6fca801e664ac3654bb060d62f37919628b",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 11 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 12 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 13 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 14 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 15 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 16 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 17 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 18 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"1794175373644\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"1794175373644\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The kucoin TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/kucoin-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bitget",
+      "tape": "sdk-rs/harness/tapes/bitget-private.jsonl",
+      "tapeSha256": "bfcd32b911c929b80471d265d037dde0e9e2a698ce9e6e482a2c8c5a901c0567",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"execution-1\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bitget TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bitget-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bitgetinverse",
+      "tape": "sdk-rs/harness/tapes/bitgetinverse-private.jsonl",
+      "tapeSha256": "20bed551d2e369ef2b3e21c9b40f1e4add8c2a0a7c2bf5b36d2c3e04493fa28a",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"inverse-native-execution\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"inverse-native-execution\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bitgetinverse TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bitgetinverse-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "bitgetusdc",
+      "tape": "sdk-rs/harness/tapes/bitgetusdc-private.jsonl",
+      "tapeSha256": "88f8f994e249dbb96eaeb9390d4703bf9761ac4cb9b1385f5815115aa01f9928",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"usdc-execution-1\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"usdc-execution-1\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"usdc-execution-1\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"usdc-execution-1\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The bitgetusdc TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/bitgetusdc-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "backpack",
+      "tape": "sdk-rs/harness/tapes/backpack-private.jsonl",
+      "tapeSha256": "f95174bf4bfff348fed06b8b101e5ebccf93a96b59255c44b4f1d97a6e3867c5",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"999\"",
+            "account fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 10 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 10 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 8 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 8 account.fills[1].executionId: ts=null rust=\"1000\"",
+            "checkpoint 9 account.fills[0].executionId: ts=null rust=\"999\"",
+            "checkpoint 9 account.fills[1].executionId: ts=null rust=\"1000\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The backpack TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/backpack-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "phemex",
+      "tape": "sdk-rs/harness/tapes/phemex-private.jsonl",
+      "tapeSha256": "cc64e261274127d3ac79ec328a872a30a6bb9ea814432adef90c397ba81cd25f",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "account fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "checkpoint 1 account.fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"8718cae0-0000-4000-8000-000000000001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"8b8a8a00-0000-4000-8000-000000000002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The phemex TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/phemex-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "binance",
+      "tape": "sdk-rs/harness/tapes/binance-private.jsonl",
+      "tapeSha256": "8066c3b4de3742be5345977c9f66d270898b1b8ebbf220f1cffc384f433f6ba8",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"10001\"",
+            "account fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 1 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 2 account.fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 3 account.fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 4 account.fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 5 account.fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 6 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 6 account.fills[1].executionId: ts=null rust=\"10002\"",
+            "checkpoint 7 account.fills[0].executionId: ts=null rust=\"10001\"",
+            "checkpoint 7 account.fills[1].executionId: ts=null rust=\"10002\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The binance TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/binance-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "binancespot",
+      "tape": "sdk-rs/harness/tapes/binancespot-private.jsonl",
+      "tapeSha256": "17f14a131f0240857e7a0866432587f8929a9aea084d1f619c65a88bb4309c67",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"101\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The binancespot TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/binancespot-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "binanceinverse",
+      "tape": "sdk-rs/harness/tapes/binanceinverse-private.jsonl",
+      "tapeSha256": "2e29220370a438c5424ffcacff131bfbd7dc6dfafc1aede4bf2f476edf608d91",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"101\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The binanceinverse TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/binanceinverse-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
+        }
+      ]
+    },
+    {
+      "venue": "binancepm",
+      "tape": "sdk-rs/harness/tapes/binancepm-private.jsonl",
+      "tapeSha256": "a083f2c3b3f81d1aa7bb868ea4423b1988d003df2685f4eb736d57b7ad3d237d",
+      "diagnostics": [
+        {
+          "failures": [
+            "account fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 2 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 3 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 4 account.fills[0].executionId: ts=null rust=\"101\"",
+            "checkpoint 5 account.fills[0].executionId: ts=null rust=\"101\""
+          ],
+          "category": "ts-unsupported",
+          "rationale": "AGT-83: Rust sends the venue's native per-execution id as the live Fill id, so equal partial fills of one order stay distinct from a replay. The binancepm TypeScript reference emits the order id as the fill id and carries no execution identity.",
+          "evidence": "sdk-rs/harness/tapes/binancepm-private.jsonl live execution rows carry native ids; the venue crate's unit tests pin Fill.id to them with order_id unchanged (AGT-83)."
         }
       ]
     }
