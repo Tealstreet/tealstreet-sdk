@@ -522,6 +522,10 @@ it for every device. What never keeps the key: a COSIGNED tab attached to the
 resident, a parked holder, and the leaving registration's own half-open socket
 (detached with it, so its idle-out cannot start 48 h retention). An unjoined
 socket's `dispose_delegated` stays unconditional: it names no registration.
+Detachment and the keep decision run on EVERY disposed alias, including when the
+socket keeps another alias. A detached label loses command authority through
+`Registry::holds_label`, which session cleanup, order admission and the deferred
+action guard check instead of the socket-wide `holds`.
 Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
 rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 
