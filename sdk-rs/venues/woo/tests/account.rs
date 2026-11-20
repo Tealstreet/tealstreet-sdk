@@ -437,6 +437,24 @@ fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
         ]
     );
 }
+// A tradeId without executedQuantity delivers a cumulative delta, so it carries no execution id.
+#[test]
+fn trade_id_without_executed_quantity_is_not_a_fill_identity() {
+    let (mut e, socket, mut reads, _) = established_stream();
+    load(&mut e, &mut reads);
+    e.take_frame(69.0);
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000,"tradeId":301}}"#;
+    ws(&mut e, socket, 70.0, frame);
+    let fills = safe_cex_engine::wire::fills(e.take_frame(100.0).unwrap()).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| (fill.id.as_deref(), fill.order_id.as_str()))
+        .collect();
+    assert_eq!(
+        identities,
+        vec![(Some("9007199254740993"), "9007199254740993")]
+    );
+}
 #[test]
 fn cumulative_only_reports_emit_deltas_not_repeated_totals() {
     let (mut e, socket, mut reads, _) = established_stream();
