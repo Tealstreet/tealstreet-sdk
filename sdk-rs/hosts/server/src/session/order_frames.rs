@@ -204,9 +204,11 @@ impl Session {
             return;
         }
         let venue = &self.joined[&name].account.venue;
-        // Native Bybit protection omits caller IDs; other orders retain the admitted
-        // venue's lossless UUID representation, or omit it (no lossless native form).
-        let client_id = if order_contract::bybit_protection(venue, params) {
+        // Bybit protection and BloFin triggers omit caller IDs; other orders retain the
+        // admitted venue's lossless UUID representation, or omit it (no lossless form).
+        let client_id = if order_contract::bybit_protection(venue, params)
+            || order_contract::blofin_trigger(venue, params)
+        {
             None
         } else {
             order_contract::client_order_id(venue, &submit.intent_id)

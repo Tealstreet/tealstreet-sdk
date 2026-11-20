@@ -214,15 +214,25 @@ pub(crate) fn venue_caller_ids(venue: &str, args: &mut [Value]) {
     }
 }
 
+/// A trigger/protection type, or an attached trigger, stop-loss or take-profit.
+fn trigger_shape(order: &serde_json::Map<String, Value>) -> bool {
+    matches!(
+        order.get("type").and_then(Value::as_str),
+        Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
+    ) || ["triggerPrice", "stopLoss", "takeProfit"]
+        .iter()
+        .any(|field| order.get(*field).is_some_and(|value| !value.is_null()))
+}
+
 // 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
-    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
-        && (matches!(
-            order.get("type").and_then(Value::as_str),
-            Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
-        ) || ["triggerPrice", "stopLoss", "takeProfit"]
-            .iter()
-            .any(|field| order.get(*field).is_some_and(|value| !value.is_null())))
+    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot") && trigger_shape(order)
+}
+
+/// AGT-46: BloFin's adapter refuses a caller ID on order-algo triggers and on
+/// attached TP/SL ("cannot honor caller clientOrderId"), so those submits omit it.
+pub(crate) fn blofin_trigger(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
+    venue == "blofin" && trigger_shape(order)
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
@@ -383,6 +393,36 @@ mod activation_tests {
                     assert!(!super::bybit_protection(other, order.as_object().unwrap()));
                 }
             }
+        }
+    }
+
+    // AGT-46 live: blofin-t reduce-only stop-market and stop-limit submits were
+    // refused "cannot honor caller clientOrderId" after the order-algo shape fix.
+    #[test]
+    fn blofin_trigger_omission_covers_triggers_and_attached_protection_only() {
+        let plain = json!({"type":"limit","amount":0.01,"price":0.05});
+        assert!(!super::blofin_trigger("blofin", plain.as_object().unwrap()));
+        let market = json!({"type":"market","amount":0.01,"reduceOnly":true});
+        assert!(!super::blofin_trigger(
+            "blofin",
+            market.as_object().unwrap()
+        ));
+        let stop_market = json!({"type":"conditional","side":"sell","amount":0.01,
+            "triggerPrice":0.04,"reduceOnly":true});
+        let mut stop_limit = stop_market.clone();
+        stop_limit["price"] = 0.039.into();
+        for order in [&stop_market, &stop_limit] {
+            assert!(super::blofin_trigger("blofin", order.as_object().unwrap()));
+            for other in ["okx", "bitget", "bybit", "not-blofin"] {
+                assert!(!super::blofin_trigger(other, order.as_object().unwrap()));
+            }
+        }
+        for field in ["stopLoss", "takeProfit"] {
+            let mut order = plain.clone();
+            order[field] = 0.04.into();
+            assert!(super::blofin_trigger("blofin", order.as_object().unwrap()));
+            order[field] = Value::Null;
+            assert!(!super::blofin_trigger("blofin", order.as_object().unwrap()));
         }
     }
 
