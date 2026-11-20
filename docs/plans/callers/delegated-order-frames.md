@@ -196,10 +196,10 @@ supported; replay and conflicting payloads never create another forward.
 Native order-shape, quantity/split, ownership and command guards remain unchanged.
 A venue ID is never discarded and retried after a native refusal. Multiple or
 missing native result IDs retain the existing unknown outcome, never a resend. The one
-exception is an OKX single limit/market bracket: OKX places its stop-loss/take-profit as
-separate algo orders after the entry, so exactly one entry ID followed by one ID per
-requested leg is `placed` with the entry as `venueOrderId` (AGT-111); a split entry
-or any other count stays unknown.
+exception is a single bracket on a venue that places its stop-loss/take-profit as
+separate orders after the entry (OKX and Binance limit/market entries, Kraken limit
+entries): exactly one entry ID followed by one ID per requested leg is `placed` with the
+entry as `venueOrderId` (AGT-111); a split entry or any other count stays unknown.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives

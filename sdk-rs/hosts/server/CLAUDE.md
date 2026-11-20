@@ -395,10 +395,10 @@ Placement completions (`settle_intent`) send `refused` with `error.outcome:
 `protection`. Every other failure without `notSent` proof, including a partially
 accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
 as the venue's refusal; the SDK still keeps the intent unknown and never resends.
-A successful completion is `placed` only with one native ID, or (OKX family, single
-limit/market bracket: `order_contract::bracket_protective_legs`) one entry ID followed by
-exactly its separately placed legs, reported as the entry (AGT-111). Kraken and Binance
-also derive legs but their result order is unverified, so they keep the one-ID rule.
+A successful completion is `placed` only with one native ID, or (a single bracket on a
+venue that places its legs after the entry: OKX and Binance limit/market, Kraken limit;
+`order_contract::bracket_protective_legs`) one entry ID followed by exactly its separately
+placed legs, reported as the entry (AGT-111; Binance and Kraken order verified live).
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
