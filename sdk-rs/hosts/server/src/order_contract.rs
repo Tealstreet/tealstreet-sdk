@@ -251,6 +251,26 @@ pub(crate) fn trigger_refuses_caller_id(
     }
 }
 
+/// AGT-111: OKX places a bracket's stop-loss/take-profit as separate algo orders after
+/// the entry and completes with `[entry, ..protective]`, as the TS reference does. One
+/// unsplit bracket therefore names its entry first. Kraken and Binance also derive legs;
+/// their ordering is unverified, so they keep the single-ID rule.
+pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
+    if !matches!(venue, "okx" | "okxdemo" | "okxeu" | "okxeudemo") {
+        return 0;
+    }
+    let Some([order]) = command["orders"].as_array().map(Vec::as_slice) else {
+        return 0;
+    };
+    if !matches!(order["type"].as_str(), Some("limit" | "market")) {
+        return 0;
+    }
+    ["stopLoss", "takeProfit"]
+        .iter()
+        .filter(|field| order[**field].as_f64().is_some_and(|v| v != 0.0))
+        .count()
+}
+
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
 /// finite binary64 serialization, and negative zero is normalized to zero.
 pub fn fingerprint(
@@ -497,6 +517,60 @@ mod activation_tests {
                     "{other}"
                 );
             }
+        }
+    }
+
+    // AGT-111: only an OKX single limit/market bracket counts its separately placed legs.
+    #[test]
+    fn bracket_protective_legs_count_only_okx_single_brackets() {
+        let bracket = |extra: Value| {
+            let mut order =
+                json!({"symbol":"DOGEUSDT","type":"limit","side":"buy","amount":0.01,"price":0.04});
+            for (k, v) in extra.as_object().unwrap() {
+                order[k] = v.clone();
+            }
+            json!({"op":"placeOrders","orders":[order]})
+        };
+        for venue in ["okx", "okxdemo", "okxeu", "okxeudemo"] {
+            assert_eq!(
+                super::bracket_protective_legs(venue, &bracket(json!({"stopLoss":0.03}))),
+                1
+            );
+            assert_eq!(
+                super::bracket_protective_legs(
+                    venue,
+                    &bracket(json!({"stopLoss":0.03,"takeProfit":0.05}))
+                ),
+                2
+            );
+            assert_eq!(
+                super::bracket_protective_legs(venue, &bracket(json!({}))),
+                0
+            );
+            assert_eq!(
+                super::bracket_protective_legs(
+                    venue,
+                    &bracket(json!({"stopLoss":0,"takeProfit":null}))
+                ),
+                0
+            );
+            assert_eq!(
+                super::bracket_protective_legs(
+                    venue,
+                    &bracket(json!({"type":"conditional","stopLoss":0.03}))
+                ),
+                0
+            );
+            let two = json!({"op":"placeOrders","orders":[
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone(),
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone()]});
+            assert_eq!(super::bracket_protective_legs(venue, &two), 0);
+        }
+        for venue in ["bitget", "bybit", "kraken", "binance", "blofin"] {
+            assert_eq!(
+                super::bracket_protective_legs(venue, &bracket(json!({"stopLoss":0.03}))),
+                0
+            );
         }
     }
 

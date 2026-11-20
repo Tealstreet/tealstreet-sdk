@@ -2683,6 +2683,10 @@ impl Session {
                                 .and_then(|orders| orders[0]["clientOrderId"].as_str())
                                 .map(str::to_owned),
                             seq,
+                            protective_legs: crate::order_contract::bracket_protective_legs(
+                                &account.venue,
+                                command,
+                            ),
                         },
                         OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
                             seq,
@@ -3368,6 +3372,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     if let methods::Reply::Intent {
         client_order_id,
         seq,
+        protective_legs,
     } = &pending.reply
     {
         order_frames::settle_intent(
@@ -3376,6 +3381,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             &pending.request_id,
             client_order_id.as_deref(),
             *seq,
+            *protective_legs,
             outcome,
         );
         return;
