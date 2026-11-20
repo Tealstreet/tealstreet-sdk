@@ -513,13 +513,15 @@ See `DELEGATED_RETENTION.md` for the retention and restart contracts.
 ## DELEGATED holder-refcounted dispose
 
 AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
-detaches only that holder in `Registry::release_with_labels`; the shared actor and
-resident signer stop with the last LIVE holder. Before this, one device switching
-that account to LOCAL/COSIGNED (which disposes first) stopped it for every device.
-Parked holders deliberately do not count: one may be the disposing device's own
-stale socket, which must not keep a removed key resident for 48 h.
-`dispose_delegated` (an unjoined socket) refuses while a live holder remains.
-This is not a stop reason; #3736's `superseded` stays for newer-init takeovers.
+detaches only that holder in `Registry::release_with_labels`. The shared actor and
+resident signer keep running only while a LIVE holder of ANOTHER client
+registration (init `instanceId`, kept in `Holders::confirmed`) confirmed a
+DELEGATED request; otherwise `dispose_for` stops and erases as before. Before this,
+one device switching that account to LOCAL/COSIGNED (which disposes first) stopped
+it for every device. What never keeps the key: a COSIGNED tab attached to the
+resident, a parked holder, and the leaving registration's own half-open socket
+(detached with it, so its idle-out cannot start 48 h retention). An unjoined
+socket's `dispose_delegated` stays unconditional: it names no registration.
 Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
 rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 

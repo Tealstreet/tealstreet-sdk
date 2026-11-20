@@ -119,6 +119,10 @@ async fn another_devices_dispose_leaves_this_device_trading() {
     let init = payload(&mut phone, Some("phone"));
     phone.init(init).await.unwrap();
     finish(&mut phone, &mut phone_ready).await;
+    assert!(Arc::ptr_eq(
+        &web.joined["acct"].account,
+        &phone.joined["acct"].account
+    ));
     snapshot(&mut phone, &mut phone_sent, "acct").await;
     web.handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
         .await

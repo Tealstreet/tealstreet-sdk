@@ -203,7 +203,8 @@ impl Registry {
     }
 
     /// Explicit removal/disable also applies while this user's account is retained.
-    /// AGT-79: an unjoined socket never stops an account another live holder holds.
+    /// AGT-79 left this unconditional: an unjoined socket names no registration, so
+    /// its dispose cannot be told apart from this device's own stale socket.
     pub(crate) fn dispose_delegated(&self, user: &str, name: &str) {
         let accounts = self.accounts.lock().unwrap();
         let mut matches = accounts.values().filter(|account| {
@@ -215,14 +216,8 @@ impl Registry {
         let account = matches.next().cloned();
         let unique = matches.next().is_none();
         drop(accounts);
-        let Some(account) = account.filter(|_| unique) else {
-            return;
-        };
-        let holders = account.holders.lock().unwrap();
-        if !holders.disposed && holders.by_id.values().any(Option::is_some) {
-            return;
+        if let Some(account) = account.filter(|_| unique) {
+            self.dispose_for(&account, Disposal::PageDisposed, "account disposed", None);
         }
-        drop(holders);
-        self.dispose_for(&account, Disposal::PageDisposed, "account disposed", None);
     }
 }

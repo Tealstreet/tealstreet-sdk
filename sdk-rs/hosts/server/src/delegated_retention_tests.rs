@@ -85,12 +85,32 @@ fn resident_from(
 }
 
 fn hold(account: &Account, id: u64) {
+    let registration = format!("registration-{id}");
+    hold_requesting(account, id, Delegated, &registration);
+}
+
+use crate::envelope::AccountSigningMode::{Cosigned, Delegated};
+
+/// A live holder whose join confirmed `requested` for a client registration.
+fn hold_requesting(
+    account: &Account,
+    id: u64,
+    requested: crate::envelope::AccountSigningMode,
+    registration: &str,
+) {
     account.hold(
         id,
         Live {
             outbox: Arc::new(|_| true),
             token: None,
         },
+    );
+    account.confirm_signing_mode(
+        id,
+        &account.name,
+        requested,
+        Arc::new(|_| true),
+        Some(registration),
     );
 }
 
@@ -230,6 +250,37 @@ async fn a_parked_holder_never_keeps_a_disposed_account_resident() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cosigned_holder_never_keeps_the_delegated_key_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for unjoined in [false, true] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold_requesting(&account, 8, Cosigned, "registration-8");
+                let provider = account.delegated().as_ref().unwrap().provider();
+                if unjoined {
+                    registry.release(&account, 7, Disposal::SocketClosed);
+                    registry.dispose_delegated("A", "synthetic-main");
+                } else {
+                    registry.release(&account, 7, Disposal::PageDisposed);
+                }
+                assert_eq!(registry.account_count(), 0, "unjoined={unjoined}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "unjoined={unjoined}: the last DELEGATED holder's dispose erases the key"
+                );
+                assert!(!registry.holds(&account, 8));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn hard_stops_still_stop_every_holder() {
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -260,30 +311,62 @@ async fn hard_stops_still_stop_every_holder() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_unjoined_dispose_never_stops_an_account_another_live_holder_holds() {
+async fn a_dispose_never_counts_its_own_registrations_stale_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for other_device in [false, true] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                // Socket 8 is socket 7's half-open predecessor: same registration.
+                hold_requesting(&account, 8, Delegated, "registration-7");
+                if other_device {
+                    hold(&account, 9);
+                }
+                let provider = account.delegated().as_ref().unwrap().provider();
+                let key = KeyRef("primary.signing".into());
+                registry.release(&account, 7, Disposal::PageDisposed);
+                assert!(!registry.holds(&account, 8), "other_device={other_device}");
+                if !other_device {
+                    assert_eq!(registry.account_count(), 0);
+                    assert_eq!(
+                        provider.can_sign(&key, Algorithm::HmacSha256),
+                        Capability::Unsupported,
+                        "the stale socket never keeps a removed key resident"
+                    );
+                    continue;
+                }
+                assert_eq!(registry.account_count(), 1);
+                assert!(inbox.try_recv().is_err());
+                assert!(registry.holds(&account, 9));
+                registry.release(&account, 9, Disposal::PageDisposed);
+                assert_eq!(registry.account_count(), 0);
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Unsupported
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unjoined_dispose_still_stops_the_account_it_cannot_attribute() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = tests::registry();
             let (account, mut inbox) = resident(&registry, "A");
             let provider = account.delegated().as_ref().unwrap().provider();
             registry.dispose_delegated("A", "synthetic-main");
-            assert_eq!(registry.account_count(), 1);
-            assert!(inbox.try_recv().is_err());
-            assert_eq!(
-                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
-                Capability::Supported
-            );
-            registry.release(&account, 7, Disposal::SocketClosed);
-            registry.dispose_delegated("A", "synthetic-main");
-            assert_eq!(
-                registry.account_count(),
-                0,
-                "a retained account is still removable"
-            );
+            assert_eq!(registry.account_count(), 0);
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
             assert_eq!(
                 provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
                 Capability::Unsupported
             );
+            assert!(!registry.holds(&account, 7));
         })
         .await;
 }

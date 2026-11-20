@@ -18,13 +18,14 @@ kind `no_client_48h`. The existing retained stop-notice path tells the next
 admitted client. The resident signing material is erased at disposal, including
 when engine or host references remain. A page `dispose` (removal, disabling, or a
 device switching that account to LOCAL or COSIGNED) and a ping orphan detach only
-that holder (AGT-79). While another live holder remains, the account, its algos
-and the resident signer keep running untouched; the last live holder's dispose
-stops the account and erases the key immediately. Parked holders do not count,
-since one may be the disposing device's own stale socket. An unjoined socket's
-dispose removes a retained account only when no live holder holds it. Expiry,
-signer failure, lease fence, drain, settings rebuild and `Registry::dispose`
-still stop every holder. LOCAL and COSIGNED accounts retain their existing lifecycle.
+that holder (AGT-79). While a live holder of another client registration that
+requested DELEGATED remains, the account, its algos and the resident signer keep
+running untouched. Otherwise the dispose stops the account and erases the key
+immediately. COSIGNED tabs attached to the resident, parked holders and the
+leaving registration's own stale sockets never keep it. A socket that has not
+joined the account still removes it unconditionally. Expiry, signer failure,
+lease fence, drain, settings rebuild and `Registry::dispose` still stop every
+holder. LOCAL and COSIGNED accounts retain their existing lifecycle.
 
 A poisoned resident lock is recovered only to discard its provider and erase
 the protected material. It remains unavailable for signing or admission;

@@ -262,6 +262,12 @@ pub struct Live {
     pub token: Option<(String, u64)>,
 }
 
+type Confirmed = (
+    crate::envelope::AccountSigningMode,
+    Outbox,
+    Option<Arc<str>>,
+);
+
 #[derive(Default)]
 struct Holders {
     retention: Option<retention::Retention>,
@@ -272,7 +278,8 @@ struct Holders {
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
     labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
-    confirmed: HashMap<(u64, String), (crate::envelope::AccountSigningMode, Outbox)>,
+    /// Each confirmed registration's requested mode, output and client `instanceId`.
+    confirmed: HashMap<(u64, String), Confirmed>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -284,6 +291,49 @@ impl Holders {
             self.init_order.push(id);
         }
         self.by_id.insert(id, live);
+    }
+
+    /// AGT-79: whether a live holder of another client registration confirmed a
+    /// DELEGATED request. A COSIGNED tab, or the leaving registration's own
+    /// half-open socket, never keeps the resident key alone.
+    fn delegated_live_besides(&self, leaving: &[Arc<str>]) -> bool {
+        self.confirmed
+            .iter()
+            .any(|((holder, label), (requested, _, registration))| {
+                *requested == crate::envelope::AccountSigningMode::Delegated
+                    && registration
+                        .as_ref()
+                        .is_none_or(|registration| !leaving.contains(registration))
+                    && self
+                        .labels
+                        .get(holder)
+                        .and_then(|labels| labels.get(label))
+                        .is_some_and(Option::is_some)
+            })
+    }
+
+    /// The client registrations `holder` confirmed, for `label` or all of them.
+    fn registrations(&self, holder: u64, label: Option<&str>) -> Vec<Arc<str>> {
+        self.confirmed
+            .iter()
+            .filter(|((id, held), _)| *id == holder && label.is_none_or(|label| held == label))
+            .filter_map(|(_, (_, _, registration))| registration.clone())
+            .collect()
+    }
+
+    /// Other sockets of the leaving registrations: its own stale, half-open copies.
+    fn holders_of(&self, leaving: &[Arc<str>]) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .confirmed
+            .iter()
+            .filter(|(_, (_, _, registration))| {
+                registration.as_ref().is_some_and(|r| leaving.contains(r))
+            })
+            .map(|((id, _), _)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     fn remove(&mut self, id: u64) {
@@ -327,6 +377,7 @@ impl Account {
         label: &str,
         requested: crate::envelope::AccountSigningMode,
         outbox: Outbox,
+        registration: Option<&str>,
     ) {
         // Serialize confirmations with broadcasts, so an old COSIGNED
         // confirmation cannot follow the newer DELEGATED state.
@@ -345,9 +396,10 @@ impl Account {
             return;
         }
         let actual = self.actual_signing_mode();
-        holders
-            .confirmed
-            .insert((holder, label.into()), (requested, outbox.clone()));
+        holders.confirmed.insert(
+            (holder, label.into()),
+            (requested, outbox.clone(), registration.map(Arc::from)),
+        );
         outbox(crate::envelope::account_signing_mode(
             label, requested, actual,
         ));
@@ -356,7 +408,7 @@ impl Account {
     fn broadcast_signing_mode(&self) {
         let holders = self.holders.lock().unwrap();
         let actual = self.actual_signing_mode();
-        for ((holder, label), (requested, outbox)) in &holders.confirmed {
+        for ((holder, label), (requested, outbox, _)) in &holders.confirmed {
             if holders
                 .labels
                 .get(holder)
@@ -2239,7 +2291,7 @@ impl Registry {
 
     /// Releases a holder; DELEGATED disconnects start their separate retention clock.
     pub fn release(self: &Arc<Self>, account: &Arc<Account>, holder: u64, disposal: Disposal) {
-        self.release_with_labels(account, holder, disposal, Vec::new());
+        self.release_with_labels(account, holder, disposal, Vec::new(), Vec::new());
     }
 
     fn release_with_labels(
@@ -2248,10 +2300,13 @@ impl Registry {
         holder: u64,
         disposal: Disposal,
         mut labels: Vec<String>,
+        mut leaving: Vec<Arc<str>>,
     ) {
-        let (last, stopped) = {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned);
+        let (last, stopped, delegated_live) = {
             let mut holders = account.holders.lock().unwrap();
             let removed = holders.by_id.get(&holder).cloned();
+            leaving.extend(holders.registrations(holder, None));
             holders.remove(holder);
             if let Some(held) = holders.labels.remove(&holder) {
                 labels.extend(held.into_keys());
@@ -2260,23 +2315,33 @@ impl Registry {
                 return;
             }
             account.hand_over(&mut holders, holder);
+            let delegated_live = holders.delegated_live_besides(&leaving);
+            if page_dispose && delegated_live && account.delegated().is_some() {
+                // The leaving registration's other (stale) sockets leave with it.
+                for stale in holders.holders_of(&leaving) {
+                    holders.remove(stale);
+                    holders.labels.remove(&stale);
+                    account.hand_over(&mut holders, stale);
+                }
+            }
             let last = if account.delegated().is_some() {
                 holders.by_id.values().all(Option::is_none)
             } else {
                 holders.by_id.is_empty()
             };
-            (last, holders.disposed)
+            (last, holders.disposed, delegated_live)
         };
         if account.delegated().is_some() {
-            // AGT-79: a page dispose detaches only its own holder. The shared account
-            // and its resident signer stop with the last LIVE holder: a parked one may be
-            // this device's own stale socket, which must not keep a removed key resident.
-            if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
-                if last {
+            // AGT-79: a page dispose detaches only its own holder. The account and its
+            // resident signer stop with the last live DELEGATED holder; a parked one may
+            // be this device's own stale socket and must not keep a removed key resident.
+            if page_dispose {
+                let keep = if stopped { !last } else { delegated_live };
+                if !keep {
                     self.dispose_for(account, disposal, "account disposed", None);
                 } else {
                     Log::info(&format!(
-                        "detach {}: holder {holder} left, other holders keep it (disposal={})",
+                        "detach {}: holder {holder} left, a DELEGATED holder keeps it (disposal={})",
                         account.name,
                         disposal.as_str()
                     ));
@@ -2300,8 +2365,9 @@ impl Registry {
         label: &str,
         disposal: Disposal,
     ) {
-        let still_held = {
+        let (still_held, leaving) = {
             let mut holders = account.holders.lock().unwrap();
+            let leaving = holders.registrations(holder, Some(label));
             holders.confirmed.remove(&(holder, label.into()));
             let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
                 let removed = labels.remove(label).is_some();
@@ -2321,13 +2387,13 @@ impl Registry {
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
                 }
-                true
+                (true, leaving)
             } else {
-                false
+                (false, leaving)
             }
         };
         if !still_held {
-            self.release_with_labels(account, holder, disposal, vec![label.to_owned()]);
+            self.release_with_labels(account, holder, disposal, vec![label.to_owned()], leaving);
         }
     }
 

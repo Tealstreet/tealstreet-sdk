@@ -824,12 +824,14 @@ mod registration_tests {
                     "alias-A",
                     AccountSigningMode::Cosigned,
                     a_registration.outbox(),
+                    a_registration.instance_id(),
                 );
                 account.confirm_signing_mode(
                     2,
                     "alias-B",
                     AccountSigningMode::Cosigned,
                     b_registration.outbox(),
+                    b_registration.instance_id(),
                 );
                 assert!(a_rx.try_recv().is_ok());
                 assert!(b_rx.try_recv().is_ok());
