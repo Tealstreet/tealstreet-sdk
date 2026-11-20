@@ -200,6 +200,42 @@ fn original_mismatch(row: &NativeStop, guard: &PartialStopGuard) -> Option<&'sta
         .find_map(|(field, matched)| (!matched).then_some(field))
 }
 
+/// Whether Bybit shows the original changed: a field it sent that differs. A missing or
+/// unreadable field is no evidence of a change (readiness then says "couldn't confirm").
+fn shows_original_changed(row: &NativeStop, guard: &PartialStopGuard) -> bool {
+    let order = &guard.original;
+    let limit = order
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.conditional_order_price);
+    let number_differs = |raw: &str, expected: f64| {
+        raw.parse::<f64>()
+            .is_ok_and(|n| n.is_finite() && n != expected)
+    };
+    let text_differs = |raw: Option<&str>, matches: &dyn Fn(&str) -> bool| {
+        raw.is_some_and(|raw| !raw.is_empty() && !matches(raw))
+    };
+    number_differs(&row.qty, order.amount)
+        || number_differs(&row.trigger_price, order.price)
+        || number_differs(&row.price, limit.unwrap_or(0.0))
+        || row.position_idx != guard.position_idx
+        || text_differs(Some(&row.side), &|side| {
+            side == super::side_text(order.side)
+        })
+        || text_differs(Some(&row.order_type), &|kind| {
+            kind == if limit.is_some() { "Limit" } else { "Market" }
+        })
+        || order
+            .trigger_type
+            .is_some_and(|by| text_differs(row.trigger_by.as_deref(), &|raw| raw == reference(by)))
+        || text_differs(row.tpsl_mode.as_deref(), &|mode| mode == "Partial")
+        || text_differs(row.stop_order_type.as_deref(), &|stop| match order.kind {
+            OrderType::StopLoss => matches!(stop, "StopLoss" | "PartialStopLoss"),
+            OrderType::TakeProfit => matches!(stop, "TakeProfit" | "PartialTakeProfit"),
+            _ => false,
+        })
+}
+
 /// A venue enum value for the proof diagnostic; anything else is never echoed.
 fn enum_token(raw: &str) -> &str {
     if (1..=32).contains(&raw.len()) && raw.bytes().all(|byte| byte.is_ascii_alphanumeric()) {

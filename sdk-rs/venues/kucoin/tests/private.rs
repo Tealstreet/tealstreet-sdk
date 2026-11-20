@@ -266,6 +266,38 @@ fn fills_use_incremental_lots_and_execution_price_once() {
     assert!(h.fill_rows().is_empty());
     assert!(h.engine.store().orders().is_empty());
 }
+// AGT-83: the native tradeId is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::new();
+    h.ready();
+    h.engine.take_frame(h.now);
+    let matched = r#"{"orderId":"5cdfc138b21023a909e5ad55","symbol":"XBTUSDTM","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","size":10,"filledSize":3,"remainSize":7,"matchSize":1,"matchPrice":"89.5","tradeId":"t1","ts":1610000000001000000}"#;
+    h.ws("/contractMarket/tradeOrders", matched);
+    h.ws(
+        "/contractMarket/tradeOrders",
+        &matched
+            .replace("\"filledSize\":3", "\"filledSize\":4")
+            .replace("\"t1\"", "\"t2\""),
+    );
+    h.ws(
+        "/contractMarket/tradeOrders",
+        &matched
+            .replace("\"filledSize\":3", "\"filledSize\":5")
+            .replace(r#""tradeId":"t1","#, ""),
+    );
+    let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    let order = "5cdfc138b21023a909e5ad55";
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["t1", "t2", order].map(|id| (Some(id.to_owned()), order.to_owned(), 0.001))
+    );
+}
 #[test]
 fn inflight_and_cached_snapshots_cannot_resurrect_terminal_orders() {
     let mut h = Harness::new();

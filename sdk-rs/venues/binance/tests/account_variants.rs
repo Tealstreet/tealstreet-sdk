@@ -374,6 +374,31 @@ fn fill_prices(frame: &[u8]) -> Vec<f64> {
     Vec::new()
 }
 
+// AGT-83: the native trade id `t` is the fill identity; an idless packet keeps the order id.
+#[test]
+fn spot_trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = spot();
+    let _ = h.engine.take_frame(h.now);
+    for (filled, trade) in [("1", r#","t":31"#), ("1.5", r#","t":32"#), ("2", "")] {
+        h.message(
+            "ws-api/v3",
+            &format!(
+                r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":77,"s":"BTCUSDT","c":"spot-id","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","x":"TRADE","p":"100","L":"99","q":"2","z":"{filled}","l":"0.5"{trade}}}}}"#
+            ),
+        );
+    }
+    let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["31", "32", "spot-id"].map(|id| (Some(id.to_owned()), "spot-id".to_owned(), 0.5))
+    );
+}
+
 #[test]
 fn spot_execution_identity_survives_duplicate_out_of_order_and_client_id_reuse() {
     let mut h = spot();

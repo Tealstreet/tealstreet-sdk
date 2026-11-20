@@ -370,6 +370,27 @@ fn live_execution_during_initial_five_seconds_is_reported_once() {
     }
     assert_eq!(fill_count(e.take_frame(now).unwrap()), 1);
 }
+// AGT-83: the native trade_id is the fill identity; the order id is kept for attribution.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let now = NOW + 1.0;
+    let frame = format!(
+        r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":"98","order_id":"42","side":"buy","price":"90","size":"0.25","timestamp":{t}}},{{"trade_id":"99","order_id":"42","side":"buy","price":"90","size":"0.25","timestamp":{t}}}]}}}}"#,
+        t = now as u64
+    );
+    message(&mut e, s, now, &frame);
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        ["98", "99"].map(|id| (Some(id.to_owned()), "42".to_owned(), 0.25))
+    );
+}
 #[test]
 fn native_hyphenated_types_tif_and_cancel_reasons_preserve_lifecycle() {
     let (mut e, s) = ready();
