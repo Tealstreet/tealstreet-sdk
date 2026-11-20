@@ -1,7 +1,7 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Exchange } from '../exchanges/base';
 import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
-import type { ExchangeName } from '../types';
+import type { ExchangeName, ExchangeOptions } from '../types';
 import type { AppSettingsWorkerType } from '../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWorkerType';
 
@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { FrameStore } from '../store/frameStore';
+import { runWithPlacementIntent } from '../placementIntentContext';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { CallMethodHandler } from '../webworker/handlers/CallMethodHandler';
 import { consumerFrame } from './cutover/consumerFrame';
@@ -104,11 +105,11 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
   return fake;
 };
 
-const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
+const mirrorWith = (fake: Fake, failure?: Record<string, unknown>, signingMode?: ExchangeOptions['signingMode']) => {
   void fake;
   const exchange = new RustEngineExchange(
     'bybit',
-    { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+    { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false, ...(signingMode ? { signingMode } : {}) },
     new FrameStore(),
   );
   const calls: string[] = [];
@@ -137,6 +138,38 @@ describe('frame-fed main-thread mirror', () => {
     exchange?.dispose();
     exchange = undefined;
     vi.restoreAllMocks();
+  });
+
+  it.each(['local', 'cosigned'] as const)('coalesces one action across page readiness in %s mode', async (mode) => {
+    const fake = fakeEngine();
+    exchange = mirrorWith(fake, undefined, mode).exchange;
+    const id = '019a9b43-1000-7000-8000-000000000001';
+    const first = runWithPlacementIntent(id, () => exchange!.placeOrder(order));
+    const replay = runWithPlacementIntent(id, () => exchange!.placeOrder(order));
+    expect(await Promise.all([first, replay])).toEqual([['placed-1'], ['placed-1']]);
+    expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
+  });
+
+  it.each(['local', 'cosigned'] as const)('sends three identical distinct actions in %s mode', async (mode) => {
+    const fake = fakeEngine();
+    exchange = mirrorWith(fake, undefined, mode).exchange;
+    const actions = [1, 2, 3].map((n) => runWithPlacementIntent(
+      `019a9b43-1000-7000-8000-${n.toString().padStart(12, '0')}`, () => exchange!.placeOrder(order),
+    ));
+    await Promise.all(actions);
+    expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(3);
+  });
+
+  it('cannot return another owner incarnation a cached placement receipt', async () => {
+    const fake = fakeEngine();
+    exchange = mirrorWith(fake).exchange;
+    let owner = { ownerId: 'A', generation: 1 };
+    exchange.setWorkerOwner(() => owner);
+    const id = '019a9b43-1000-7000-8000-000000000001';
+    await runWithPlacementIntent(id, () => exchange!.placeOrder(order));
+    owner = { ownerId: 'B', generation: 2 };
+    await expect(runWithPlacementIntent(id, () => exchange!.placeOrder(order))).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
   });
 
   it.each([false, true])(
