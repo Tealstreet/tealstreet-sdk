@@ -1199,6 +1199,13 @@ impl Hyperliquid {
             );
         }
     }
+    pub(crate) fn schedule_position_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let dex = self.dex_of(cx, symbol).to_owned();
+        self.account.state_dirty.insert(dex);
+        if self.account.state_refresh_timer.is_none() {
+            self.account.state_refresh_timer = Some(cx.set_timer(350.0));
+        }
+    }
     /// TS `shouldTrackSpotHoldings`: spot is collateral (unified/portfolio) or the
     /// account opted into spot markets.
     pub(crate) fn tracks_spot_holdings(&self) -> bool {
@@ -3330,10 +3337,7 @@ impl Hyperliquid {
                 .and_modify(|time| *time = time.max(fill.time))
                 .or_insert(fill.time);
             *self.account.state_revision.entry(dex.into()).or_default() += 1;
-            self.account.state_dirty.insert(dex.into());
-            if self.account.state_refresh_timer.is_none() {
-                self.account.state_refresh_timer = Some(cx.set_timer(350.0));
-            }
+            self.schedule_position_refresh(cx, symbol);
             return;
         }
         let Some(start) = fill.start_position else {
