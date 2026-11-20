@@ -259,6 +259,8 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+A refused proof read fails the join without a second signature: the venue crate
+no longer sends ApeX's whole-second legacy read resend (AGT-75).
 
 Exact `binanceoptions` mainnet proves possession through its existing signed
 EAPI margin-account, position and open-order startup reads. Public exchange-info,
