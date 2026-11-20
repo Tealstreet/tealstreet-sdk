@@ -34,6 +34,12 @@ test('caller validation includes reader/runbook checks and actual NX gates', () 
   }
 });
 
+test('the NX diagnostic consumer runs only after its TypeScript/Jotai dependencies are installed', () => {
+  const install = workflow.indexOf('- name: Install frozen NX dependencies');
+  const consumer = workflow.indexOf('scripts/sdk-diagnostic-observability.test.cjs');
+  assert.ok(install >= 0 && consumer > install, 'diagnostic consumer requires the frozen NX install first');
+});
+
 test('native production Dockerfiles already have a cache-only PR build', () => {
   const image = readFileSync(join(__dirname, '../workflows/docker-native-server-pr.yml'), 'utf8');
   assert.match(image, /dockerfile: sdk-rs\/hosts\/server\/Dockerfile/);
