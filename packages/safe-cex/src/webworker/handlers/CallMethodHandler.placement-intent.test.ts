@@ -86,6 +86,23 @@ describe('worker placement intent ingress', () => {
     f.handler.dispose();
   });
 
+  it('a malformed redelivery cannot report notSent for an already admitted request', async () => {
+    let finish = (_ids: string[]) => {};
+    const pending = new Promise<string[]>((resolve) => { finish = resolve; });
+    const f = fixture(vi.fn(() => pending));
+    f.deliver('same-request', id(1));
+    f.deliver('same-request', 'not-a-uuid');
+    try {
+      await f.replies(1);
+      expect(f.messages[0]).toMatchObject({ data: { success: false, result: { outcome: 'unknown' } } });
+      expect(f.send).toHaveBeenCalledTimes(1);
+    } finally {
+      finish(['venue-order']);
+      await f.replies(2);
+      f.handler.dispose();
+    }
+  });
+
   it('ordinary reads remain independent even when a caller repeats metadata', async () => {
     const f = fixture();
     const read: StoreWorkerPayload = { op: 'callMethod', data: { requestId: 'read', intentId: id(1), method: 'fetchOrders', args: [] } };

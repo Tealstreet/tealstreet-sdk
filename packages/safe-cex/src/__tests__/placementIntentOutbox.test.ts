@@ -107,6 +107,28 @@ describe('durable caller-intent retirement', () => {
     } finally { box.close(); }
   });
 
+  it('a conflict with restored Unknown work cannot claim the original was not sent', async () => {
+    const f = fixture();
+    const { owner, accountName, venue, accountId } = f.options;
+    let writes = 0;
+    let box = await DelegatedOutbox.open(f.options);
+    box.connect({ owner, accountName, venue, accountId, instanceId: 'registration', signingMode: 'delegated', ready: true,
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+      send: () => { writes++; return true; },
+    });
+    const id = f.id();
+    await box.enqueue(params, { intentId: id });
+    expect(box.entries()[0].state).toBe('sending');
+    box.close();
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      expect(box.entries()[0].state).toBe('unknown');
+      await expect(box.enqueue({ ...params, amount: 2000 }, { intentId: id }))
+        .rejects.toMatchObject({ code: 'intentConflict', outcome: 'unknown' });
+      expect(writes).toBe(1);
+    } finally { box.close(); }
+  });
+
   it('legacy storage keeps permanent caller reservations instead of forgetting replay protection', async () => {
     const f = fixture(1);
     const box = await DelegatedOutbox.open(f.options);
