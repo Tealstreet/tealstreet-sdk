@@ -229,14 +229,26 @@ pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Valu
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot") && trigger_shape(order)
 }
 
-/// Adapters that refuse a caller ID on triggers and attached TP/SL, so those submits
-/// omit it: BloFin "cannot honor caller clientOrderId" (AGT-46, #3754, which named
-/// this `blofin_trigger`) and Phemex "requires a plain order" (live 2026-11-20).
+/// Venues whose native adapter refuses a caller ID by order shape, so those submits
+/// omit it. BloFin (AGT-46, #3754, first `blofin_trigger`), Phemex (#3758) and AGT-110:
+/// OKX, KuCoin, Bitget, Bitunix and Binance were reproduced live; the rest match by adapter
+/// source. Binance Options refuses every trigger outright, so it needs no entry.
 pub(crate) fn trigger_refuses_caller_id(
     venue: &str,
     order: &serde_json::Map<String, Value>,
 ) -> bool {
-    matches!(venue, "blofin" | "phemex") && trigger_shape(order)
+    let close = order.get("close").and_then(Value::as_bool) == Some(true);
+    match venue {
+        "blofin" | "phemex" | "okx" | "okxdemo" | "okxeu" | "okxeudemo" | "bitget"
+        | "bitgetusdc" | "bitgetinverse" | "kucoin" | "bitunix" | "apexomni" | "cryptocom"
+        | "binance" | "binancespot" | "binancepm" => trigger_shape(order),
+        "bingx" | "paradex" => trigger_shape(order) || close,
+        // Coinbase's adapter (futures and spot) refuses only a stop-market or close-only caller ID.
+        "coinbase" | "coinbasespot" => {
+            order.get("type").and_then(Value::as_str) == Some("stop_market") || close
+        }
+        _ => false,
+    }
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
@@ -400,55 +412,91 @@ mod activation_tests {
         }
     }
 
-    // AGT-46 live: blofin-t reduce-only stop-market and stop-limit submits were
-    // refused "cannot honor caller clientOrderId" after the order-algo shape fix;
-    // phemex-t reduce-only stop_market and an attached stopLoss were refused
-    // "requires a plain order" (2026-11-20). Was `blofin_trigger_omission_*` (#3754).
+    // AGT-46 (blofin-t), #3758 (phemex-t) and AGT-110 (okx, okxeu, kucoin, bitget,
+    // bitunix live 2026-11-20): trigger/bracket submits were refused for carrying a
+    // caller ID. Was `blofin_trigger_omission_*` (#3754); #3758 dropped "okx"/"bitget"
+    // from its negative list, and AGT-110 covers them and drops "binance" too.
     #[test]
     fn trigger_caller_id_omission_covers_triggers_and_attached_protection_only() {
+        let obj = |v: &Value| v.as_object().unwrap().clone();
         let plain = json!({"type":"limit","amount":0.01,"price":0.05});
         let market = json!({"type":"market","amount":0.01,"reduceOnly":true});
+        let close = json!({"type":"market","amount":0.01,"close":true});
         let conditional = json!({"type":"conditional","side":"sell","amount":0.01,
             "triggerPrice":0.04,"reduceOnly":true});
         let mut stop_limit = conditional.clone();
         stop_limit["price"] = 0.039.into();
         let stop_market = json!({"type":"stop_market","side":"sell","amount":25,
             "price":0.04,"reduceOnly":true});
-        for venue in ["blofin", "phemex"] {
-            for order in [&plain, &market] {
-                assert!(!super::trigger_refuses_caller_id(
-                    venue,
-                    order.as_object().unwrap()
-                ));
+        let mut attached = Vec::new();
+        for field in ["stopLoss", "takeProfit"] {
+            let mut order = plain.clone();
+            order[field] = 0.04.into();
+            attached.push(order);
+        }
+        let mut null_field = plain.clone();
+        null_field["stopLoss"] = Value::Null;
+        let shape = [
+            &conditional,
+            &stop_limit,
+            &stop_market,
+            &attached[0],
+            &attached[1],
+        ];
+        for venue in [
+            "blofin",
+            "phemex",
+            "okx",
+            "okxdemo",
+            "okxeu",
+            "okxeudemo",
+            "bitget",
+            "bitgetusdc",
+            "bitgetinverse",
+            "kucoin",
+            "bitunix",
+            "apexomni",
+            "cryptocom",
+            "bingx",
+            "paradex",
+            "binance",
+            "binancespot",
+            "binancepm",
+        ] {
+            for order in [&plain, &market, &null_field] {
+                assert!(
+                    !super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
             }
-            for order in [&conditional, &stop_limit, &stop_market] {
-                assert!(super::trigger_refuses_caller_id(
-                    venue,
-                    order.as_object().unwrap()
-                ));
+            for order in shape {
+                assert!(
+                    super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
             }
-            for field in ["stopLoss", "takeProfit"] {
-                let mut order = plain.clone();
-                order[field] = 0.04.into();
-                assert!(super::trigger_refuses_caller_id(
-                    venue,
-                    order.as_object().unwrap()
-                ));
-                order[field] = Value::Null;
-                assert!(!super::trigger_refuses_caller_id(
-                    venue,
-                    order.as_object().unwrap()
-                ));
+            let refuses_close = matches!(venue, "bingx" | "paradex");
+            assert_eq!(
+                super::trigger_refuses_caller_id(venue, &obj(&close)),
+                refuses_close,
+                "{venue}"
+            );
+        }
+        for venue in ["coinbase", "coinbasespot"] {
+            for order in [&stop_market, &close] {
+                assert!(super::trigger_refuses_caller_id(venue, &obj(order)));
+            }
+            for order in [&plain, &market, &conditional, &attached[0]] {
+                assert!(!super::trigger_refuses_caller_id(venue, &obj(order)));
             }
         }
-        // Not the full set with this adapter rule: at least OKX, Bitget, Crypto.com, ApeX
-        // Omni, Bitunix, KuCoin, BingX, Paradex and Coinbase share it and are a tracked gap
-        // (sdk-rs/hosts/server/CLAUDE.md). #3758 dropped "okx" and "bitget" from this list.
-        for other in ["bybit", "bitrue", "weex", "not-blofin"] {
-            assert!(!super::trigger_refuses_caller_id(
-                other,
-                stop_market.as_object().unwrap()
-            ));
+        for other in ["bybit", "hyperliquid", "kucoinspot", "bitrue", "weex"] {
+            for order in shape {
+                assert!(
+                    !super::trigger_refuses_caller_id(other, &obj(order)),
+                    "{other}"
+                );
+            }
         }
     }
 

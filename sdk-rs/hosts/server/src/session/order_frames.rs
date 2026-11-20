@@ -204,8 +204,8 @@ impl Session {
             return;
         }
         let venue = &self.joined[&name].account.venue;
-        // Bybit protection and BloFin/Phemex triggers omit caller IDs; other orders keep
-        // the admitted venue's lossless UUID representation, or omit it (no lossless form).
+        // Bybit protection and shape-refusing adapters (`trigger_refuses_caller_id`) omit
+        // caller IDs; other orders keep the venue's lossless UUID form, or omit it.
         let client_id = if order_contract::bybit_protection(venue, params)
             || order_contract::trigger_refuses_caller_id(venue, params)
         {
@@ -213,6 +213,7 @@ impl Session {
         } else {
             order_contract::client_order_id(venue, &submit.intent_id)
         };
+        let caller_id = client_id.is_some();
         let method = if let Some(id) = client_id {
             params.insert("clientOrderId".into(), id.into());
             "placeOrderWithClientOrderId"
@@ -229,7 +230,10 @@ impl Session {
             &name,
             json!({"requestId":submit.intent_id,
             "method":method,"args":[submit.params],"intentSeq":submit.seq}),
-            Some(OrderReceipt::Placement(submit.seq)),
+            Some(OrderReceipt::Placement {
+                seq: submit.seq,
+                caller_id,
+            }),
         )
         .await;
     }
@@ -310,20 +314,22 @@ impl Session {
         if let Some(receipt) = order_frame {
             let op = match receipt {
                 OrderReceipt::Action { kind, .. } => kind,
-                OrderReceipt::Placement(_) => "order.submit",
+                OrderReceipt::Placement { .. } => "order.submit",
             };
             self.audit_order_refusal(name, op, message);
         }
         if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
             crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
-        } else if let Some(OrderReceipt::Placement(seq)) = order_frame {
+        } else if let Some(OrderReceipt::Placement { seq, caller_id }) = order_frame {
             let message: String = message.chars().take(512).collect();
             let venue = self
                 .joined
                 .get(name)
                 .map_or("", |joined| joined.account.venue.as_str());
+            // An omitted caller ID was never sent, so the refusal names none (AGT-110).
             let client_id = request_id
                 .as_str()
+                .filter(|_| caller_id)
                 .and_then(|id| order_contract::client_order_id(venue, id));
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
                 "venueOrderId":null,"clientOrderId":client_id,"error":{"message":message,"outcome":"notSent"}}));
