@@ -527,7 +527,7 @@ fn measure_twelve_accounts() {
                     }
                 }
                 let bytes_in = encode(&mut source);
-                let due = interval > 0 && (step * step_ms) % interval as usize == 0;
+                let due = interval > 0 && (step * step_ms).is_multiple_of(interval as usize);
                 for (publisher, (view, state)) in publishers.iter_mut().zip(&mut views) {
                     let started = std::time::Instant::now();
                     let mut output = publisher.receive(bytes_in.clone(), false).unwrap();
@@ -562,5 +562,24 @@ fn measure_twelve_accounts() {
                 client.as_secs_f64() * 1e6 / seconds,
             );
         }
+    }
+}
+
+#[test]
+fn an_unreadable_frame_resnapshots_a_selected_unpaced_client_instead_of_forwarding_rows() {
+    let mut publisher = Publisher::new(0, 16 * 1024 * 1024);
+    publisher.set_tickers(selection(&["ETHUSDT"])).unwrap();
+    let mut source = Store::default();
+    source.set_markets(vec![market("BTCUSDT"), market("ETHUSDT")]);
+    source.set_tickers(vec![ticker("BTCUSDT", 100.), ticker("ETHUSDT", 200.)]);
+    publisher.receive(encode(&mut source), true).unwrap();
+    let malformed: Arc<[u8]> = Arc::from(&b"unknown future wire"[..]);
+    assert!(publisher.receive(malformed.clone(), false).is_err());
+    // The replacement pump's snapshot passes through whole and later frames follow it.
+    let mut replacement = Publisher::new(0, 16 * 1024 * 1024);
+    replacement.set_tickers(selection(&["ETHUSDT"])).unwrap();
+    for initial in [true, false] {
+        let output = replacement.receive(malformed.clone(), initial).unwrap();
+        assert!(Arc::ptr_eq(&output[0], &malformed));
     }
 }

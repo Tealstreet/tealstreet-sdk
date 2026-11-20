@@ -568,6 +568,8 @@ pub struct Publisher {
     tickers: TickerSelection,
     /// Set once the first (snapshot) frame has gone out; nothing publishes before it.
     started: bool,
+    /// The client holds a selected, renumbered ticker table: raw source rows would misapply.
+    selected_table: bool,
     last_publication: Instant,
     state: Option<PublicState>,
     limit: usize,
@@ -578,6 +580,7 @@ impl Publisher {
             interval,
             tickers: None,
             started: false,
+            selected_table: false,
             last_publication: Instant::now(),
             state: Some(PublicState::default()),
             limit,
@@ -639,7 +642,9 @@ impl Publisher {
             return Ok(Vec::new());
         }
         state.pending = true;
-        self.flush()
+        let frames = self.flush()?;
+        self.selected_table = self.tickers.is_some();
+        Ok(frames)
     }
     pub fn receive(
         &mut self,
@@ -656,7 +661,13 @@ impl Publisher {
             Err(error) => {
                 self.state = None;
                 // Old clients retain their exact bytes and cadence even on an unknown format.
-                if self.interval == 0 {
+                // A selected table cannot take source rows: it resnapshots, and the new pump's
+                // snapshot then passes through whole, replacing the client's table.
+                if self.interval == 0 && (initial || !self.selected_table) {
+                    if initial {
+                        self.started = true;
+                        self.selected_table = false;
+                    }
                     return Ok(vec![bytes]);
                 }
                 return Err(error);
@@ -667,6 +678,7 @@ impl Publisher {
             let frames = if state.filter.is_some()
                 && wire::sections(&bytes).any(|(kind, _)| ticker_section(kind))
             {
+                self.selected_table = true;
                 state.split_tickers(&bytes, self.limit)?
             } else {
                 vec![bytes]

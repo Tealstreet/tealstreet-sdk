@@ -124,6 +124,9 @@ fn coinbase_algorithm<'de, D: serde::Deserializer<'de>>(
         .transpose()
 }
 
+/// Builds a malformed publication field's refusal for an account name and init flag.
+pub type PublicationRefusal = fn(Option<&str>, bool) -> String;
+
 impl InitPayload {
     /// Identifies what an account's engine is built from; an init with the same
     /// one shares the account (see `accounts::build_fingerprint`).
@@ -132,18 +135,13 @@ impl InitPayload {
     }
 
     /// This connection's publication choices, or the refusal for a malformed one.
-    pub fn publication(
-        &self,
-    ) -> Result<crate::publication::Preferences, fn(Option<&str>, bool) -> String> {
-        let interval = self.publish_interval_ms.millis().ok_or(
-            (|name, init| publish_interval_refused(name, "invalid_publish_interval", init))
-                as fn(Option<&str>, bool) -> String,
-        )?;
-        let tickers = self.active_ticker_symbols.selection().ok_or(
-            (|name, init| {
-                active_ticker_symbols_refused(name, "invalid_active_ticker_symbols", init)
-            }) as fn(Option<&str>, bool) -> String,
-        )?;
+    pub fn publication(&self) -> Result<crate::publication::Preferences, PublicationRefusal> {
+        let interval: PublicationRefusal =
+            |name, init| publish_interval_refused(name, "invalid_publish_interval", init);
+        let tickers: PublicationRefusal =
+            |name, init| active_ticker_symbols_refused(name, "invalid_active_ticker_symbols", init);
+        let interval = self.publish_interval_ms.millis().ok_or(interval)?;
+        let tickers = self.active_ticker_symbols.selection().ok_or(tickers)?;
         Ok(crate::publication::Preferences { interval, tickers })
     }
 }
