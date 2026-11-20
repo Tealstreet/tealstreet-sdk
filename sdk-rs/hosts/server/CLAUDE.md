@@ -527,7 +527,8 @@ Detachment and the keep decision run on EVERY disposed alias, including when the
 socket keeps another alias. A detached label loses command authority through
 `Registry::holds_label`, which session cleanup, order admission and the deferred
 action guard check instead of the socket-wide `holds`.
-Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+It is not a stop reason: AGT-73's `superseded` marks only a newer init from
+another socket. Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
 rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 
 ## Host notifications (AGT-37)
