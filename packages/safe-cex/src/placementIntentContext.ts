@@ -39,7 +39,7 @@ export const runWithPlacementIntent = <Result>(id: string | undefined, start: ()
 /** Supply the shared synchronized protocol clock; never use the write-budget clock. */
 export const mintPlacementIntent = (unixMs: number): PlacementIntentIdentity => {
   const id = createDelegatedIntentId(unixMs, (bytes) => {
-    crypto.getRandomValues(bytes);
+    bytes.set(crypto.getRandomValues(new Uint8Array(bytes.length)));
   });
   return Object.freeze({ id, createdAt: unixMs });
 };
