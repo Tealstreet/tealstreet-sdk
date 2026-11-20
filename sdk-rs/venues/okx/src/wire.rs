@@ -253,6 +253,7 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrderRow<'a> {
+    pub close_fraction: &'a str,
     pub inst_type: &'a str,
     pub inst_id: &'a str,
     pub ord_id: &'a str,

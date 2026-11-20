@@ -1,6 +1,6 @@
 //! AGT-68: OKX holds one entire-position TP/SL algo per position (51088). A full
 //! SL and TP placed together become one `oco`; a full leg beside a held full
-//! algo is refused before any write.
+//! algo without native provenance is refused before any write (AGT-98).
 #![allow(dead_code)]
 mod support;
 
@@ -364,6 +364,36 @@ fn missing_full_leg_refusal_and_unknown_never_cancel_or_resend() {
 fn an_existing_full_leg_cannot_be_attached_twice() {
     let mut e = native_full_leg(OrderType::StopLoss, OrderSide::Sell);
     let out = attach(&mut e, OrderType::StopLoss, OrderSide::Sell);
+    assert!(writes(&out).is_empty());
+    assert_eq!(refusal(&out).outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn full_leg_attachment_requires_the_exact_acknowledged_algo() {
+    for reply_body in [
+        r#"{"code":"0","data":[{"algoId":"88","sCode":"0"}]}"#,
+        r#"{"code":"0","data":[{"algoId":"","sCode":"0"}]}"#,
+        r#"{"code":"0","data":[{"algoId":"77","sCode":"0"},{"algoId":"77","sCode":"0"}]}"#,
+    ] {
+        let mut e = native_full_leg(OrderType::StopLoss, OrderSide::Sell);
+        let original = e.store().order("77_sl").unwrap().clone();
+        let out = attach(&mut e, OrderType::TakeProfit, OrderSide::Sell);
+        let sent = writes(&out);
+        assert_eq!(sent.len(), 1);
+        reply(&mut e, sent[0], reply_body, 6.);
+        let out = prepared(&mut e, 6.);
+        assert_eq!(refusal(&out).outcome, Some(Outcome::Unknown));
+        assert!(writes(&out).is_empty());
+        assert_eq!(e.store().order("77_sl"), Some(&original));
+    }
+}
+
+#[test]
+fn a_native_full_algo_with_a_present_complement_still_refuses() {
+    let mut e = native_full_leg(OrderType::StopLoss, OrderSide::Sell);
+    e.store_mut()
+        .upsert_order(full_leg("77_tp", OrderType::TakeProfit, OrderSide::Sell));
+    let out = attach(&mut e, OrderType::TakeProfit, OrderSide::Sell);
     assert!(writes(&out).is_empty());
     assert_eq!(refusal(&out).outcome, Some(Outcome::NotSent));
 }

@@ -98,17 +98,19 @@ changed to add this venue companion event.
 ## Entire-position TP/SL (AGT-68)
 
 OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
-refuses a second with `51088`. A full SL and TP placed in one command become
-one `oco` algo, as OKX documents and ccxt places them. A full-position SL or TP
-for a position that already holds an open full algo, of either kind, is refused
-before any write as not sent: "OKX allows one full-position TP/SL. Edit the
-existing order or remove it first." This also covers a command carrying both
-legs while one is held, so one leg is never sent with 51088 on the other.
-Adding a leg to a held algo through `amend-algos` is deliberately not done: it
-is undocumented, ccxt warns that a two-leg `conditional` applies only its SL,
-and a protective leg falsely reported as placed is worse than a refusal.
-Partial-size legs and other positions are unaffected. Legacy TS sends the
-second algo and gets `51088`; this is a recorded deviation.
+refuses a second with `51088`. A full SL and TP placed in one command still
+become one `oco` algo. AGT-98 extends AGT-68: a single missing complementary leg
+amends the uniquely observed full-position native algo through `amend-algos`,
+using its `algoId`, the new leg's trigger/execution fields and `cxlOnFail=false`.
+The held leg, quantity and execution fields are not rewritten. The placement
+returns that same native ID only after an exact, successful acknowledgement.
+
+A duplicate/present leg, ambiguous or unproven native state, and compound calls
+beside a held full algo retain the before-write refusal. Native `51088` and other
+proven refusals remain definitive, preserving the old protection; timeout,
+missing/foreign/duplicate acknowledgement rows remain Unknown without resend or
+cancel/recreate. Partial-size legs and other positions are unaffected. The same
+native plan serves LOCAL/COSIGNED page engines and DELEGATED hosted engines.
 
 ## Native write refusal diagnostics
 

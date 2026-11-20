@@ -261,3 +261,7 @@ retained in `wasm-caps-history.md` as historical evidence. AGT-23 supersedes tha
 PR-local floor: the active cap follows master, and only the master artifact bot
 restores its reserve. Fresh artifacts must fit the byte ceiling; reserve warnings
 remain advisory. Native/combined consumers remain independent gates.
+
+AGT-98 OKX missing full-position TP/SL legs amend a proven complementary native
+algo without cancel/recreate. Its native row proof and acknowledgement guard move
+WASM inputs; validate fresh OKX family and combined artifacts at the PR head.

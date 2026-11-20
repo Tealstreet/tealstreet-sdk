@@ -182,6 +182,7 @@ struct Job {
     replacing_stop: Option<(String, OrderSide, OrderType)>,
     trailing: Option<TrailingAmend>,
     lookup: Option<Box<AmendLookup>>,
+    full_attach: Option<Box<ObservedAlgo>>,
     /// Set at genuine entry; the Plan follows its admission.
     preflight: Option<Preflight>,
     plan: Option<Plan>,
@@ -261,6 +262,7 @@ struct AmendLookup {
 pub(crate) struct ObservedAlgo {
     pub order: Order,
     pub trigger: bool,
+    full_position: bool,
     trigger_price: Option<f64>,
     trailing: Option<TrailingOrder>,
 }
@@ -290,6 +292,7 @@ impl ObservedAlgo {
         Some(Self {
             order: order.clone(),
             trigger: row.ord_type == "trigger",
+            full_position: row.close_fraction == "1",
             trigger_price: row
                 .move_trigger_px
                 .parse::<f64>()
@@ -822,7 +825,17 @@ impl Okx {
             .into_iter()
             .map(|o| self.order_payload(cx, &o, o.amount))
             .collect::<Result<Vec<_>, _>>()?;
-        let algos = self.full_position_algos(cx, algos)?;
+        let algos = self.full_position_algos(algos)?;
+        // AGT-98 replaces AGT-68's blanket refusal only for one proven missing leg.
+        if algos
+            .iter()
+            .any(|p| p.close_fraction == Some("1") && self.holds_full_position_algo(cx, p))
+        {
+            if !regular.is_empty() || algos.len() != 1 {
+                return Err(FULL_POSITION_HELD.into());
+            }
+            return self.attach_full_position_leg(cx, &algos[0]);
+        }
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
             steps.push(placement_step(
@@ -843,14 +856,9 @@ impl Okx {
         Ok(job(steps, Finish::Ids))
     }
 
-    /// OKX keeps ONE entire-position TP/SL algo per position and refuses a
-    /// second with 51088. A full SL and TP placed together become one `oco`
-    /// algo (as ccxt places them). A full leg for a position that already holds
-    /// a full algo is refused before any write: adding a leg to an existing
-    /// close-all algo through amend-algos is undocumented and unverified.
+    /// Group simultaneous full legs into one OCO; a held algo is handled separately.
     fn full_position_algos(
         &self,
-        cx: &Cx<'_, Pending>,
         payloads: Vec<OrderPayload>,
     ) -> Result<Vec<OrderPayload>, String> {
         let mut placed: Vec<OrderPayload> = Vec::new();
@@ -870,13 +878,70 @@ impl Okx {
             }
             placed.push(payload);
         }
-        if placed
-            .iter()
-            .any(|p| p.close_fraction == Some("1") && self.holds_full_position_algo(cx, p))
+        Ok(placed)
+    }
+
+    fn attach_full_position_leg(
+        &self,
+        cx: &Cx<'_, Pending>,
+        payload: &OrderPayload,
+    ) -> Result<Job, String> {
+        let mut held = cx.store.orders().iter().filter(|o| {
+            o.symbol == payload.symbol
+                && o.side == payload.side
+                && o.amount == 0.0
+                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+        });
+        let order = held.next().ok_or(FULL_POSITION_HELD)?;
+        if held.next().is_some()
+            || order.status != OrderStatus::Open
+            || single_full_leg(payload) != Some(order.kind != OrderType::StopLoss)
         {
             return Err(FULL_POSITION_HELD.into());
         }
-        Ok(placed)
+        let observed = self
+            .trading
+            .algo_orders
+            .get(&order.id)
+            .filter(|o| o.order == *order && o.full_position && !o.trigger)
+            .ok_or(FULL_POSITION_HELD)?;
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Attach<'a> {
+            inst_id: &'a str,
+            algo_id: &'a str,
+            cxl_on_fail: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_tp_trigger_px: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_tp_ord_px: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_tp_trigger_px_type: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_sl_trigger_px: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_sl_ord_px: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_sl_trigger_px_type: Option<&'a str>,
+        }
+        let edit = Attach {
+            inst_id: &payload.inst_id,
+            algo_id: native_id(&order.id),
+            cxl_on_fail: false,
+            new_tp_trigger_px: payload.tp_trigger_px.as_deref(),
+            new_tp_ord_px: payload.tp_ord_px,
+            new_tp_trigger_px_type: payload.tp_trigger_px_type,
+            new_sl_trigger_px: payload.sl_trigger_px.as_deref(),
+            new_sl_ord_px: payload.sl_ord_px,
+            new_sl_trigger_px_type: payload.sl_trigger_px_type,
+        };
+        let mut result = job(
+            vec![step("/api/v5/trade/amend-algos", &edit, 1, true)?],
+            Finish::Ids,
+        );
+        result.full_attach = Some(Box::new(observed.clone()));
+        Ok(result)
     }
 
     /// The position already has an open entire-position TP or SL. Full rows
@@ -1465,6 +1530,24 @@ impl Okx {
         slot: Slot,
         context: Context,
     ) {
+        if let Some(original) = self
+            .trading
+            .jobs
+            .get(&command)
+            .and_then(|job| job.full_attach.as_deref())
+            && (cx.store.order(&original.order.id) != Some(&original.order)
+                || self.trading.algo_orders.get(&original.order.id) != Some(original))
+        {
+            return self.end(
+                cx,
+                command,
+                None,
+                not_sent(
+                    "OKX full-position protection changed before the edit; refresh before retrying",
+                ),
+                false,
+            );
+        }
         let rest = self.rest();
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
@@ -1835,6 +1918,22 @@ impl Okx {
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
+        if let Some(original) = &job.full_attach {
+            let expected = native_id(&original.order.id);
+            if acks.len() != 1
+                || acks.iter().any(|ack| {
+                    !ack.ord_id.is_empty()
+                        || (ack.algo_id != expected
+                            && (!ack.algo_id.is_empty() || matches!(ack.s_code, "" | "0")))
+                })
+            {
+                return self.unproven(
+                    cx,
+                    request,
+                    "OKX full-position amendment identity is unproven",
+                );
+            }
+        }
         let step = job.steps.front_mut().expect("inflight step");
         step.unknown_row = acks.iter().position(|ack| {
             (!matches!(ack.s_code, "" | "0")
@@ -2926,6 +3025,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         replacing_stop: None,
         trailing: None,
         lookup: None,
+        full_attach: None,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
