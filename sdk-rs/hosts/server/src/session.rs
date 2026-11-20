@@ -6,6 +6,7 @@ use crate::delegated::probe::{ProbeRefusal, RefusalStage};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
+use crate::publication::Preferences;
 use crate::state::{Log, Metrics};
 use safe_cex_algo_twap::{PersistedTwap, TwapStatus};
 use safe_cex_engine::capabilities::CancelAll;
@@ -78,7 +79,8 @@ struct Client {
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     /// After a re-snapshot the old client only finishes its pending replies.
     draining: Arc<AtomicBool>,
-    publish_interval: tokio::sync::watch::Sender<u16>,
+    /// This connection's interval and ticker selection; never shared with another holder.
+    publication: tokio::sync::watch::Sender<Preferences>,
 }
 
 /// Subscribers one socket can stack on a book or candle key before extras stop counting.
@@ -208,6 +210,9 @@ pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_s
 const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
 /// How long a hold's load check may wait on the engine; a miss is retried next hold tick.
 const HOLD_LOAD_CHECK: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Connection-local, like `set-publish-interval`: it selects this socket's ticker rows only.
+const SET_ACTIVE_TICKER_SYMBOLS: &str = "set-active-ticker-symbols";
 
 const PUBLIC_OPS: [&str; 5] = [
     "sendSnapshot",
@@ -512,11 +517,7 @@ impl Session {
         }
         if let Some(probe) = completed.probe {
             let requested_mode = envelope::AccountSigningMode::requested(&probe.init);
-            let interval = probe
-                .init
-                .publish_interval_ms
-                .millis()
-                .expect("validated init");
+            let interval = probe.init.publication().expect("validated init");
             let candidate = completed.candidate.ok();
             out = out.account(&completed.account_name);
             let account = match probe.permit {
@@ -560,7 +561,7 @@ impl Session {
                         let previous = std::mem::replace(&mut joined.out, out.clone());
                         previous.retire_order_receipts();
                         previous.finish_registration(&out);
-                        self.resnapshot(&completed.account_name, Some(interval))
+                        self.resnapshot(&completed.account_name, Some(interval.clone()))
                             .await;
                     } else {
                         if let Some(previous) = self.joined.remove(&completed.account_name) {
@@ -1106,7 +1107,7 @@ impl Session {
                         account.clone(),
                         out,
                         envelope::AccountSigningMode::Cosigned,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                 }
@@ -1132,7 +1133,7 @@ impl Session {
     /// AGT-54: a `resume` init claims this socket's parked DELEGATED label and
     /// its resident signer without a handover or probe. Any refusal is
     /// transient and tells the client to fall back to the ordinary handover.
-    async fn resume_delegated(&mut self, init: InitPayload, out: Out, interval: u16) {
+    async fn resume_delegated(&mut self, init: InitPayload, out: Out, interval: Preferences) {
         let name = init.account_name.clone();
         self.handovers.forget(&name);
         let claimed = match (&self.identity.resume_from, &self.identity.token) {
@@ -1210,17 +1211,20 @@ impl Session {
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
-                Ok(Inbound::Msg(msg)) if msg.op == "set-publish-interval" => {
+                Ok(Inbound::Msg(msg))
+                    if msg.op == "set-publish-interval" || msg.op == SET_ACTIVE_TICKER_SYMBOLS =>
+                {
                     let out = msg
                         .account_name
                         .as_deref()
                         .map(|name| self.account_out(name))
                         .unwrap_or_else(|| self.out.clone());
-                    out.send(envelope::publish_interval_refused(
-                        msg.account_name.as_deref(),
-                        "auth_expired",
-                        false,
-                    ));
+                    let refused = if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+                        envelope::active_ticker_symbols_refused
+                    } else {
+                        envelope::publish_interval_refused
+                    };
+                    out.send(refused(msg.account_name.as_deref(), "auth_expired", false));
                     return Ok(());
                 }
                 Ok(Inbound::OrderSubmit(submit))
@@ -1420,6 +1424,10 @@ impl Session {
                     self.set_publish_interval(msg);
                     return Ok(());
                 }
+                if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+                    self.set_active_ticker_symbols(msg);
+                    return Ok(());
+                }
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
@@ -1548,13 +1556,12 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
-        let Some(interval) = init.publish_interval_ms.millis() else {
-            out.send(envelope::publish_interval_refused(
-                Some(&init.account_name),
-                "invalid_publish_interval",
-                true,
-            ));
-            return Ok(());
+        let interval = match init.publication() {
+            Ok(preferences) => preferences,
+            Err(refusal) => {
+                out.send(refusal(Some(&init.account_name), true));
+                return Ok(());
+            }
         };
         self.registration_outputs
             .insert(init.account_name.clone(), out.clone());
@@ -1666,7 +1673,8 @@ impl Session {
                 account.update_reply_outbox(self.socket, out.outbox(), &init.account_name);
             }
             previous.finish_registration(&out);
-            self.resnapshot(&init.account_name, Some(interval)).await;
+            self.resnapshot(&init.account_name, Some(interval.clone()))
+                .await;
             if !account.is_public() {
                 account.confirm_signing_mode(
                     self.socket,
@@ -1772,7 +1780,7 @@ impl Session {
         account: Arc<Account>,
         out: Out,
         admitted_mode: envelope::AccountSigningMode,
-        interval: u16,
+        interval: Preferences,
     ) {
         let name = out.account_label(&account.name).to_owned();
         match self.client(&account, out.clone(), interval).await {
@@ -1807,7 +1815,7 @@ impl Session {
         &self,
         account: &Arc<Account>,
         out: Out,
-        interval: u16,
+        interval: Preferences,
     ) -> Result<Client, &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms())?;
         let id = self.registry.next_id();
@@ -1825,7 +1833,7 @@ impl Session {
             client: id,
             loaded: self.loaded.clone(),
         });
-        let (publish_interval, publish_rx) = tokio::sync::watch::channel(interval);
+        let (publication, publish_rx) = tokio::sync::watch::channel(interval);
         let pump = tokio::spawn(pump(
             link,
             id,
@@ -1844,14 +1852,14 @@ impl Session {
             pump,
             pending,
             draining,
-            publish_interval,
+            publication,
         })
     }
 
     /// A new client on the same account takes a full snapshot (seq 1); the old
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
-    async fn resnapshot(&mut self, name: &str, requested_interval: Option<u16>) -> bool {
+    async fn resnapshot(&mut self, name: &str, requested_interval: Option<Preferences>) -> bool {
         if self.token_expired() {
             return false;
         }
@@ -1859,7 +1867,7 @@ impl Session {
             (
                 joined.account.clone(),
                 joined.out.clone(),
-                requested_interval.unwrap_or(*joined.client.publish_interval.borrow()),
+                requested_interval.unwrap_or_else(|| joined.client.publication.borrow().clone()),
             )
         }) else {
             return false;
@@ -1972,12 +1980,53 @@ impl Session {
             ));
             return;
         };
-        joined.client.publish_interval.send_replace(interval);
+        joined
+            .client
+            .publication
+            .send_modify(|preferences| preferences.interval = interval);
+    }
+
+    fn set_active_ticker_symbols(&self, msg: AccountMsg) {
+        let name = msg.account_name.as_deref();
+        let out = name
+            .map(|name| self.account_out(name))
+            .unwrap_or_else(|| self.out.clone());
+        let joined = name.and_then(|name| self.joined.get(name));
+        let Some(joined) = joined.filter(|joined| {
+            self.registry.holds(&joined.account, self.socket)
+                && !joined.client.draining.load(Ordering::Relaxed)
+                && !self.pending_verifications.contains_key(name.unwrap())
+        }) else {
+            out.send(envelope::active_ticker_symbols_refused(
+                name,
+                "not_admitted",
+                false,
+            ));
+            return;
+        };
+        let Some(tickers) =
+            envelope::RequestedTickers::parse(&msg.data["activeTickerSymbols"]).selection()
+        else {
+            out.send(envelope::active_ticker_symbols_refused(
+                name,
+                "invalid_active_ticker_symbols",
+                false,
+            ));
+            return;
+        };
+        joined
+            .client
+            .publication
+            .send_modify(|preferences| preferences.tickers = tickers);
     }
 
     async fn msg(&mut self, msg: AccountMsg) {
         if msg.op == "set-publish-interval" {
             self.set_publish_interval(msg);
+            return;
+        }
+        if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+            self.set_active_ticker_symbols(msg);
             return;
         }
         let Some(name) = msg.account_name.clone() else {
@@ -2188,7 +2237,7 @@ impl Session {
     async fn apply_settings(&mut self, name: &str, data: Value) {
         let out = self.account_out(name);
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
-        let interval = *self.joined[name].client.publish_interval.borrow();
+        let interval = self.joined[name].client.publication.borrow().clone();
         let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
             Ok(init) if init.account_name == name => {
                 let joined = &self.joined[name];
@@ -3452,13 +3501,13 @@ async fn pump(
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
     mut hold: Option<Hold>,
-    mut publish_interval: tokio::sync::watch::Receiver<u16>,
+    mut publication: tokio::sync::watch::Receiver<Preferences>,
 ) {
     // Set while frames are withheld: when holding began.
     let mut held: Option<std::time::Instant> = None;
     let mut seq = 0u64;
     let mut publisher = crate::publication::Publisher::new(
-        *publish_interval.borrow(),
+        publication.borrow().interval,
         safe_cex_native::ServerConfig::default().max_frame_bytes,
     );
     let mut configuration_open = true;
@@ -3467,16 +3516,19 @@ async fn pump(
         // Service cadence after each received item, even with a permanently ready inbox.
         // The preceding item's private sections/notices have already been sent.
         if !draining.load(Ordering::Relaxed) {
-            let interval = *publish_interval.borrow_and_update();
-            let ready = publisher.set_interval(interval).and_then(|mut frames| {
-                if publisher
-                    .deadline()
-                    .is_some_and(|at| at <= tokio::time::Instant::now())
-                {
-                    frames.extend(publisher.flush()?);
-                }
-                Ok(frames)
-            });
+            let preferences = publication.borrow_and_update().clone();
+            let ready = publisher
+                .set_interval(preferences.interval)
+                .and_then(|mut frames| {
+                    frames.extend(publisher.set_tickers(preferences.tickers)?);
+                    if publisher
+                        .deadline()
+                        .is_some_and(|at| at <= tokio::time::Instant::now())
+                    {
+                        frames.extend(publisher.flush()?);
+                    }
+                    Ok(frames)
+                });
             match ready {
                 Ok(frames) => {
                     if !publish_frames(&out, &name, &mut seq, frames) {
@@ -3502,7 +3554,7 @@ async fn pump(
                     break;
                 }
             },
-            changed = publish_interval.changed(), if configuration_open => {
+            changed = publication.changed(), if configuration_open => {
                 if changed.is_err() { configuration_open = false; }
                 continue;
             }
@@ -4754,7 +4806,7 @@ mod tests {
                 let (mut late, mut frames) = user_session(registry, "u");
                 // Keep this stopped-actor fixture's original non-DELEGATED admission.
                 late.join(
-                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned, 0,
+                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned, Preferences::default(),
                 ).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
@@ -4802,7 +4854,7 @@ mod tests {
                         account,
                         late.out.clone(),
                         envelope::AccountSigningMode::Cosigned,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
@@ -6040,7 +6092,7 @@ mod tests {
                     Arc::default(),
                     Arc::default(),
                     Some(Hold { client: 1, loaded }),
-                    tokio::sync::watch::channel(0).1,
+                    tokio::sync::watch::channel(Preferences::default()).1,
                 ));
                 let mut accepted = 0;
                 for _ in 0..100 {
@@ -6293,7 +6345,7 @@ mod tests {
                 Arc::default(),
                 Arc::default(),
                 Some(Hold { client, loaded }),
-                tokio::sync::watch::channel(0).1,
+                tokio::sync::watch::channel(Preferences::default()).1,
             ));
             (sent, task)
         }
@@ -6545,7 +6597,7 @@ mod tests {
                         Arc::default(),
                         Arc::default(),
                         Some(Hold { client: 1, loaded }),
-                        tokio::sync::watch::channel(0).1,
+                        tokio::sync::watch::channel(Preferences::default()).1,
                     ));
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                     while let Ok(text) = sent.try_recv() {
