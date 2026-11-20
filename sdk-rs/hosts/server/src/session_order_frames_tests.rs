@@ -805,8 +805,8 @@ async fn woo_market_submit_sends_without_a_caller_id() {
 
 // AGT-46 live, blofin-t: a reduce-only conditional carried the bare-hex caller ID,
 // which BloFin's adapter refuses on triggers; phemex-t refused the UUID on a reduce-only
-// stop and an attached stopLoss (2026-11-20), and AGT-110 found OKX, KuCoin, Bitget and
-// Bitunix live. Plain orders keep their venue ID form. Coinbase's narrower rule is
+// stop and an attached stopLoss (2026-11-20), and AGT-110 found OKX, KuCoin, Bitget,
+// Bitunix and Binance live. Plain orders keep their venue ID form. Coinbase's narrower rule is
 // unit-tested. Was `blofin_reduce_only_trigger_submit_sends_without_a_caller_id` (#3754).
 #[tokio::test]
 async fn trigger_submit_sends_without_a_caller_id_where_the_adapter_refuses_one() {
@@ -837,6 +837,8 @@ async fn trigger_submit_sends_without_a_caller_id_where_the_adapter_refuses_one(
                 "cryptocom",
                 "bingx",
                 "paradex",
+                "binance",
+                "binancepm",
             ] {
                 for (params, caller_id) in cases.clone() {
                     let registry = crate::accounts::tests::registry();

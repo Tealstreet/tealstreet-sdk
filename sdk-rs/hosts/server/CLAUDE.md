@@ -376,7 +376,7 @@ caller IDs. Those native validators are unchanged; explicit unsupported caller
 IDs still refuse. Bybit protection also omits its unsupported caller ID and
 reports null, as do orders whose adapter refuses a caller ID by shape
 (`trigger_refuses_caller_id`: BloFin, Phemex, OKX, Bitget, KuCoin, Bitunix, ApeX Omni,
-Crypto.com, BingX, Paradex, Coinbase/Coinbase Spot; AGT-46/#3758/AGT-110). Adding a newly hosted
+Crypto.com, Binance (USD-M/Spot/PM), BingX, Paradex, Coinbase/Coinbase Spot; AGT-46/#3758/AGT-110). Adding a newly hosted
 venue means auditing its adapter's caller-ID guard first. A pre-dispatch refusal of
 such a submit also reports null, since no ID was sent (`OrderReceipt::Placement`'s
 `caller_id`). Other modes keep `callMethod` unchanged. Pending joins

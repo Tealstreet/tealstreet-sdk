@@ -231,7 +231,8 @@ pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Valu
 
 /// Venues whose native adapter refuses a caller ID by order shape, so those submits
 /// omit it. BloFin (AGT-46, #3754, first `blofin_trigger`), Phemex (#3758) and AGT-110:
-/// OKX, KuCoin, Bitget and Bitunix were reproduced live; the rest match by adapter source.
+/// OKX, KuCoin, Bitget, Bitunix and Binance were reproduced live; the rest match by adapter
+/// source. Binance Options refuses every trigger outright, so it needs no entry.
 pub(crate) fn trigger_refuses_caller_id(
     venue: &str,
     order: &serde_json::Map<String, Value>,
@@ -239,9 +240,8 @@ pub(crate) fn trigger_refuses_caller_id(
     let close = order.get("close").and_then(Value::as_bool) == Some(true);
     match venue {
         "blofin" | "phemex" | "okx" | "okxdemo" | "okxeu" | "okxeudemo" | "bitget"
-        | "bitgetusdc" | "bitgetinverse" | "kucoin" | "bitunix" | "apexomni" | "cryptocom" => {
-            trigger_shape(order)
-        }
+        | "bitgetusdc" | "bitgetinverse" | "kucoin" | "bitunix" | "apexomni" | "cryptocom"
+        | "binance" | "binancespot" | "binancepm" => trigger_shape(order),
         "bingx" | "paradex" => trigger_shape(order) || close,
         // Coinbase's adapter (futures and spot) refuses only a stop-market or close-only caller ID.
         "coinbase" | "coinbasespot" => {
@@ -415,7 +415,7 @@ mod activation_tests {
     // AGT-46 (blofin-t), #3758 (phemex-t) and AGT-110 (okx, okxeu, kucoin, bitget,
     // bitunix live 2026-11-20): trigger/bracket submits were refused for carrying a
     // caller ID. Was `blofin_trigger_omission_*` (#3754); #3758 dropped "okx"/"bitget"
-    // from its negative list, and AGT-110 now covers them.
+    // from its negative list, and AGT-110 covers them and drops "binance" too.
     #[test]
     fn trigger_caller_id_omission_covers_triggers_and_attached_protection_only() {
         let obj = |v: &Value| v.as_object().unwrap().clone();
@@ -459,6 +459,9 @@ mod activation_tests {
             "cryptocom",
             "bingx",
             "paradex",
+            "binance",
+            "binancespot",
+            "binancepm",
         ] {
             for order in [&plain, &market, &null_field] {
                 assert!(
@@ -487,14 +490,7 @@ mod activation_tests {
                 assert!(!super::trigger_refuses_caller_id(venue, &obj(order)));
             }
         }
-        for other in [
-            "bybit",
-            "binance",
-            "hyperliquid",
-            "kucoinspot",
-            "bitrue",
-            "weex",
-        ] {
+        for other in ["bybit", "hyperliquid", "kucoinspot", "bitrue", "weex"] {
             for order in shape {
                 assert!(
                     !super::trigger_refuses_caller_id(other, &obj(order)),

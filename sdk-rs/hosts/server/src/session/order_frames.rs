@@ -204,8 +204,8 @@ impl Session {
             return;
         }
         let venue = &self.joined[&name].account.venue;
-        // Bybit protection and BloFin/Phemex triggers omit caller IDs; other orders keep
-        // the admitted venue's lossless UUID representation, or omit it (no lossless form).
+        // Bybit protection and shape-refusing adapters (`trigger_refuses_caller_id`) omit
+        // caller IDs; other orders keep the venue's lossless UUID form, or omit it.
         let client_id = if order_contract::bybit_protection(venue, params)
             || order_contract::trigger_refuses_caller_id(venue, params)
         {
