@@ -40,7 +40,7 @@ const UNKNOWN_TEXT: &str =
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
-        && !error.message.contains(UNKNOWN_TEXT)
+        && !error.message.contains("Check your open orders")
         && !error
             .message
             .contains("outcome of this order change is unknown")

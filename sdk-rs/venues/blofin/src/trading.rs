@@ -31,6 +31,7 @@ const UNKNOWN_WRITE: &str =
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains("Check your open orders")
         && !(error.message.contains("unknown") && error.message.contains("Check Open Orders"))
     {
         format!("{UNKNOWN_WRITE}: {}", error.message)

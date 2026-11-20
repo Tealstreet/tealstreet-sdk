@@ -136,3 +136,5 @@ Messages shown in the UI use calm, plain language: what happened, then at most
 one short action. Unconfirmed changes still ask users to check before retrying;
 missing protection remains explicit. Keep structured outcomes, retries and
 severity unchanged, including recognition of retained older messages.
+Venue display decorators preserve retained and current check-open-orders guidance
+without adding a second action.

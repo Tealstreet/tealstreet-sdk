@@ -1209,7 +1209,10 @@ fn trading_failure(mut error: VenueError, partial: bool) -> VenueError {
     if partial {
         error.outcome = Some(Outcome::Unknown);
     }
-    if error.outcome == Some(Outcome::Unknown) && !error.message.contains("Check Open Orders") {
+    if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains("Check Open Orders")
+        && !error.message.contains("Check your open orders")
+    {
         error.message = format!(
             "Kraken didn’t confirm this change. Check your open orders before trying again.: {}",
             error.message
