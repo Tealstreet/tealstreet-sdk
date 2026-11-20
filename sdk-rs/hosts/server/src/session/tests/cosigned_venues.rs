@@ -533,9 +533,9 @@ async fn venue_case(venue: &'static str) {
         if venue == "asterdex" && matches!(mode, Answer::Replay) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        if matches!(venue, "phemex" | "apexomni") && matches!(mode, Answer::Replay) {
-            // Phemex expiry and ApeX's signature-retry clock use whole seconds.
-            // Cross a real boundary before presenting the old signature.
+        if venue == "phemex" && matches!(mode, Answer::Replay) {
+            // Phemex expiry uses whole seconds. Cross a real boundary before
+            // presenting the old signature.
             tokio::time::sleep(Duration::from_millis(1100)).await;
         }
         let before = seen.lock().unwrap().refused;
