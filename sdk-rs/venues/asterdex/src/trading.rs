@@ -1309,7 +1309,7 @@ impl AsterDex {
                                             == Some(Outcome::Unknown),
                             )
                         }) {
-                        Some(gone) => safe_cex_engine::error::with_detail(&gone, &message),
+                        Some(gone) => safe_cex_engine::error::with_detail(&gone, message),
                         None => message.clone(),
                     };
                     let table = if protective {
