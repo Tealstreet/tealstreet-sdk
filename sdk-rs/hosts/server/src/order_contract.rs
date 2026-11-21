@@ -257,8 +257,12 @@ pub(crate) fn trigger_refuses_caller_id(
 /// through `order.action`). Each adapter places one leg per non-zero price, never fewer.
 pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
     let entries: &[&str] = match venue {
-        "okx" | "okxdemo" | "okxeu" | "okxeudemo" | "binance" | "binancespot" | "binancepm"
-        | "binanceinverse" => &["limit", "market"],
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => &["limit", "market"],
+        // AGT-112: Binance also derives legs after a stop-type entry (USD-M live 2026-11-21).
+        // OKX places stop-type and `conditional` entries without legs; Kraken refuses them.
+        "binance" | "binancespot" | "binancepm" | "binanceinverse" => {
+            &["limit", "market", "stop_market", "take_profit_market"]
+        }
         // Kraken refuses a bracket on a market entry before placing anything.
         "kraken" => &["limit"],
         _ => return 0,
@@ -529,7 +533,8 @@ mod activation_tests {
 
     // AGT-111: only a single limit/market bracket on a venue that lists its separately
     // placed legs after the entry counts them (Kraken: limit only). Kraken and Binance
-    // were negatives here until their order was verified live.
+    // were negatives here until their order was verified live; Binance stop-type entries
+    // until AGT-112.
     #[test]
     fn bracket_protective_legs_count_only_entry_first_single_brackets() {
         let bracket = |extra: Value| {
@@ -565,11 +570,24 @@ mod activation_tests {
                 0,
                 "{venue}"
             );
-            for kind in ["conditional", "stop_market"] {
+            // AGT-112: only Binance lists its legs after a stop-type entry. A `conditional`
+            // entry carries none anywhere (OKX and Binance drop them, Kraken refuses).
+            let binance = venue.starts_with("binance");
+            for kind in ["stop_market", "take_profit_market"] {
+                assert_eq!(
+                    legs(
+                        venue,
+                        json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05})
+                    ),
+                    if binance { 2 } else { 0 },
+                    "{venue} {kind}"
+                );
+            }
+            for kind in ["conditional", "trailing_stop_market"] {
                 assert_eq!(
                     legs(venue, json!({"type":kind,"stopLoss":0.03})),
                     0,
-                    "{venue}"
+                    "{venue} {kind}"
                 );
             }
             let market = legs(venue, json!({"type":"market","stopLoss":0.03}));

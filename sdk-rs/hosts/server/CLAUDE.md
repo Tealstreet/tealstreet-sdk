@@ -396,9 +396,12 @@ Placement completions (`settle_intent`) send `refused` with `error.outcome:
 accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
 as the venue's refusal; the SDK still keeps the intent unknown and never resends.
 A successful completion is `placed` only with one native ID, or (a single bracket on a
-venue that places its legs after the entry: OKX and Binance limit/market, Kraken limit;
-`order_contract::bracket_protective_legs`) one entry ID followed by exactly its separately
-placed legs, reported as the entry (AGT-111; Binance and Kraken order verified live).
+venue that places its legs after the entry: OKX limit/market, Binance limit/market and
+stop-type, Kraken limit; `order_contract::bracket_protective_legs`) one entry ID followed by
+exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live: OKX and
+Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
+Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
+entry (and an OKX stop-type one) counts no legs: those adapters drop the attached legs.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add

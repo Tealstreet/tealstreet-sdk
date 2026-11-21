@@ -197,9 +197,13 @@ Native order-shape, quantity/split, ownership and command guards remain unchange
 A venue ID is never discarded and retried after a native refusal. Multiple or
 missing native result IDs retain the existing unknown outcome, never a resend. The one
 exception is a single bracket on a venue that places its stop-loss/take-profit as
-separate orders after the entry (OKX and Binance limit/market entries, Kraken limit
-entries): exactly one entry ID followed by one ID per requested leg is `placed` with the
-entry as `venueOrderId` (AGT-111); a split entry or any other count stays unknown.
+separate orders after the entry (OKX limit/market entries, Binance limit/market and
+`stop_market`/`take_profit_market` entries, Kraken limit entries): exactly one entry ID
+followed by one ID per requested leg is `placed` with the entry as `venueOrderId`
+(AGT-111, AGT-112). On those, a split entry, a lone entry ID or any other count stays unknown.
+OKX places a stop-type or `conditional` entry, and Binance a `conditional` or trailing
+one, without its attached legs, so that single ID is `placed` as the entry alone; Kraken
+refuses those brackets before any write.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives

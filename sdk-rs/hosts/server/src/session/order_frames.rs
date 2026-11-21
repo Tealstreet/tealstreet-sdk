@@ -365,16 +365,15 @@ pub(super) fn settle_intent(
     match answer {
         Ok(value) => {
             // One native order, or one entry followed by exactly its separately placed
-            // bracket legs (AGT-111). Any other count, such as a split entry, stays unknown.
+            // bracket legs (AGT-111). Any other count, such as a split entry, stays unknown;
+            // so does a lone ID where legs were expected (AGT-112: a missing leg).
             let valid = |id: &Value| {
                 id.as_str()
                     .is_some_and(|id| !id.is_empty() && id.len() <= 256)
             };
             if let Some(venue_id) = value
                 .as_array()
-                .filter(|ids| {
-                    ids.len() == 1 || (protective_legs > 0 && ids.len() == 1 + protective_legs)
-                })
+                .filter(|ids| ids.len() == 1 + protective_legs)
                 .filter(|ids| ids.iter().all(valid))
                 .and_then(|ids| ids[0].as_str())
             {
@@ -463,22 +462,22 @@ mod tests {
             (json!(["a", "b"]), 0),
             (json!(["lot-1", "lot-2", "sl"]), 1),
             (json!(["entry", "sl", "tp"]), 1),
+            // AGT-112: an entry without the leg it requested is not a whole placement.
             (json!(["entry"]), 1),
+            (json!(["entry"]), 2),
+            (json!(["entry", "sl"]), 2),
             (json!(["entry", ""]), 1),
             (json!([]), 1),
+            (json!([]), 0),
         ] {
             let unknown = settled_ok(ids.clone(), legs).await;
-            let single = ids.as_array().is_some_and(|ids| ids.len() == 1);
-            if single {
-                assert_eq!(unknown["outcome"], "placed", "{ids}: {unknown}");
-            } else {
-                assert_eq!(
-                    unknown["outcome"], "unknown",
-                    "{ids} legs {legs}: {unknown}"
-                );
-                assert_eq!(unknown["venueOrderId"], Value::Null);
-            }
+            assert_eq!(
+                unknown["outcome"], "unknown",
+                "{ids} legs {legs}: {unknown}"
+            );
+            assert_eq!(unknown["venueOrderId"], Value::Null);
         }
+        assert_eq!(settled_ok(json!(["only"]), 0).await["outcome"], "placed");
     }
 
     #[tokio::test]
