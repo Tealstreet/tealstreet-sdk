@@ -865,8 +865,16 @@ async fn trigger_submit_sends_without_a_caller_id_where_the_adapter_refuses_one(
                         true
                     );
                     let outcome = order_frame(&mut sent, "order.outcome").await;
+                    // AGT-112: the fixture is Bybit-native under another venue's label, so the
+                    // bracket completes with one ID (its SL attached natively). Where that label
+                    // expects separate legs, a lone ID is a missing leg and stays unknown.
+                    let legs = crate::order_contract::bracket_protective_legs(
+                        venue,
+                        &json!({"orders":[params.clone()]}),
+                    );
                     assert_eq!(
-                        outcome["d"]["outcome"], "placed",
+                        outcome["d"]["outcome"],
+                        if legs > 0 { "unknown" } else { "placed" },
                         "{venue} {params}: {outcome}"
                     );
                     let sent_ids = tape.client_order_ids.lock().unwrap().clone();
