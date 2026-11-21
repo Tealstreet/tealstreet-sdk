@@ -17,7 +17,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     uses: ./.github/workflows/nx-integration.yml
     secrets:
-      NX_INTEGRATION_READ_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+      NX_INTEGRATION_DEPLOY_KEY: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
 
   checks:
     name: SDK checks

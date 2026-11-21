@@ -20,11 +20,12 @@ test('SDK PRs run the NX caller gate on free hosted runners without publication 
   assert.doesNotMatch(workflow, /pull_request_target|self-hosted|: write\b|continue-on-error/);
 });
 
-test('NX checkout has an immutable resolved revision and no persistent credentials', () => {
-  assert.match(workflow, /repository: Tealstreet\/tealstreet-next/);
-  assert.match(workflow, /ref: \$\{\{ steps\.nx\.outputs\.sha \}\}/);
-  assert.match(workflow, /persist-credentials: false/);
-  assert.match(workflow, /NX_INTEGRATION_READ_TOKEN/);
+test('NX master is resolved by one checkout and no credential persists', () => {
+  const checkouts = [...workflow.matchAll(/repository: Tealstreet\/tealstreet-next/g)];
+  assert.equal(checkouts.length, 1);
+  assert.match(workflow, /repository: Tealstreet\/tealstreet-next\n          ref: master\n          path: nx\n          ssh-key: \$\{\{ secrets\.NX_INTEGRATION_DEPLOY_KEY \}\}\n          persist-credentials: false/);
+  assert.match(workflow, /sha=\$\(git -C nx rev-parse HEAD\)/);
+  assert.doesNotMatch(workflow, /gh api|GH_TOKEN|token: \$\{\{ secrets\./);
 });
 
 test('caller validation includes reader/runbook checks and actual NX gates', () => {
@@ -188,10 +189,11 @@ test('unknown Copybara syntax refuses while literal exclusions are honored', asy
   assert.equal(contains('private/secret.txt'), false);
 });
 
-test('private checkout credential is restricted to admission, resolution and checkout', () => {
-  assert.equal([...workflow.matchAll(/secrets\.NX_INTEGRATION_READ_TOKEN/g)].length, 3);
+test('private checkout credential is restricted to admission and the NX checkout', () => {
+  assert.equal([...workflow.matchAll(/secrets\.NX_INTEGRATION_DEPLOY_KEY/g)].length, 2);
+  assert.doesNotMatch(workflow, /NX_INTEGRATION_READ_TOKEN/);
   assert.match(workflow, /SAME_REPO: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name == github\.repository \}\}/);
-  assert.match(workflow, /test -n "\$NX_TOKEN"/);
+  assert.match(workflow, /test -n "\$NX_KEY"/);
   assert.doesNotMatch(workflow, /upload-artifact|cache\/save|--push\b|id-token:/);
   assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.match(workflow, /--cache-folder "\$RUNNER_TEMP\/nx-yarn"/);

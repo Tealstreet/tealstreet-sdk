@@ -4,13 +4,15 @@ AGT-32 adds an ephemeral consumer check before an SDK import. It does not
 perform a Copybara import or change release certification.
 
 Every SDK pull request starts one `ubuntu-latest` job, cancelled by a newer
-push to that PR. The job resolves NX master once to a full SHA, then checks
-out that SHA and the exact SDK PR head with credentials persistence disabled.
-A contents-read-only credential scoped to NX is required as
-`NX_INTEGRATION_READ_TOKEN`; the SDK's automatic token cannot read private NX.
-Fork PRs and a missing credential refuse explicitly before private checkout.
-No production credentials, self-hosted runner, artifact upload or write token
-are used. The credential is present only during resolution/checkout.
+push to that PR. A single NX checkout resolves master, and its full SHA is
+recorded; the exact SDK PR head is checked out too, both with credentials
+persistence disabled. The SDK's automatic token cannot read private NX, so a
+read-only NX deploy key (`sdk-pr-nx-integration` on tealstreet-next) is
+required as `NX_INTEGRATION_DEPLOY_KEY`: it reads that one repository and
+nothing else, and every account that can push an SDK branch already reads NX.
+Fork PRs and a missing key refuse explicitly before private checkout.
+No production credentials, self-hosted runner, artifact upload or write
+credential are used. The key is present only during admission and checkout.
 Private NX command output stays in mode-600 runner-temporary logs and is never
 uploaded; public logs report the gate and its result. Failures retain nonzero
 status. Reproducing the pinned command in an authorized NX checkout provides

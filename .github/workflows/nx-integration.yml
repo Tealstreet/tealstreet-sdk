@@ -3,7 +3,7 @@ name: NX caller integration
 on:
   workflow_call:
     secrets:
-      NX_INTEGRATION_READ_TOKEN:
+      NX_INTEGRATION_DEPLOY_KEY:
         required: false
 
 permissions:
@@ -27,32 +27,29 @@ jobs:
       - name: Require a maintainer branch and read-only NX credential
         env:
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-          NX_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+          NX_KEY: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
         run: |
           test "$SAME_REPO" = true || { printf '%s\n' 'NX integration requires a maintainer branch'; exit 1; }
-          test -n "$NX_TOKEN" || { printf '%s\n' 'NX_INTEGRATION_READ_TOKEN is not configured'; exit 1; }
+          test -n "$NX_KEY" || { printf '%s\n' 'NX_INTEGRATION_DEPLOY_KEY is not configured'; exit 1; }
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           filter: blob:none
           persist-credentials: false
-      - name: Resolve NX master exactly once
-        id: nx
-        env:
-          GH_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
-        run: |
-          sha=$(gh api repos/Tealstreet/tealstreet-next/git/ref/heads/master --jq .object.sha)
-          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-          printf 'NX baseline: %s\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+      # NX master is resolved once, by this checkout; every later step uses this tree.
       - uses: actions/checkout@v7
         with:
           repository: Tealstreet/tealstreet-next
-          ref: ${{ steps.nx.outputs.sha }}
+          ref: master
           path: nx
-          token: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+          ssh-key: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
           persist-credentials: false
+      - name: Record the resolved NX baseline
+        run: |
+          sha=$(git -C nx rev-parse HEAD)
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          printf 'NX baseline: %s\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
