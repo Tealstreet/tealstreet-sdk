@@ -101,3 +101,13 @@ return (ceil(span/step)+1; `1M` is a fixed 30-day bucket), matching Hyperliquid'
 documented charge. The cap is 6,000 rows (120): a full 1m reply was seen at 5,182.
 A flat 104 queued chart-sized reads ~15 s each (AGT-113); the shared host budget
 derives the same weight from the request body.
+
+## Stop-entry brackets (AGT-115)
+
+`wires` groups legs (`normalTpsl`) only with a limit entry. A stop or take-profit entry
+with a non-zero attached leg used to be placed without it; `preflight` now refuses the whole
+batch before any write with the engine's shared `stop_entry_legs_refusal` copy.
+
+KNOWN-ISSUE: a market entry's legs are still dropped, in Rust and the TS reference alike. The
+venue supports TP/SL on a market order, so it is not refused; attaching them under
+`normalTpsl` is the fix and needs a live check first (AGT-115).

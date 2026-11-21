@@ -3,6 +3,7 @@ import type { OrderWire } from '../../../exchanges/hyperliquid/hyperliquid.types
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
+import { mapSeries } from 'p-iteration';
 
 import { numberToString, parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_exchange';
 import {
@@ -46,6 +47,7 @@ import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './hyperliquid.api';
 import {
   orderRequestToOrderWire,
@@ -742,12 +744,22 @@ export class HyperliquidSpotExchange extends BaseExchange {
     return legs;
   };
 
+  // AGT-115: the base batch places one by one, so refuse a stop entry with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
     // The caller's ID goes on the main wire verbatim; otherwise we mint one. Each TP/SL leg gets its own.
     const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
+    // AGT-115: legs are grouped only with a limit entry; a trigger entry would drop them.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
 
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[opts.symbol];

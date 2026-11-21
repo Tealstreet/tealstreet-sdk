@@ -5,7 +5,7 @@ mod support;
 use safe_cex_engine::{Command, Event, Method, Outcome};
 use support::{Harness, Options};
 
-const REFUSAL: &str = "Attaching a stop-loss or take-profit to a stop entry isn't supported on Binance, so nothing was sent. Place the stop-loss after the entry fills.";
+const REFUSAL: &str = "Attaching a stop-loss or take-profit to a stop entry isn't supported on Binance. Place the stop-loss after the entry fills.";
 
 fn ready(pm: bool) -> Harness {
     let mut h = Harness::started(Options {

@@ -205,6 +205,10 @@ OKX refuses any non-limit/market entry with an attached stop-loss/take-profit, a
 USD-M/PM a `conditional` or trailing one, before any write (AGT-115: they used to place the
 entry without its legs). Kraken, Binance Spot and COIN-M also refuse those brackets, except
 a COIN-M trailing entry, which places its legs uncounted and so stays unknown.
+The same refusal covers every adapter that dropped those legs (AGT-115 follow-up): any
+non-limit/market entry on AsterDEX, Bitget, Bitunix, Hyperliquid, Lighter, MEXC and WOO;
+trailing entries, and stops closing a covering position, on Bybit and HyroTrader; stop and take-profit on WEEX;
+trailing on Phemex. Lighter also refuses legs on a reduce-only limit/market entry.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives

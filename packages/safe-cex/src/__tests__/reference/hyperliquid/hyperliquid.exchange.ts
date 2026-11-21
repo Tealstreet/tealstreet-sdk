@@ -97,6 +97,7 @@ import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
@@ -3908,6 +3909,8 @@ export class HyperliquidExchange extends BaseExchange {
   // `cloid` is the main wire's client order ID. `updateOrder` calls this directly
   // so it knows which cloid its replacement went out with.
   private placeOrderWithCloid = async (opts: PlaceOrderOpts, cloid: string): Promise<string[]> => {
+    // AGT-115: legs are grouped only with a limit entry; a trigger entry would drop them.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
@@ -4556,6 +4559,7 @@ export class HyperliquidExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
   };

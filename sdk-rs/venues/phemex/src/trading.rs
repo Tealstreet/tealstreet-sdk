@@ -640,6 +640,11 @@ impl PhemexPerpetuals {
             if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
                 return Err("Phemex does not support Bybit execution controls".into());
             }
+            // AGT-115: a trailing entry sends only its peg, dropping attached legs. Stop
+            // entries carry theirs natively, and an amend re-plans its stop parent here.
+            if o.kind == OrderType::TrailingStopLoss && o.stop_entry_with_attached_legs() {
+                return Err(safe_cex_engine::model::stop_entry_legs_refusal("Phemex"));
+            }
             if let Some(id) = &o.client_order_id {
                 if !plain(o) || !valid_client(id) {
                     return Err(

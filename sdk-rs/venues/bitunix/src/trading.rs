@@ -466,6 +466,14 @@ impl BitunixFutures {
         self.end(cx, command, error::not_sent(error, ErrorKind::InvalidInput));
     }
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
+        // AGT-115: a stop-type entry becomes a position TP/SL order that never carries
+        // the attached legs; refuse the whole command rather than drop them.
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("Bitunix"));
+        }
         let mut ids = HashSet::new();
         for o in orders {
             if o.stp_mode.is_some() {

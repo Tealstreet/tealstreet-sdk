@@ -48,6 +48,7 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './weex.api';
 import {
   ENDPOINTS,
@@ -116,6 +117,10 @@ const extractArray = <T = Record<string, any>>(payload: any, keys: string[] = []
   }
   return [];
 };
+
+/** AGT-115: placeTpSlOrder carries no legs; conditional entries carry them natively. */
+const weexDropsStopEntryLegs = (order: PlaceOrderOpts) =>
+  (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) && stopEntryWithAttachedLegs(order);
 
 export class WeexExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
@@ -604,6 +609,7 @@ export class WeexExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     this.resolveCallerClientOrderId(opts);
+    if (weexDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('WEEX'));
     const payload = this.formatOrderPayload(opts);
     const endpoint =
       opts.type === OrderType.Conditional
@@ -649,6 +655,7 @@ export class WeexExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(weexDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('WEEX'));
     const ids: string[] = [];
     let regularBatch: PlaceOrderOpts[] = [];
 
