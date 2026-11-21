@@ -220,11 +220,21 @@ encoding compares the exact original intent bits; foreign/numeric IDs and idless
 `placed` remain rejected. Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
-and admission waits), a never-forwarded queued intent becomes `notSent`; an
-in-flight or acknowledged intent becomes `unknown`. `DELEGATED_RECEIPT_MAX_AGE_MS` (20 s) and
-`DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s) are exported for hosts' RPC timers ahead of
-the outbox adopting them for handed-off intents (AGT-125); `delegatedOutboxBounds.test.ts`
-pins them to the box's key-age, future-tolerance and command-wait limits. Direct close also changes
+and admission waits), a never-forwarded queued intent becomes `notSent`. Handed-off
+intents wait longer, because ten seconds is admission's budget, not a delivery
+bound (AGT-125: bursts reported unknown at 10 s and were then placed). An in-flight
+(`sending`) intent waits for its router/box receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s): both admit a key until it is 10 s old by
+their own clocks, with 5 s future tolerance, so an ACK can land after 10 s. An
+`acknowledged` intent is admitted and may be waiting in the venue's write queue,
+so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s): the
+receipt bound + the engine's 120 s `DEFAULT_COMMAND_WAIT_MS` + a 20 s venue write.
+That age never proves the box is done: a write plan's own span can exceed the command
+wait (a 32-target Bybit cancel), so hosts must not infer "not placed" from it (NX gates
+those verdicts on the outcome or a disconnect). Each then becomes
+`unknown`; a late ACK returns an `unknown` intent to `acknowledged`. These windows
+never resend or extend admission. `delegatedOutboxBounds.test.ts` pins them to the
+Rust limits. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send

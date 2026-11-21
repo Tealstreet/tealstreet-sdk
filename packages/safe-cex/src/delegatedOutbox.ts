@@ -120,16 +120,19 @@ export interface OutboxConnection extends OutboxScope {
   send(frame: string): boolean;
 }
 
+/** Admission budget: an intent not handed off by now was never sent. */
 const MAX_AGE_MS = 10_000;
 /**
- * How long a handed-off intent may await its router/box receipt: both admit a key until it
- * is 10 s old by their own clocks (5 s future tolerance), plus transit (AGT-125).
+ * A handed-off intent awaits its router/box receipt. Both admit a key until it is 10 s
+ * old by their own clocks (5 s future tolerance), so a receipt can land after the budget.
  */
 export const DELEGATED_RECEIPT_MAX_AGE_MS = 20_000;
 /**
- * How long a box-ACKed intent may await its outcome: the receipt bound + the engine's 120 s
- * command wait + one 20 s venue write attempt (AGT-125). Exported for hosts before the outbox
- * adopts it; `delegatedOutboxBounds.test.ts` pins both to the Rust limits.
+ * A box-ACKed intent is admitted and may wait in the venue's write queue; that wait is not
+ * the admission budget. It waits for its outcome this long (the receipt bound + the engine's
+ * 120 s command wait + one 20 s venue write attempt), then is unknown (AGT-125). A write
+ * plan's own span can run longer, so this age never proves the box is done. Pinned by
+ * `delegatedOutboxBounds.test.ts` against the Rust sources.
  */
 export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 160_000;
 const MAX_PENDING = 1024;
@@ -901,7 +904,12 @@ export class DelegatedOutbox {
   private expired(row: DelegatedIntent): boolean {
     if (row.clockEpoch !== this.options.clock.epoch) return true;
     const age = this.options.clock.now() - row.createdAt;
-    return !Number.isFinite(age) || age < 0 || age >= MAX_AGE_MS;
+    return !Number.isFinite(age) || age < 0 || age >= this.maxAge(row);
+  }
+
+  private maxAge(row: DelegatedIntent): number {
+    if (row.state === 'acknowledged') return DELEGATED_ACKNOWLEDGED_MAX_AGE_MS;
+    return row.state === 'sending' ? DELEGATED_RECEIPT_MAX_AGE_MS : MAX_AGE_MS;
   }
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
@@ -1063,7 +1071,7 @@ export class DelegatedOutbox {
           if (this.expired(row)) this.expire(row);
           else this.arm(row);
         },
-        Math.max(0, MAX_AGE_MS - (this.options.clock.now() - row.createdAt)),
+        Math.max(0, this.maxAge(row) - (this.options.clock.now() - row.createdAt)),
       ),
     );
   }
