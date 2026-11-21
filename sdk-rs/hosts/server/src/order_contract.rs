@@ -605,7 +605,7 @@ mod activation_tests {
         // AGT-117: Hyperliquid groups a limit or market entry's legs into its own write, and
         // the reply names only the entry (each leg answers `waitingForFill`/`waitingForTrigger`
         // without an ID), so its whole bracket completes with exactly one ID. A refused leg is
-        // partial evidence, which `settle_intent` keeps unknown.
+        // partial evidence, which `settle_intent` keeps unknown. Spot refuses a bracket whole.
         for venue in ["hyperliquid", "hyperliquidspot"] {
             for kind in ["limit", "market"] {
                 let extra = json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05});

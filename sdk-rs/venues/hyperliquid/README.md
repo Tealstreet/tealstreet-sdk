@@ -109,9 +109,15 @@ entry with a non-zero attached leg used to be placed without it; `preflight` now
 whole batch before any write with the engine's shared `stop_entry_legs_refusal` copy.
 
 A market entry dropped its legs too until AGT-117. It is a marketable Gtc limit at the
-slippage-capped price, so its legs now group with it exactly as a limit entry's do: reduce-only
-market triggers at the entry's size, each with the entry's `p` (the venue applies its own 10%
-slippage when a trigger fires). Verified live 2026-11-21: a 220 DOGE market buy with SL and TP
-answered `[filled, "waitingForTrigger", "waitingForTrigger"]` and both legs rested as reduce-only
-triggers of 220. The reply names only the entry, so the result is that one ID; the hosted
-receipt counts no separate legs for Hyperliquid, and a refused leg stays partial evidence.
+slippage-capped price, so its legs now group with it exactly as a limit entry's do: market
+triggers at the entry's size (reduce-only on perps), each with the entry's `p` (the venue
+applies its own 10% slippage when a trigger fires). Verified live 2026-11-21 on a perp: a 220
+DOGE market buy with SL and TP answered `[filled, "waitingForTrigger", "waitingForTrigger"]` and
+both legs rested as reduce-only triggers of 220. The reply names only the entry, so the result is
+that one ID; the hosted receipt counts no separate legs for Hyperliquid, and a refused leg stays
+partial evidence.
+
+Spot (the standalone venue and spot pairs in the perp account) has no trigger orders. The venue
+refuses a spot bracket, limit or market entry, as one row for the whole group: "Placing trigger
+orders is not enabled on spot trading yet." (live 2026-11-21, HYPE/USDC, nothing filled or
+resting). `BATCH` classifies it as a refusal, so the command is refused rather than unknown.
