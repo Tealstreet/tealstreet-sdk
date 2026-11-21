@@ -8,6 +8,7 @@ use std::time::Duration;
 
 struct Updates {
     book: Book,
+    with_positions: bool,
 }
 impl Venue for Updates {
     type Pending = ();
@@ -18,6 +19,9 @@ impl Venue for Updates {
             ticker: true,
         }
         .on_timer(cx, TimerId(0));
+        if !self.with_positions {
+            cx.store.set_positions(Vec::new());
+        }
         cx.store.set_balance(Balance {
             free: 1000.,
             total: 1000.,
@@ -152,6 +156,7 @@ async fn setup(interval: Option<Value>) -> (Session, crate::out::Receiver, Arc<A
     let (mut account, _) = crate::accounts::testing::account_on(
         Updates {
             book: Book::default(),
+            with_positions: true,
         },
         ("u", "acct", &init.exchange_name),
         Some(link),
@@ -635,12 +640,19 @@ async fn select_tickers(session: &mut Session, account: &str, value: Value) {
 async fn selected_setup(
     tickers: Value,
 ) -> (Session, crate::out::Receiver, Arc<Account>, Vec<Value>) {
+    selected_setup_with_positions(tickers, false).await
+}
+async fn selected_setup_with_positions(
+    tickers: Value,
+    with_positions: bool,
+) -> (Session, crate::out::Receiver, Arc<Account>, Vec<Value>) {
     let registry = crate::accounts::tests::registry();
     let init = acct_init();
     let link = safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| true));
     let (mut account, _) = crate::accounts::testing::account_on(
         Updates {
             book: Book::default(),
+            with_positions,
         },
         ("u", "acct", &init.exchange_name),
         Some(link),
@@ -821,4 +833,37 @@ fn ticker_selection_is_not_an_engine_option_or_account_identity() {
         serde_json::to_value(&plain).unwrap(),
         serde_json::to_value(&selected).unwrap()
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn selected_session_keeps_its_position_price_without_a_client_hint() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (mut session, mut sent, account, mut seen) =
+                selected_setup_with_positions(json!([]), true).await;
+            assert_eq!(view(&seen).positions()[0].symbol, "BTCUSDT");
+            assert!(view(&seen).ticker("BTCUSDT").is_some());
+            update(&session, &account, 111, 1);
+            tick(70).await;
+            seen.extend(drain(&mut sent));
+            assert_eq!(view(&seen).ticker("BTCUSDT").unwrap().last, 111.);
+            assert!(session.resnapshot("acct", None).await);
+            let mut restored = vec![first(&mut sent).await];
+            tick(5).await;
+            restored.extend(drain(&mut sent));
+            assert!(view(&restored).ticker("BTCUSDT").is_some());
+            assert!(
+                session.joined["acct"]
+                    .client
+                    .publication
+                    .borrow()
+                    .tickers
+                    .as_ref()
+                    .unwrap()
+                    .is_empty()
+            );
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
 }
