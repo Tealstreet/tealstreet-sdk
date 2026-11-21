@@ -322,10 +322,15 @@ impl TwapInstance {
         {
             return Err("Invalid TWAP amendment".into());
         }
-        let revision = self
-            .schedule_revision
-            .checked_add(1)
-            .ok_or("TWAP job is not amendable")?;
+        // Only a changed interval re-anchors the schedule; a slice-count edit keeps it.
+        let reschedule = update.interval_ms.is_some();
+        let revision = if reschedule {
+            self.schedule_revision
+                .checked_add(1)
+                .ok_or("TWAP job is not amendable")?
+        } else {
+            self.schedule_revision
+        };
         let mut sizes = self.state.orders_sizes.clone();
         if update.remaining_slices.is_some() {
             sizes = vec![quantity / f64::from(remaining); remaining as usize];
@@ -363,7 +368,7 @@ impl TwapInstance {
         self.options.orders_count = total;
         self.options.duration = duration;
         self.schedule_revision = revision;
-        if self.pending.is_empty() {
+        if reschedule && self.pending.is_empty() {
             self.state.next_order_at = next_at;
             self.slice_due_at = (self.state.status == TwapStatus::Running).then_some(next_at);
         }
