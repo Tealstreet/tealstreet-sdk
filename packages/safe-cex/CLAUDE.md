@@ -227,8 +227,12 @@ bound (AGT-125: bursts reported unknown at 10 s and were then placed). An in-fli
 `DELEGATED_RECEIPT_MAX_AGE_MS` (20 s): both admit a key until it is 10 s old by
 their own clocks, with 5 s future tolerance, so an ACK can land after 10 s. An
 `acknowledged` intent is admitted and may be waiting in the venue's write queue,
-so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (60 s).
-Each then becomes `unknown`. These windows never resend or extend admission. Direct close also changes
+so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s): the
+receipt bound + the engine's 120 s `DEFAULT_COMMAND_WAIT_MS` + a 20 s venue write, so
+no client verdict lands while the box can still execute it. Each then becomes
+`unknown`; a late ACK returns an `unknown` intent to `acknowledged`. These windows
+never resend or extend admission. `delegatedOutboxBounds.test.ts` pins them to the
+Rust limits. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send

@@ -918,6 +918,28 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(f.writes).toHaveLength(1);
     box.close();
   });
+  it('returns an unknown intent to waiting when its ACK lands after the receipt bound', async () => {
+    const f = fixture();
+    const states: string[] = [];
+    f.options.changed = (row) => states.push(row.state);
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS + 1_000);
+    expect(box.entries()[0].state).toBe('unknown');
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    expect(box.entries()[0].state).toBe('acknowledged');
+    f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS - DELEGATED_RECEIPT_MAX_AGE_MS - 2_000);
+    expect(box.entries()[0].state).toBe('acknowledged');
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'venue-2', clientOrderId: id, error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(states).toEqual(['queued', 'sending', 'unknown', 'acknowledged', 'placed']);
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
   it('bounds an acknowledged intent by DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, then unknown without a replay', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
