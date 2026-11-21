@@ -388,15 +388,18 @@ LOCAL and hosted use the same implementation. Typed v1 carries
 - Chaser `update` accepts only `limitPrice`, `offset`, and `maxAttempts`.
   `limitPrice` is an absolute buy ceiling or sell floor; `offset` is a
   nonnegative price-unit distance away from the passive touch. Constraints round
-  outward to the market tick. Values merge with the job's prior amendments;
+  outward to the market tick; a constrained quote already on the tick is kept. Values merge with the job's prior amendments;
   `offset:0` resets the offset, while nulls/empty patches are invalid. The usual
   market-driven re-quote trigger is unchanged: no immediate cancel, replace, or
-  job restart. The next placement uses the amended constraints/attempt bound.
+  job restart. The next placement uses the amended constraints/attempt bound,
+  and a resting order already at the constrained quote is not replaced. A TWAP
+  slice's chase is not amendable on its own; amend its TWAP.
 - TWAP `update` accepts only positive `intervalMs` and `remainingSlices` (1–1000).
   The issued-plus-remaining count remains bounded by 1000. Repartition only the
   sum of unplaced slice quantities; preserve issued/pending children, fill
-  ownership and every issued outcome-journal row. A changed interval schedules
-  the next slice from amendment time, or from the pending child's answer when
+  ownership and every issued outcome-journal row. Only a changed interval
+  re-anchors the schedule (a slice-count-only edit keeps the next slice's time):
+  it schedules the next slice from amendment time, or from the pending child's answer when
   one is in flight. Paused jobs stay paused. Persisted duration/count encode the
   amended interval, so restore retains the same remaining schedule.
 
@@ -405,8 +408,10 @@ Unsupported fields return a named `unsupported amend field` error before
 forwarding; finished, stopping, unknown or missing jobs refuse visibly with
 `not amendable`. Job IDs are scoped to the resident account. Typed amendment
 admission retains the original registration, owner, deadline, IO and drain
-fences. Shared factory refusals settle `refused/notSent` because these operations
-validate synchronously before changing future settings. A successful dispatch
+fences. Shared factory refusals and drain refusals settle `refused/notSent`
+because these operations validate synchronously before changing future
+settings. On LOCAL, an amendment the worker cannot dispatch (stopped,
+recovering, owner change, dead engine) is reported as an error, never dropped. A successful dispatch
 retains the existing conservative `unknown` algo receipt; it never claims a
 completed venue write or permits resend. Reconcile through `chaser:amended`
 (`{id,update}`), `activeChasers`, and existing TWAP state/store updates.

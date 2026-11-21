@@ -1726,8 +1726,10 @@ The shared chaser and TWAP amend operations link into every family. Rule-17
 raise per `harness/CLAUDE.md` ("A PR that outgrows its cap raises it itself"),
 generated with `update-wasm-caps.mjs` from PR run 44877378708 (sealed source
 `ac4cbf6c027341737dbb3015f2de0167a3743513`, whose tree equals PR head
-`6422af05212da96421e11781f89edbdaad2953cf`). Only the 22 families whose
-measurement exceeded the ceiling were raised, to measured + 10 KiB rounded up.
+`6422af05212da96421e11781f89edbdaad2953cf`). The committed `wasm-caps.json` is
+that script's output filtered to the 22 families whose measurement exceeded the
+ceiling, each raised to measured + 10 KiB rounded up; the raw output also raised
+the three reserve-only families below, which were reverted.
 asterdex, orderly and txflow fit their caps with a reserve warning and are
 left to the master reserve bot. combined, hyperliquid and polymarket are unchanged.
 
