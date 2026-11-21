@@ -2356,17 +2356,12 @@ fn candle_body(
     ))
 }
 
-/// Hyperliquid charges a candleSnapshot 20 plus one per 60 candles returned, at most
-/// 5,000. Both boundary candles are returned, so a span holds at most ceil(span/step)+1;
-/// a month is bounded by its shortest length. Reserving 104 for every read starved charts.
+/// Hyperliquid charges 20 plus one per 60 candles returned and returns both boundary
+/// candles (1M is a fixed 30-day bucket), so a span holds ceil(span/step)+1. A full reply
+/// was seen past 5,000 rows (5,182), so the cap is 6,000 (120). A flat 104 starved charts.
 fn candle_weight(interval: Interval, start_ms: u64, end_ms: u64) -> u32 {
-    const DAY: f64 = 86_400_000.0;
-    let step = match interval {
-        Interval::Mo1 => 28.0 * DAY,
-        other => other.ms(),
-    };
     let span = end_ms.saturating_sub(start_ms) as f64;
-    let rows = ((span / step).ceil() + 1.0).min(5000.0) as u32;
+    let rows = ((span / interval.ms()).ceil() + 1.0).min(6000.0) as u32;
     20 + rows.div_ceil(60)
 }
 
@@ -2380,3 +2375,21 @@ fn supported(interval: Interval) -> bool {
 
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+mod candle_weight_tests {
+    use super::*;
+    // The same cases as hyperliquidInfoBudget.test.ts, so native and host weights agree.
+    #[test]
+    fn candle_weight_matches_the_host_budget() {
+        const H: u64 = 3_600_000;
+        let t = 1_795_000_000_000;
+        assert_eq!(candle_weight(Interval::M1, t - 329 * 60_000, t), 26);
+        assert_eq!(candle_weight(Interval::H4, t - 329 * 4 * H, t), 26);
+        assert_eq!(candle_weight(Interval::D1, t - 330 * 24 * H, t), 26);
+        assert_eq!(candle_weight(Interval::H1, 21 * H / 2, 12 * H), 21);
+        assert_eq!(candle_weight(Interval::M1, t, t), 21);
+        assert_eq!(candle_weight(Interval::M1, 0, t), 120);
+        assert_eq!(candle_weight(Interval::Mo1, 0, 60 * 24 * H), 21);
+    }
+}

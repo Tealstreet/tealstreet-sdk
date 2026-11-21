@@ -500,7 +500,8 @@ describe('cross-worker Hyperliquid info admission', () => {
     ['metaAndAssetCtxs', 20],
     ['frontendOpenOrders', 20],
     ['userFillsByTime', 120],
-    ['candleSnapshot', 104],
+    // AGT-113: a body with no readable span reserves the 6,000-row maximum (was 104).
+    ['candleSnapshot', 120],
   ])('reserves the documented weight for %s including bounded reply surcharges', (type, weight) => {
     expect(hyperliquidInfoWeight(JSON.stringify({ type }))).toBe(weight);
   });
@@ -517,12 +518,13 @@ describe('cross-worker Hyperliquid info admission', () => {
     // Both boundary candles return: 10:30..12:00 on 1h is 10:00, 11:00 and 12:00.
     ['a span crossing three hourly opens', candles('1h', 10.5 * HOUR, 12 * HOUR), 21],
     ['a zero-width span', candles('1m', T, T), 21],
-    ['a span beyond 5,000 candles', candles('1m', 0, T), 104],
-    ['a month span, bounded by 28-day months', candles('1M', 0, 56 * 24 * HOUR), 21],
-    ['an unknown interval', candles('7m', 0, HOUR), 104],
-    ['a reversed span', candles('1m', T, T - HOUR), 104],
-    ['a string timestamp', candles('1m', String(T - HOUR), T), 104],
-    ['a missing request', JSON.stringify({ type: 'candleSnapshot' }), 104],
+    // Hyperliquid returned 5,182 rows for a full 1m reply, so the cap is 6,000 rows.
+    ['a span beyond 6,000 candles', candles('1m', 0, T), 120],
+    ['a two-month span of 30-day buckets', candles('1M', 0, 60 * 24 * HOUR), 21],
+    ['an unknown interval', candles('7m', 0, HOUR), 120],
+    ['a reversed span', candles('1m', T, T - HOUR), 120],
+    ['a string timestamp', candles('1m', String(T - HOUR), T), 120],
+    ['a missing request', JSON.stringify({ type: 'candleSnapshot' }), 120],
   ])('reserves %s by its requested span', (_label, body, weight) => {
     expect(hyperliquidInfoWeight(body)).toBe(weight);
   });
@@ -659,7 +661,8 @@ describe('managed transport admission', () => {
     ['legacy', 'frontendOpenOrders', 20],
     ['managed', 'frontendOpenOrders', 20],
     ['managed', 'metaAndAssetCtxs', 20],
-    ['managed', 'candleSnapshot', 104],
+    // AGT-113: a span-less candle body reserves the 6,000-row maximum (was 104).
+    ['managed', 'candleSnapshot', 120],
   ] as const)(
     'applies the shared budget to two actual %s transports for %s before dispatch',
     async (mode, type, weight) => {

@@ -6,8 +6,8 @@ use safe_cex_engine::{Action, Command, Event, Query};
 use support::*;
 
 // AGT-113: candle reservations follow the sent span, so `limit: Some(5000)` at this
-// suite's 2 s clock no longer reserves the 104 maximum. These saturating reads now
-// ask an explicit span of more than 5,000 one-minute candles instead.
+// suite's 2 s clock no longer reserves the maximum. These saturating reads now ask
+// an explicit span of more than 6,000 one-minute candles (120 each) instead.
 const MAXIMAL_SPAN_MS: f64 = 400_000_000.;
 
 #[test]

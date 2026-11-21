@@ -17,7 +17,8 @@ fence/amend reads retain first rank. Already physical work is not preempted.
 Native refill is continuous at one weight per 60 ms, rather than a minute reset.
 Candles and caller history are bulk; catalogue, fees and builder reads remain
 normal. A candle read reserves 20 plus one per 60 candles its requested span can
-return (ceil(span/step)+1, at most 104), not a flat 104 (AGT-113). Account State/Orders, reconnect snapshots and Role/Mode/Spot prerequisites
+return (ceil(span/step)+1, at most 6,000 rows = 120), not a flat 104 (AGT-113).
+Account State/Orders, reconnect snapshots and Role/Mode/Spot prerequisites
 use the closed reconciliation class. They keep the three-slot native bound;
 explicit amend reads retain their independent slot behavior. Existing three-slot account limits, including foreground Orders,
 remain in place. Native amend role/status weights are 60/2, matching the host.
