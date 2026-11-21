@@ -2921,9 +2921,11 @@ impl Registry {
         let registry = self.clone();
         let (user, id) = (user.to_owned(), id.to_owned());
         Some(tokio::spawn(async move {
-            for account in accounts {
-                let keep = registry.keep_notice(&account, &id);
-                let weak = Arc::downgrade(&account);
+            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            let mut queued = Vec::new();
+            for account in &accounts {
+                let keep = registry.keep_notice(account, &id);
+                let weak = Arc::downgrade(account);
                 let stopped = Box::new(move |kept: crate::algos::Kept| {
                     if let Some(account) = weak.upgrade() {
                         for frame in kept.frames(&account.name) {
@@ -2932,17 +2934,25 @@ impl Registry {
                     }
                     keep(kept);
                 });
-                // The process keeps delivering, so nothing waits for these notices.
-                let (server_stopped, _) = tokio::sync::oneshot::channel();
+                let (server_stopped, receiver) = tokio::sync::oneshot::channel();
+                queued.push(receiver);
                 registry.stop(
-                    &account,
+                    account,
                     "the operator forced a user drain",
                     Some(stopped),
                     DisposalCause::Stopped,
                     Some(server_stopped),
                 );
             }
-            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            // The host's DELEGATED check reads the signer weakly, and an absent user's
+            // account may have no other owner: hold it until its stops are queued.
+            let _ = tokio::time::timeout(crate::host_notify::RESTART_FLUSH, async {
+                for receiver in queued {
+                    let _ = receiver.await;
+                }
+            })
+            .await;
+            drop(accounts);
             let settled = loop {
                 if registry.user_drains.status(&user)["algosDone"] == true {
                     break true;

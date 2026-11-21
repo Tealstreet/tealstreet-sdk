@@ -1604,17 +1604,30 @@ async fn only_box_stops_mark_their_dispose_for_algo_stop_notices() {
         .run_until(async {
             let (registry, _notifier) = notifying_registry();
             let (forced, mut forced_inbox) = keyless_resident(&registry, "forced-user", false);
+            // Absent: nothing but the forced drain owns the account and its signer,
+            // which the host's DELEGATED check reads weakly.
+            registry.release(&forced, 7, Disposal::SocketClosed);
+            let signer = Arc::downgrade(&forced.signing);
+            drop(forced);
             let started = registry.start_user_drain("forced-user", 1);
             let _force = registry
                 .force_user_drain("forced-user", started["drainId"].as_str().unwrap())
                 .unwrap();
-            assert!(matches!(
-                forced_inbox.recv().await,
-                Some(crate::algos::AlgoInput::Dispose {
-                    server_stopped: Some(_),
-                    ..
-                })
-            ));
+            let Some(crate::algos::AlgoInput::Dispose {
+                server_stopped: Some(queued),
+                ..
+            }) = forced_inbox.recv().await
+            else {
+                panic!("a forced user drain marks its Dispose as a box stop");
+            };
+            advance(Duration::from_millis(100)).await;
+            assert!(
+                signer.upgrade().is_some(),
+                "the signer outlives the Dispose until the host has queued its stops"
+            );
+            queued.send(()).unwrap();
+            advance(Duration::from_millis(100)).await;
+            assert!(signer.upgrade().is_none(), "then the account is released");
             let (expired, mut expired_inbox) = keyless_resident(&registry, "away-user", false);
             registry.release(&expired, 7, Disposal::SocketClosed);
             advance(RETAIN).await;
@@ -1625,7 +1638,6 @@ async fn only_box_stops_mark_their_dispose_for_algo_stop_notices() {
                     ..
                 })
             ));
-            drop(forced);
         })
         .await;
 }

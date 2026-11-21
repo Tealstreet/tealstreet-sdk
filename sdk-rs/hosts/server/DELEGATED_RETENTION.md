@@ -144,7 +144,9 @@ never from a snapshot or a rejoin replay:
   so the gateway keeps at most one per chase. A TWAP is restored paused under
   its id and can still end for real later, so its stop gets an `id` of its own,
   minted once per stop (retries still dedupe), and shares only the collapse key
-  with that end.
+  with that end. The host reads the account's DELEGATED state through a weak
+  signer, so a forced user drain holds each account until its host has queued
+  these, bounded to 3 seconds.
 
 Other stops caused by account disposal emit no `algoStopped`: the host's own
 chase ends and TWAP removals during disposal are not ordinary ends. Retention
