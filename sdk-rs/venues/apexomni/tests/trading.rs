@@ -2504,7 +2504,8 @@ fn a_refused_put_back_is_unprotected_and_never_retried() {
     let out = actions(&mut e);
     let error = failure_of(&out);
     assert!(
-        error.message.contains("the put-back was refused too") && error.message.contains("re-place"),
+        error.message.contains("the put-back was refused too")
+            && error.message.contains("re-place"),
         "{}",
         error.message
     );
@@ -2723,7 +2724,11 @@ fn a_put_back_is_one_attempt_on_the_wire() {
     let out = actions(&mut e);
     assert!(placements(&http(out.clone())).is_empty(), "never resent");
     let error = failure_of(&out);
-    assert!(error.message.contains("the put-back was refused too"), "{}", error.message);
+    assert!(
+        error.message.contains("the put-back was refused too"),
+        "{}",
+        error.message
+    );
     assert_eq!(error.protection, Some(Protection::Unprotected));
 }
 

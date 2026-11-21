@@ -1978,7 +1978,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         h.respond(request, status, body);
         if matches!(status, 408 | 429 | 500..) {
             assert!(safe_cex_engine::error::carries_guidance(
-                &h.result(8).unwrap_err(),
+                h.result(8).unwrap_err(),
                 ENGINE_UNKNOWN_TEXT
             ));
             assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
@@ -1995,7 +1995,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
     assert!(safe_cex_engine::error::carries_guidance(
-        &h.result(8).unwrap_err(),
+        h.result(8).unwrap_err(),
         ENGINE_UNKNOWN_TEXT
     ));
     assert!(h.failures[0].venue_message.is_some());
@@ -2016,7 +2016,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
     assert!(safe_cex_engine::error::carries_guidance(
-        &h.result(8).unwrap_err(),
+        h.result(8).unwrap_err(),
         ENGINE_UNKNOWN_TEXT
     ));
     assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
