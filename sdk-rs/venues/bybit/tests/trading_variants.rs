@@ -7832,6 +7832,50 @@ fn local_demo_write_pacing_is_shared_by_concurrent_scaled_commands() {
     assert_write_pacing_is_shared_by_concurrent_scaled_commands(Variant::Demo);
 }
 
+// AGT-124: Bybit charges a batch by its order count, so a one-order batch costs
+// one tenth of the ten-order floor; the shared 200ms single-write floor remains.
+#[test]
+fn single_order_batches_pace_at_the_single_write_floor() {
+    let mut h = ready(Variant::Linear);
+    for (command, symbol) in [(7100, "BTCUSDT"), (7101, "ETHUSDT")] {
+        place(&mut h, command, vec![order(symbol, 0.1)]);
+    }
+    resolve_mode(&mut h, "BTCUSDT");
+    resolve_mode(&mut h, "ETHUSDT");
+    let first = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&first)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 1);
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.advance(199.0);
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.advance(1.0);
+    assert!(h.has_request("/v5/order/create-batch"));
+    let second = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+    assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
+}
+
+// A full batch still owns the whole ten-order budget against any later batch.
+#[test]
+fn a_full_batch_still_holds_a_later_single_order_batch_for_its_floor() {
+    let mut h = ready(Variant::Linear);
+    place(&mut h, 7200, vec![order("BTCUSDT", 0.1); 10]);
+    place(&mut h, 7201, vec![order("ETHUSDT", 0.1)]);
+    resolve_mode(&mut h, "BTCUSDT");
+    resolve_mode(&mut h, "ETHUSDT");
+    let first = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&first)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 10);
+    h.advance(1199.0);
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.advance(1.0);
+    assert!(h.has_request("/v5/order/create-batch"));
+    let second = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 1);
+    assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
+}
+
 // Exact native 10006 proves non-placement; transport status or contradictory IDs do not.
 #[test]
 fn native_uid_limit_is_rejected_after_managed_http_end_without_resend() {
@@ -8111,3 +8155,4 @@ fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
         }
     }
 }
+
