@@ -1,7 +1,8 @@
 # Hyperliquid write outcomes
 
-Hyperliquid writes follow the legacy TS serial/grouping behavior. The shared
-WritePlan records outcomes and has no validation or dispatch authority.
+Hyperliquid writes follow the legacy TS serial/grouping behavior, except that
+plain placements within one command are batched (see Batched placements). The
+shared WritePlan records outcomes and has no validation or dispatch authority.
 
 Stop-after-UNKNOWN is a recorded parity exception (Sean/daxx, 2026-11-08;
 doc #3355). A genuine Unknown halts further physical writes for that action,
@@ -29,6 +30,25 @@ standard wording, journal rows, telemetry and absence of later writes.
 Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
 message assertions. Telemetry for that path awaits a later engine hook; its
 telemetry assertion alone is deferred. Other Unknown pins require telemetry.
+
+## Batched placements
+
+TS placed a PlaceOrders command's rows one signed `order` action at a time, so a
+burst of N orders took N paced round trips. Now consecutive plain limit/market rows
+on one DEX (core perps, spot, or one HIP-3 DEX) share one `na` action of at most 40
+rows, the most that still costs one request of weight. Any row with an attached leg
+or a trigger keeps an action of its own, as before, so `normalTpsl` and
+`positionTpsl` grouping never contains another command's or row's order.
+
+Each status row settles its own order, in caller order: a refused row is NotSent
+and fails only itself, and its siblings stay placed and acknowledged. A reply whose
+row count differs from the batch, or that cannot be parsed, proves nothing about
+any row, so every row is Unknown. A `waitingForFill` row in a batch has no parent
+and is Unknown as well. A failed write still halts the command's later writes, and
+nothing is resent. One action takes one nonce, so signing is unchanged.
+
+Separate commands are not batched together: each owns its own engine Plan, and one
+physical request cannot settle several owners (`docs/plans/RUST_EXECUTION_GROUPS.md`).
 
 ## Confirmed fill reconciliation
 

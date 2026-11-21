@@ -31,6 +31,7 @@ struct Trace {
     writes: Vec<Value>,
     done: Option<String>,
     failed: Option<Value>,
+    events: Vec<safe_cex_engine::log::LogEvent>,
 }
 
 /// Drives one command, answering each `/exchange` write with `answer(write index, action)`.
@@ -57,6 +58,7 @@ fn run(
         writes: Vec::new(),
         done: None,
         failed: None,
+        events: Vec::new(),
     };
     let mut actions = prepared_now(engine);
     for _ in 0..12 {
@@ -72,7 +74,10 @@ fn run(
                         None => lose(engine, request),
                     }
                 }
-                Action::Notice(Notice::CommandDone { command: 77, result }) => {
+                Action::Notice(Notice::CommandDone {
+                    command: 77,
+                    result,
+                }) => {
                     assert!(trace.done.is_none() && trace.failed.is_none());
                     trace.done = Some(result.clone());
                 }
@@ -80,11 +85,12 @@ fn run(
                     assert!(trace.done.is_none() && trace.failed.is_none());
                     trace.failed = Some(serde_json::to_value(error).expect("error JSON"));
                 }
+                Action::Notice(Notice::Event(event)) => trace.events.push(event.clone()),
                 _ => {}
             }
         }
         let next = prepared_now(engine);
-        actions = advance_packet_timers(engine, next, 30_000.);
+        actions = advance_packet_timers(engine, next, 4000.);
     }
     assert!(
         trace.done.is_some() || trace.failed.is_some(),
@@ -104,9 +110,7 @@ fn lose(engine: &mut Engine<Hyperliquid>, request: &HttpRequest) {
 }
 
 fn statuses(rows: Vec<Value>) -> Option<String> {
-    Some(
-        json!({"status":"ok","response":{"type":"order","data":{"statuses":rows}}}).to_string(),
-    )
+    Some(json!({"status":"ok","response":{"type":"order","data":{"statuses":rows}}}).to_string())
 }
 
 fn resting_all(action: &Value, first_oid: u64) -> Option<String> {
@@ -130,7 +134,10 @@ fn burst_of_plain_limits_is_one_signed_order_action_in_caller_order() {
     assert_eq!(wires.len(), 25);
     for (wire, order) in wires.iter().zip(&orders) {
         assert_eq!(wire["a"], if order.symbol == "BTC-PERP" { 0 } else { 1 });
-        assert_eq!(wire["b"], order.side == safe_cex_engine::model::OrderSide::Buy);
+        assert_eq!(
+            wire["b"],
+            order.side == safe_cex_engine::model::OrderSide::Buy
+        );
         assert_eq!(
             wire["p"].as_str().expect("price").parse::<f64>().unwrap(),
             order.price.unwrap()
@@ -181,6 +188,7 @@ fn unlisted_row_error_is_unknown_only_for_that_row() {
     assert_eq!(elements[0]["status"], "placed");
     assert_eq!(elements[1]["status"], "placed");
     assert_eq!(elements[2]["status"], "unknown");
+    support::assert_unknown_publication(&error, &trace.events, 77);
 }
 
 #[test]
@@ -194,6 +202,7 @@ fn one_error_row_for_a_batch_proves_nothing_and_is_never_resent() {
     for element in error["elements"].as_array().expect("rows") {
         assert_eq!(element["status"], "unknown", "{element}");
     }
+    support::assert_unknown_publication(&error, &trace.events, 77);
 }
 
 #[test]
@@ -205,6 +214,7 @@ fn lost_batch_reply_is_unknown_for_every_row_and_never_resent() {
     let elements = error["elements"].as_array().expect("rows");
     assert_eq!(elements.len(), 5);
     assert!(elements.iter().all(|row| row["status"] == "unknown"));
+    support::assert_unknown_publication(&error, &trace.events, 77);
 }
 
 #[test]
@@ -218,7 +228,8 @@ fn bursts_split_at_forty_orders_per_action() {
         .map(|action| action["orders"].as_array().unwrap().len())
         .collect();
     assert_eq!(sizes, [40, 5]);
-    let ids: Vec<String> = serde_json::from_str(&trace.done.expect("done")).expect("ids");
+    let done = trace.done.unwrap_or_else(|| panic!("{:?}", trace.failed));
+    let ids: Vec<String> = serde_json::from_str(&done).expect("ids");
     assert_eq!(ids.len(), 45);
     assert_eq!(ids[39], "40");
     assert_eq!(ids[40], "101");
@@ -324,4 +335,43 @@ fn reduce_only_and_post_only_survive_per_row() {
     assert_eq!(wires[0]["r"], false);
     assert_eq!(wires[1]["r"], true);
     assert_eq!(wires[2]["t"], json!({"limit":{"tif":"Alo"}}));
+}
+
+#[test]
+fn an_unproven_row_is_unknown_and_keeps_its_siblings_acknowledged() {
+    for text in ["waitingForFill", "mystery"] {
+        let (mut engine, _) = ready("disabled");
+        engine.handle(
+            2000.,
+            Event::Command(Command::PlaceOrders {
+                command: 77,
+                orders: burst(3),
+            }),
+        );
+        let trace = run(&mut engine, &mut |_, _| {
+            statuses(vec![
+                json!({"resting":{"oid":11}}),
+                json!(text),
+                json!({"resting":{"oid":13}}),
+            ])
+        });
+        assert_eq!(trace.writes.len(), 1, "{text}: never resent");
+        let error = trace.failed.expect("unproven row fails the command");
+        assert_eq!(error["outcome"], "unknown", "{text}");
+        assert_eq!(error["partial"]["orderIds"], json!(["11", "13"]), "{text}");
+        let statuses: Vec<_> = error["elements"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row["status"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(statuses, ["placed", "unknown", "placed"], "{text}");
+        support::assert_unknown_publication(&error, &trace.events, 77);
+        for oid in ["11", "13"] {
+            assert!(
+                engine.store().order(oid).is_some(),
+                "{text}: {oid} acknowledged"
+            );
+        }
+    }
 }

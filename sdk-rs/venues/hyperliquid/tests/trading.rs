@@ -1522,7 +1522,8 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
     }
-    // The second order is refused after the first rested: nothing to claim.
+    // The second order is refused beside the first, which rested: nothing to claim. Both
+    // share one action since feat/hyperliquid-batched-placements, so one reply carries both.
     let (mut e, _) = ready("disabled");
     e.handle(
         2000.,
@@ -1536,16 +1537,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         &mut e,
         &r,
         200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}}]}}}"#,
-    );
-    let timer = pace_timer(&mut e);
-    e.handle(3000., Event::TimerFired { timer });
-    let r = write(&mut e);
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}},{"error":"Order price too far"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));

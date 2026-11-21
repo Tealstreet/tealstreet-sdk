@@ -28,6 +28,17 @@ fn order(amount: f64) -> PlaceOrderOpts {
     .expect("fixture order")
 }
 
+/// A standalone stop is never batched, so it keeps its neighbours in writes of their own.
+/// Plain rows on one DEX share one order action since feat/hyperliquid-batched-placements;
+/// the serial-continuation pins below put a stop between plain rows to keep one row per write.
+fn separator() -> PlaceOrderOpts {
+    serde_json::from_value(json!({
+        "symbol": "BTC-PERP", "type": "stop_market", "side": "sell",
+        "amount": 3, "price": 80
+    }))
+    .expect("fixture stop")
+}
+
 fn configured() -> Engine<Hyperliquid> {
     let (mut engine, _) = ready("disabled");
     engine.store_mut().update_markets(|market| {
@@ -62,11 +73,22 @@ fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
             last
         },
     ] {
+        let legs = [last.stop_loss, last.take_profit]
+            .into_iter()
+            .flatten()
+            .filter(|price| *price > 0.)
+            .count();
         let payloads = submit_valid(vec![order(3.), last]);
+        // Plain rows now share one action (feat/hyperliquid-batched-placements); every row
+        // is still formatted and sent without min/max/notional gates.
+        let rows: usize = payloads
+            .iter()
+            .map(|payload| payload["action"]["orders"].as_array().expect("rows").len())
+            .sum();
         assert_eq!(
-            payloads.len(),
-            2,
-            "TS formats and sends each serial row without min/max/notional gates"
+            rows,
+            2 + legs,
+            "every row is sent without native rule gates"
         );
     }
 }
@@ -188,15 +210,16 @@ fn positional_zero_trigger_control() {
 
 #[test]
 fn final_wire_bounds_allow_rounding_to_exact_minimum_and_maximum() {
+    // One batched action since feat/hyperliquid-batched-placements; rows keep caller order.
     let payloads = submit_valid(vec![order(1.6), order(4.9)]);
-    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads.len(), 1);
     assert_eq!(payloads[0]["action"]["orders"][0]["s"], "2");
-    assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
+    assert_eq!(payloads[0]["action"]["orders"][1]["s"], "5");
 }
 
 fn runtime_failure(status: u16, second_reply: &str, expected: &str) {
     runtime_failure_orders(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         status,
         second_reply,
         expected,
@@ -387,7 +410,7 @@ fn runtime_server_failure_retains_complete_journal() {
     // Engine-sealed HTTP503 retains halt/journal/canonical-message pins.
     // Telemetry for this path awaits the engine hook approved by the lead.
     runtime_failure_suffix(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         503,
         "service unavailable",
         "unknown",
@@ -408,7 +431,7 @@ fn later_market_write_uses_current_price_without_frozen_plan_veto() {
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![order(3.), second],
+            orders: vec![separator(), second],
         }),
     );
     let mut actions = prepared_now(&mut engine);
@@ -456,7 +479,7 @@ fn accepted_idless_prefix(first: PlaceOrderOpts, statuses: Value, expected: &[&s
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![first, order(3.), order(3.)],
+            orders: vec![first, order(3.), separator()],
         }),
     );
     let mut actions = prepared_now(&mut engine);
@@ -664,8 +687,9 @@ fn caller_id_size_gate_matches_ts_rounded_maximum() {
     // TS exchanges/base.ts:1211-1223 rounds before the positive-cap unsplit check.
     let mut accepted = order(5.1);
     accepted.client_order_id = Some("0x00000000000000000000000000000001".into());
+    // The second row of the one batched action (feat/hyperliquid-batched-placements).
     let payloads = submit_valid(vec![order(3.), accepted]);
-    assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
+    assert_eq!(payloads[0]["action"]["orders"][1]["s"], "5");
 
     let mut engine = configured();
     engine
@@ -699,7 +723,7 @@ fn market_row_refusal_pins_stop_before_next_live_price_preparation() {
     market.kind = safe_cex_engine::model::OrderType::Market;
     market.price = None;
     runtime_failure_orders(
-        vec![order(3.), market.clone(), market],
+        vec![separator(), market, separator()],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
         "notSent",
@@ -755,7 +779,7 @@ fn context_free_deferred_plain_limit_reply_keeps_unknown_fence() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.order-response.ts:137-145; hyperliquid.exchange.ts:4439-4442.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
     runtime_failure_suffix(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
@@ -773,7 +797,7 @@ fn context_free_deferred_market_reply_keeps_fence_before_next_market() {
     market.kind = safe_cex_engine::model::OrderType::Market;
     market.price = None;
     runtime_failure_suffix(
-        vec![order(3.), market.clone(), market],
+        vec![separator(), market, separator()],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
