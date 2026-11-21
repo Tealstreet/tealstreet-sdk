@@ -108,7 +108,7 @@ async fn tick(ms: u64) {
         tokio::task::yield_now().await;
     }
 }
-fn drain(sent: &mut crate::out::Receiver) -> Vec<Value> {
+pub(super) fn drain(sent: &mut crate::out::Receiver) -> Vec<Value> {
     std::iter::from_fn(|| sent.try_recv().ok())
         .map(|s| serde_json::from_str(&s).unwrap())
         .collect()
@@ -145,7 +145,9 @@ async fn first(sent: &mut crate::out::Receiver) -> Value {
         }
     }
 }
-async fn setup(interval: Option<Value>) -> (Session, crate::out::Receiver, Arc<Account>, Value) {
+pub(super) async fn setup(
+    interval: Option<Value>,
+) -> (Session, crate::out::Receiver, Arc<Account>, Value) {
     let registry = crate::accounts::tests::registry();
     let init = acct_init();
     let link = safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| true));

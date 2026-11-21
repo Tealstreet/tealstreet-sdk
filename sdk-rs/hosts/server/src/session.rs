@@ -3849,6 +3849,7 @@ mod tests {
 
     mod apexomni_batch_bridge;
     mod apply_settings;
+    mod audit_stages;
     mod backpack_local_proof;
     mod cosigned_coinbase;
     mod cosigned_venues;
