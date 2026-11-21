@@ -745,9 +745,11 @@ impl PlaceOrderOpts {
 }
 
 /// One refusal copy for every venue that cannot attach legs to a stop entry (AGT-115).
+/// It omits "nothing was sent": the outcome is `NotSent`, and the app's placement
+/// toast already says the order was not sent and nothing was placed.
 pub fn stop_entry_legs_refusal(venue: &str) -> String {
     format!(
-        "Attaching a stop-loss or take-profit to a stop entry isn't supported on {venue}, so nothing was sent. Place the stop-loss after the entry fills."
+        "Attaching a stop-loss or take-profit to a stop entry isn't supported on {venue}. Place the stop-loss after the entry fills."
     )
 }
 
@@ -840,8 +842,9 @@ mod tests {
                 !order(kind, r#","stopLoss":1,"takeProfit":2"#).stop_entry_with_attached_legs()
             );
         }
-        assert!(
-            stop_entry_legs_refusal("OKX").contains("isn't supported on OKX, so nothing was sent")
+        assert_eq!(
+            stop_entry_legs_refusal("OKX"),
+            "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills."
         );
     }
 

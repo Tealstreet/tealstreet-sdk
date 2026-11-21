@@ -10,4 +10,4 @@ export const stopEntryWithAttachedLegs = (order: PlaceOrderOpts) =>
 
 /** The Rust engine's `stop_entry_legs_refusal` copy, so both paths say the same thing. */
 export const stopEntryLegsRefusal = (venue: string) =>
-  `Attaching a stop-loss or take-profit to a stop entry isn't supported on ${venue}, so nothing was sent. Place the stop-loss after the entry fills.`;
+  `Attaching a stop-loss or take-profit to a stop entry isn't supported on ${venue}. Place the stop-loss after the entry fills.`;

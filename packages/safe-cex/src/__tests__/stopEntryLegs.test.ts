@@ -26,9 +26,9 @@ describe('stopEntryWithAttachedLegs', () => {
     }
   });
 
-  it('names the venue and says nothing was sent', () => {
+  it('names the venue and leaves "not sent" to the outcome and the app toast', () => {
     expect(stopEntryLegsRefusal('OKX')).toBe(
-      "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX, so nothing was sent. Place the stop-loss after the entry fills.",
+      "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills.",
     );
   });
 });
