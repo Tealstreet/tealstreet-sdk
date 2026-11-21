@@ -348,10 +348,14 @@ continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
 
-Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
-unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
-keeps the same job and schedule; never emulate amendment with automatic
-stop-and-replace.
+AGT-97 uses shared Rust `chaser:amend`/`twap:amend` with typed v1 `{id,update}`.
+Chaser permits limitPrice/offset/maxAttempts; TWAP permits intervalMs/remainingSlices.
+Side, symbol and quantity stay immutable and unsupported fields refuse by name
+before enqueue. Finished/stopping/unknown jobs refuse. A LOCAL amendment the
+worker cannot dispatch reports an error like a start (`USER_ALGORITHM_REQUESTS`). Edits affect the next
+attempt/slice, preserve in-flight children and never stop-and-replace; receipts
+retain conservative algo uncertainty. See the caller contract for exact units,
+future-quantity repartition, restore semantics and mobile enablement.
 
 The hosted typed v1 action decoder rejects duplicate object keys recursively in
 placement orders, close orders, scheduling values and algo payloads before they
