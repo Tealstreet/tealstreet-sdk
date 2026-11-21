@@ -238,8 +238,77 @@ fn chase_ends_classify_client_stops_finishes_and_errors() {
     assert_eq!(
         sent(&notifier).len(),
         2,
-        "disposal stops belong to delegated.shutdown"
+        "disposal stops are not ordinary ends"
     );
+}
+
+fn chase(id: &str, is_stopped: bool) -> safe_cex_chaser::ActiveChaser {
+    safe_cex_chaser::ActiveChaser {
+        is_stopped,
+        twap_id: None,
+        ..slice(id, "ETHUSDT", OrderSide::Sell)
+    }
+}
+
+fn twap_row(id: &str, symbol: &str, status: &str) -> Value {
+    json!({"id": id, "accountName": "synthetic-main", "activeMarket": {"symbol": symbol},
+        "symbol": symbol, "side": "buy", "size": 3.0, "status": status, "ordersExecuted": 1})
+}
+
+#[test]
+fn a_box_stop_reports_each_running_chase_and_twap_as_a_server_restart() {
+    let (tap, notifier) = tap(true, false);
+    tap.observe("twap:stateUpdate", &twap_state(&[("t-client", "XRPUSDT")]));
+    tap.client_stop("t-client");
+    tap.end();
+    let chases = [
+        chase("c-running", false),
+        chase("c-cancelling", true),
+        slice("slice", "BTCUSDT", OrderSide::Buy),
+    ];
+    let twaps = [
+        twap_row("t1", "BTCUSDT", "running"),
+        twap_row("t-paused", "SOLUSDT", "paused"),
+        twap_row("t-client", "XRPUSDT", "running"),
+    ];
+    tap.server_stopped(&chases, &twaps);
+    let queued = sent(&notifier);
+    assert_eq!(
+        queued.len(),
+        2,
+        "stopping chases, slices, paused TWAPs and client stops are not reported: {queued:?}"
+    );
+    for notification in &queued {
+        assert_eq!(notification["kind"], "algoStopped");
+        assert_eq!(notification["severity"], "warning");
+    }
+    assert_eq!(
+        queued[0]["fields"],
+        json!({"symbol":"ETHUSDT","side":"sell","verb":"stopped","algo":"chase","cause":"serverRestart"})
+    );
+    assert_eq!(
+        queued[1]["fields"],
+        json!({"symbol":"BTCUSDT","side":"buy","verb":"stopped","algo":"twap","cause":"serverRestart"})
+    );
+
+    // An algo's box stop and its ordinary end share one id, so the gateway keeps one.
+    let (ordinary, ordinary_notifier) = self::tap(true, false);
+    ordinary.observe(
+        "chaser:complete",
+        &chase_end("c-running", "Failed to place orders after 3 tries"),
+    );
+    ordinary.observe("twap:stateUpdate", &twap_state(&[("t1", "BTCUSDT")]));
+    ordinary.observe("twap:stateUpdate", &twap_state(&[]));
+    let ends = sent(&ordinary_notifier);
+    assert_eq!(ends.len(), 2);
+    for (end, stop) in ends.iter().zip(&queued) {
+        assert_eq!(end["id"], stop["id"]);
+        assert_eq!(end["collapseKey"], stop["collapseKey"]);
+    }
+
+    let (cosigned, cosigned_notifier) = self::tap(false, false);
+    cosigned.server_stopped(&chases, &twaps);
+    assert!(sent(&cosigned_notifier).is_empty());
 }
 
 fn twap_state(rows: &[(&str, &str)]) -> String {

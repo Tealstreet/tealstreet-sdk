@@ -99,8 +99,14 @@ Retention emits for DELEGATED residents only:
   An interval shorter than one hour (a nearly expired proxy token) has none.
 - `delegated.shutdown` on expiry with cause `noClient48h` or `proxyTokenExpired`.
 - `delegated.shutdown` with cause `serverRestart` for each DELEGATED resident
-  stopped by drain/SIGTERM. The drain waits for delivery beside the engine
-  shutdown, bounded to 3 seconds.
+  stopped by drain/SIGTERM. The gateway treats it as a diagnostic: it logs it
+  and never stores, pushes or replays it (Sam, 2026-11-21: notifications to end
+  users are not telemetry; never push server-lifecycle events that are not
+  user-specific). An ordinary roll waits for the user's chases and TWAPs, so it
+  stops only idle residents; what a drain cuts short is reported per algo below.
+  The drain waits for delivery beside the engine shutdown, bounded to 3 seconds
+  in all: first for each algo host to queue its `algoStopped` notices, then for
+  the outbox to empty.
 
 The algo host (`src/algo_notify.rs`) emits, for DELEGATED residents only and
 never from a snapshot or a rejoin replay:
@@ -127,12 +133,22 @@ never from a snapshot or a rejoin replay:
   shortfall report are `finished`/`algoFinished`; the rest `stopped`/`algoError`.
   TWAP slice chases report through their TWAP. Exec has no `algoStopped`: it
   is a one-shot client command answered on its own socket.
+- `algoStopped` with `verb: stopped`, `cause: serverRestart` for each chase and
+  TWAP a box stop cuts short: a drain or SIGTERM (`roll.sh --now`,
+  `POST /admin/drain?now=1`, a host shutdown) or a forced user drain
+  (`/admin/user-drain/force`, `exchange-roll --on-cap force`). Chases are never
+  restored, so an absent user would otherwise never hear (AGT-119). One per
+  algo, sent as the host receives the stop and before it settles; chases
+  already stopping, TWAP slices, paused TWAPs and TWAPs with a client stop in
+  flight are not reported. Its `id` is the algo's ordinary end id, so the
+  gateway keeps at most one `algoStopped` per chase or TWAP.
 
-Stops caused by account disposal emit no `algoStopped`. Retention expiry and
-drain/SIGTERM are covered by `delegated.shutdown`; router-lease fences, forced
-user drains and revocation disposals send neither notification (a server-lost
-notice from the router is deferred). Fills still waiting out the debounce are
-sent when the algo host shuts down or is fenced.
+Other stops caused by account disposal emit no `algoStopped`: the host's own
+chase ends and TWAP removals during disposal are not ordinary ends. Retention
+expiry is covered by `delegated.shutdown`; router-lease fences and revocation
+disposals send neither notification (a server-lost notice from the router is
+deferred). Fills still waiting out the debounce are sent when the algo host
+shuts down or is fenced.
 
 The lane adds no timing, admission, custody, signing or key lifecycle behavior
 beyond the warning timer, and never cancels resting orders.
