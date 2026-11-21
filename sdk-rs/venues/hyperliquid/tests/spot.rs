@@ -375,6 +375,22 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     assert_eq!(wires[0]["c"], "0x00000000000000000000000000000001");
     assert_ne!(wires[1]["c"], wires[2]["c"]);
     assert_eq!(wires[0]["t"]["limit"]["tif"], "Alo");
+    // A reduce-only spot entry (no legs) is sent, never as reduce-only.
+    let (mut e, _) = ready(true);
+    e.drain_plain().for_each(drop);
+    let mut o = order("HFUN/USDC");
+    o.reduce_only = Some(true);
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p["action"]["grouping"], "na");
+    assert_eq!(p["action"]["orders"][0]["r"], false);
 }
 // AGT-117: a spot market entry's legs were dropped and the entry placed. They now group with it
 // like a limit entry's, and the venue refuses the whole group: probed live 2026-11-21 on HYPE/USDC

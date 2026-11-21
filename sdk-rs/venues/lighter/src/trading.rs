@@ -30,7 +30,6 @@ const GROUP_PROOF_BOUND_MS: u32 = 10_000;
 const GROUP_PENDING_MESSAGE: &str = "is awaiting confirmation of its grouped placement";
 const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
-/// AGT-115: legs on a reduce-only entry were dropped; it closes, so they would protect nothing.
 
 #[derive(Default)]
 pub struct Trading {

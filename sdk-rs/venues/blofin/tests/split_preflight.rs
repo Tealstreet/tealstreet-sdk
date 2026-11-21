@@ -99,37 +99,49 @@ fn positional_zero_protection_remains_explicit() {
 }
 #[test]
 fn legacy_split_preserves_attachments_and_distinct_ids() {
-    let mut h = harness(4.0, 5.0, 1.0);
-    let mut intent = order(12.0);
-    intent["takeProfit"] = json!(65000.04);
-    intent["stopLoss"] = json!(55000.04);
-    // AGT-120: a reduce-only order may not carry legs, so the split is checked opening.
-    place(&mut h, json!([intent]));
-    let rows = accept_batch(&mut h, 100);
-    // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
-    // TS:2199-2220 rounds each of three lots to 3, then appends remainder 2.
-    assert_eq!(rows.len(), 4);
-    let allocated = rows
-        .iter()
-        .map(|row| row["size"].as_str().unwrap().parse::<u64>().unwrap())
-        .sum::<u64>();
-    assert_eq!(allocated, 11);
-    let mut ids = std::collections::HashSet::new();
-    for (row, size) in rows.into_iter().zip(["3", "3", "3", "2"]) {
-        assert_eq!(row["size"], size);
-        assert_ne!(row["reduceOnly"], true);
-        assert_eq!(row["attachAlgoOrders"][0]["tpTriggerPrice"], "65000");
-        assert_eq!(row["attachAlgoOrders"][0]["slTriggerPrice"], "55000");
-        assert!(ids.insert(row["clientOrderId"].clone().to_string()));
-    }
-    assert!(h.failures.is_empty());
-    assert_eq!(h.pending.len(), 0);
-    assert_eq!(h.requests.len(), 1);
-    assert!(
-        h.actions
+    // AGT-120: a reduce-only order may not carry legs, so the split's attachments are checked
+    // on an opening order and its reduce-only flag on a legless one.
+    for reduce in [false, true] {
+        let mut h = harness(4.0, 5.0, 1.0);
+        let mut intent = order(12.0);
+        if reduce {
+            intent["reduceOnly"] = json!(true);
+        } else {
+            intent["takeProfit"] = json!(65000.04);
+            intent["stopLoss"] = json!(55000.04);
+        }
+        place(&mut h, json!([intent]));
+        let rows = accept_batch(&mut h, 100);
+        // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
+        // TS:2199-2220 rounds each of three lots to 3, then appends remainder 2.
+        assert_eq!(rows.len(), 4);
+        let allocated = rows
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
-    );
+            .map(|row| row["size"].as_str().unwrap().parse::<u64>().unwrap())
+            .sum::<u64>();
+        assert_eq!(allocated, 11);
+        let mut ids = std::collections::HashSet::new();
+        for (row, size) in rows.into_iter().zip(["3", "3", "3", "2"]) {
+            assert_eq!(row["size"], size);
+            if reduce {
+                assert_eq!(row["reduceOnly"], true);
+                assert!(row.get("attachAlgoOrders").is_none(), "{row}");
+            } else {
+                assert_ne!(row["reduceOnly"], true);
+                assert_eq!(row["attachAlgoOrders"][0]["tpTriggerPrice"], "65000");
+                assert_eq!(row["attachAlgoOrders"][0]["slTriggerPrice"], "55000");
+            }
+            assert!(ids.insert(row["clientOrderId"].clone().to_string()));
+        }
+        assert!(h.failures.is_empty());
+        assert_eq!(h.pending.len(), 0);
+        assert_eq!(h.requests.len(), 1);
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+        );
+    }
 }
 #[test]
 fn valid_grouped_chunks_preserve_each_caller_id_exactly_once() {

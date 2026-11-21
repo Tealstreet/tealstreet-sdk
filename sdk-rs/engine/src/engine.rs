@@ -11949,28 +11949,30 @@ mod placement_ack_tests {
     // command is refused NotSent before the venue (whose stub would answer ["7","8"]).
     #[test]
     fn a_reduce_only_order_with_legs_is_refused_before_the_venue() {
-        let order = |extra: &str| -> crate::model::PlaceOrderOpts {
-            let mut order = serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":1,"price":100});
-            let extra: serde_json::Value =
-                serde_json::from_str(&format!("{{{}}}", &extra[extra.len().min(1)..])).unwrap();
-            for (key, value) in extra.as_object().unwrap() {
-                order[key] = value.clone();
-            }
-            serde_json::from_value(order).unwrap()
+        let order = |kind: &str, extra: &str| -> crate::model::PlaceOrderOpts {
+            serde_json::from_str(&format!(
+                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":1,"price":100{extra}}}"#
+            ))
+            .unwrap()
         };
-        for (legs, refused) in [
-            (r#","reduceOnly":true,"stopLoss":120"#, true),
-            (r#","reduceOnly":true,"takeProfit":80"#, true),
-            (r#","reduceOnly":true,"stopLoss":0,"takeProfit":80"#, true),
-            (r#","close":true,"stopLoss":120"#, true),
-            (r#","type":"market","reduceOnly":true,"stopLoss":120"#, true),
-            (r#","reduceOnly":true"#, false),
+        for (kind, legs, refused) in [
+            ("limit", r#","reduceOnly":true,"stopLoss":120"#, true),
+            ("limit", r#","reduceOnly":true,"takeProfit":80"#, true),
             (
+                "limit",
+                r#","reduceOnly":true,"stopLoss":0,"takeProfit":80"#,
+                true,
+            ),
+            ("limit", r#","close":true,"stopLoss":120"#, true),
+            ("market", r#","reduceOnly":true,"stopLoss":120"#, true),
+            ("limit", r#","reduceOnly":true"#, false),
+            (
+                "limit",
                 r#","reduceOnly":true,"stopLoss":0,"takeProfit":null"#,
                 false,
             ),
-            (r#","reduceOnly":false,"stopLoss":120"#, false),
-            (r#","stopLoss":120,"takeProfit":80"#, false),
+            ("limit", r#","reduceOnly":false,"stopLoss":120"#, false),
+            ("limit", r#","stopLoss":120,"takeProfit":80"#, false),
         ] {
             for needs_stored in [false, true] {
                 let mut engine = engine(needs_stored);
@@ -11978,7 +11980,7 @@ mod placement_ack_tests {
                     0.,
                     Event::Command(Command::PlaceOrders {
                         command: 1,
-                        orders: vec![order(""), order(legs)],
+                        orders: vec![order("limit", ""), order(kind, legs)],
                     }),
                 );
                 let outcomes: Vec<_> = engine

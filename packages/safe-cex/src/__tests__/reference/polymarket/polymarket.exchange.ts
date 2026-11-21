@@ -23,6 +23,7 @@ import type {
 
 import { ethers } from 'ethers';
 import sumBy from 'lodash/sumBy';
+import { mapSeries } from 'p-iteration';
 
 import { BaseExchange } from '../../../exchanges/base';
 import { FrameStore } from '../../../store/frameStore';
@@ -632,6 +633,14 @@ export class PolymarketExchange extends BaseExchange {
   /**
    * Place an order
    */
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
     if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);

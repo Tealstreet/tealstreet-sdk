@@ -9,6 +9,7 @@ import { AsterDEXExchange } from './reference/asterdex/asterdex.exchange';
 import { BackpackExchange } from './reference/backpack/backpack.exchange';
 import { BinanceExchange } from './reference/binance/binance.exchange';
 import { BinanceInverseExchange } from './reference/binance/binanceinverse.exchange';
+import { BinanceOptionsExchange } from './reference/binance/binanceoptions.exchange';
 import { BinancePMExchange } from './reference/binance/binancepm.exchange';
 import { BinanceSpotExchange } from './reference/binance/binancespot.exchange';
 import { BingxExchange } from './reference/bingx/bingx.exchange';
@@ -19,6 +20,7 @@ import { BlofinExchange } from './reference/blofin/blofin.exchange';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from './reference/bybit/bybitspot.exchange';
+import { HyrotraderExchange } from './reference/bybit/hyrotrader.exchange';
 import { CoinbaseExchange } from './reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from './reference/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from './reference/grvt/grvt.exchange';
@@ -27,13 +29,16 @@ import { HyperliquidSpotExchange } from './reference/hyperliquid/hyperliquidspot
 import { KrakenExchange } from './reference/kraken/kraken.exchange';
 import { KrakenSpotExchange } from './reference/kraken/krakenspot.exchange';
 import { KucoinExchange } from './reference/kucoin/kucoin.exchange';
+import { KucoinSpotExchange } from './reference/kucoin/kucoinspot.exchange';
 import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { MexcExchange } from './reference/mexc/mexc.exchange';
 import { OKXExchange } from './reference/okx/okx.exchange';
 import { OrderlyExchange } from './reference/orderly/orderly.exchange';
 import { ParadexExchange } from './reference/paradex/paradex.exchange';
 import { PhemexExchange } from './reference/phemex/phemex.exchange';
+import { PolymarketExchange } from './reference/polymarket/polymarket.exchange';
 import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from './reference/stopEntryLegs';
+import { TxFlowExchange } from './reference/txflow/txflow.exchange';
 import { WeexExchange } from './reference/weex/weex.exchange';
 import { WOOXExchange } from './reference/woo/woo.exchange';
 
@@ -111,6 +116,11 @@ describe('every reference venue refuses a reduce-only order with legs before any
     ['phemex', () => new PhemexExchange('phemex' as any, options as any, store())],
     ['weex', () => new WeexExchange('weex' as any, options as any, store())],
     ['woo', () => new WOOXExchange('woo' as any, options as any, store())],
+    ['binanceoptions', () => new BinanceOptionsExchange('binanceoptions' as any, options as any, store())],
+    ['hyrotrader', () => new HyrotraderExchange('hyrotrader' as any, options as any, store())],
+    ['kucoinspot', () => new KucoinSpotExchange('kucoinspot' as any, options as any, store())],
+    ['polymarket', () => new PolymarketExchange('polymarket' as any, options as any, store())],
+    ['txflow', () => new TxFlowExchange('txflow' as any, { ...options, testnet: true } as any, store())],
   ];
   const plain = {
     symbol: 'BTCUSDT',

@@ -4,6 +4,7 @@ import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
+import { mapSeries } from 'p-iteration';
 
 import { BaseExchange } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
@@ -438,6 +439,14 @@ export class KucoinSpotExchange extends BaseExchange {
       lastUpdate: parseInt(order.lastUpdatedAt || order.orderTime || order.createdAt || `${Date.now()}`, 10),
       info: order,
     };
+  };
+
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
