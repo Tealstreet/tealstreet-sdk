@@ -31,8 +31,6 @@ const GROUP_PROOF_BOUND_MS: u32 = 10_000;
 const GROUP_PENDING_MESSAGE: &str = "is awaiting confirmation of its grouped placement";
 const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
-/// AGT-115: legs on a reduce-only entry were dropped; it closes, so they would protect nothing.
-const REDUCE_ONLY_LEGS_REFUSAL: &str = "Attaching a stop-loss or take-profit to a reduce-only order isn't supported on Lighter, so nothing was sent. Place the stop-loss as its own order.";
 
 #[derive(Default)]
 pub struct Trading {
@@ -2215,21 +2213,14 @@ impl Lighter {
         {
             return Err("Bybit BBO and TickSize controls are not supported by Lighter".into());
         }
-        // AGT-115: legs attach only to a limit/market entry that is not reduce-only; any
-        // other entry would be placed without them, so refuse the whole command first.
+        // AGT-115: legs attach only to a limit/market entry; any other entry would be placed
+        // without them, so refuse the whole command first. A reduce-only order with legs
+        // never reaches the venue: the engine refuses it for every venue (AGT-120).
         if orders
             .iter()
             .any(PlaceOrderOpts::stop_entry_with_attached_legs)
         {
             return Err(safe_cex_engine::model::stop_entry_legs_refusal("Lighter"));
-        }
-        if orders.iter().any(|o| {
-            o.reduce_only == Some(true)
-                && [o.stop_loss, o.take_profit]
-                    .iter()
-                    .any(|leg| leg.is_some_and(|price| price != 0.0))
-        }) {
-            return Err(REDUCE_ONLY_LEGS_REFUSAL.into());
         }
         let batch = orders.len() > 1
             && orders.iter().all(|o| {

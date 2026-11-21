@@ -81,7 +81,12 @@ impl Session {
             Ok(call) => call,
             Err(message) => {
                 self.audit_order_refusal(&name, action.kind(), message);
-                order_actions::unsupported(&out, &name, &id, request.seq);
+                if matches!(&action, order_actions::Action::Algo { op, .. } if matches!(op.as_str(), "chaser:amend" | "twap:amend"))
+                {
+                    order_actions::unsupported_message(&out, &name, &id, request.seq, message);
+                } else {
+                    order_actions::unsupported(&out, &name, &id, request.seq);
+                }
                 return;
             }
         };

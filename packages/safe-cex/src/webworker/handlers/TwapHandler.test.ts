@@ -38,6 +38,12 @@ const restoredRow = {
 };
 
 describe('TwapHandler', () => {
+  it('forwards a live amendment without changing restore ownership or issuing stop/start', () => {
+    const exchange = rustAlgoExchange();
+    const data = { id: 'twap-1', update: { intervalMs: 1000, remainingSlices: 3 } };
+    new TwapHandler(...handlerArgs(exchange)).handle({ op: 'twap:amend', data });
+    expect(exchange.algoOp).toHaveBeenCalledExactlyOnceWith('twap:amend', data);
+  });
   beforeEach(() => setTwapLockManager(null));
   afterEach(() => setTwapLockManager(undefined));
 

@@ -9,6 +9,12 @@ import { ChaserOrderHandler } from './ChaserOrderHandler';
 const start = { op: 'chaser:start', data: { symbol: 'BTCUSDT', size: 1, side: 'buy' } } as StoreWorkerPayload;
 
 describe('ChaserOrderHandler', () => {
+  it('forwards an amendment to the shared Rust account without stop/start', () => {
+    const exchange = rustAlgoExchange();
+    const data = { id: 'chase-1', update: { limitPrice: 100, maxAttempts: 20 } };
+    new ChaserOrderHandler(...handlerArgs(exchange)).handle({ op: 'chaser:amend', data });
+    expect(exchange.algoOp).toHaveBeenCalledExactlyOnceWith('chaser:amend', data);
+  });
   it.each([start, { op: 'chaser:terminate', data: 'chase-1' }, { op: 'chaser:terminateAll' }] as StoreWorkerPayload[])(
     'sends $op to the account engine Rust algos',
     (payload) => {

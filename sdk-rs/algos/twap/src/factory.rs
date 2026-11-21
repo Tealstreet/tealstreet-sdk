@@ -31,6 +31,7 @@ pub trait TwapChasers {
 
 pub const TWAP_OPS: &[&str] = &[
     "twap:start",
+    "twap:amend",
     "twap:resume",
     "twap:pause",
     "twap:stop",
@@ -276,8 +277,31 @@ impl AlgoFactory for TwapFactory {
     /// `_op_cx` is the sending socket's; TWAPs run on the account's context.
     fn handle(&self, op: &str, data: &str, _op_cx: &AlgoCx) -> Result<(), String> {
         let cx = &self.inner.cx;
+        if op == "twap:amend" && cx.scope.is_disposed() {
+            return Err("TWAP job is not amendable: its account is stopping".into());
+        }
         Inner::refresh_owner(&self.inner, cx);
         let data: Value = serde_json::from_str(data).map_err(|error| format!("{op}: {error}"))?;
+        if op == "twap:amend" {
+            let amendment = crate::TwapAmendment::parse(&data)?;
+            let mut env = self.inner.env.borrow_mut();
+            env.now = cx.now_ms();
+            let view = CxView {
+                cx,
+                chasers: &*self.inner.chasers,
+                client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
+            };
+            let (result, effects) = self
+                .inner
+                .book
+                .borrow_mut()
+                .amend(amendment, &mut *env, &view);
+            drop(env);
+            Inner::run(&self.inner, cx, effects);
+            Inner::ensure_driver(&self.inner, cx);
+            return result;
+        }
         let effects = {
             let mut env = self.inner.env.borrow_mut();
             env.now = cx.now_ms();

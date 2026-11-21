@@ -724,7 +724,6 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     let mut o = limit();
     o["side"] = json!("sell");
     o["reduceOnly"] = json!(true);
-    o["takeProfit"] = json!(120);
     place(&mut h, vec![o]);
     let (request, p) = body(&mut h, "/api/v3/trade/place-order");
     assert_eq!(p["category"], "USDT-FUTURES");
@@ -732,8 +731,15 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     assert_eq!(p["posSide"], "long");
     assert_eq!(p["qty"], "0.002");
     assert!(p.get("size").is_none());
-    assert_eq!(p["takeProfit"], "120");
     h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"4"}}"#);
+    // AGT-120: a reduce-only order may not carry legs, so the v3 attached take-profit is
+    // checked on an opening entry.
+    let mut o = limit();
+    o["takeProfit"] = json!(120);
+    place(&mut h, vec![o]);
+    let (request, p) = body(&mut h, "/api/v3/trade/place-order");
+    assert_eq!(p["takeProfit"], "120");
+    h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"5"}}"#);
     place(
         &mut h,
         vec![json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":80})],

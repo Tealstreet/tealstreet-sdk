@@ -846,8 +846,6 @@ fn stop_brackets_and_hedged_reduce_side() {
     let mut o = opts("");
     o.side = OrderSide::Sell;
     o.reduce_only = Some(true);
-    o.stop_loss = Some(68000.);
-    o.take_profit = Some(71000.);
     o.time_in_force = Some(TimeInForce::PostOnly);
     let a = command(
         &mut e,
@@ -859,6 +857,22 @@ fn stop_brackets_and_hedged_reduce_side() {
     let r = &writes(&a)[0];
     assert_eq!(p(r, "posSide").as_deref(), Some("Long"));
     assert_eq!(p(r, "reduceOnly"), None);
+    assert_eq!(p(r, "timeInForce").as_deref(), Some("PostOnly"));
+    // AGT-120: a reduce-only order may not carry legs, so they are checked on an opening one.
+    let mut o = opts("");
+    o.side = OrderSide::Sell;
+    o.stop_loss = Some(68000.);
+    o.take_profit = Some(71000.);
+    o.time_in_force = Some(TimeInForce::PostOnly);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 3,
+            orders: vec![o],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "posSide").as_deref(), Some("Short"));
     assert_eq!(p(r, "stopLossRp").as_deref(), Some("68000"));
     assert_eq!(p(r, "slTrigger").as_deref(), Some("ByMarkPrice"));
     assert_eq!(p(r, "tpTrigger").as_deref(), Some("ByLastPrice"));
