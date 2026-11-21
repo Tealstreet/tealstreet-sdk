@@ -421,6 +421,82 @@ async fn amended_chaser_keeps_an_order_already_at_its_constrained_quote() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_amended_chaser_keeps_on_tick_quotes_on_decimal_ticks() {
+    let mut misses = Vec::new();
+    for side in ["buy", "sell"] {
+        for cents in (1..=40).map(|n| n * 7) {
+            local(async {
+                let bid = 100_000.0 + f64::from(cents) / 10.0;
+                let port = FakePort::new("bybit");
+                port.accept_placements();
+                port.store
+                    .borrow_mut()
+                    .markets
+                    .get_mut("BTCUSDT")
+                    .unwrap()
+                    .precision
+                    .price = 0.1;
+                // Start away from the touch on the side that forces a re-quote.
+                if side == "buy" {
+                    port.set_ticker(99_000.0, 99_000.1);
+                } else {
+                    port.set_ticker(101_000.0, 101_000.1);
+                }
+                let (factory, cx) = start(
+                    &port,
+                    &format!(r#"{{"symbol":"BTCUSDT","size":1,"side":"{side}","maxAttempts":100,"delay":0}}"#),
+                );
+                settle(1100).await;
+                let id = factory.book().active_chasers()[0].id.clone();
+                factory
+                    .handle(
+                        "chaser:amend",
+                        &serde_json::json!({"id":id,"update":{"offset":0.0}}).to_string(),
+                        &cx,
+                    )
+                    .unwrap();
+                let ask = safe_cex_chaser::adjust(bid + 0.1, 0.1);
+                port.set_ticker(bid, ask);
+                settle(1100).await;
+                let expected = if side == "buy" { bid } else { ask };
+                let placed = port.placements().last().unwrap().0;
+                if placed != safe_cex_chaser::adjust(expected, 0.1) {
+                    misses.push(format!("{side} touch {bid}/{ask}: placed {placed}"));
+                }
+            })
+            .await;
+        }
+    }
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_twap_slice_chaser_is_amended_only_through_its_twap() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let cx = AlgoCx::new(port.clone(), Scope::new());
+        let factory = ChaserFactory::new(cx.clone());
+        let mut options: safe_cex_chaser::ChaserOptions = serde_json::from_str(BUY_ONE).unwrap();
+        options.twap_id = Some("twap-1".into());
+        let id = factory.book().start(options).unwrap();
+        settle(1100).await;
+        let error = factory
+            .handle(
+                "chaser:amend",
+                &serde_json::json!({"id":id,"update":{"limitPrice":101.0}}).to_string(),
+                &cx,
+            )
+            .unwrap_err();
+        assert!(error.contains("not amendable"), "{error}");
+        port.set_ticker(102.0, 102.5);
+        settle(1100).await;
+        assert_eq!(port.placements(), vec![(100.0, 1.0), (102.0, 1.0)]);
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn amend_refuses_immutable_chaser_fields_and_ended_jobs() {
     local(async {
         let port = FakePort::new("bybit");

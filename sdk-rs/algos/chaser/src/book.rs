@@ -291,10 +291,16 @@ impl ChaserBook {
         amendment.validate()?;
         let chase = self
             .find(&amendment.id)
+            // A TWAP slice's chase belongs to its TWAP; it is edited through `twap:amend`.
             .filter(|chase| {
-                !chase.is_stopped() && !chase.scope.is_disposed() && !chase.order_may_be_open()
+                chase.options.twap_id.is_none()
+                    && !chase.is_stopped()
+                    && !chase.scope.is_disposed()
+                    && !chase.order_may_be_open()
             })
-            .ok_or("Chaser job is not amendable: finished, stopping, unknown or missing")?;
+            .ok_or(
+                "Chaser job is not amendable: finished, stopping, unknown, missing or a TWAP slice",
+            )?;
         let mut current = chase.amendment.borrow().clone();
         if let Some(value) = amendment.update.limit_price {
             current.limit_price = Some(value);
@@ -584,12 +590,15 @@ impl ChaserBook {
             OrderSide::Buy => (raw - offset).min(amendment.limit_price.unwrap_or(f64::INFINITY)),
             OrderSide::Sell => (raw + offset).max(amendment.limit_price.unwrap_or(0.0)),
         };
-        let units = constrained / step;
+        // Round outward from the market, but keep a quote already on the tick:
+        // a float floor/ceil of constrained / step drops one on decimal ticks.
+        let nearest = adjust(constrained, step);
+        let tolerance = step * 1e-6;
         let mut price = match chase.options.side {
-            OrderSide::Buy => units.floor() * step,
-            OrderSide::Sell => units.ceil() * step,
+            OrderSide::Buy if nearest > constrained + tolerance => adjust(nearest - step, step),
+            OrderSide::Sell if nearest < constrained - tolerance => adjust(nearest + step, step),
+            _ => nearest,
         };
-        price = adjust(price, step);
         if let Some(limit) = amendment.limit_price {
             if chase.options.side == OrderSide::Buy && price > limit {
                 price = adjust(price - step, step);
