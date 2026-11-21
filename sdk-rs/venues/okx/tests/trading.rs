@@ -3255,7 +3255,7 @@ fn algo_rate_limited_cancel_50061_keeps_engine_and_row_unknown() {
 #[test]
 fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
     use safe_cex_engine::Outcome;
-    let refusal = "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX, so nothing was sent. Place the stop-loss after the entry fills.";
+    let refusal = "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills.";
     for entry in [
         r#""type":"conditional","triggerPrice":41000"#,
         r#""type":"stop_market","price":41000"#,
