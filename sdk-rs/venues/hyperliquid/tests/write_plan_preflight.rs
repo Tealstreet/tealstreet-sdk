@@ -227,11 +227,15 @@ fn runtime_failure_suffix(
     fenced_suffix: bool,
     recorded_exception: bool,
 ) {
-    let second_rows = 1 + [orders[1].stop_loss, orders[1].take_profit]
-        .into_iter()
-        .flatten()
-        .filter(|price| *price > 0.)
-        .count();
+    let rows = |order: &PlaceOrderOpts| {
+        1 + [order.stop_loss, order.take_profit]
+            .into_iter()
+            .flatten()
+            .filter(|price| *price > 0.)
+            .count()
+    };
+    let second_rows = rows(&orders[1]);
+    let tail_rows = rows(&orders[2]);
     let mut engine = configured();
     engine.handle(
         2000.,
@@ -310,7 +314,7 @@ fn runtime_failure_suffix(
     let elements = error["elements"]
         .as_array()
         .expect("complete per-element outcomes");
-    assert_eq!(elements.len(), second_rows + 2);
+    assert_eq!(elements.len(), second_rows + 1 + tail_rows);
     assert_eq!(elements[0]["index"], 0);
     assert_eq!(elements[0]["status"], "placed");
     assert_eq!(elements[0]["orderIds"], json!(["91"]));
@@ -334,15 +338,17 @@ fn runtime_failure_suffix(
             }
         );
     }
-    assert_eq!(elements[second_rows + 1]["status"], "notSent");
-    if fenced_suffix {
-        assert_eq!(elements[second_rows + 1]["error"]["outcome"], "notSent");
-        assert_eq!(
-            elements[second_rows + 1]["error"]["message"],
-            "Request is not in a sendable state"
-        );
-    } else {
-        assert!(elements[second_rows + 1].get("error").is_none(), "{error}");
+    for tail in &elements[second_rows + 1..] {
+        assert_eq!(tail["status"], "notSent");
+        if fenced_suffix {
+            assert_eq!(tail["error"]["outcome"], "notSent");
+            assert_eq!(
+                tail["error"]["message"],
+                "Request is not in a sendable state"
+            );
+        } else {
+            assert!(tail.get("error").is_none(), "{error}");
+        }
     }
 }
 
@@ -694,6 +700,23 @@ fn market_row_refusal_pins_stop_before_next_live_price_preparation() {
     market.price = None;
     runtime_failure_orders(
         vec![order(3.), market.clone(), market],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+        "notSent",
+    );
+}
+
+// AGT-117: a market entry's legs are rows of its own grouped write, so a refused market
+// bracket journals three refused rows, and an unsent one three unsent rows.
+#[test]
+fn market_bracket_rows_are_journaled_when_refused_or_unsent() {
+    let mut bracket = order(3.);
+    bracket.kind = safe_cex_engine::model::OrderType::Market;
+    bracket.price = None;
+    bracket.stop_loss = Some(80.);
+    bracket.take_profit = Some(120.);
+    runtime_failure_orders(
+        vec![order(3.), bracket.clone(), bracket],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
         "notSent",

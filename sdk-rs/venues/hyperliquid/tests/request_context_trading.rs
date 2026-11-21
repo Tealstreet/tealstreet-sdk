@@ -1261,6 +1261,48 @@ fn a_filled_or_resting_parent_returns_its_id_with_either_child_state() {
     }
 }
 
+// AGT-117: a market entry's legs ride in its grouped write, and the live reply names only the
+// filled parent, so the result is that one ID (the host's receipt counts no separate legs).
+// A refused leg keeps the filled parent as known partial evidence instead of `placed`.
+#[test]
+fn a_market_bracket_returns_its_filled_parent_and_reports_a_refused_leg() {
+    for (children, expect_ok) in [
+        (json!(["waitingForTrigger", "waitingForTrigger"]), true),
+        (
+            json!(["waitingForTrigger", {"error":"Insufficient margin to place order."}]),
+            false,
+        ),
+    ] {
+        let (mut e, _) = boot();
+        let order = json!({"symbol":"BTC-PERP","type":"market","side":"buy","amount":1,
+            "stopLoss":80,"takeProfit":120,"clientOrderId":CLOID});
+        let c = Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![serde_json::from_value(order).unwrap()],
+        };
+        let actions = command(&mut e, NOW, c);
+        let request = native_release(&mut e, &actions);
+        let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(wire["action"]["grouping"], "normalTpsl");
+        assert_eq!(wire["action"]["orders"].as_array().unwrap().len(), 3);
+        let response = json!({"status":"ok","response":{"type":"order","data":{"statuses":[
+            {"filled":{"oid":3001,"totalSz":"1","avgPx":"100","cloid":CLOID}},
+            children[0], children[1]
+        ]}}})
+        .to_string();
+        respond(&mut e, NOW + 1., &request, 200, &response);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        if expect_ok {
+            assert_eq!(result, vec![Ok(r#"["3001"]"#.into())]);
+        } else {
+            let error = result[0].as_ref().unwrap_err();
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["3001"]);
+        }
+        no_trade(&actions);
+    }
+}
+
 #[test]
 fn a_deferred_attachment_requires_its_accepted_parent_in_the_parent_row() {
     for statuses in [

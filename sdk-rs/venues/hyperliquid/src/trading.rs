@@ -756,7 +756,9 @@ impl Hyperliquid {
             c: cloid,
         };
         let mut wires = vec![main];
-        if opts.kind == OrderType::Limit {
+        // AGT-117: a market entry is a marketable limit, so it groups its legs the same way;
+        // each leg's `p` is the slippage-capped parent price (verified live 2026-11-21).
+        if matches!(opts.kind, OrderType::Limit | OrderType::Market) {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
                 // Like TS, a zero bracket price means no bracket on every market.
                 if let Some(trigger) = value.filter(|p| *p != 0.0) {
