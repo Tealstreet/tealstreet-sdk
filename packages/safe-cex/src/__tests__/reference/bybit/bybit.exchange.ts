@@ -88,6 +88,7 @@ import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { normalizeBybitExecutionTimestampMs, normalizeBybitExecutionTimestampSeconds } from './bybit.execution-time';
@@ -117,6 +118,13 @@ const MAX_CLOSED_PNL_PAGES = 20;
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const PRIVATE_SNAPSHOT_REFRESH_DEBOUNCE_MS = 250;
+
+/** AGT-115: trailing and position stops drop attached legs; conditional entries carry them. */
+export const bybitDropsStopEntryLegs = (order: PlaceOrderOpts) =>
+  (order.type === OrderType.StopLoss ||
+    order.type === OrderType.TakeProfit ||
+    order.type === OrderType.TrailingStopLoss) &&
+  stopEntryWithAttachedLegs(order);
 const PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
@@ -2737,6 +2745,7 @@ export class BybitExchange extends BaseExchange {
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.validateOrderCapabilities(opts);
+    if (bybitDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     const category = this.getCategoryForSymbol(opts.symbol);
     if (category === 'option') return this.placeOptionOrder(opts, clientOrderId);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
@@ -3054,6 +3063,7 @@ export class BybitExchange extends BaseExchange {
     // Explicit execution controls and caller client IDs must reject atomically
     // before any request; the special-order loop continues after transport errors.
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(bybitDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     for (const order of orders) {
       if (isBybitOptionSymbol(order.symbol)) this.assertOptionOrderPlaceable(order);
       else this.getOrderExecutionParams(order);
