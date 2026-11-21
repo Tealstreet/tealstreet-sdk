@@ -75,6 +75,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
 import { mapBitgetFills, mapBitgetUtaFills } from './bitget.fills';
 import { mapBitgetBills } from './bitget.income';
@@ -2032,6 +2033,8 @@ export class BitgetExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: stop and trailing payloads never carry the legs; refuse before any I/O.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bitget'));
     await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
       if (this.isAlgoOrder(opts)) {
@@ -2058,6 +2061,7 @@ export class BitgetExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bitget'));
     await this.ensureAccountTypeDetected();
     const [algoOrders, normalOrders] = partition(orders, this.isAlgoOrder);
 

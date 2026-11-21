@@ -776,3 +776,43 @@ fn deferred_group_without_proven_parent_keeps_unknown_fence() {
         true,
     );
 }
+
+// AGT-115: `wires` groups legs only with a limit entry, so a stop or take-profit entry
+// was placed without them. It now refuses the whole batch before any write.
+#[test]
+fn a_stop_entry_with_attached_legs_refuses_entire_batch() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Hyperliquid");
+    for kind in ["stop_market", "take_profit_market"] {
+        for legs in [
+            json!({"stopLoss": 80}),
+            json!({"takeProfit": 120}),
+            json!({"stopLoss": 0, "takeProfit": 120}),
+        ] {
+            let mut stop = json!({"symbol": "BTC-PERP", "type": kind, "side": "buy", "amount": 3, "price": 110});
+            for (k, v) in legs.as_object().unwrap() {
+                stop[k] = v.clone();
+            }
+            let mut engine = configured();
+            engine.handle(
+                2000.,
+                Event::Command(Command::PlaceOrders {
+                    command: 77,
+                    orders: vec![order(3.), serde_json::from_value(stop).unwrap()],
+                }),
+            );
+            let actions = prepared_now(&mut engine);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_))),
+                "{kind} {legs}"
+            );
+            assert!(
+                actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { command: 77, error })
+                    if error.outcome == Some(Outcome::NotSent) && error.legacy_text() == refusal)),
+                "{kind} {legs}: {actions:?}"
+            );
+        }
+    }
+}

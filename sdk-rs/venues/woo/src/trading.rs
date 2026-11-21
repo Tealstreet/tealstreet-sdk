@@ -272,6 +272,11 @@ impl Woo {
                     "WOO opening conditional orders are not implemented by the TS venue".into(),
                 );
             }
+            // AGT-115: legs are placed only after a limit/market entry; stop and trailing
+            // algos would drop them, so the whole command is refused before any write.
+            if o.stop_entry_with_attached_legs() {
+                return Err(stop_entry_legs_refusal("WOO"));
+            }
             if !o.amount.is_finite() || o.amount < 0.0 {
                 return Err("Invalid WOO quantity".into());
             }
