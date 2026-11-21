@@ -431,6 +431,23 @@ impl BybitLinear {
             if let Err(error) = validate_stop_triggers(cx, orders) {
                 return Some(Gate::Fail(not_sent(error)));
             }
+            // AGT-115: a trailing or position stop goes to trading-stop with only its own
+            // price, dropping attached legs; conditional entries carry them natively.
+            if orders.iter().any(|o| {
+                matches!(
+                    o.kind,
+                    OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+                ) && o.stop_entry_with_attached_legs()
+            }) {
+                let venue = if self.variant.is_hyro() {
+                    "HyroTrader"
+                } else {
+                    "Bybit"
+                };
+                return Some(Gate::Fail(not_sent(
+                    safe_cex_engine::model::stop_entry_legs_refusal(venue),
+                )));
+            }
         }
         if let Some((_, result)) = self.variant_control(command) {
             return Some(match result {
