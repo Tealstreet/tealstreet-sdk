@@ -69,11 +69,18 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 
 Ordinary writes share the engine's mutation release domain across commands.
 Single writes have a 200ms floor, restoring the legacy transport's five-request
-budget. A plan using create-batch or cancel-batch also shares a 1200ms floor:
+budget. A plan using create-batch or cancel-batch also shares a batch floor of
+120ms per order in its largest batch, so a full ten-order batch keeps 1200ms:
 Bybit counts orders within a batch, so two commands cannot each release ten
-orders in the same second. Smaller batches and single-order fallbacks in such
-a plan conservatively use that same batch floor. Existing per-plan batch waits
-remain; unrelated reads and history's separate pacing remain unchanged.
+orders in the same second. Charging every batch the whole 1200ms paced a burst
+of one-order placements (each a one-order create-batch) at one per 1.2s, which
+users saw as DELEGATED capping their clicks (AGT-124); they now run at the 200ms
+single-write floor. A floor is set by the batch just released, so small batches
+followed at once by a full batch can briefly exceed a 10/s budget; Bybit then
+refuses only the excess orders with native `10006`, a known rejection. Single-order
+fallbacks in a batch plan share that plan's floor; an unrecognised batch leg is
+charged the full 1200ms. Existing per-plan batch waits remain; unrelated reads
+and history's separate pacing remain unchanged.
 
 The floors advance only on actual engine Claim release, not queueing or a
 response. Held work retains its original owner, credential, deadline and

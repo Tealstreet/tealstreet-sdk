@@ -585,15 +585,28 @@ impl BybitLinear {
                 effects: Vec::new(),
             });
         }
-        let pacing = legs
-            .iter()
-            .any(|leg| {
-                matches!(
-                    leg.planned.path,
-                    "/v5/order/create-batch" | "/v5/order/cancel-batch"
-                )
-            })
-            .then_some(crate::pacing::BATCH_WRITE);
+        // The plan's largest batch sets its share of the batch floor (AGT-124).
+        let mut batch: Option<Option<usize>> = None;
+        for leg in &legs {
+            if !matches!(
+                leg.planned.path,
+                "/v5/order/create-batch" | "/v5/order/cancel-batch"
+            ) {
+                continue;
+            }
+            let orders = match &leg.planned.call {
+                Call::PlaceBatch { fallback } => Some(fallback.len()),
+                Call::Cancel { ids } => Some(ids.len()),
+                Call::CancelPartialStop { .. } => Some(1),
+                _ => None,
+            };
+            batch = Some(match (batch, orders) {
+                (None, orders) => orders,
+                (Some(Some(largest)), Some(orders)) => Some(largest.max(orders)),
+                _ => None,
+            });
+        }
+        let pacing = batch.map(crate::pacing::batch_write_for);
         let writes = match write_plan::build(&mut legs) {
             Ok(writes) => writes,
             Err(error) => {

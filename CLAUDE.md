@@ -24,7 +24,7 @@ re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
-Bybit REST mutation release budgets and their conservative batch fallback cost
+Bybit REST mutation release budgets and their per-order batch floor
 are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.

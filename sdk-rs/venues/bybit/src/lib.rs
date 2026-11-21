@@ -2799,7 +2799,7 @@ impl Venue for BybitLinear {
         &[history::ORDER_HISTORY_PACING, pacing::WRITE, pacing::BATCH]
     }
     fn http_pacing_sets(&self) -> &[safe_cex_engine::request_context::PacingSet] {
-        &[pacing::BATCH_SET]
+        &pacing::BATCH_SETS
     }
     fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
         Some(safe_cex_engine::request_context::ReleaseDomain {
