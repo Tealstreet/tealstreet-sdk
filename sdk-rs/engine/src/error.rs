@@ -909,27 +909,62 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
-/// Splits a trailing action sentence ("Check …", either case) off user text.
+/// The action sentences this SDK (and its callers' retained copy) ends user text
+/// with. Only these are actions: any other venue text is detail and is kept.
+const GUIDANCE_ACTIONS: &[&str] = &[
+    "Check your open orders before trying again",
+    "Check your open orders before adding protection",
+    "Check your open orders and position before adding protection",
+    "Check your open orders before adding another stop",
+    "Check your open orders before cancelling all orders",
+    "Check your open orders before placing or editing orders",
+    "Check your open orders before placing a replacement",
+    "Check your open orders before making another change",
+    "Check your open orders before editing it",
+    "Check your open orders before editing again",
+    "Check your open orders before restarting it",
+    "Check your open orders before restarting them",
+    "Check your open orders before restarting automated orders",
+    "Check your open orders before starting it again",
+    "Check your open orders before using a new order ID",
+    "Check your open orders for a second stop",
+    "Check your open orders for a duplicate",
+    "Check your open orders and positions before trying again",
+    "Check your open orders and positions for fills",
+    "Check your open orders and positions",
+    "Check your open orders",
+    "Check your orders and positions before trying again",
+    "Check your orders",
+    "Check Open Orders and Positions before trying again",
+    "Check Open Orders before retrying",
+    "Check Open Orders",
+    "Check it before stopping it again",
+];
+
+fn is_guidance(sentence: &str) -> bool {
+    let sentence = sentence.trim().trim_end_matches('.');
+    GUIDANCE_ACTIONS.iter().any(|action| {
+        sentence.len() == action.len()
+            && sentence.get(1..) == action.get(1..)
+            && sentence[..1].eq_ignore_ascii_case(&action[..1])
+    })
+}
+
+/// Splits one of our trailing action sentences off user text. Anything else,
+/// including venue text that starts with "Check", is returned whole.
 pub fn split_action(text: &str) -> (&str, Option<&str>) {
     let text = text.trim();
-    if text.starts_with("Check ") || text.starts_with("check ") {
+    if is_guidance(text) {
         return ("", Some(text));
     }
-    let at = [". Check ", ". check "]
-        .iter()
-        .filter_map(|marker| text.rfind(marker))
-        .max();
-    match at {
-        // Only a final, plain sentence is an action: "Check …. More text" and
-        // "Check ….: detail" are not.
-        Some(at)
-            if !text[at + 2..].trim_end_matches('.').contains(". ")
-                && !text[at + 2..].contains([':', ';']) =>
-        {
-            (&text[..at], Some(&text[at + 2..]))
+    let mut from = text.len();
+    while let Some(at) = text[..from].rfind(". ") {
+        if is_guidance(&text[at + 2..]) {
+            return (&text[..at], Some(&text[at + 2..]));
         }
-        _ => (text, None),
+        from = at;
     }
+    (text, None)
 }
 
 /// One action for a composed text: protection advice wins, then the earliest.
@@ -1425,6 +1460,94 @@ mod gone_detail_tests {
                         assert_eq!(actions(&text), 1, "{a:?} + {b:?}: {text}");
                     }
                 }
+            }
+        }
+        // Venue text that merely starts with "Check" is detail, never dropped.
+        for detail in [
+            "check sum mismatch",
+            "Check failed: insufficient margin",
+            "Leverage too high. Check your leverage settings",
+        ] {
+            for text in [
+                with_detail(&order_gone_text("BTCUSDT", true), detail),
+                join_note(&order_gone_text("BTCUSDT", true), detail),
+                join_note(detail, &order_gone_text("BTCUSDT", true)),
+                restore_unconfirmed_text(
+                    &order_gone_text("BTCUSDT", false),
+                    &order_gone_text("BTCUSDT", true),
+                    detail,
+                ),
+            ] {
+                assert!(
+                    text.contains(detail.trim_end_matches('.')),
+                    "{detail}: {text}"
+                );
+                assert_eq!(actions(&text), 1, "{detail}: {text}");
+            }
+        }
+        // Deterministic fuzz: venue-like detail built from non-guidance fragments
+        // (some start with "Check") survives every composer verbatim.
+        let fragments = [
+            "Check failed",
+            "check sum mismatch",
+            "Check your leverage settings",
+            "check the margin mode",
+            "Margin is insufficient",
+            "HTTP 502",
+            "order 12",
+            "Checking position",
+            "check",
+            "Check",
+            "Leverage too high",
+        ];
+        let separators = [". ", ": ", "; ", " ", ", "];
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        for _ in 0..20_000 {
+            let mut detail = fragments[next(fragments.len())].to_owned();
+            for _ in 0..next(3) {
+                detail.push_str(separators[next(separators.len())]);
+                detail.push_str(fragments[next(fragments.len())]);
+            }
+            if next(2) == 0 {
+                detail.push('.');
+            }
+            let kept = detail.trim_end_matches('.');
+            let base = [
+                order_gone_text("BTCUSDT", true),
+                stop_gone_text("BTCUSDT", OrderSide::Buy, OrderType::TakeProfit, true),
+            ][next(2)]
+            .clone();
+            let composed = [
+                (with_detail(&base, &detail), false),
+                (join_note(&base, &detail), true),
+                (
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), &base, &detail),
+                    false,
+                ),
+            ];
+            for (text, parts) in composed {
+                // The note join folds a repeated identical part; every distinct part stays.
+                if parts {
+                    for part in kept.split("; ") {
+                        assert!(
+                            text.contains(part.trim_end_matches('.')),
+                            "{detail:?}: {text}"
+                        );
+                    }
+                } else {
+                    assert!(text.contains(kept), "{detail:?}: {text}");
+                }
+                assert_eq!(actions(&text), 1, "{detail:?}: {text}");
+                assert!(
+                    !text.contains(".;") && !text.contains(".:"),
+                    "{detail:?}: {text}"
+                );
             }
         }
         let stop = stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, true);
