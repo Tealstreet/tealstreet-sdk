@@ -294,18 +294,53 @@ const LIST_READS = new Set([
   'validatorStats',
 ]);
 
+const MINUTE_MS = 60_000;
+const DAY_MS = 1440 * MINUTE_MS;
+// The shortest length of each candle; a month is bounded by February.
+const CANDLE_STEP_MS = new Map([
+  ['1m', MINUTE_MS],
+  ['3m', 3 * MINUTE_MS],
+  ['5m', 5 * MINUTE_MS],
+  ['15m', 15 * MINUTE_MS],
+  ['30m', 30 * MINUTE_MS],
+  ['1h', 60 * MINUTE_MS],
+  ['2h', 120 * MINUTE_MS],
+  ['4h', 240 * MINUTE_MS],
+  ['8h', 480 * MINUTE_MS],
+  ['12h', 720 * MINUTE_MS],
+  ['1d', DAY_MS],
+  ['3d', 3 * DAY_MS],
+  ['1w', 7 * DAY_MS],
+  ['1M', 28 * DAY_MS],
+]);
+
+/**
+ * 20 plus one per 60 candles, from the span the body asks for: both boundary candles
+ * are returned, so at most ceil(span/step)+1, capped at the venue's 5,000. Reserving
+ * 104 for every read made a chart's 330-bar reads queue ~15 s each (AGT-113).
+ */
+function candleSnapshotWeight(req: unknown): number {
+  const { interval, startTime, endTime } = (req ?? {}) as Record<string, unknown>;
+  const step = typeof interval === 'string' ? CANDLE_STEP_MS.get(interval) : undefined;
+  if (!step || typeof startTime !== 'number' || typeof endTime !== 'number') return 104;
+  const span = endTime - startTime;
+  if (!Number.isFinite(span) || span < 0) return 104;
+  return 20 + Math.ceil(Math.min(5000, Math.ceil(span / step) + 1) / 60);
+}
+
 export function hyperliquidInfoWeight(body: string | undefined): number {
-  let type: unknown;
+  let parsed: { type?: unknown; req?: unknown };
   try {
-    type = JSON.parse(body ?? '{}').type;
+    parsed = JSON.parse(body ?? '{}') ?? {};
   } catch {
     return 20;
   }
+  const type = parsed.type;
   if (type === 'userRole') return 60;
   if (typeof type === 'string' && LOW_WEIGHT.has(type)) return 2;
-  // Reserve the SDK's maximum 2,000-row history page or 5,000-candle reply before sending.
+  // Reserve the SDK's maximum 2,000-row history page before sending.
   if (typeof type === 'string' && LIST_READS.has(type)) return 120;
-  if (type === 'candleSnapshot') return 104;
+  if (type === 'candleSnapshot') return candleSnapshotWeight(parsed.req);
   return 20;
 }
 

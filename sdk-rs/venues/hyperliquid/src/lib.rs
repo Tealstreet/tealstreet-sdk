@@ -2311,7 +2311,7 @@ fn candle_body(
     limit: Option<u32>,
     from_ms: Option<f64>,
     to_ms: Option<f64>,
-) -> Option<String> {
+) -> Option<(String, u32)> {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Req<'a> {
@@ -2339,18 +2339,35 @@ fn candle_body(
     {
         return None;
     }
-    Some(
+    let start_time = start.max(0.0).floor() as u64;
+    let end_time = end as u64;
+    Some((
         serde_json::to_string(&Read {
             r#type: "candleSnapshot",
             req: Req {
                 coin,
                 interval: interval.as_str(),
-                start_time: start.max(0.0).floor() as u64,
-                end_time: end as u64,
+                start_time,
+                end_time,
             },
         })
         .unwrap(),
-    )
+        candle_weight(interval, start_time, end_time),
+    ))
+}
+
+/// Hyperliquid charges a candleSnapshot 20 plus one per 60 candles returned, at most
+/// 5,000. Both boundary candles are returned, so a span holds at most ceil(span/step)+1;
+/// a month is bounded by its shortest length. Reserving 104 for every read starved charts.
+fn candle_weight(interval: Interval, start_ms: u64, end_ms: u64) -> u32 {
+    const DAY: f64 = 86_400_000.0;
+    let step = match interval {
+        Interval::Mo1 => 28.0 * DAY,
+        other => other.ms(),
+    };
+    let span = end_ms.saturating_sub(start_ms) as f64;
+    let rows = ((span / step).ceil() + 1.0).min(5000.0) as u32;
+    20 + rows.div_ceil(60)
 }
 
 fn supported(interval: Interval) -> bool {

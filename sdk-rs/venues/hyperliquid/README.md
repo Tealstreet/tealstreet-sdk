@@ -95,3 +95,8 @@ any shorter caller bound. Discovery and HTTP share that deadline; neither arriva
 nor an early host timer renews it. Deferred release runs outside the discovery
 HTTP callback and rechecks the original Context. Retired generations cannot send
 or complete a reused command ID. Candle time geometry is captured at receipt.
+
+A queued candle read reserves 20 plus one weight per 60 candles its sent span can
+return (ceil(span/step)+1, months at 28 days, at most 5,000 candles = 104), matching
+Hyperliquid's documented charge. A flat 104 queued chart-sized reads ~15 s each
+(AGT-113); the shared host budget derives the same weight from the request body.
