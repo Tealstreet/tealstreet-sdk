@@ -334,7 +334,7 @@
     "hosted-server-turn-off": "Click to turn off",
     "hosted-server-reconnect-accounts": "Reconnect accounts to the hosted server",
     "hosted-server-info": "Connect to {{brand}}'s hosted server. Your API keys never leave your browser — the server only handles data streaming. Active accounts reconnect when you change this.",
-    "hosted-server-switch-failed": "Accounts could not reconnect after the cloud settings changed",
+    "hosted-server-switch-failed": "Accounts couldn’t reconnect after the hosted server changed",
     "hosted-server-status-success": "connected",
     "hosted-server-status-warning": "connecting",
     "hosted-server-status-error": "disconnected",

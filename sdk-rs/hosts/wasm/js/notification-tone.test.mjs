@@ -77,7 +77,7 @@ test('locale summary fragments preserve count and include one action for every p
   assert.equal(trade['placement-outcome-unknown_one'], '{{count}} order not confirmed. Check Open Orders and Positions before trying again.');
   assert.equal(trade['placement-outcome-unknown_other'], '{{count}} orders not confirmed. Check Open Orders and Positions before trying again.');
   assert.equal(trade['connection-status-bybitdemo-chaser-warning'], 'Bybit Demo order updates are not ready. Wait for live updates before starting a chase.');
-  assert.equal(trade['hosted-server-switch-failed'], 'Accounts could not reconnect after the cloud settings changed');
+  assert.equal(trade['hosted-server-switch-failed'], 'Accounts couldn’t reconnect after the hosted server changed');
   assert.equal(trade['breakeven-all-partial'], 'Breakeven stops: {{placed}} placed, {{failed}} not completed, {{unconfirmed}} not confirmed. Check your open orders before trying again.');
   for (const key of ['placement-outcome-unknown_one', 'placement-outcome-unknown_other']) {
     assert.equal((trade[key].match(/{{count}}/g) ?? []).length, 1);

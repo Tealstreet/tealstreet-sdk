@@ -2123,8 +2123,8 @@ impl Session {
                 self.send(envelope::error(
                     Some(&name),
                     &format!(
-                        "{} was not run: this account is not connected yet. Try again once it has loaded",
-                        msg.op
+                        "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded",
+                        algo_action_label(&msg.op)
                     ),
                 ));
             }
@@ -6927,3 +6927,17 @@ mod delegated_e2e;
 #[cfg(test)]
 #[path = "session/tests/delegated_resume.rs"]
 mod delegated_resume;
+
+/// Display names only, as the SDK's `algoActionLabel`; the op itself is unchanged.
+fn algo_action_label(op: &str) -> &'static str {
+    match op {
+        "chaser:start" => "Starting the chase",
+        "chaser:terminate" => "Stopping the chase",
+        "twap:start" => "Starting the TWAP",
+        "twap:resume" => "Resuming the TWAP",
+        "twap:pause" => "Pausing the TWAP",
+        "twap:stop" => "Stopping the TWAP",
+        "exec" => "Running this trading request",
+        _ => "This automated order request",
+    }
+}
