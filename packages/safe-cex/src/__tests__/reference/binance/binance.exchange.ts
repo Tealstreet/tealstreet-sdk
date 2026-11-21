@@ -77,7 +77,8 @@ import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
+  replacing,
   stopEntryLegsRefusal,
   stopEntryWithAttachedLegs,
 } from '../stopEntryLegs';
@@ -1695,12 +1696,12 @@ export class BinanceExchange extends BaseExchange {
     if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // Cancel existing closePosition orders if placing a new closePosition order
     // Binance only allows ONE closePosition order per direction per symbol
@@ -1766,7 +1767,7 @@ export class BinanceExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const allRegular: any[] = [];
     const allAlgo: any[] = [];

@@ -40,7 +40,7 @@ import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
@@ -912,7 +912,7 @@ export class BackpackExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
@@ -1165,7 +1165,7 @@ export class BackpackExchange extends BaseExchange {
     };
 
     try {
-      const result = await this.placeOrder(newOrderOpts);
+      const result = await replacing(this, () => this.placeOrder(newOrderOpts));
       this.log(`Order updated successfully: ${existingOrder.id} -> ${result.join(', ')}`, LogSeverity.Info);
       return result;
     } catch (err) {
@@ -1239,7 +1239,7 @@ export class BackpackExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds: string[] = [];
 

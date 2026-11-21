@@ -37,7 +37,12 @@ import { OrderlyExchange } from './reference/orderly/orderly.exchange';
 import { ParadexExchange } from './reference/paradex/paradex.exchange';
 import { PhemexExchange } from './reference/phemex/phemex.exchange';
 import { PolymarketExchange } from './reference/polymarket/polymarket.exchange';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from './reference/stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
+  replacing,
+} from './reference/stopEntryLegs';
 import { TxFlowExchange } from './reference/txflow/txflow.exchange';
 import { WeexExchange } from './reference/weex/weex.exchange';
 import { WOOXExchange } from './reference/woo/woo.exchange';
@@ -152,4 +157,62 @@ describe('every reference venue refuses a reduce-only order with legs before any
       }
     });
   }
+});
+
+// An amendment's replacement re-places an existing order's own parameters; the Rust engine
+// never gates amends, so the reference lets it through, via placeOrder or placeOrders alike.
+// Past the gate, the first write-shaping call throws a marker, so no network is involved.
+describe('an amendment replacement is not refused', () => {
+  const options = { key: 'test-key', secret: 'test-secret', passphrase: 'p', tuning: { consoleLogging: false } };
+  const bracket = {
+    symbol: 'BTCUSDT',
+    type: OrderType.Limit,
+    side: OrderSide.Sell,
+    amount: 1,
+    price: 110,
+    reduceOnly: true,
+    stopLoss: 120,
+  } as PlaceOrderOpts;
+  for (const [venue, make, shaping] of [
+    ['okx', () => new OKXExchange('okx' as any, options as any, new FrameStore() as any), 'getOrFetchPositionMode'],
+    ['phemex', () => new PhemexExchange('phemex' as any, options as any, new FrameStore() as any), 'formatCreateOrder'],
+  ] as const) {
+    it(venue, async () => {
+      const exchange = make() as any;
+      exchange.emitAndLogError = vi.fn();
+      exchange[shaping] = vi.fn(() => {
+        throw new Error('reached the write path');
+      });
+      await expect(exchange.placeOrder(bracket)).rejects.toThrow(REDUCE_ONLY_LEGS_REFUSAL);
+      await expect(replacing(exchange, () => exchange.placeOrder(bracket))).rejects.toThrow('reached the write path');
+    });
+  }
+});
+
+describe('replacing', () => {
+  const order = {
+    symbol: 'BTCUSDT',
+    type: OrderType.Limit,
+    side: OrderSide.Sell,
+    amount: 1,
+    price: 100,
+    reduceOnly: true,
+    stopLoss: 120,
+  } as PlaceOrderOpts;
+
+  it('exempts only the synchronous start of a replacement on that exchange', () => {
+    const exchange = {};
+    const other = {};
+    expect(refusesReduceOnlyLegs(exchange, order)).toBe(true);
+    expect(
+      replacing(exchange, () => [refusesReduceOnlyLegs(exchange, order), refusesReduceOnlyLegs(other, order)]),
+    ).toEqual([false, true]);
+    expect(refusesReduceOnlyLegs(exchange, order)).toBe(true);
+    expect(() =>
+      replacing(exchange, () => {
+        throw new Error('placement failed');
+      }),
+    ).toThrow('placement failed');
+    expect(refusesReduceOnlyLegs(exchange, order)).toBe(true);
+  });
 });

@@ -38,7 +38,7 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createKucoinSpotAPI } from './kucoinspot.api';
 import {
   KUCOIN_SPOT_ENDPOINTS,
@@ -443,7 +443,7 @@ export class KucoinSpotExchange extends BaseExchange {
 
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
@@ -451,7 +451,7 @@ export class KucoinSpotExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) {
       const msg = `KuCoin Spot does not support ${opts.type} orders`;

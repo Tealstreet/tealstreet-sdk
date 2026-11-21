@@ -55,7 +55,7 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { PolymarketAPI } from './polymarket.api';
 import { ORDER_SIDE_MAP, ORDER_STATUS_MAP, ORDER_TYPE_MAP, SignatureType } from './polymarket.constants';
 import { createSignedOrder, createWallet, signApiKeyDerivationMessage } from './polymarket.signing';
@@ -635,7 +635,7 @@ export class PolymarketExchange extends BaseExchange {
    */
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
@@ -643,7 +643,7 @@ export class PolymarketExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     const rejectOrder = (message: string): never => {
       this.emitAndLogError(message);
@@ -754,13 +754,15 @@ export class PolymarketExchange extends BaseExchange {
     const price = 'price' in update ? update.price : order.price;
 
     // Place a new order with updated parameters
-    return this.placeOrder({
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      amount,
-      price,
-    });
+    return replacing(this, () =>
+      this.placeOrder({
+        symbol: order.symbol,
+        type: order.type,
+        side: order.side,
+        amount,
+        price,
+      }),
+    );
   };
 
   /**

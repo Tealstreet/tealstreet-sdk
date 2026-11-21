@@ -90,7 +90,7 @@ import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
   stopEntryLegsRefusal,
   stopEntryWithAttachedLegs,
 } from '../stopEntryLegs';
@@ -2754,7 +2754,7 @@ export class BybitExchange extends BaseExchange {
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.validateOrderCapabilities(opts);
     if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
@@ -3069,7 +3069,7 @@ export class BybitExchange extends BaseExchange {
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     if (orders.length === 0) {
       return [];
     }

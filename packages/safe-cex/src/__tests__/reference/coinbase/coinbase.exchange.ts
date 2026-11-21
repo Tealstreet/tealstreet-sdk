@@ -42,7 +42,7 @@ import { adjust, multiply, round } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './coinbase.api';
 import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
@@ -1561,7 +1561,7 @@ export class CoinbaseExchange extends BaseExchange {
       if ('amount' in update) newOrder.amount = update.amount;
 
       await this.cancelOrders([order]);
-      return await this.placeOrder(newOrder);
+      return await replacing(this, () => this.placeOrder(newOrder));
     }
 
     const rejectPreflight = (message: string): never => {
@@ -1713,7 +1713,7 @@ export class CoinbaseExchange extends BaseExchange {
 
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
@@ -1721,7 +1721,7 @@ export class CoinbaseExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     const payload = this.formatCreateOrder(opts);
     try {

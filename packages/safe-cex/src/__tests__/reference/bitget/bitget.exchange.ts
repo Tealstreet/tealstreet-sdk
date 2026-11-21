@@ -77,7 +77,8 @@ import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
+  replacing,
   stopEntryLegsRefusal,
   stopEntryWithAttachedLegs,
 } from '../stopEntryLegs';
@@ -2038,7 +2039,7 @@ export class BitgetExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // AGT-115: stop and trailing payloads never carry the legs; refuse before any I/O.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bitget'));
@@ -2068,7 +2069,7 @@ export class BitgetExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bitget'));
     await this.ensureAccountTypeDetected();
@@ -2620,7 +2621,7 @@ export class BitgetExchange extends BaseExchange {
     if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   private updateUtaStrategyOrder = async ({ order, update }: UpdateOrderOpts) => {

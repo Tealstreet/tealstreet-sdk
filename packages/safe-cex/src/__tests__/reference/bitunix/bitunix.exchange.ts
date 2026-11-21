@@ -60,7 +60,8 @@ import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
+  replacing,
   stopEntryLegsRefusal,
   stopEntryWithAttachedLegs,
 } from '../stopEntryLegs';
@@ -1808,7 +1809,7 @@ export class BitunixExchange extends BaseExchange {
           newOrderOpts.slTriggerType = slOrder.slTriggerType;
         }
 
-        await this.placeOrder(newOrderOpts);
+        await replacing(this, () => this.placeOrder(newOrderOpts));
       }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -1905,7 +1906,7 @@ export class BitunixExchange extends BaseExchange {
       );
     })();
 
-    const replacementIds = await this.placeOrder(replacementOrder);
+    const replacementIds = await replacing(this, () => this.placeOrder(replacementOrder));
     const replacementParentId = replacementIds[0];
     return replacementParentId ? [`${replacementParentId}__${virtualTpslLeg}`] : [];
   };
@@ -2170,7 +2171,7 @@ export class BitunixExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // AGT-115: a stop entry becomes a position TP/SL order without the legs; refuse first.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
@@ -2212,7 +2213,7 @@ export class BitunixExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
     for (const order of orders) {

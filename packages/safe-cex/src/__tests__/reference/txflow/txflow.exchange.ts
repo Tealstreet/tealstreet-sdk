@@ -18,7 +18,7 @@ import { ethers } from 'ethers';
 import { BaseExchange } from '../../../exchanges/base';
 import { FrameStore } from '../../../store/frameStore';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { TxflowAccount } from './txflow.account';
 import { createAPI, createPublicAPI } from './txflow.api';
 import {
@@ -231,13 +231,13 @@ export class TxFlowExchange extends BaseExchange {
   fetchBalance = () => this.account.fetchBalance();
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     return this.trading.placeOrders([opts]);
   };
   placeOrders = async (opts: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (opts.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (opts.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(opts);
     return this.trading.placeOrders(opts);
   };

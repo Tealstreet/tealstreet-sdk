@@ -60,7 +60,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI, createPublicAPI } from './binanceinverse.api';
 import { BinanceInversePrivateWebsocket } from './binanceinverse.ws-private';
 import { BinanceInversePublicWebsocket } from './binanceinverse.ws-public';
@@ -910,19 +910,19 @@ export class BinanceInverseExchange extends BaseExchange {
     if ('price' in update) newOrder.price = update.price;
     if ('amount' in update) newOrder.amount = update.amount;
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const payloads = this.formatCreateOrder(opts);
     return await this.placeOrderPayloads(payloads);
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const payloads = orders.flatMap((order) => this.formatCreateOrder(order));
     return await this.placeOrderPayloads(payloads);
   };

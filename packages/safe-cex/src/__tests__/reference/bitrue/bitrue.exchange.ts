@@ -44,7 +44,7 @@ import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './bitrue.api';
 import {
   ENDPOINTS,
@@ -442,7 +442,7 @@ export class BitrueExchange extends BaseExchange {
     if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   tick = async () => {
@@ -1314,7 +1314,7 @@ export class BitrueExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     const payloads = this.formatCreateOrder(opts);
     const res = await this.placeOrderBatch(payloads);
@@ -1328,7 +1328,7 @@ export class BitrueExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     const res = await this.placeOrderBatch(requests);

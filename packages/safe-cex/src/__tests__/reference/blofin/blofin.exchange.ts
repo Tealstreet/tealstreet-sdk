@@ -80,7 +80,7 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './blofin.api';
 import { mapBlofinClosedPosition } from './blofin.closed-pnl';
 import { mapBlofinFillToIncomeRecords } from './blofin.income';
@@ -1466,7 +1466,7 @@ export class BlofinExchange extends BaseExchange {
     } else {
       await this.cancelOrders(relativeOrders);
     }
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   cancelOrders = async (_orders: Order[]) => {
@@ -1541,7 +1541,7 @@ export class BlofinExchange extends BaseExchange {
 
       // Place the preserved order after a short delay to ensure the cancellation is processed
       await sleep(500);
-      await this.placeOrder(preserveOrder);
+      await replacing(this, () => this.placeOrder(preserveOrder));
     }
   };
 
@@ -1652,7 +1652,7 @@ export class BlofinExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.Conditional) {
       return [await this.placeTriggerOrder(await this.formatTriggerOrder(opts))];
@@ -1675,7 +1675,7 @@ export class BlofinExchange extends BaseExchange {
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (opts.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (opts.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(opts);
     const [triggerOrders, nonTriggerOrders] = partition(opts, (o) => o.type === OrderType.Conditional);
     const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));

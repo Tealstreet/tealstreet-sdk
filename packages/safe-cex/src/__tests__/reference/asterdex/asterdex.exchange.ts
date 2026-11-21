@@ -79,7 +79,8 @@ import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
+  refusesReduceOnlyLegs,
+  replacing,
   stopEntryLegsRefusal,
   stopEntryWithAttachedLegs,
 } from '../stopEntryLegs';
@@ -815,7 +816,7 @@ export class AsterDEXExchange extends BaseExchange {
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // AGT-115: brackets are built only for limit/market; a stop entry would drop its legs.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
@@ -1047,7 +1048,7 @@ export class AsterDEXExchange extends BaseExchange {
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     const orderIds: string[] = [];
@@ -1118,7 +1119,7 @@ export class AsterDEXExchange extends BaseExchange {
 
     // Cancel the old order and place the new one
     await this.cancelOrders([opts.order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   cancelOrders = async (orders: Order[]): Promise<void> => {

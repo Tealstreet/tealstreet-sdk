@@ -37,7 +37,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { buildOptionChain, optionExpiries } from '../bybit/bybit.options';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './binanceoptions.api';
 import {
   formatBinanceOptionOrder,
@@ -263,7 +263,7 @@ export class BinanceOptionsExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.assertOptionOrderPlaceable(opts);
     return [await this.sendOrder(opts, clientOrderId)];
@@ -272,7 +272,7 @@ export class BinanceOptionsExchange extends BaseExchange {
   /** One request per order: a batch is all-or-nothing on preflight, then placed in sequence. */
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     for (const order of orders) this.assertOptionOrderPlaceable(order);
     return await mapSeries(orders, (order) => this.sendOrder(order, order.clientOrderId));

@@ -43,7 +43,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './kucoin.api';
 import {
   ENDPOINTS,
@@ -881,7 +881,7 @@ export class KucoinExchange extends BaseExchange {
 
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
@@ -889,7 +889,7 @@ export class KucoinExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts)) {
       const payload = this.formatAlgoOrder(opts);
@@ -1165,7 +1165,7 @@ export class KucoinExchange extends BaseExchange {
       };
 
       // Place the new order
-      return await this.placeOrder(newOrder);
+      return await replacing(this, () => this.placeOrder(newOrder));
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
       throw err;
@@ -1191,7 +1191,7 @@ export class KucoinExchange extends BaseExchange {
         reduceOnly: true,
       };
 
-      return await this.placeOrder(newOrder);
+      return await replacing(this, () => this.placeOrder(newOrder));
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;

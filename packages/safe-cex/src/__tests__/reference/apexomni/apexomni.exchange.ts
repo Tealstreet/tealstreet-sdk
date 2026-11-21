@@ -53,7 +53,7 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './apexomni.api';
 import {
   BROKER_ID,
@@ -1387,7 +1387,7 @@ export class ApexOmniExchange extends BaseExchange {
    */
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
@@ -1395,7 +1395,7 @@ export class ApexOmniExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     // Resolved before SDK init and signing: the ID is hashed into the signed nonce.
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -1825,7 +1825,7 @@ export class ApexOmniExchange extends BaseExchange {
       if (terminal || filled >= totalAmount) return [];
       if (explicitAmount === undefined) newOrder.amount = Math.max(0, baselineRemaining - (filled - baselineFilled));
       if (newOrder.amount <= 0) return [];
-      return await this.placeOrder(newOrder);
+      return await replacing(this, () => this.placeOrder(newOrder));
     } finally {
       observers.delete(observe);
       if (observers.size === 0) this.amendmentObservers.delete(baseOrderId);

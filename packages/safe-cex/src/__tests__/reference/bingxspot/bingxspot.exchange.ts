@@ -18,7 +18,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { withHistoryCompleteness } from '../../../historyCompleteness';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
 import { adjust } from '../../../utils/safe-math';
-import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 
 export const SPOT_PATHS = Object.freeze({
   markets: '/openApi/spot/v1/common/symbols',
@@ -193,7 +193,7 @@ export class BingxSpotReference {
   }
   async placeOrder(o: PlaceOrderOpts): Promise<string[]> {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
-    if (reduceOnlyWithAttachedLegs(o)) throw new Error(REDUCE_ONLY_LEGS_REFUSAL);
+    if (refusesReduceOnlyLegs(this, o)) throw new Error(REDUCE_ONLY_LEGS_REFUSAL);
     const market = this.markets.find((m) => m.symbol === o.symbol);
     if (
       !market ||

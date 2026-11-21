@@ -20,3 +20,23 @@ export const reduceOnlyWithAttachedLegs = (order: PlaceOrderOpts) =>
 /** The Rust engine's `REDUCE_ONLY_LEGS_REFUSAL`, which it applies before any venue sees the order. */
 export const REDUCE_ONLY_LEGS_REFUSAL =
   "A stop-loss or take-profit can't be attached to a reduce-only order. Place it as its own order.";
+
+const replacingExchanges = new WeakSet<object>();
+
+/**
+ * AGT-120: an amendment's replacement re-places an existing order's own parameters, which the
+ * Rust engine never gates (its amend path is not a `PlaceOrders`). The flag is read only by the
+ * synchronous gate at the top of `placeOrder`, so it never reaches a concurrent new placement.
+ */
+export const replacing = <T>(exchange: object, place: () => T): T => {
+  replacingExchanges.add(exchange);
+  try {
+    return place();
+  } finally {
+    replacingExchanges.delete(exchange);
+  }
+};
+
+/** The reduce-only legs gate for a single placement; an amendment's replacement is exempt. */
+export const refusesReduceOnlyLegs = (exchange: object, order: PlaceOrderOpts) =>
+  !replacingExchanges.has(exchange) && reduceOnlyWithAttachedLegs(order);
