@@ -6511,6 +6511,20 @@ impl<V: Venue> Engine<V> {
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
             Event::Command(command) => {
+                // AGT-120: legs on an order that can only reduce would outlive the position,
+                // so the whole command is refused before any lock, fence or venue sees it.
+                if let Command::PlaceOrders { command, orders } = &command
+                    && orders
+                        .iter()
+                        .any(crate::model::PlaceOrderOpts::reduce_only_with_attached_legs)
+                {
+                    cx.refuse_before_entry(
+                        *command,
+                        VenueError::new(crate::model::REDUCE_ONLY_LEGS_REFUSAL)
+                            .outcome(crate::Outcome::NotSent),
+                    );
+                    return;
+                }
                 #[cfg(feature = "order-locks")]
                 let guarded = self.venue.guard_order_mutations()
                     || self.venue.guards_order_mutation(cx.store, &command);
@@ -11929,6 +11943,71 @@ mod placement_ack_tests {
                 Action::ClearTimer { .. } => None,
                 _ => armed,
             })
+    }
+
+    // AGT-120: an order that can only reduce never carries legs, on any venue; the whole
+    // command is refused NotSent before the venue (whose stub would answer ["7","8"]).
+    #[test]
+    fn a_reduce_only_order_with_legs_is_refused_before_the_venue() {
+        let order = |extra: &str| -> crate::model::PlaceOrderOpts {
+            let mut order = serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":1,"price":100});
+            let extra: serde_json::Value =
+                serde_json::from_str(&format!("{{{}}}", &extra[extra.len().min(1)..])).unwrap();
+            for (key, value) in extra.as_object().unwrap() {
+                order[key] = value.clone();
+            }
+            serde_json::from_value(order).unwrap()
+        };
+        for (legs, refused) in [
+            (r#","reduceOnly":true,"stopLoss":120"#, true),
+            (r#","reduceOnly":true,"takeProfit":80"#, true),
+            (r#","reduceOnly":true,"stopLoss":0,"takeProfit":80"#, true),
+            (r#","close":true,"stopLoss":120"#, true),
+            (r#","type":"market","reduceOnly":true,"stopLoss":120"#, true),
+            (r#","reduceOnly":true"#, false),
+            (
+                r#","reduceOnly":true,"stopLoss":0,"takeProfit":null"#,
+                false,
+            ),
+            (r#","reduceOnly":false,"stopLoss":120"#, false),
+            (r#","stopLoss":120,"takeProfit":80"#, false),
+        ] {
+            for needs_stored in [false, true] {
+                let mut engine = engine(needs_stored);
+                engine.handle(
+                    0.,
+                    Event::Command(Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![order(""), order(legs)],
+                    }),
+                );
+                let outcomes: Vec<_> = engine
+                    .drain_actions()
+                    .filter_map(|action| match action {
+                        Action::Notice(Notice::CommandDone { command, result }) => {
+                            Some((command, Ok(result)))
+                        }
+                        Action::Notice(Notice::CommandFailed { command, error }) => {
+                            Some((command, Err(error)))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(outcomes.len(), 1, "{legs}");
+                match &outcomes[0] {
+                    (1, Err(error)) if refused => {
+                        assert_eq!(error.outcome, Some(crate::Outcome::NotSent), "{legs}");
+                        assert_eq!(
+                            error.legacy_text(),
+                            crate::model::REDUCE_ONLY_LEGS_REFUSAL,
+                            "{legs}"
+                        );
+                    }
+                    (1, Ok(result)) if !refused => assert_eq!(result, r#"["7","8"]"#, "{legs}"),
+                    other => panic!("{legs}: {other:?}"),
+                }
+            }
+        }
     }
 
     #[test]
