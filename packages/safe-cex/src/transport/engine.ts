@@ -103,9 +103,10 @@ type Request = Parameters<Transport['request']>[0];
 type CredentialIntent = 'public' | 'primary' | 'secondary';
 const orderlyExchanges = new Set<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi']);
 const coinbaseExchanges = new Set<ExchangeName>(['coinbase', 'coinbasespot']);
+const COINBASE_AUTHORIZATION_HEADER = 'Coinbase-Authorization';
 
 const httpHeaderAliases = (exchange: ExchangeName, proxied: boolean, how: boolean): Record<string, string> =>
-  coinbaseExchanges.has(exchange) && proxied && !how ? { Authorization: 'Coinbase-Authorization' } : {};
+  coinbaseExchanges.has(exchange) && proxied && !how ? { Authorization: COINBASE_AUTHORIZATION_HEADER } : {};
 
 const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): void => {
   for (const [source, target] of Object.entries(aliases)) {
@@ -168,6 +169,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
 /** Headers that carry a venue credential: never sent toward the public proxy. */
 const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   'authorization',
+  COINBASE_AUTHORIZATION_HEADER.toLowerCase(),
   'x-ts-grvt-session',
   'x-grvt-account-id',
   ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
