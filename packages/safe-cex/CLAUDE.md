@@ -351,7 +351,8 @@ LOCAL and COSIGNED method forwarding is unchanged.
 AGT-97 uses shared Rust `chaser:amend`/`twap:amend` with typed v1 `{id,update}`.
 Chaser permits limitPrice/offset/maxAttempts; TWAP permits intervalMs/remainingSlices.
 Side, symbol and quantity stay immutable and unsupported fields refuse by name
-before enqueue. Finished/stopping/unknown jobs refuse. Edits affect the next
+before enqueue. Finished/stopping/unknown jobs refuse. A LOCAL amendment the
+worker cannot dispatch reports an error like a start (`USER_ALGORITHM_REQUESTS`). Edits affect the next
 attempt/slice, preserve in-flight children and never stop-and-replace; receipts
 retain conservative algo uncertainty. See the caller contract for exact units,
 future-quantity repartition, restore semantics and mobile enablement.

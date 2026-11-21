@@ -100,7 +100,14 @@ const START_RETRY_DELAYS_MS = [10_000, 20_000, 40_000, 60_000];
 /** A request held for an exchange that does not exist yet, matching the engine's write refusal. */
 const BUFFERED_REQUEST_WAIT_MS = 30_000;
 
-const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
+// User-requested algorithm changes refuse visibly when they cannot be dispatched.
+const USER_ALGORITHM_REQUESTS = new Set<StoreWorkerPayload['op']>([
+  'chaser:start',
+  'chaser:amend',
+  'twap:start',
+  'twap:resume',
+  'twap:amend',
+]);
 
 export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
@@ -793,7 +800,7 @@ export class ExchangeWorker {
           },
         ],
       });
-    } else if (USER_STARTED_ALGORITHMS.has(payload.op)) {
+    } else if (USER_ALGORITHM_REQUESTS.has(payload.op)) {
       this.logError(message, new Error(message), { payloadOp: payload.op }, false);
     }
     // Store sync, UI state and stop/cleanup ops have nothing left to act on; an
