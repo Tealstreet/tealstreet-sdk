@@ -2747,7 +2747,7 @@ impl BitgetFutures {
                         };
                         if self.remember_execution(format!("{}:{execution}", row.symbol)) {
                             cx.fill(Fill {
-                                id: None,
+                                id: Some(execution.into_owned()),
                                 order_id: order.into_owned(),
                                 symbol: row.symbol.into_owned(),
                                 side,
@@ -2877,7 +2877,7 @@ impl BitgetFutures {
             return;
         }
         cx.fill(Fill {
-            id: None,
+            id: (raw.base_volume.0.is_some() && !execution.is_empty()).then_some(execution),
             order_id: order.id.clone(),
             symbol: order.symbol.clone(),
             side: order.side,

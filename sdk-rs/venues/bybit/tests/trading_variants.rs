@@ -8074,3 +8074,53 @@ fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
     h.advance(2000.0);
     assert!(!h.has_request("/v5/order/create"));
 }
+
+// AGT-115, live on Bybit 2026-11-21: a trailing stop carrying legs went to trading-stop
+// with only its distance. Planning now refuses the whole batch before any write, on every
+// variant; account.rs pins the position-stop case and the create path that keeps legs.
+#[test]
+fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
+    for (variant, symbol, venue) in [
+        (Variant::Linear, "BTCUSDT", "Bybit"),
+        (Variant::Inverse, "BTCUSD", "Bybit"),
+        (Variant::Demo, "BTCUSDT", "Bybit"),
+        (Variant::Hyrotrader, "BTCUSDT", "HyroTrader"),
+    ] {
+        for (stop_loss, take_profit) in [
+            (Some(90.0), None),
+            (None, Some(110.0)),
+            (Some(0.0), Some(110.0)),
+        ] {
+            let mut h = ready(variant);
+            let mut trailing = order(symbol, 1.0);
+            trailing.kind = OrderType::TrailingStopLoss;
+            trailing.side = OrderSide::Sell;
+            trailing.price = Some(5.0);
+            trailing.stop_loss = stop_loss;
+            trailing.take_profit = take_profit;
+            place(&mut h, 1, vec![order(symbol, 1.0), trailing]);
+            // Only the position-mode read may precede planning.
+            if h.has_request("/v5/position/list") {
+                let mode = h.take("/v5/position/list");
+                h.reply(
+                    mode.id,
+                    200,
+                    &format!(r#"{{"retCode":0,"result":{{"list":[{{"symbol":"{symbol}","positionIdx":0}}]}}}}"#),
+                );
+            }
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get),
+                "{variant:?}: {:?}",
+                h.paths()
+            );
+            assert_eq!(
+                h.result(1),
+                Some(&Err(safe_cex_engine::model::stop_entry_legs_refusal(venue))),
+                "{variant:?}"
+            );
+            assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::NotSent));
+        }
+    }
+}

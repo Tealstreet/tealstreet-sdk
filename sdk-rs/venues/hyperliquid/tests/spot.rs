@@ -375,6 +375,61 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     assert_ne!(wires[1]["c"], wires[2]["c"]);
     assert_eq!(wires[0]["t"]["limit"]["tif"], "Alo");
 }
+// AGT-117: a spot market entry's legs were dropped and the entry placed. They now group with it
+// like a limit entry's, and the venue refuses the whole group: probed live 2026-11-21 on HYPE/USDC
+// (resting limit and marketable entries alike), one error row and nothing filled or resting.
+#[test]
+fn spot_market_bracket_is_sent_whole_and_the_venue_refusal_is_not_partial() {
+    let (mut e, _) = ready(true);
+    e.drain_plain().for_each(drop);
+    let mut o = order("HFUN/USDC");
+    o.kind = OrderType::Market;
+    o.price = None;
+    o.stop_loss = Some(0.0008);
+    o.take_profit = Some(0.0012);
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    let wires = p["action"]["orders"].as_array().unwrap();
+    assert_eq!(p["action"]["grouping"], "normalTpsl");
+    assert_eq!(wires.len(), 3);
+    assert!(wires.iter().all(|w| w["r"] == false));
+    assert!(wires[1..].iter().all(|w| w["p"] == wires[0]["p"]));
+    support::reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Placing trigger orders is not enabled on spot trading yet."}]}}}"#,
+    );
+    let actions = prepared_now(&mut e);
+    let actions = support::advance_packet_timers(&mut e, actions, 20_000.);
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 2, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{actions:?}");
+    assert_eq!(
+        failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert!(failures[0].partial.is_none(), "{:?}", failures[0]);
+    assert!(
+        failures[0]
+            .message
+            .contains("Placing trigger orders is not enabled on spot trading yet."),
+        "{:?}",
+        failures[0]
+    );
+}
 #[test]
 fn spot_zero_bracket_prices_disable_only_the_requested_child() {
     for (stop, take, children) in [

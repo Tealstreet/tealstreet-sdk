@@ -4992,3 +4992,49 @@ fn fresh_local_mark_allows_a_protective_edit_despite_old_shared_source_provenanc
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
     );
 }
+
+// AGT-115: a trailing entry sends only its peg params, so attached legs were dropped
+// while the optimistic row still showed them. It now refuses the whole command before
+// any write; a stop entry keeps carrying its legs natively.
+#[test]
+fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
+    let refusal = stop_entry_legs_refusal("Phemex");
+    for (stop_loss, take_profit) in [
+        (Some(70000.), None),
+        (None, Some(60000.)),
+        (Some(0.), Some(60000.)),
+    ] {
+        let mut e = engine();
+        let mut trailing = opts("");
+        trailing.kind = OrderType::TrailingStopLoss;
+        trailing.side = OrderSide::Sell;
+        trailing.price = Some(68000.);
+        trailing.stop_loss = stop_loss;
+        trailing.take_profit = take_profit;
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts(""), trailing],
+            },
+        );
+        assert!(writes(&a).is_empty(), "{stop_loss:?} {take_profit:?}");
+        let f = failure(&a);
+        assert_eq!(f.legacy_text(), refusal);
+        assert_eq!(f.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    }
+    let mut e = engine();
+    let mut stop = opts("");
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(68000.);
+    stop.stop_loss = Some(70000.);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![stop],
+        },
+    );
+    assert_eq!(p(&writes(&a)[0], "stopLossRp").as_deref(), Some("70000"));
+}

@@ -2584,6 +2584,15 @@ impl BinanceFutures {
             .store
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        // AGT-115: these return before the leg loop below, so attached legs would be
+        // dropped; refuse instead. Stop-type entries do place their legs after the entry.
+        if matches!(
+            opts.kind,
+            OrderType::TrailingStopLoss | OrderType::Conditional
+        ) && opts.stop_entry_with_attached_legs()
+        {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("Binance"));
+        }
         if opts.kind == OrderType::TrailingStopLoss {
             return Ok((Vec::new(), vec![self.format_trailing(cx, opts)?]));
         }

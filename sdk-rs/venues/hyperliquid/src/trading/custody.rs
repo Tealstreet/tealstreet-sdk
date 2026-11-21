@@ -602,6 +602,9 @@ const BATCH: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::C
         place_refusal("Order has zero size."),
         place_refusal("Builder fee has not been approved."),
         place_refusal("Reduce-only is invalid for spot trading."),
+        // AGT-117: a spot bracket (limit or marketable entry) answers this as one row for the
+        // whole group, with nothing filled or resting (live 2026-11-21, HYPE/USDC).
+        place_refusal("Placing trigger orders is not enabled on spot trading yet."),
     ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(Some(ErrorKind::Rejected)),

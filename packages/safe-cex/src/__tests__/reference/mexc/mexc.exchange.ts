@@ -42,6 +42,7 @@ import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './mexc.api';
 import {
   ENDPOINTS,
@@ -780,6 +781,8 @@ export class MexcExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: stop bodies carry only their own trigger; refuse rather than drop the legs.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
     if (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) {
       const message = 'MEXC opening conditional and trailing-stop placement is not implemented';
       this.emitAndLogError(message);
@@ -1279,6 +1282,7 @@ export class MexcExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
     if (orders.some((order) => order.type === OrderType.Conditional || order.type === OrderType.TrailingStopLoss)) {
       throw new Error('MEXC opening conditional and trailing-stop placement is not implemented');
     }

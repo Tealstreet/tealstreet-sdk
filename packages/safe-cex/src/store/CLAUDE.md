@@ -16,7 +16,10 @@ trip, normalizer or per-frame deep clone.
 `subscribe(section, listener)` observes a typed value, version and snapshot.
 `version(section)` advances only when the section's value changes. Equal
 sections retain identity. Ticker deltas copy their array and changed rows;
-other sections remain shared. Reentrant notifications are delivered in order.
+other sections remain shared. Each changed row is copied once per frame, and
+same-frame observations fill those unpublished copies in place: Hermes (mobile)
+pays per allocation, and per-field spreads made ticker ingest twice as slow
+(AGT-91). Reentrant notifications are delivered in order.
 A failing listener does not prevent peers from running or trigger recovery.
 
 `reset()` releases stream baselines and restores generated unloaded defaults.
@@ -70,8 +73,11 @@ book batch invalidates baselines until fresh full books arrive. Full books
 replace both sides, including an empty reset. Deltas upsert absolute amounts
 and delete amount-zero levels; finite zero prices remain valid. Consumers get
 sorted, cumulative levels without mutating previously published books. Numeric
-baselines are copied off source buffers before transfer. Reset discards cached
-frame ingestion as well as numeric baselines, allowing a snapshot to be reused.
+baselines are copied off source buffers before transfer. Delta baselines are
+sorted nonzero levels, merged per section rather than copied and re-sorted; a
+later row for the same price in one section wins, as with the Map it replaced.
+Reset discards cached frame ingestion as well as numeric baselines, allowing a
+snapshot to be reused.
 
 Apply errors request bounded native snapshots. Snapshots contain no executions,
 so valid original FILLS must be delivered once. FrameStore exposes book,

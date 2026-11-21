@@ -209,12 +209,12 @@ impl ApexOmni {
             .is_ok_and(|(_, identity)| identity.passphrase.is_some());
         let custody = if signed {
             let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
-            // ReadFailure covers only the one native signature resend; the
-            // startup backoff stays the transport retry.
+            // Neither a signature refusal nor a transport loss resends inline;
+            // the startup backoff is the only retry.
             let policy = ReadPolicy {
                 timeout_ms: crate::read::TIMEOUT_MS,
                 pacing: None,
-                retry: RetryPolicy::ReadFailure,
+                retry: RetryPolicy::Never,
             };
             match SelectedRead::background(cx, selected, policy) {
                 Ok(read) => Ok(crate::read::Custody::Admitted(read)),

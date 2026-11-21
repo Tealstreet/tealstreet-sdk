@@ -1,5 +1,5 @@
 //! Non-trading reads under engine custody. Each request keeps its own native
-//! one-time signature resend and three-retry budgets
+//! three-retry transport budget; a signature refusal fails without a resend
 //! (docs/plans/RUST_APEXOMNI_READ_CONTEXT.md).
 use crate::{ApexOmni, Pending, account, history, public, sign};
 use safe_cex_engine::json::ArrayAt;
@@ -33,7 +33,6 @@ pub struct Read {
     custody: Custody,
     unsigned: sign::Request,
     at: Option<ArrayAt>,
-    legacy: bool,
     retries: u8,
 }
 
@@ -127,17 +126,15 @@ impl ApexOmni {
         at: Option<ArrayAt>,
         native: Native,
     ) {
-        self.queue_read(cx, custody, request, at, false, 0, native);
+        self.queue_read(cx, custody, request, at, 0, native);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn queue_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         custody: Custody,
         request: sign::Request,
         at: Option<ArrayAt>,
-        legacy: bool,
         retries: u8,
         native: Native,
     ) {
@@ -154,11 +151,10 @@ impl ApexOmni {
             custody,
             unsigned: request,
             at,
-            legacy,
             retries,
         };
         let recipe = move |identity: &safe_cex_engine::signing::Identity| {
-            Box::new(sign::Http::new(identity.clone(), unsigned, legacy))
+            Box::new(sign::Http::new(identity.clone(), unsigned, false))
                 as Box<dyn safe_cex_engine::SignStep>
         };
         let queued = match custody {
@@ -187,14 +183,13 @@ impl ApexOmni {
         }
     }
 
-    /// A native resend or retry under engine authority from the same custody;
+    /// A native transport retry under engine authority from the same custody;
     /// history pages re-mint from their original root. No renewed root or reselection.
     fn resend(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         read: Read,
         mut native: Native,
-        legacy: bool,
         retries: u8,
         error: VenueError,
     ) {
@@ -232,7 +227,6 @@ impl ApexOmni {
                     custody,
                     unsigned: request,
                     at,
-                    legacy,
                     retries,
                 };
                 self.read_failed(cx, read, native, error);
@@ -240,7 +234,7 @@ impl ApexOmni {
             }
         };
         native.reset();
-        self.queue_read(cx, custody, request, at, legacy, retries, native);
+        self.queue_read(cx, custody, request, at, retries, native);
     }
 
     pub(crate) fn read_response(
@@ -259,12 +253,8 @@ impl ApexOmni {
             return;
         }
         match crate::api_response(response) {
-            crate::ApiResponse::SignatureRefusal(error) if !read.legacy => {
-                // The venue refused the first signature; a refused resend never leaves.
-                let error = error.outcome(safe_cex_engine::Outcome::Rejected);
-                let retries = read.retries;
-                self.resend(cx, read, native, true, retries, error);
-            }
+            // No legacy resend: the venue verifies the primary canonical text, so the
+            // whole-second legacy one could only repeat a refusal, at 1 s uniqueness (AGT-75).
             crate::ApiResponse::Failed(error) | crate::ApiResponse::SignatureRefusal(error) => {
                 self.read_failed(cx, read, native, error);
             }
@@ -323,8 +313,8 @@ impl ApexOmni {
             && read.retries < 3
             && !matches!(native, Native::Public(_))
         {
-            let (legacy, retries) = (read.legacy, read.retries + 1);
-            self.resend(cx, read, native, legacy, retries, error);
+            let retries = read.retries + 1;
+            self.resend(cx, read, native, retries, error);
         } else {
             self.read_failed(cx, read, native, error);
         }

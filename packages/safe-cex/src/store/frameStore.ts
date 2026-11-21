@@ -1,6 +1,6 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type { StoreData } from '../generated/StoreData';
-import type { MessageHandlerStatsType, OrderFillEvent } from '../types';
+import type { MessageHandlerStatsType, OrderFillEvent, Writable } from '../types';
 import type { FrameBook } from './bookFrames';
 import type { FrameCandle } from './candleFrames';
 
@@ -22,6 +22,25 @@ import { WorkerFrameRecoveryScopes } from './workerFrameRecoveryScopes';
 
 export type { FrameBook } from './bookFrames';
 export type { FrameCandle } from './candleFrames';
+
+/** Fresh symbol and ID indexes; a plain loop avoids one entry array per row. */
+function indexRows<T extends { symbol: string; id: string }>(
+  rows: readonly T[],
+): [Record<string, T>, Record<string, T>] {
+  const bySymbol: Record<string, T> = {};
+  const byId: Record<string, T> = {};
+  for (const row of rows) {
+    // Object.fromEntries defined `__proto__` as data; plain assignment would set the prototype.
+    if (row.symbol === '__proto__' || row.id === '__proto__')
+      return [
+        Object.fromEntries(rows.map((entry) => [entry.symbol, entry])),
+        Object.fromEntries(rows.map((entry) => [entry.id, entry])),
+      ];
+    bySymbol[row.symbol] = row;
+    byId[row.id] = row;
+  }
+  return [bySymbol, byId];
+}
 
 export class FrameApplyError extends Error {
   constructor(
@@ -136,14 +155,12 @@ export class FrameStore {
   private indexMarkets() {
     if (this.marketIndexRows === this.markets) return;
     this.marketIndexRows = this.markets;
-    this.marketSymbolIndex = Object.fromEntries(this.markets.map((row) => [row.symbol, row]));
-    this.marketIdIndex = Object.fromEntries(this.markets.map((row) => [row.id, row]));
+    [this.marketSymbolIndex, this.marketIdIndex] = indexRows(this.markets);
   }
   private indexTickers() {
     if (this.tickerIndexRows === this.tickers) return;
     this.tickerIndexRows = this.tickers;
-    this.tickerSymbolIndex = Object.fromEntries(this.tickers.map((row) => [row.symbol, row]));
-    this.tickerIdIndex = Object.fromEntries(this.tickers.map((row) => [row.id, row]));
+    [this.tickerSymbolIndex, this.tickerIdIndex] = indexRows(this.tickers);
   }
   getMarketsVersion() {
     return this.version('markets');
@@ -152,21 +169,29 @@ export class FrameStore {
     return this.version('tickers');
   }
 
-  private patchTickers(rows: StoreData['tickers'], deltas: readonly (readonly number[])[]): StoreData['tickers'] {
+  /** One copy per changed row (Hermes pays per allocation); `fresh` records rows this frame owns. */
+  private patchTickers(
+    rows: StoreData['tickers'],
+    deltas: readonly (readonly number[])[],
+    fresh: Set<StoreData['tickers'][number]>,
+  ): StoreData['tickers'] {
     const result = [...rows];
-    for (const [index, mask, ...values] of deltas) {
-      let row = { ...result[index] };
-      let offset = 0;
+    for (const delta of deltas) {
+      const index = delta[0];
+      const mask = delta[1];
+      let row: Writable<StoreData['tickers'][number]> = { ...result[index] };
+      let offset = 2;
       for (let field = 0; field < TICKER_FIELDS.length; field++) {
         if (!(mask & (1 << field))) continue;
         const key = TICKER_FIELDS[field];
-        const value = values[offset++];
+        const value = delta[offset++];
         if (key === 'midPrice' && Number.isNaN(value)) {
           const { midPrice: _, ...rest } = row;
           row = rest;
-        } else row = { ...row, [key]: value };
+        } else row[key] = value;
       }
       result[index] = row;
+      fresh.add(row);
     }
     return result;
   }
@@ -519,19 +544,31 @@ export class FrameStore {
       }
     }, LOADED_FLAG.TICKERS);
 
+    // Rows and the table copied by this frame are unpublished, so observations may fill them in place.
+    const freshTickerRows = new Set<StoreData['tickers'][number]>();
+    let freshTickers: StoreData['tickers'] | undefined;
     attempt(() => {
       if (marketsFailed) return;
       const deltas = readTickerDeltaFrame(frame, (update.tickers ?? this.tickers).length, Boolean(tickers));
-      if (deltas) update.tickers = this.patchTickers(update.tickers ?? this.tickers, deltas);
+      if (deltas)
+        update.tickers = freshTickers = this.patchTickers(update.tickers ?? this.tickers, deltas, freshTickerRows);
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
       const observations = readTickerObservationFrame(frame, update.tickers ?? this.tickers);
       if (observations) {
-        const rows = [...(update.tickers ?? this.tickers)];
-        for (const [index, observedAt] of observations) rows[index] = { ...rows[index], observedAt };
-        update.tickers = rows;
+        const current = update.tickers ?? this.tickers;
+        const rows: Writable<StoreData['tickers'][number]>[] = current === freshTickers ? current : [...current];
+        for (const [index, observedAt] of observations) {
+          const row = rows[index];
+          if (freshTickerRows.has(row)) row.observedAt = observedAt;
+          else {
+            rows[index] = { ...row, observedAt };
+            freshTickerRows.add(rows[index]);
+          }
+        }
+        update.tickers = freshTickers = rows;
       }
     }, LOADED_FLAG.TICKERS);
 

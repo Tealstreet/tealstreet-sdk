@@ -30,6 +30,9 @@ stored protection references normalize to the TS default `last`.
 PARITY-EXCEPTION (AGT-46): TS refused reduce-only triggers; the port sends them
 on order-algo with the documented string `reduceOnly: "true"` and lists reduce-only
 trigger rows as reduce-only Conditionals. Close-only and non-GTC triggers stay refused.
+Whole-position trigger rows (`size: -1`, AGT-46 follow-up #3740) retain native
+provenance but publish `amount: 0`, `remaining: 0`, `close: true`; their trigger-time
+quantity is not inferred from a potentially stale position snapshot.
 Split allocation also follows TS: round equal lots and append the rounded native
 remainder. For amount 11/12 with maximum 5 and step 1, the payload sizes are
 `[3,3,3,1]`/`[3,3,3,2]`, including TS's quantity shortfall. Rounding can also

@@ -456,6 +456,45 @@ fn successful_mode_write_fences_startup_read_and_controls_subsequent_order_polic
         assert_eq!(order.url.contains("reduceOnly=true"), !hedged);
     }
 }
+// AGT-83: the native trade id `t` is the fill identity; the cumulative path keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(order(10.0, "PARTIALLY_FILLED", "0.5", 1));
+    h.ws(order(11.0, "PARTIALLY_FILLED", "1", 2));
+    let mut idless = order(12.0, "PARTIALLY_FILLED", "1.5", 3);
+    idless["o"].as_object_mut().unwrap().remove("t");
+    h.ws(idless);
+    let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["1", "2", "123"].map(|id| (Some(id.to_owned()), "123".to_owned(), 0.5))
+    );
+}
+
+// A trade id of 0 is a non-trade update: no execution id, so the cumulative path delivers it.
+#[test]
+fn zero_trade_id_is_not_a_fill_identity() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(order(10.0, "PARTIALLY_FILLED", "0.5", 0));
+    let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        vec![(Some("123".to_owned()), "123".to_owned(), 0.5)]
+    );
+}
+
 #[test]
 fn fill_without_execution_id_uses_cumulative_progress() {
     let mut h = H::new();

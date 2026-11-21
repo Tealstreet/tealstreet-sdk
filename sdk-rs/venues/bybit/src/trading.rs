@@ -702,9 +702,11 @@ impl BybitLinear {
                 continue;
             }
             if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts)? {
+                self.refuse_dropped_legs(opts)?;
                 let body = self.position_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
             } else if opts.kind == OrderType::TrailingStopLoss {
+                self.refuse_dropped_legs(opts)?;
                 let body = self.trailing_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
             } else if opts.max_slippage_pct.is_some()
@@ -822,14 +824,31 @@ impl BybitLinear {
             return Err("Order quantity must be finite and nonnegative".into());
         }
         if opts.kind == OrderType::TrailingStopLoss {
+            self.refuse_dropped_legs(opts)?;
             return self.trailing_stop(cx, opts).map(Some);
         }
         if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
             && self.full_position_opposite(cx, opts)?
         {
+            self.refuse_dropped_legs(opts)?;
             return self.position_stop(cx, opts).map(Some);
         }
         Ok(None)
+    }
+
+    /// AGT-115: trading-stop carries only the order's own price, so a trailing stop or a
+    /// stop closing a covering position would drop attached legs. Planning fails the whole
+    /// command before any write; a stop sent through order create keeps its legs.
+    fn refuse_dropped_legs(&self, opts: &PlaceOrderOpts) -> Result<(), String> {
+        if !opts.stop_entry_with_attached_legs() {
+            return Ok(());
+        }
+        let venue = if self.variant.is_hyro() {
+            "HyroTrader"
+        } else {
+            "Bybit"
+        };
+        Err(safe_cex_engine::model::stop_entry_legs_refusal(venue))
     }
 
     /// Split entries with each product's legacy allocation and protection rules.

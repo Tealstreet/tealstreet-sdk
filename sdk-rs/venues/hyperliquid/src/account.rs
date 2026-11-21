@@ -478,13 +478,14 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         body: String,
+        weight: u32,
         read: Box<crate::ManagedCandleRead>,
     ) {
         self.account.reads.push_back(QueuedRead {
             body,
             continuation: ReadContinuation::Candles(read),
             streamed: true,
-            weight: 104,
+            weight,
             priority: ReadPriority::Bulk,
         });
         self.pump_reads(cx);
@@ -1197,6 +1198,16 @@ impl Hyperliquid {
             self.account.refresh_timer = Some(
                 cx.set_timer(500.0f64.max(1000.0 - (cx.now - self.account.last_order_refresh))),
             );
+        }
+    }
+    pub(crate) fn schedule_position_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if cx.frame_fed() {
+            return;
+        }
+        let dex = self.dex_of(cx, symbol).to_owned();
+        self.account.state_dirty.insert(dex);
+        if self.account.state_refresh_timer.is_none() {
+            self.account.state_refresh_timer = Some(cx.set_timer(350.0));
         }
     }
     /// TS `shouldTrackSpotHoldings`: spot is collateral (unified/portfolio) or the
@@ -3330,10 +3341,7 @@ impl Hyperliquid {
                 .and_modify(|time| *time = time.max(fill.time))
                 .or_insert(fill.time);
             *self.account.state_revision.entry(dex.into()).or_default() += 1;
-            self.account.state_dirty.insert(dex.into());
-            if self.account.state_refresh_timer.is_none() {
-                self.account.state_refresh_timer = Some(cx.set_timer(350.0));
-            }
+            self.schedule_position_refresh(cx, symbol);
             return;
         }
         let Some(start) = fill.start_position else {

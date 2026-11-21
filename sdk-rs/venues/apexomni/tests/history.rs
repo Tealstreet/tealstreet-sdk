@@ -775,7 +775,7 @@ fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement()
     assert_eq!((rows[0].timestamp, rows[0].qty), (1700000006.0, 9.0));
 }
 #[test]
-fn signature_reset_discards_prefix_but_retains_original_history_owner() {
+fn signature_refusal_discards_prefix_and_walks_aliases_under_the_original_owner() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
     let first = owned_request(&mut e, 20.0);
@@ -785,8 +785,14 @@ fn signature_reset_discards_prefix_but_retains_original_history_owner() {
         30.0,
         &format!(r#"{{"code":20016,"msg":"signature rejected","data":[{FILL}]}}"#),
     );
+    // AGT-75: no same-page legacy resend; the refused page counts as a failed alias.
     let retry = owned_request(&mut e, 30.0);
-    assert_eq!(first.url, retry.url);
+    assert!(first.url.contains("symbol=BTC-USDT"), "{}", first.url);
+    assert!(
+        retry.url.contains("/v3/fills?") && retry.url.contains("symbol=BTCUSDT"),
+        "{}",
+        retry.url
+    );
     let corrected = FILL
         .replace("\"fillPrice\":\"100\"", "\"fillPrice\":\"101\"")
         .replace("\"fillSize\":\"2\"", "\"fillSize\":\"3\"");

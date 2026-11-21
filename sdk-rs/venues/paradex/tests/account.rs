@@ -369,6 +369,31 @@ fn stream_closure_and_terminal_orders_fence_older_snapshots() {
         safe_cex_engine::model::OrderStatus::Canceled
     );
 }
+// AGT-83: the fill's own id is the fill identity; the order id is kept for attribution.
+#[test]
+fn fill_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    fills(&mut h);
+    for id in ["execution-1", "execution-2"] {
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"fills.ALL","data":{{"id":"{id}","order_id":"123","market":"BTC-USD-PERP","side":"BUY","price":"99","size":"0.5"}}}}}}"#
+            ),
+        );
+    }
+    let identities: Vec<_> = wire::fills(h.e.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        ["execution-1", "execution-2"].map(|id| (Some(id.to_owned()), "123".to_owned(), 0.5))
+    );
+}
 #[test]
 fn fills_are_deduplicated_by_execution_identity_across_reconnects() {
     let (mut h, socket) = loaded();

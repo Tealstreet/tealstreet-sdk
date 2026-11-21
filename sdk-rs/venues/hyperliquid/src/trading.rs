@@ -633,6 +633,13 @@ impl Hyperliquid {
             ) {
                 return Err("Hyperliquid order type is not supported".into());
             }
+            // AGT-115: `wires` groups legs only with a limit or market entry; a trigger entry would
+            // be placed without them, so the whole batch is refused before any write.
+            if o.stop_entry_with_attached_legs() {
+                return Err(safe_cex_engine::model::stop_entry_legs_refusal(
+                    "Hyperliquid",
+                ));
+            }
             if !o.amount.is_finite()
                 || o.amount < 0.0
                 || (o.amount == 0.0 && matches!(o.kind, OrderType::Limit | OrderType::Market))
@@ -757,7 +764,9 @@ impl Hyperliquid {
             c: cloid,
         };
         let mut wires = vec![main];
-        if opts.kind == OrderType::Limit {
+        // AGT-117: a market entry is a marketable limit, so it groups its legs the same way;
+        // each leg's `p` is the slippage-capped parent price (verified live 2026-11-21).
+        if matches!(opts.kind, OrderType::Limit | OrderType::Market) {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
                 // Like TS, a zero bracket price means no bracket on every market.
                 if let Some(trigger) = value.filter(|p| *p != 0.0) {
@@ -1355,7 +1364,18 @@ impl Hyperliquid {
                     let (id, resting) = match status {
                         Status::Error { .. } => continue,
                         Status::Resting { resting } => (Some(resting.oid.to_string()), true),
-                        Status::Filled { filled } => (Some(filled.oid.to_string()), false),
+                        Status::Filled { filled } => {
+                            if !self.spot
+                                && let Some(record) = records.get(index)
+                                && cx
+                                    .store
+                                    .market(&record.order.symbol)
+                                    .is_some_and(|market| market.is_spot != Some(true))
+                            {
+                                self.schedule_position_refresh(cx, &record.order.symbol);
+                            }
+                            (Some(filled.oid.to_string()), false)
+                        }
                         // Ruled: a rested full-position trigger has no oid, and [] reads as nothing
                         // placed; its cloid is the pending id, and the order read names it.
                         Status::Text(s) if s == "waitingForTrigger" && full_position => {

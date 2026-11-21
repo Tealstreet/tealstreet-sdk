@@ -209,3 +209,68 @@ async fn switching_login_during_retention_keeps_the_expiry_on_the_disconnected_u
         .unwrap();
     bob.close();
 }
+
+// AGT-79: switching one device to LOCAL/COSIGNED sends a page dispose first. That
+// detaches only that device; the other device's DELEGATED account keeps running.
+#[tokio::test]
+async fn one_devices_dispose_keeps_the_shared_account_for_the_other_device() {
+    let f = fixture().await;
+    let (mut web, _web_sent) = user_session(f.registry.clone(), "alice");
+    let (mut phone, mut phone_sent) = user_session(f.registry.clone(), "alice");
+    let (mut web_ready, mut phone_ready) = (web.take_verified(), phone.take_verified());
+    let init = payload(&mut web, Some("web-registration"));
+    web.init(init).await.unwrap();
+    finish(&mut web, &mut web_ready).await;
+    let init = payload(&mut phone, Some("phone-registration"));
+    phone.init(init).await.unwrap();
+    finish(&mut phone, &mut phone_ready).await;
+    let account = f.registry.held("alice", "acct", phone.socket).unwrap();
+    assert!(Arc::ptr_eq(&account, &web.joined["acct"].account));
+    let provider = account.delegated().as_ref().unwrap().provider();
+    let key = KeyRef("primary.signing".into());
+
+    web.handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+        .await
+        .unwrap();
+    assert!(!f.registry.holds(&account, web.socket));
+    assert!(account.handle.disposal_cause().is_none());
+    assert_eq!(f.registry.account_count(), 1);
+    assert_eq!(
+        provider.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Supported
+    );
+    assert!(Arc::ptr_eq(
+        &account,
+        &f.registry.held("alice", "acct", phone.socket).unwrap()
+    ));
+    while phone_sent.try_recv().is_ok() {}
+    phone
+        .handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"after-web-left","method":"fetchPositions","args":[]}}}"#)
+        .await
+        .unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let frame: Value = serde_json::from_str(&phone_sent.recv().await.unwrap()).unwrap();
+            assert_ne!(frame["d"]["data"][0], "account stopped");
+            if frame["d"]["op"] == "callMethod:done" {
+                return frame;
+            }
+        }
+    })
+    .await
+    .expect("the phone's signed read settles");
+    assert_eq!(reply["d"]["data"]["success"], true, "{reply}");
+
+    phone
+        .handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+        .await
+        .unwrap();
+    assert_eq!(f.registry.account_count(), 0);
+    assert_eq!(
+        provider.can_sign(&key, Algorithm::HmacSha256),
+        Capability::Unsupported,
+        "the last holder's dispose erases the resident key"
+    );
+    web.close();
+    phone.close();
+}

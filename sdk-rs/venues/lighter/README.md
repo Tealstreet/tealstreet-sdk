@@ -81,3 +81,10 @@ take its nonce, so continuing the local sequence made the next write fail
 that expires invalidate the counter, so the next write reads `nextNonce` first.
 An order-status refusal (`canceled-margin-not-allowed`) executed its transaction
 and keeps the sequence.
+
+## Stop-entry brackets (AGT-115)
+
+Legs attach only to a limit/market entry that is not reduce-only: grouped OTO/OTOCO for a
+limit, separate trigger steps after a market. Any other entry with a non-zero leg, and a
+reduce-only limit/market with one, used to be placed without them; `prepare_orders` now
+refuses the whole command before any signing with the engine's shared `stop_entry_legs_refusal` copy, or its own reduce-only copy.

@@ -136,3 +136,9 @@ Sources:
 - [MEXC spot signature rules](https://www.mexc.com/api-docs/spot-v3/introduction#signature)
 - [CCXT pinned MEXC spot signing, lines 6434–6439](https://github.com/ccxt/ccxt/blob/e27b747210ba4f7505de3c0b0e29dc820a96ada4/ts/src/mexc.ts#L6434-L6439)
 - [CCXT pinned MEXC futures signing, lines 6472–6480](https://github.com/ccxt/ccxt/blob/e27b747210ba4f7505de3c0b0e29dc820a96ada4/ts/src/mexc.ts#L6472-L6480)
+
+## Stop-entry brackets (AGT-115)
+
+Stop and take-profit bodies (sized plan or whole-position stop) carry only their own
+trigger, so attached legs were dropped. `place_steps` now refuses the whole command before
+any write with the engine's shared `stop_entry_legs_refusal` copy.

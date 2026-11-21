@@ -481,7 +481,7 @@ async fn joined_without_runtime_opt_in(
             account.clone(),
             out.with_instance_id(None),
             admitted_mode,
-            0,
+            Preferences::default(),
         )
         .await;
     if account.delegated().is_some() {

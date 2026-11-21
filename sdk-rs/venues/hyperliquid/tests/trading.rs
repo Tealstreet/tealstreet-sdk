@@ -1611,6 +1611,57 @@ fn perp_zero_bracket_prices_disable_only_the_requested_child() {
     }
 }
 
+// AGT-117: a market entry was sent alone (`na`) and its legs dropped while the receipt said
+// placed. It now carries them under `normalTpsl` like a limit entry: the same wire that was
+// accepted live on 2026-11-21 (DOGE, filled parent then two `waitingForTrigger` legs).
+#[test]
+fn market_entry_attaches_its_legs_under_normal_tpsl() {
+    for (side, parent_p, leg_side) in [("buy", "105", false), ("sell", "95", true)] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"market","side":"{side}","amount":2,"stopLoss":80,"takeProfit":120,"clientOrderId":"{CLOID}"}}"#))] }));
+        let payload = body(&write(&mut e));
+        assert_eq!(payload["action"]["grouping"], "normalTpsl", "{side}");
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 3, "{side}");
+        assert_eq!(wires[0]["c"], CLOID);
+        assert_eq!(wires[0]["p"], parent_p);
+        assert_eq!(wires[0]["t"]["limit"]["tif"], "Gtc");
+        assert_eq!(wires[0]["r"], false);
+        for (wire, (kind, trigger)) in wires[1..].iter().zip([("sl", "80"), ("tp", "120")]) {
+            assert_eq!(wire["a"], wires[0]["a"]);
+            assert_eq!(wire["b"], leg_side, "{side} {kind}");
+            assert_eq!(wire["p"], parent_p, "{side} {kind}");
+            assert_eq!(wire["s"], wires[0]["s"], "{side} {kind}");
+            assert_eq!(wire["r"], true, "{side} {kind}");
+            assert_eq!(wire["t"]["trigger"]["isMarket"], true);
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+            assert_eq!(wire["t"]["trigger"]["triggerPx"], trigger);
+            assert_ne!(wire["c"], wires[0]["c"]);
+        }
+        assert_ne!(wires[1]["c"], wires[2]["c"]);
+    }
+    for (stop, take, children) in [
+        ("0", "0", Vec::<&str>::new()),
+        ("null", "120", vec!["tp"]),
+        ("80", "0", vec!["sl"]),
+    ] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"market","side":"buy","amount":2,"stopLoss":{stop},"takeProfit":{take}}}"#))] }));
+        let payload = body(&write(&mut e));
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 1 + children.len(), "sl {stop} tp {take}");
+        let grouping = if children.is_empty() {
+            "na"
+        } else {
+            "normalTpsl"
+        };
+        assert_eq!(payload["action"]["grouping"], grouping);
+        for (wire, kind) in wires.iter().skip(1).zip(children) {
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+        }
+    }
+}
+
 #[test]
 fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutation() {
     let (mut e, _) = ready("disabled");

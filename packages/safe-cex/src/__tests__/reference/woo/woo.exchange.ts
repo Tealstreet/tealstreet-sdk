@@ -57,6 +57,7 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './woo.api';
 import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from './woo.income';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
@@ -2374,6 +2375,7 @@ export class WOOXExchange extends BaseExchange {
     if (orders.some((order) => order.type === OrderType.Conditional)) {
       return this.rejectPreflight('WOO opening conditional orders are not implemented by the TS venue');
     }
+    if (orders.some(stopEntryWithAttachedLegs)) return this.rejectPreflight(stopEntryLegsRefusal('WOO'));
     return (await mapSeries(orders, (order) => this.placeOrder(order))).flat();
   };
 
@@ -2381,6 +2383,8 @@ export class WOOXExchange extends BaseExchange {
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.Conditional)
       return this.rejectPreflight('WOO opening conditional orders are not implemented by the TS venue');
+    // AGT-115: legs are placed only after a limit/market entry; algo entries would drop them.
+    if (stopEntryWithAttachedLegs(opts)) return this.rejectPreflight(stopEntryLegsRefusal('WOO'));
     if (this.isAlgoOrder(opts.type)) {
       return this.placeAlgoOrder(opts);
     }

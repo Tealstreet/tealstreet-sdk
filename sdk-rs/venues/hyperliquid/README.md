@@ -30,6 +30,18 @@ Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
 message assertions. Telemetry for that path awaits a later engine hook; its
 telemetry assertion alone is deferred. Other Unknown pins require telemetry.
 
+## Confirmed fill reconciliation
+
+A confirmed perp `filled` reply schedules a `clearinghouseState` read for its
+DEX through the existing 350 ms coalescer and account-read admission. This also
+covers the core DEX, which the periodic HIP-3 poll does not read. A delayed private
+stream must not leave a confirmed fill waiting indefinitely for a position update.
+The reply never creates a position: only a usable account snapshot or live fill
+does. Failed reads preserve state, newer stream evidence wins, and no write is
+retried. Resting replies and quiet accounts gain no position polling.
+Frame-fed page engines leave reconciliation to their account-frame provider;
+they do not arm local position-refresh timers or account reads.
+
 ## Cancellation reporting
 
 Decoded failed cancellation batches retain an indexed logical journal beside
@@ -95,3 +107,29 @@ any shorter caller bound. Discovery and HTTP share that deadline; neither arriva
 nor an early host timer renews it. Deferred release runs outside the discovery
 HTTP callback and rechecks the original Context. Retired generations cannot send
 or complete a reused command ID. Candle time geometry is captured at receipt.
+
+A queued candle read reserves 20 plus one weight per 60 candles its sent span can
+return (ceil(span/step)+1; `1M` is a fixed 30-day bucket), matching Hyperliquid's
+documented charge. The cap is 6,000 rows (120): a full 1m reply was seen at 5,182.
+A flat 104 queued chart-sized reads ~15 s each (AGT-113); the shared host budget
+derives the same weight from the request body.
+
+## Stop-entry brackets (AGT-115)
+
+`wires` groups legs (`normalTpsl`) only with a limit or market entry. A stop or take-profit
+entry with a non-zero attached leg used to be placed without it; `preflight` now refuses the
+whole batch before any write with the engine's shared `stop_entry_legs_refusal` copy.
+
+A market entry dropped its legs too until AGT-117. It is a marketable Gtc limit at the
+slippage-capped price, so its legs now group with it exactly as a limit entry's do: market
+triggers at the entry's size (reduce-only on perps), each with the entry's `p` (the venue
+applies its own 10% slippage when a trigger fires). Verified live 2026-11-21 on a perp: a 220
+DOGE market buy with SL and TP answered `[filled, "waitingForTrigger", "waitingForTrigger"]` and
+both legs rested as reduce-only triggers of 220. The reply names only the entry, so the result is
+that one ID; the hosted receipt counts no separate legs for Hyperliquid, and a refused leg stays
+partial evidence.
+
+Spot (the standalone venue and spot pairs in the perp account) has no trigger orders. The venue
+refuses a spot bracket, limit or market entry, as one row for the whole group: "Placing trigger
+orders is not enabled on spot trading yet." (live 2026-11-21, HYPE/USDC, nothing filled or
+resting). `BATCH` classifies it as a refusal, so the command is refused rather than unknown.

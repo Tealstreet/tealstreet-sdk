@@ -192,3 +192,10 @@ failures carry neither field. Frame-fed consumers without their own native split
 receipt also omit them; frame/model quantities never stand in for a receipt.
 The same read-only binding applies to refusals and first-booking size mismatches
 and adds no event or request.
+
+## Stop-entry brackets (AGT-115)
+
+Stop, take-profit and trailing payloads (Classic `algo_payload`, UTA `strategy_payload`)
+never carry the order's own legs; they are position TP/SL or trailing closes. Such an entry
+with an attached stop-loss/take-profit used to place without it (live, 2026-11-21); the
+whole command now refuses in `preflight` before any I/O with the engine's shared `stop_entry_legs_refusal` copy.

@@ -56,7 +56,14 @@ Market execution and omit conditional Limit fields for Full and Partial modes.
 exactly one live stop (the replacement or the old stop put back) or says plainly
 that there is none; it never places a second stop. The orderId proof read ignores
 `nextPageCursor`: an orderId names at most one order, and live Bybit returns a
-cursor beside the single row, which used to fail every edit. Proof failures are
+cursor beside the single row, which used to fail every edit. The frame-fed
+readiness read before the cancel follows the same rule (AGT-108: it kept the
+cursor refusal, so every LOCAL/COSIGNED page-engine edit was refused before its
+cancel). A readiness refusal sends nothing and says which case it is: the
+edited order's own row showing it executed, ended, triggered (`Active`/`Created`), or still live with a field
+Bybit sent that differs means it changed or already triggered (refresh before
+editing; retrying cannot help). Any other mismatch, including a field Bybit left
+out, is missing or unreadable evidence: it could not be confirmed (try again). Proof failures are
 classified. A row showing the old stop still live, or triggered/filled, ends the
 edit definitely with no replacement (two reduce-only stops could over-close).
 Missing or unreadable evidence gets one final orderId read on realtime. If that

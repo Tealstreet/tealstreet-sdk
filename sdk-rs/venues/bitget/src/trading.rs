@@ -666,6 +666,14 @@ impl BitgetFutures {
 
     fn preflight(&self, cx: &Cx<'_, Pending>, command: &Command) -> Result<(), String> {
         if let Command::PlaceOrders { orders, .. } = command {
+            // AGT-115: stop and trailing payloads never carry the attached legs, so such an
+            // entry would be placed without them; refuse the whole command before any write.
+            if orders
+                .iter()
+                .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+            {
+                return Err(safe_cex_engine::model::stop_entry_legs_refusal("Bitget"));
+            }
             let mut ids = HashSet::new();
             for o in orders {
                 if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {

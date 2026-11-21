@@ -481,6 +481,14 @@ impl WeexFutures {
         }) {
             return Err("Bybit BBO and TickSize controls are not supported by WEEX".into());
         }
+        // AGT-115: the placeTpSlOrder payload carries no legs, so a stop-type entry would
+        // drop them; refuse the whole command. Conditional entries carry them natively.
+        if orders.iter().any(|o| {
+            matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && o.stop_entry_with_attached_legs()
+        }) {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("WEEX"));
+        }
         // Validate every caller ID (including duplicates) before constructing a
         // job. No earlier row can escape when a later row is unhonorable.
         let mut seen = HashSet::new();

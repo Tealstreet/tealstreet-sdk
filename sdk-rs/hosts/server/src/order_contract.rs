@@ -158,7 +158,7 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
 
 /// #3630 audits native formats: keep all validated UUID bits in supported text
 /// IDs. Adapters without caller-ID support omit it; the router ledger still
-/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+/// owns dedupe. IDs that cannot carry the intent losslessly are omitted.
 pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
     let hex = || intent.replace('-', "");
     match venue {
@@ -169,6 +169,9 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
         // WOO refuses the UUID, and router/outbox accept only lossless forms, so it
         // omits the ID exactly as the action path's WOO limits already do.
         "woo" => None,
+        // AGT-50: numeric-only Backpack/GRVT and no-ID HyroTrader cannot carry
+        // this UUID; use the existing null-receipt path without a lossy mapping.
+        "backpack" | "grvt" | "hyrotrader" => None,
         _ => Some(intent.to_owned()),
     }
 }
@@ -211,15 +214,74 @@ pub(crate) fn venue_caller_ids(venue: &str, args: &mut [Value]) {
     }
 }
 
+/// A trigger/protection type, or an attached trigger, stop-loss or take-profit.
+fn trigger_shape(order: &serde_json::Map<String, Value>) -> bool {
+    matches!(
+        order.get("type").and_then(Value::as_str),
+        Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
+    ) || ["triggerPrice", "stopLoss", "takeProfit"]
+        .iter()
+        .any(|field| order.get(*field).is_some_and(|value| !value.is_null()))
+}
+
 // 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
-    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
-        && (matches!(
-            order.get("type").and_then(Value::as_str),
-            Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
-        ) || ["triggerPrice", "stopLoss", "takeProfit"]
-            .iter()
-            .any(|field| order.get(*field).is_some_and(|value| !value.is_null())))
+    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot") && trigger_shape(order)
+}
+
+/// Venues whose native adapter refuses a caller ID by order shape, so those submits
+/// omit it. BloFin (AGT-46, #3754, first `blofin_trigger`), Phemex (#3758) and AGT-110:
+/// OKX, KuCoin, Bitget, Bitunix and Binance were reproduced live; the rest match by adapter
+/// source. Binance Options refuses every trigger outright, so it needs no entry.
+pub(crate) fn trigger_refuses_caller_id(
+    venue: &str,
+    order: &serde_json::Map<String, Value>,
+) -> bool {
+    let close = order.get("close").and_then(Value::as_bool) == Some(true);
+    match venue {
+        "blofin" | "phemex" | "okx" | "okxdemo" | "okxeu" | "okxeudemo" | "bitget"
+        | "bitgetusdc" | "bitgetinverse" | "kucoin" | "bitunix" | "apexomni" | "cryptocom"
+        | "binance" | "binancespot" | "binancepm" => trigger_shape(order),
+        "bingx" | "paradex" => trigger_shape(order) || close,
+        // Coinbase's adapter (futures and spot) refuses only a stop-market or close-only caller ID.
+        "coinbase" | "coinbasespot" => {
+            order.get("type").and_then(Value::as_str) == Some("stop_market") || close
+        }
+        _ => false,
+    }
+}
+
+/// Venues that place a bracket's stop-loss/take-profit as separate orders after the entry
+/// and complete with `[entry, ..protective]`, so one unsplit bracket names its entry first:
+/// OKX (AGT-111, as the TS reference), Binance and Kraken (each verified live 2026-11-20
+/// through `order.action`). Each adapter places one leg per non-zero price, never fewer.
+/// Hyperliquid groups legs into the entry's own write and replies with the entry's ID alone,
+/// so it counts none (AGT-117).
+pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
+    let entries: &[&str] = match venue {
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => &["limit", "market"],
+        // AGT-112: Binance also derives legs after a stop-type entry (USD-M live 2026-11-21).
+        // With legs, OKX refuses every non-limit/market entry and Kraken any non-limit (AGT-115).
+        "binance" | "binancespot" | "binancepm" | "binanceinverse" => {
+            &["limit", "market", "stop_market", "take_profit_market"]
+        }
+        // Kraken refuses a bracket on a market entry before placing anything.
+        "kraken" => &["limit"],
+        _ => return 0,
+    };
+    let Some([order]) = command["orders"].as_array().map(Vec::as_slice) else {
+        return 0;
+    };
+    if !order["type"]
+        .as_str()
+        .is_some_and(|kind| entries.contains(&kind))
+    {
+        return 0;
+    }
+    ["stopLoss", "takeProfit"]
+        .iter()
+        .filter(|field| order[**field].as_f64().is_some_and(|v| v != 0.0))
+        .count()
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
@@ -379,6 +441,175 @@ mod activation_tests {
                 for other in ["okx", "binance", "hyperliquid", "not-bybit"] {
                     assert!(!super::bybit_protection(other, order.as_object().unwrap()));
                 }
+            }
+        }
+    }
+
+    // AGT-46 (blofin-t), #3758 (phemex-t) and AGT-110 (okx, okxeu, kucoin, bitget,
+    // bitunix live 2026-11-20): trigger/bracket submits were refused for carrying a
+    // caller ID. Was `blofin_trigger_omission_*` (#3754); #3758 dropped "okx"/"bitget"
+    // from its negative list, and AGT-110 covers them and drops "binance" too.
+    #[test]
+    fn trigger_caller_id_omission_covers_triggers_and_attached_protection_only() {
+        let obj = |v: &Value| v.as_object().unwrap().clone();
+        let plain = json!({"type":"limit","amount":0.01,"price":0.05});
+        let market = json!({"type":"market","amount":0.01,"reduceOnly":true});
+        let close = json!({"type":"market","amount":0.01,"close":true});
+        let conditional = json!({"type":"conditional","side":"sell","amount":0.01,
+            "triggerPrice":0.04,"reduceOnly":true});
+        let mut stop_limit = conditional.clone();
+        stop_limit["price"] = 0.039.into();
+        let stop_market = json!({"type":"stop_market","side":"sell","amount":25,
+            "price":0.04,"reduceOnly":true});
+        let mut attached = Vec::new();
+        for field in ["stopLoss", "takeProfit"] {
+            let mut order = plain.clone();
+            order[field] = 0.04.into();
+            attached.push(order);
+        }
+        let mut null_field = plain.clone();
+        null_field["stopLoss"] = Value::Null;
+        let shape = [
+            &conditional,
+            &stop_limit,
+            &stop_market,
+            &attached[0],
+            &attached[1],
+        ];
+        for venue in [
+            "blofin",
+            "phemex",
+            "okx",
+            "okxdemo",
+            "okxeu",
+            "okxeudemo",
+            "bitget",
+            "bitgetusdc",
+            "bitgetinverse",
+            "kucoin",
+            "bitunix",
+            "apexomni",
+            "cryptocom",
+            "bingx",
+            "paradex",
+            "binance",
+            "binancespot",
+            "binancepm",
+        ] {
+            for order in [&plain, &market, &null_field] {
+                assert!(
+                    !super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
+            }
+            for order in shape {
+                assert!(
+                    super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
+            }
+            let refuses_close = matches!(venue, "bingx" | "paradex");
+            assert_eq!(
+                super::trigger_refuses_caller_id(venue, &obj(&close)),
+                refuses_close,
+                "{venue}"
+            );
+        }
+        for venue in ["coinbase", "coinbasespot"] {
+            for order in [&stop_market, &close] {
+                assert!(super::trigger_refuses_caller_id(venue, &obj(order)));
+            }
+            for order in [&plain, &market, &conditional, &attached[0]] {
+                assert!(!super::trigger_refuses_caller_id(venue, &obj(order)));
+            }
+        }
+        for other in ["bybit", "hyperliquid", "kucoinspot", "bitrue", "weex"] {
+            for order in shape {
+                assert!(
+                    !super::trigger_refuses_caller_id(other, &obj(order)),
+                    "{other}"
+                );
+            }
+        }
+    }
+
+    // AGT-111: only a single limit/market bracket on a venue that lists its separately
+    // placed legs after the entry counts them (Kraken: limit only). Kraken and Binance
+    // were negatives here until their order was verified live; Binance stop-type entries
+    // until AGT-112.
+    #[test]
+    fn bracket_protective_legs_count_only_entry_first_single_brackets() {
+        let bracket = |extra: Value| {
+            let mut order =
+                json!({"symbol":"DOGEUSDT","type":"limit","side":"buy","amount":0.01,"price":0.04});
+            for (k, v) in extra.as_object().unwrap() {
+                order[k] = v.clone();
+            }
+            json!({"op":"placeOrders","orders":[order]})
+        };
+        let legs =
+            |venue: &str, extra: Value| super::bracket_protective_legs(venue, &bracket(extra));
+        for venue in [
+            "okx",
+            "okxdemo",
+            "okxeu",
+            "okxeudemo",
+            "binance",
+            "binancespot",
+            "binancepm",
+            "binanceinverse",
+            "kraken",
+        ] {
+            assert_eq!(legs(venue, json!({"stopLoss":0.03})), 1, "{venue}");
+            assert_eq!(
+                legs(venue, json!({"stopLoss":0.03,"takeProfit":0.05})),
+                2,
+                "{venue}"
+            );
+            assert_eq!(legs(venue, json!({})), 0, "{venue}");
+            assert_eq!(
+                legs(venue, json!({"stopLoss":0,"takeProfit":null})),
+                0,
+                "{venue}"
+            );
+            // AGT-112: only Binance lists its legs after a stop-type entry. A `conditional`
+            // entry carries none anywhere (OKX and Binance drop them, Kraken refuses).
+            let binance = venue.starts_with("binance");
+            for kind in ["stop_market", "take_profit_market"] {
+                assert_eq!(
+                    legs(
+                        venue,
+                        json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05})
+                    ),
+                    if binance { 2 } else { 0 },
+                    "{venue} {kind}"
+                );
+            }
+            for kind in ["conditional", "trailing_stop_market"] {
+                assert_eq!(
+                    legs(venue, json!({"type":kind,"stopLoss":0.03})),
+                    0,
+                    "{venue} {kind}"
+                );
+            }
+            let market = legs(venue, json!({"type":"market","stopLoss":0.03}));
+            assert_eq!(market, if venue == "kraken" { 0 } else { 1 }, "{venue}");
+            let two = json!({"op":"placeOrders","orders":[
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone(),
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone()]});
+            assert_eq!(super::bracket_protective_legs(venue, &two), 0, "{venue}");
+        }
+        for venue in ["bitget", "bybit", "blofin", "binanceoptions", "krakenspot"] {
+            assert_eq!(legs(venue, json!({"stopLoss":0.03})), 0, "{venue}");
+        }
+        // AGT-117: Hyperliquid groups a limit or market entry's legs into its own write, and
+        // the reply names only the entry (each leg answers `waitingForFill`/`waitingForTrigger`
+        // without an ID), so its whole bracket completes with exactly one ID. A refused leg is
+        // partial evidence, which `settle_intent` keeps unknown. Spot refuses a bracket whole.
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            for kind in ["limit", "market"] {
+                let extra = json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05});
+                assert_eq!(legs(venue, extra), 0, "{venue} {kind}");
             }
         }
     }

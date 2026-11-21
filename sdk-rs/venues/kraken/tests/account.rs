@@ -45,6 +45,31 @@ fn mapped_orders_keep_trigger_provenance_and_never_emit_cumulative_fills() {
     );
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
 }
+// AGT-83: the native fill_id is the fill identity; the order id is kept for attribution.
+#[test]
+fn fill_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket) = ready();
+    e.take_frame(NOW);
+    for id in ["fill-1", "fill-2"] {
+        message(
+            &mut e,
+            socket,
+            NOW + 100.,
+            &format!(
+                r#"{{"feed":"fills","fills":[{{"fill_id":"{id}","order_id":"100","instrument":"PF_XBTUSD","qty":0.5,"price":90,"buy":true}}]}}"#
+            ),
+        );
+    }
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(NOW + 100.).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        ["fill-1", "fill-2"].map(|id| (Some(id.to_owned()), "100".to_owned(), 0.5))
+    );
+}
 #[test]
 fn startup_fill_history_does_not_precede_the_first_live_execution() {
     let (mut e, socket) = ready();

@@ -58,6 +58,7 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './bitunix.api';
 import { mapBitunixClosedPosition } from './bitunix.closed-pnl';
 import { mapBitunixTradeToIncomeRecords } from './bitunix.income';
@@ -2164,6 +2165,8 @@ export class BitunixExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts) => {
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: a stop entry becomes a position TP/SL order without the legs; refuse first.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
     try {
       await this.hydratePositionIdBeforeFormatting(opts);
       const payloads = this.formatCreateOrder(opts);
@@ -2202,6 +2205,7 @@ export class BitunixExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
     for (const order of orders) {
       await this.hydratePositionIdBeforeFormatting(order);
     }

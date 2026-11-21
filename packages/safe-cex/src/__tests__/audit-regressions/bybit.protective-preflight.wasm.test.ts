@@ -188,13 +188,13 @@ async function account(
           result = list([position]);
           break;
         case '/v5/order/realtime':
-          result = list(
-            parsed.searchParams.has('orderId')
-              ? [{ ...original, orderStatus: cancelled ? 'Cancelled' : 'Untriggered' }]
-              : cancelled
-                ? []
-                : [original],
-          );
+          result = parsed.searchParams.has('orderId')
+            ? // AGT-108: live Bybit returns a page cursor beside an orderId read's single row.
+              {
+                ...list([{ ...original, orderStatus: cancelled ? 'Cancelled' : 'Untriggered' }]),
+                nextPageCursor: `${original.orderId}%3A${original.createdTime}%2C${original.orderId}%3A${original.createdTime}`,
+              }
+            : list(cancelled ? [] : [original]);
           break;
         case '/v5/order/history':
           result = list([]);

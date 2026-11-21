@@ -4313,3 +4313,54 @@ fn protective_replacement_rechecks_after_the_signed_bind() {
         );
     }
 }
+
+// AGT-115: a stop or take-profit body carries only its own trigger, so attached legs
+// were dropped. Any non-limit/market entry with a non-zero leg, sized or whole-position,
+// now refuses the whole command before any write, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    use safe_cex_engine::model::OrderType;
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("MEXC");
+    for kind in [
+        OrderType::StopLoss,
+        OrderType::TakeProfit,
+        OrderType::Conditional,
+        OrderType::TrailingStopLoss,
+    ] {
+        for amount in [60.0, 0.0] {
+            for (stop_loss, take_profit) in [
+                (Some(50000.0), None),
+                (None, Some(70000.0)),
+                (Some(0.0), Some(70000.0)),
+            ] {
+                let mut e = ready();
+                let mut stop = order();
+                stop.kind = kind;
+                stop.amount = amount;
+                stop.trigger_price = Some(61000.0);
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                e.handle(
+                    200.0,
+                    Event::Command(Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![order(), stop],
+                    }),
+                );
+                let actions = drained(&mut e);
+                assert!(
+                    !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                    "{kind:?} {amount}"
+                );
+                assert!(e.store().orders().is_empty());
+                assert!(
+                    actions.iter().any(|a| matches!(a,
+                        Action::Notice(Notice::CommandFailed { error, .. })
+                        if error.legacy_text() == refusal
+                            && error.outcome == Some(safe_cex_engine::Outcome::NotSent))),
+                    "{kind:?} {amount}: {actions:?}"
+                );
+            }
+        }
+    }
+}

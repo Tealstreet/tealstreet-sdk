@@ -1708,6 +1708,14 @@ impl AsterDex {
         {
             return Err("Bybit BBO and TickSize controls are not supported by AsterDEX".into());
         }
+        // AGT-115: legs below are built only for limit/market entries; a stop entry would
+        // be placed without them, so refuse the whole command before any write.
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("AsterDEX"));
+        }
         let builder = if self.version == Version::V3 {
             builder(&self.options)?
         } else {

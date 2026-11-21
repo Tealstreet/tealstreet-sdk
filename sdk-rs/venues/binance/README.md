@@ -26,6 +26,9 @@ does not validate every lot against native minimum quantities or notionals.
 A venue refusal can therefore follow an accepted order. USD-M/PM attached algo
 orders retain their whole intent quantity, and derivatives can continue later batches
 after a definite per-row refusal. These are known legacy partial-placement paths.
+One former path is closed: a USD-M/PM `conditional` or trailing entry with an attached
+stop-loss/take-profit used to be placed without its legs, and now refuses before any
+write with the engine's shared `stop_entry_legs_refusal` copy (AGT-115).
 
 | Audit path | Legacy reference evidence | Verdict |
 | --- | --- | --- |

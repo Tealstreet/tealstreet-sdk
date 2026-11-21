@@ -95,20 +95,47 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
-## Entire-position TP/SL (AGT-68)
+## Stop-entry brackets (AGT-115)
+
+`plan_place` derives stop-loss/take-profit legs only after a limit/market entry, as
+the TS reference does. Any algo entry (`conditional`, `stop_market`,
+`take_profit_market`, `trailing_stop_market`) with a non-zero attached leg used to
+be placed without it; the whole command now refuses before any write with the
+engine's shared `stop_entry_legs_refusal` copy. A zero leg still means "none".
+
+## Entire-position TP/SL (AGT-68, AGT-98)
 
 OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
 refuses a second with `51088`. A full SL and TP placed in one command become
-one `oco` algo, as OKX documents and ccxt places them. A full-position SL or TP
-for a position that already holds an open full algo, of either kind, is refused
-before any write as not sent: "OKX allows one full-position TP/SL. Edit the
-existing order or remove it first." This also covers a command carrying both
-legs while one is held, so one leg is never sent with 51088 on the other.
-Adding a leg to a held algo through `amend-algos` is deliberately not done: it
-is undocumented, ccxt warns that a two-leg `conditional` applies only its SL,
-and a protective leg falsely reported as placed is worse than a refusal.
-Partial-size legs and other positions are unaffected. Legacy TS sends the
-second algo and gets `51088`; this is a recorded deviation.
+one `oco` algo, as OKX documents and ccxt places them.
+
+A lone full SL or TP for a position whose full algo holds only the opposite
+leg **joins** that algo: `amend-algos` with the new leg's trigger price,
+`-1` (market) order price and trigger type, and `cxlOnFail:false`, so a refusal
+keeps the held leg. Verified on a live account (AGT-98, BTC-USDT-SWAP): adding
+a TP to an SL-only `conditional` returned sCode 0, the same algoId became an
+`oco` carrying both legs, and the added TP fired (`actualSide: tp`); adding an
+SL to a TP-only one behaves the same. This answers the ccxt warning that a
+two-leg `conditional` applies only its SL: OKX converts the amended algo to
+`oco`. The command completes with the held algo's ID, like a placement.
+
+Everything else beside a held full algo is still refused before any write as
+not sent, "OKX allows one full-position TP/SL. Edit the existing order or
+remove it first.": a leg of the kind already held, a leg when both are held,
+both legs in one command while one is held, or two joins onto one algo.
+
+Cancelling one leg of a two-leg algo, while the other leg is open and not also
+being cancelled, deletes that leg through `amend-algos` (its trigger and order
+price `0`) instead of `cancel-algos`, which would take both legs. The step
+settles as a cancellation of the algo, so `51400` (already gone) satisfies it.
+OKX leaves a one-leg `conditional`; deleting a one-leg algo's only leg cancels
+the algo, so that case still uses `cancel-algos`. The live update that no
+longer lists the deleted leg removes its row (`drop_deleted_legs`), with a
+version that stops an older census restoring it. Native `trigger` algos carry one
+leg whose kind follows the reference price: they never take a leg deletion,
+and an update that moves one across the price removes its old-suffix row. Sized `oco` algos (OKX UI)
+take the same leg deletion, also verified live. Partial-size placements and
+other positions are unaffected.
 
 ## Native write refusal diagnostics
 

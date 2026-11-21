@@ -241,6 +241,35 @@ fn first_fill_response_keeps_executions_created_while_startup_read_was_inflight(
     }
     assert_eq!(e.take_frame(NOW + 100.0).map_or(0, fill_count), 1);
 }
+// AGT-83: the native tid is the fill identity; the order id is kept for attribution.
+#[test]
+fn tid_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, _, reads, _) = bootstrap();
+    for r in reads {
+        if kind(&r) == "userFills" {
+            let (a, b) = (fill(98, 123.0, NOW + 50.0), fill(99, 123.0, NOW + 50.0));
+            reply(
+                &mut e,
+                &r,
+                &format!(
+                    r#"{{"success":true,"code":0,"data":{{"data":[{a},{b}],"hasMore":false}}}}"#
+                ),
+            );
+        } else {
+            answer(&mut e, vec![r]);
+        }
+    }
+    let mut identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(NOW + 100.0).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    identities.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        identities,
+        ["98", "99"].map(|tid| (Some(tid.to_owned()), "42".to_owned(), 0.5))
+    );
+}
 #[test]
 fn flat_hedge_mode_is_confirmed_from_native_settings_without_placeholder_positions() {
     let (mut e, _, reads, _) = bootstrap();
