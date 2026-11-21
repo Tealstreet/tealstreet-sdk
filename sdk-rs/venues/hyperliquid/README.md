@@ -30,6 +30,18 @@ Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
 message assertions. Telemetry for that path awaits a later engine hook; its
 telemetry assertion alone is deferred. Other Unknown pins require telemetry.
 
+## Confirmed fill reconciliation
+
+A confirmed perp `filled` reply schedules a `clearinghouseState` read for its
+DEX through the existing 350 ms coalescer and account-read admission. This also
+covers the core DEX, which the periodic HIP-3 poll does not read. A delayed private
+stream must not leave a confirmed fill waiting indefinitely for a position update.
+The reply never creates a position: only a usable account snapshot or live fill
+does. Failed reads preserve state, newer stream evidence wins, and no write is
+retried. Resting replies and quiet accounts gain no position polling.
+Frame-fed page engines leave reconciliation to their account-frame provider;
+they do not arm local position-refresh timers or account reads.
+
 ## Cancellation reporting
 
 Decoded failed cancellation batches retain an indexed logical journal beside
