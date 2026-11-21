@@ -65,6 +65,7 @@ struct Audit {
     who: crate::audit::Who,
     origin: String,
     fields: serde_json::Map<String, Value>,
+    stages: crate::audit::Stages,
 }
 
 struct Group {
@@ -145,6 +146,8 @@ pub struct Session {
     next_verification: u64,
     verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
     verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
+    /// Arrival of the socket frame being handled, for order audit stages.
+    frame_received: Option<std::time::Instant>,
 }
 
 struct PendingVerification {
@@ -303,6 +306,7 @@ impl Session {
             next_verification: 0,
             verified,
             verified_rx: Some(verified_rx),
+            frame_received: None,
         }
     }
 
@@ -1206,6 +1210,13 @@ impl Session {
     }
 
     pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
+        self.frame_received = Some(std::time::Instant::now());
+        let handled = self.handle_frame(text).await;
+        self.frame_received = None;
+        handled
+    }
+
+    async fn handle_frame(&mut self, text: &str) -> Result<(), Close> {
         if self.token_expired() {
             // Refusal does not shorten TOKEN_GRACE. Init replies keep the
             // request's registration without changing the current holder.
@@ -2977,6 +2988,7 @@ impl Session {
             ),
             _ => None,
         };
+        let frame_received = self.frame_received;
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -2996,6 +3008,11 @@ impl Session {
             who: audit_who(&joined.account),
             origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
             fields,
+            stages: crate::audit::Stages {
+                received: frame_received,
+                admitted: Some(std::time::Instant::now()),
+                ..Default::default()
+            },
         });
         completion.audit = audit;
         joined.client.pending.lock().unwrap().insert(id, completion);
@@ -3051,6 +3068,15 @@ impl Session {
                 }
                 return;
             }
+            // Stamped before handoff: the engine may complete before input returns.
+            if let Some(audit) = pending
+                .lock()
+                .unwrap()
+                .get_mut(&id)
+                .and_then(|entry| entry.audit.as_mut())
+            {
+                audit.stages.queued = Some(std::time::Instant::now());
+            }
             let failure = match handle.input(client, &command.to_string()) {
                 Ok(true) => None,
                 // Not queued, so not submitted: a definite failure, never retried.
@@ -3058,8 +3084,12 @@ impl Session {
                 Err(refused) => Some(refused.notice.to_string()),
             };
             if let Some(message) = failure
-                && let Some(pending) = pending.lock().unwrap().remove(&id)
+                && let Some(mut pending) = pending.lock().unwrap().remove(&id)
             {
+                // The queue refused it, so it was never queued.
+                if let Some(audit) = pending.audit.as_mut() {
+                    audit.stages.queued = None;
+                }
                 if audit_refusal
                     && !matches!(
                         pending.reply,
@@ -3291,8 +3321,8 @@ fn after_load_pool<'a>(
     }
 }
 
-fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
-    if let Some(audit) = &pending.audit {
+fn settle(out: &Out, name: &str, mut pending: Pending, outcome: Result<Value, Value>) {
+    let audit = pending.audit.take().map(|mut audit| {
         if let Err(error) = &outcome
             && error["outcome"] == "notSent"
         {
@@ -3303,24 +3333,34 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                 pending.group.is_some(),
             );
         }
-        let mut fields = audit.fields.clone();
         if matches!(
             pending.reply,
             methods::Reply::Intent { .. } | methods::Reply::Action { .. }
         ) && let Ok(value) = &outcome
         {
-            fields.insert(
+            audit.fields.insert(
                 "result_shape".into(),
                 crate::audit::result_shape(value).into(),
             );
         }
-        crate::audit::log(
-            &audit.who,
-            &audit.origin,
-            &fields,
-            crate::audit::result(&outcome),
-        );
+        (audit, crate::audit::result(&outcome))
+    });
+    // Logged after the reply so `replied` is when the frame reached the socket writer.
+    let replied = reply(out, name, pending, outcome);
+    if let Some((mut audit, result)) = audit {
+        if replied {
+            audit.stages.replied = Some(std::time::Instant::now());
+        }
+        if let Some(offsets) = audit.stages.offsets() {
+            audit.fields.insert("stages_us".into(), offsets);
+        }
+        crate::audit::log(&audit.who, &audit.origin, &audit.fields, result);
     }
+}
+
+/// Sends the command's reply; `false` when a grouped leg leaves it to a later
+/// leg or the output did not take the frame.
+fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) -> bool {
     let outcome = match &pending.group {
         None => outcome,
         Some(group) => {
@@ -3332,7 +3372,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                     .push(error["message"].as_str().unwrap_or("failed").to_owned());
             }
             if group.remaining > 0 {
-                return;
+                return false;
             }
             if group.failures.is_empty() {
                 Ok(Value::Null)
@@ -3372,8 +3412,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                 value
             }
         });
-        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
-        return;
+        return crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
     }
     if let methods::Reply::Intent {
         client_order_id,
@@ -3381,7 +3420,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
         protective_legs,
     } = &pending.reply
     {
-        order_frames::settle_intent(
+        return order_frames::settle_intent(
             out,
             name,
             &pending.request_id,
@@ -3390,7 +3429,6 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             *protective_legs,
             outcome,
         );
-        return;
     }
     let data = match outcome {
         Ok(result) => {
@@ -3413,7 +3451,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
         }
         Err(detail) => json!({"requestId": pending.request_id, "success": false, "result": detail}),
     };
-    let _ = out.send(envelope::msg(name, "callMethod:done", data));
+    out.send(envelope::msg(name, "callMethod:done", data))
 }
 
 /// Last-message times alone change on every frame; they go out at most this often.
@@ -3682,13 +3720,30 @@ fn notice_to_msg(
     let command = notice["command"]
         .as_u64()
         .and_then(|id| u32::try_from(id).ok());
+    // A native write identity is released immediately before that write's I/O.
+    if kind == "commandProgress"
+        && let Some(id) = command
+        && let Some(audit) = pending
+            .lock()
+            .unwrap()
+            .get_mut(&id)
+            .and_then(|waiting| waiting.audit.as_mut())
+    {
+        audit
+            .stages
+            .sent
+            .get_or_insert_with(std::time::Instant::now);
+    }
     // Only completions settle a request; other notices leave it waiting.
     let settles = matches!(kind, "done" | "error");
     let waiting = command
         .filter(|_| settles)
         .and_then(|id| pending.lock().unwrap().remove(&id));
     match (kind, waiting) {
-        ("done", Some(pending)) => {
+        ("done", Some(mut pending)) => {
+            if let Some(audit) = pending.audit.as_mut() {
+                audit.stages.responded = Some(std::time::Instant::now());
+            }
             let outcome = match (
                 notice.get("result").and_then(Value::as_str),
                 notice.get("error"),
@@ -3799,6 +3854,7 @@ mod tests {
 
     mod apexomni_batch_bridge;
     mod apply_settings;
+    mod audit_stages;
     mod backpack_local_proof;
     mod cosigned_coinbase;
     mod cosigned_venues;

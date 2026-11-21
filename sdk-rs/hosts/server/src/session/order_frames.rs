@@ -361,7 +361,7 @@ pub(super) fn settle_intent(
     seq: u64,
     protective_legs: usize,
     answer: Result<Value, Value>,
-) {
+) -> bool {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
@@ -408,7 +408,7 @@ pub(super) fn settle_intent(
             data["error"] = json!({"message":message,"outcome":outcome});
         }
     }
-    out.order_outcome(name, data);
+    out.order_outcome(name, data)
 }
 
 /// Native evidence that some part of the command took effect at the venue.

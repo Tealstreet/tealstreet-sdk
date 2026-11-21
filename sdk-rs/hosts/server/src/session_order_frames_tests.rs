@@ -976,3 +976,50 @@ async fn grvt_hosted_submit_omits_invalid_caller_id() {
 async fn hyrotrader_hosted_submit_omits_unsupported_caller_id() {
     hosted_submit_without_caller_id("hyrotrader").await;
 }
+
+#[tokio::test]
+async fn order_frames_audit_line_carries_monotonic_stage_offsets() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+            submit(&mut session, 0, None).await;
+            let outcome = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(outcome["d"]["outcome"], "placed");
+            let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
+            let audits: Vec<Value> = lines
+                .iter()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .filter(|line| line["msg"] == "order audit")
+                .collect();
+            assert_eq!(audits.len(), 1, "one audit line per settled command");
+            let stages = audits[0]["stages_us"]
+                .as_object()
+                .expect("settled command carries stage offsets");
+            for stage in [
+                "received",
+                "admitted",
+                "queued",
+                "sent",
+                "responded",
+                "replied",
+            ] {
+                assert!(stages[stage].is_u64(), "{stage} stamped: {stages:?}");
+            }
+            assert_eq!(stages["received"], 0);
+            let offsets: Vec<u64> = crate::audit::STAGES
+                .iter()
+                .map(|stage| stages[*stage].as_u64().unwrap())
+                .collect();
+            assert!(
+                offsets.windows(2).all(|pair| pair[0] <= pair[1]),
+                "{offsets:?}"
+            );
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}

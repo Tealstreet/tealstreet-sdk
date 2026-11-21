@@ -15,6 +15,15 @@ It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
 client echoes or raw responses. This journal field changes no outcome, algo
 ownership, retry or resend authority; it is not forwarded to Sentry.
 
+## Order audit stage timings
+
+Session command audit lines carry `stages_us` (µs offsets for received, admitted,
+queued, sent, responded, replied); `/health` `typedOutcomes` counts settled and
+unknown typed receipts. Contract and the `scripts/audit-latency.sh` report are in
+`DESIGN.md` under "Order audit stage timings". The audit line is written after the
+reply is handed to the socket, so `replied` is real; keep that order. Add only
+numeric stages here, never identifiers, and never estimate a stage not observed.
+
 ## History reply completeness
 
 Command-owned `history.incomplete` notices retain a closed reason and optional

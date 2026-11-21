@@ -194,6 +194,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "accountStartPanics": app.registry.threads().panics(),
         "inits": inits,
         "disposes": disposes,
+        "typedOutcomes": crate::audit::typed_outcomes(),
     });
     let status = if draining {
         StatusCode::SERVICE_UNAVAILABLE
@@ -1698,6 +1699,9 @@ mod tests {
                 assert_eq!(body["bootId"], registry.router_leases.boot_id());
                 assert_eq!(body["draining"], false);
                 assert_eq!(body["algos"], json!({"chases": 1, "twaps": 1}));
+                // Process-lifetime typed receipt counts; the unknown rate is unknown/settled.
+                assert!(body["typedOutcomes"]["settled"].is_u64(), "{body}");
+                assert!(body["typedOutcomes"]["unknown"].is_u64(), "{body}");
                 registry.start_drain();
                 let (status, body) = read(&app).await;
                 assert_eq!(status, 503, "a draining box takes no new users: {body}");

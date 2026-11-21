@@ -404,6 +404,7 @@ pub fn unsupported_message(out: &Out, name: &str, id: &Value, seq: u64, message:
     );
 }
 
+/// Sends the typed outcome; `false` when the output did not take it.
 pub fn settle(
     out: &Out,
     name: &str,
@@ -411,7 +412,7 @@ pub fn settle(
     seq: u64,
     kind: &str,
     answer: Result<Value, Value>,
-) {
+) -> bool {
     let mut data = json!({"version":1,"intentId":id,"seq":seq,"outcome":"unknown","result":null,
         "error":{"message":"We couldn’t confirm this action. Check your open orders and positions before trying again.","outcome":"unknown"}});
     match answer {
@@ -492,7 +493,7 @@ pub fn settle(
                 json!({"message":message,"outcome":if not_sent {"notSent"} else {"unknown"}});
         }
     }
-    out.action_outcome(name, data);
+    out.action_outcome(name, data)
 }
 
 /// Capture both expiry bounds at arrival. Neither actor queues nor private-load
