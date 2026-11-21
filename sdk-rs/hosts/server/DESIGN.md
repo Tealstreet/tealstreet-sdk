@@ -1080,7 +1080,7 @@ on this box; a stage that was never observed is omitted, never estimated.
 |---|---|
 | `received` | `Session::handle` starts on the socket frame |
 | `admitted` | the command passed Session checks and holds its command ID |
-| `queued` | it is handed to the account engine's command queue, after any load wait |
+| `queued` | the account engine's command queue accepted it, after any load wait; a busy or refused handoff has no `queued` |
 | `sent` | its native write identity arrives (`commandProgress`); the engine releases it immediately before that write's I/O, so only placements carry it |
 | `responded` | the native `done` completion arrives |
 | `replied` | the outcome frame is accepted by the socket's output queue |

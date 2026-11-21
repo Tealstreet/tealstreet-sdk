@@ -3084,8 +3084,12 @@ impl Session {
                 Err(refused) => Some(refused.notice.to_string()),
             };
             if let Some(message) = failure
-                && let Some(pending) = pending.lock().unwrap().remove(&id)
+                && let Some(mut pending) = pending.lock().unwrap().remove(&id)
             {
+                // The queue refused it, so it was never queued.
+                if let Some(audit) = pending.audit.as_mut() {
+                    audit.stages.queued = None;
+                }
                 if audit_refusal
                     && !matches!(
                         pending.reply,
