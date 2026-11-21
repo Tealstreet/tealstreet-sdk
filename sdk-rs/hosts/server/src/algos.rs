@@ -1241,6 +1241,10 @@ pub(crate) async fn run_with_identity(
                                 Err(error) => {
                                     if action.is_some() { audit_refusal("draining"); }
                                     port.emit("error", error.to_string());
+                                    // A refused amendment changed nothing; starts keep the existing receipt.
+                                    if matches!(op.as_str(), "chaser:amend" | "twap:amend") && let Some(receipt) = action {
+                                        receipt.finish(Err(crate::user_drain::refusal()));
+                                    }
                                     continue;
                                 }
                             }

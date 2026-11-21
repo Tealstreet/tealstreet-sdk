@@ -607,7 +607,8 @@ TWAP only intervalMs/remainingSlices. Identity and quantity remain immutable.
 Finished/stopping/unknown jobs refuse; no stop-and-replace or in-flight order
 edit. Future TWAP repartition retains every issued child and journal result.
 The original registration/owner/deadline/IO fences remain; amendments also use
-the start admission fence while draining. Only synchronous amendment refusals
-settle notSent; accepted edits keep the existing unknown algo receipt and
+the start admission fence while draining. Synchronous amendment refusals and
+drain refusals settle notSent (a drained start still keeps its pre-existing
+interrupted receipt); accepted edits keep the existing unknown algo receipt and
 reconcile through account events/state. Exact units/limits and mobile event
 names live in docs/plans/callers/delegated-action-frames.md.
