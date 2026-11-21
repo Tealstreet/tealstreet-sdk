@@ -291,7 +291,9 @@ fn a_box_stop_reports_each_running_chase_and_twap_as_a_server_restart() {
         json!({"symbol":"BTCUSDT","side":"buy","verb":"stopped","algo":"twap","cause":"serverRestart"})
     );
 
-    // An algo's box stop and its ordinary end share one id, so the gateway keeps one.
+    // A chase is never restored, so its box stop and ordinary end share one id and
+    // the gateway keeps one. A TWAP is restored under its id: its later real end
+    // must not be dropped as a duplicate of the stop, so only the collapse key matches.
     let (ordinary, ordinary_notifier) = self::tap(true, false);
     ordinary.observe(
         "chaser:complete",
@@ -301,8 +303,9 @@ fn a_box_stop_reports_each_running_chase_and_twap_as_a_server_restart() {
     ordinary.observe("twap:stateUpdate", &twap_state(&[]));
     let ends = sent(&ordinary_notifier);
     assert_eq!(ends.len(), 2);
+    assert_eq!(ends[0]["id"], queued[0]["id"], "chase");
+    assert_ne!(ends[1]["id"], queued[1]["id"], "TWAP");
     for (end, stop) in ends.iter().zip(&queued) {
-        assert_eq!(end["id"], stop["id"]);
         assert_eq!(end["collapseKey"], stop["collapseKey"]);
     }
 

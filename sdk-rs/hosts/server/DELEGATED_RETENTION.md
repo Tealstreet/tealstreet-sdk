@@ -140,8 +140,11 @@ never from a snapshot or a rejoin replay:
   restored, so an absent user would otherwise never hear (AGT-119). One per
   algo, sent as the host receives the stop and before it settles; chases
   already stopping, TWAP slices, paused TWAPs and TWAPs with a client stop in
-  flight are not reported. Its `id` is the algo's ordinary end id, so the
-  gateway keeps at most one `algoStopped` per chase or TWAP.
+  flight are not reported. A chase's stop uses the chase's ordinary end `id`,
+  so the gateway keeps at most one per chase. A TWAP is restored paused under
+  its id and can still end for real later, so its stop gets an `id` of its own,
+  minted once per stop (retries still dedupe), and shares only the collapse key
+  with that end.
 
 Other stops caused by account disposal emit no `algoStopped`: the host's own
 chase ends and TWAP removals during disposal are not ordinary ends. Retention

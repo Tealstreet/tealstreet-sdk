@@ -394,15 +394,22 @@ impl Tap {
         self.algo_stopped(Algo::Chase, id, symbol, side_of(&end["side"]), how);
     }
 
-    /// One `algoStopped`, keyed per algo: the gateway stores the first of a
-    /// chase's or TWAP's ends and drops any later one as a duplicate.
+    /// One `algoStopped`, keyed per algo end. A TWAP's box stop gets its own key:
+    /// the TWAP is restored under its id, and sharing the key would make the
+    /// gateway drop its later real end as a duplicate (it keys rows by id).
     fn algo_stopped(&self, algo: Algo, id: &str, symbol: &str, side: Option<Side>, end: End) {
         let (fields, severity) = stopped(algo, symbol, side, end);
         let name = algo_name(algo);
+        let natural_key = match (algo, end) {
+            (Algo::Twap, End::ServerStopped) => {
+                format!("{name}\0{id}\0serverRestart\0{}", crate::accounts::now_ms())
+            }
+            _ => format!("{name}\0{id}"),
+        };
         self.notify.emit(Draft {
             kind: Kind::AlgoStopped,
             severity,
-            natural_key: format!("{name}\0{id}"),
+            natural_key,
             fields,
             deadline: None,
             collapse: Some(crate::host_notify::opaque_key(
