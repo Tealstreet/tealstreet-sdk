@@ -285,7 +285,7 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                     a.clone(),
                     out.with_instance_id(None),
                     envelope::AccountSigningMode::Delegated,
-                    0,
+                    Preferences::default(),
                 )
                 .await;
             let capture = crate::state::log_capture::capture();
@@ -546,7 +546,7 @@ async fn action_fix_registered_replies_carry_the_captured_binding() {
             let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
             let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-A"));
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated, 0).await;
+            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated, Preferences::default()).await;
             let id = action_key();
             let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
             session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-A","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
@@ -589,7 +589,7 @@ async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
             session.order_frames_enabled = crate::order_contract::enabled();
             crate::accounts::tests::hold_live(&account,session.socket,out.outbox());
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated, 0).await;
+            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated, Preferences::default()).await;
             tokio::time::timeout(Duration::from_secs(3),async {
                 while tape.held_positions.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
             }).await.unwrap();
@@ -757,7 +757,7 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         account.clone(),
                         out.with_instance_id(None),
                         envelope::AccountSigningMode::Delegated,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                 tokio::time::timeout(Duration::from_secs(3), async {
@@ -1509,7 +1509,7 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
         let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
         let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-v1"));
         // Preserve this fixture's existing DELEGATED account admission.
-        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated, 0).await;
+        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated, Preferences::default()).await;
         for case in ["kind", "duplicateKind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
             let mut payload = match case {
                 "kind" => json!({"kind":"futureWrite"}),
@@ -2151,7 +2151,7 @@ async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
                             account.clone(),
                             out,
                             envelope::AccountSigningMode::Delegated,
-                            0,
+                            Preferences::default(),
                         )
                         .await;
                     assert!(Arc::ptr_eq(

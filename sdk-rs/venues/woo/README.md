@@ -23,3 +23,9 @@ and one command diagnostic, together with one `order.outcome_unknown` event.
 The command stops after that lot without retrying or sending the suffix.
 An accepted protective-parent cancellation records its cancel effect and target
 parent ID in the journal before any replacement outcome.
+
+## Stop-entry brackets (AGT-115)
+
+Legs are placed as a separate positional TP/SL only after a limit/market entry. Stop,
+take-profit (sized or whole-position) and trailing entries used to drop them;
+`validate_places` now refuses the whole command before any request with the engine's shared `stop_entry_legs_refusal` copy.

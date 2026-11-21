@@ -1336,11 +1336,9 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     DeviceAnswer::DifferentKey,
                     DeviceAnswer::Replay,
                 ] {
-                    if matches!(venue, "phemex" | "apexomni")
-                        && matches!(answer, DeviceAnswer::Replay)
-                    {
-                        // Phemex expiry and ApeX's signature-retry clock use whole seconds.
-                        // Cross a real boundary; identical signing bytes are not stale proof.
+                    if venue == "phemex" && matches!(answer, DeviceAnswer::Replay) {
+                        // Phemex expiry uses whole seconds. Cross a real boundary;
+                        // identical signing bytes are not stale proof.
                         tokio::time::sleep(Duration::from_millis(1100)).await;
                     }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;

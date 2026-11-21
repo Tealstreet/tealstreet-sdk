@@ -1,5 +1,5 @@
 //! Today's `wss /account` JSON envelope (NX `services/exchange-server/src/server.ts`).
-pub use crate::publication::RequestedInterval;
+pub use crate::publication::{RequestedInterval, RequestedTickers};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -33,6 +33,10 @@ pub struct InitPayload {
     /// Output cadence for this connection only; never an engine setting or identity.
     #[serde(default, skip_serializing)]
     pub publish_interval_ms: RequestedInterval,
+    /// The ticker rows this connection receives; absent or null is the full table.
+    /// Connection-local, like `publish_interval_ms`; unrelated to `tuning.activeTickerSymbols`.
+    #[serde(default, skip_serializing)]
+    pub active_ticker_symbols: RequestedTickers,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -120,11 +124,25 @@ fn coinbase_algorithm<'de, D: serde::Deserializer<'de>>(
         .transpose()
 }
 
+/// Builds a malformed publication field's refusal for an account name and init flag.
+pub type PublicationRefusal = fn(Option<&str>, bool) -> String;
+
 impl InitPayload {
     /// Identifies what an account's engine is built from; an init with the same
     /// one shares the account (see `accounts::build_fingerprint`).
     pub fn fingerprint(&self) -> String {
         crate::accounts::build_fingerprint(self)
+    }
+
+    /// This connection's publication choices, or the refusal for a malformed one.
+    pub fn publication(&self) -> Result<crate::publication::Preferences, PublicationRefusal> {
+        let interval: PublicationRefusal =
+            |name, init| publish_interval_refused(name, "invalid_publish_interval", init);
+        let tickers: PublicationRefusal =
+            |name, init| active_ticker_symbols_refused(name, "invalid_active_ticker_symbols", init);
+        let interval = self.publish_interval_ms.millis().ok_or(interval)?;
+        let tickers = self.active_ticker_symbols.selection().ok_or(tickers)?;
+        Ok(crate::publication::Preferences { interval, tickers })
     }
 }
 
@@ -367,6 +385,28 @@ pub fn publish_interval_refused(
         _ => "Publish interval must be an integer number of milliseconds",
     };
     let mut options = json!({"kind":kind,"publishIntervalRefused":true});
+    if init {
+        options["initRefused"] = true.into();
+        options["forceToast"] = true.into();
+    }
+    envelope(
+        "msg",
+        json!({"op":"error","accountName":account_name,"data":[message,options]}),
+    )
+}
+
+/// A closed refusal for a connection-local ticker selection; never echo input.
+pub fn active_ticker_symbols_refused(
+    account_name: Option<&str>,
+    kind: &'static str,
+    init: bool,
+) -> String {
+    let message = match kind {
+        "not_admitted" => "Account is not admitted; active ticker symbols were not changed",
+        "auth_expired" => crate::auth::TOKEN_EXPIRED,
+        _ => "Active ticker symbols must be null or a list of at most 1024 symbols of 1-128 bytes",
+    };
+    let mut options = json!({"kind":kind,"activeTickerSymbolsRefused":true});
     if init {
         options["initRefused"] = true.into();
         options["forceToast"] = true.into();

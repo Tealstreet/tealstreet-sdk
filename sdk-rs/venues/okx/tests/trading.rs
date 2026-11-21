@@ -3248,3 +3248,58 @@ fn algo_rate_limited_cancel_50011_keeps_engine_and_row_unknown() {
 fn algo_rate_limited_cancel_50061_keeps_engine_and_row_unknown() {
     rate_limited_cancel_row_uses_released_write_outcome(true, "50061");
 }
+
+// AGT-115, live on okx-t 2026-11-21: a conditional or stop_market entry with an attached
+// stopLoss was placed without its leg. Every algo entry with a non-zero leg now refuses
+// the whole command before any write; a zero leg means "none" and still places.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    use safe_cex_engine::Outcome;
+    let refusal = "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills.";
+    for entry in [
+        r#""type":"conditional","triggerPrice":41000"#,
+        r#""type":"stop_market","price":41000"#,
+        r#""type":"take_profit_market","price":41000"#,
+        r#""type":"trailing_stop_market","price":100"#,
+    ] {
+        for legs in [
+            r#""stopLoss":35000"#,
+            r#""takeProfit":45000"#,
+            r#""stopLoss":0,"takeProfit":45000"#,
+        ] {
+            let mut e = trading_engine();
+            let plain = order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            );
+            let bracket = order(&format!(
+                r#"{{"symbol":"BTCUSDT","side":"buy","amount":1,{entry},{legs}}}"#
+            ));
+            // One refused order refuses the whole command, including a plain order beside it.
+            let out = place(&mut e, vec![plain, bracket]);
+            assert!(
+                !out.iter().any(
+                    |a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
+                ),
+                "{entry} {legs}"
+            );
+            assert!(
+                out.iter().any(
+                    |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error })
+                    if error.legacy_text() == refusal && error.outcome == Some(Outcome::NotSent))
+                ),
+                "{entry} {legs}: {out:?}"
+            );
+        }
+    }
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":41000,"stopLoss":0,"takeProfit":0}"#,
+        )],
+    );
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("order-algo")))
+    );
+}

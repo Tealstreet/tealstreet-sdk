@@ -8,6 +8,11 @@ Reviewers requested: codex-uufub4 (engine custody), claude-m26ps4
 (credential semantics), codex-hcmq3f (RequestContext plan owner).
 claude-m26ps4: CLEAR at `e9b37e81da2`, with two pins incorporated below.
 
+**Superseded for reads (AGT-75, 2026-11-21):** signed reads no longer resend after a signature
+refusal. Live read-only checks showed ApeX verifies the primary canonical text and refuses
+the legacy text wherever the two differ, so the whole-second resend could only repeat a
+refusal. Signed symbols now use `RetryPolicy::Never`; the transport budget is unchanged.
+
 This carries out phases 3 and 4 of
 [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) (single
 private reads; history and joined snapshot) for the six signed read callers.

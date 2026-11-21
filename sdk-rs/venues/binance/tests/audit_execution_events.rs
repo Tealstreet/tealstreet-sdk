@@ -168,6 +168,38 @@ fn derivative_fills_require_trade_and_dedupe_by_execution_identity() {
     }
 }
 
+// AGT-83: the native trade id `t` is the fill identity; a row without one keeps the order id.
+#[test]
+fn derivative_trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    for v in [Variant::UsdM, Variant::PortfolioMargin, Variant::CoinM] {
+        let mut h = ready(v);
+        let path = private_path(v);
+        let order = if v == Variant::PortfolioMargin {
+            "audit-client"
+        } else {
+            "77"
+        };
+        h.message(path, &event(v, "NEW", "NEW", "0", 0));
+        h.message(path, &event(v, "PARTIALLY_FILLED", "TRADE", "1", 10));
+        h.message(path, &event(v, "PARTIALLY_FILLED", "TRADE", "2", 11));
+        h.message(
+            path,
+            &event(v, "PARTIALLY_FILLED", "TRADE", "3", 0).replace(r#""t":0,"#, ""),
+        );
+        let identities: Vec<_> = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|fill| (fill.id, fill.order_id, fill.amount))
+            .collect();
+        // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+        assert_eq!(
+            identities,
+            ["10", "11", order].map(|id| (Some(id.to_owned()), order.to_owned(), 1.0)),
+            "{v:?}"
+        );
+    }
+}
+
 #[test]
 fn liquidation_calculated_execution_emits_one_fill() {
     for v in [Variant::UsdM, Variant::PortfolioMargin, Variant::CoinM] {

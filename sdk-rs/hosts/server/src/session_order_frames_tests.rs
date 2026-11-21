@@ -179,6 +179,45 @@ async fn order_frames_translation_refusals_keep_venue_client_id_without_dispatch
         .await;
 }
 
+// AGT-110: a pre-dispatch refusal of a submit whose caller ID was omitted reported the
+// venue form anyway, an ID no order ever carried. It now reports null.
+#[tokio::test]
+async fn order_frames_translation_refusals_report_no_omitted_caller_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in ["okx", "phemex", "bybit"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account(&registry, "A", venue, tape.clone());
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let key = intent(0);
+                let params = json!({"symbol":"BTCUSDT","type":"conditional","side":"sell",
+                    "amount":"invalid amount","triggerPrice":45000,"reduceOnly":true});
+                let fingerprint =
+                    crate::order_contract::fingerprint("synthetic-main", &key, &params, 1).unwrap();
+                session
+                    .handle(
+                        &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+                "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                        .to_string(),
+                    )
+                    .await
+                    .unwrap();
+                let outcome = order_frame(&mut sent, "order.outcome").await;
+                assert_eq!(outcome["d"]["outcome"], "refused", "{venue}: {outcome}");
+                assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+                assert!(
+                    outcome["d"]["clientOrderId"].is_null(),
+                    "{venue}: {outcome}"
+                );
+                assert!(tape.writes.lock().unwrap().is_empty());
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn order_frames_refuse_expired_or_unjoined_submits_without_a_write() {
     tokio::task::LocalSet::new()
@@ -760,6 +799,102 @@ async fn woo_market_submit_sends_without_a_caller_id() {
             );
             session.close();
             registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+// AGT-46 live, blofin-t: a reduce-only conditional carried the bare-hex caller ID,
+// which BloFin's adapter refuses on triggers; phemex-t refused the UUID on a reduce-only
+// stop and an attached stopLoss (2026-11-20), and AGT-110 found OKX, KuCoin, Bitget,
+// Bitunix and Binance live. Plain orders keep their venue ID form. Coinbase's narrower rule is
+// unit-tested. Was `blofin_reduce_only_trigger_submit_sends_without_a_caller_id` (#3754).
+#[tokio::test]
+async fn trigger_submit_sends_without_a_caller_id_where_the_adapter_refuses_one() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let stop = json!({"symbol":"BTCUSDT","type":"conditional","side":"sell",
+                "amount":0.001,"triggerPrice":45000,"reduceOnly":true});
+            let mut stop_limit = stop.clone();
+            stop_limit["price"] = 44900.into();
+            let bracket = json!({"symbol":"BTCUSDT","type":"limit","side":"buy",
+                "amount":0.001,"price":40000,"stopLoss":35000});
+            let plain = json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.001});
+            let cases = [
+                (stop, false),
+                (stop_limit, false),
+                (bracket, false),
+                (plain, true),
+            ];
+            for venue in [
+                "blofin",
+                "phemex",
+                "okx",
+                "okxeu",
+                "bitget",
+                "kucoin",
+                "bitunix",
+                "apexomni",
+                "cryptocom",
+                "bingx",
+                "paradex",
+                "binance",
+                "binancepm",
+            ] {
+                for (params, caller_id) in cases.clone() {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape::default();
+                    let account = delegated_account(&registry, "A", venue, tape.clone());
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    let key = intent(0);
+                    let hex = key.replace('-', "");
+                    let venue_id = crate::order_contract::client_order_id(venue, &key).unwrap();
+                    let fingerprint =
+                        crate::order_contract::fingerprint("synthetic-main", &key, &params, 1)
+                            .unwrap();
+                    session
+                        .handle(
+                            &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+                "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                            .to_string(),
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        order_frame(&mut sent, "order.ack").await["d"]["received"],
+                        true
+                    );
+                    let outcome = order_frame(&mut sent, "order.outcome").await;
+                    // AGT-112: the fixture is Bybit-native under another venue's label, so the
+                    // bracket completes with one ID (its SL attached natively). Where that label
+                    // expects separate legs, a lone ID is a missing leg and stays unknown.
+                    let legs = crate::order_contract::bracket_protective_legs(
+                        venue,
+                        &json!({"orders":[params.clone()]}),
+                    );
+                    assert_eq!(
+                        outcome["d"]["outcome"],
+                        if legs > 0 { "unknown" } else { "placed" },
+                        "{venue} {params}: {outcome}"
+                    );
+                    let sent_ids = tape.client_order_ids.lock().unwrap().clone();
+                    if caller_id {
+                        assert_eq!(
+                            outcome["d"]["clientOrderId"], venue_id,
+                            "{venue}: {outcome}"
+                        );
+                        assert_eq!(sent_ids, vec![venue_id]);
+                    } else {
+                        assert!(outcome["d"]["clientOrderId"].is_null(), "{outcome}");
+                        assert!(
+                            sent_ids.iter().all(|id| id != &hex && id != &key),
+                            "{sent_ids:?}"
+                        );
+                    }
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                }
+            }
         })
         .await;
 }

@@ -11,6 +11,8 @@ import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './pe
 const A = 'a'.repeat(40), B = 'b'.repeat(40), TREE = 'c'.repeat(40);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const declarations = { schema: 1, failures: [] };
+// Synthetic tape SHAs replay none of the real accepted differences (AGT-83 names txflow's private tape).
+const noAccepted = { schema: 1, differences: [] };
 async function fixture(suite = 'txflow') {
   const run = { id: 10, run_attempt: 1, head_sha: B, head_branch: 'master', event: 'push', repository: { full_name: 'Tealstreet/tealstreet-sdk' } };
   const job = { id: 20, run_id: 10, runner_id: 30, run_attempt: 1, head_sha: B, name: `Rust / replay measurement (${suite})` };
@@ -113,7 +115,7 @@ test('first replay collection accepts a sealed CPU-only miss with complete publi
     status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
       [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
   const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
-  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect', sourceHead: data.state.sourceHead };
+  const options = { suite: 'txflow', entries, manifest: declarations, accepted: noAccepted, mode: 'collect', sourceHead: data.state.sourceHead };
   const old = verifyGateSuite(options);
   assert.deepEqual(old.errors, [], 'a large CPU-only miss is not a measurement (correctness) error');
   assert.equal(old.cpuMisses.length, 1, 'it is left to the CPU gate');
@@ -168,7 +170,7 @@ test('first collection binds metadata-free sealed reports to the authenticated c
     status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
       [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
   const entries = [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }];
-  const options = { suite: 'txflow', entries, manifest: declarations, mode: 'collect',
+  const options = { suite: 'txflow', entries, manifest: declarations, accepted: noAccepted, mode: 'collect',
     sourceHead: data.state.sourceHead, family: readFamilyIdentity(data) };
   const before = JSON.stringify(entries);
   const result = verifyGateSuite(options);
@@ -416,7 +418,7 @@ async function cpuOnlyCollection() {
   const privateReport = { ...first.report, ...expectedGateCases('txflow')[1], tapeSha256: sha('private tape'), private: true,
     status: 'PASS', failures: [], runs: 0, samples: Object.fromEntries(['ts', 'rust'].map(impl =>
       [impl, [{ ...first.report.samples[impl][0], measuredMode: 'correctness' }]])) };
-  return { suite: 'txflow', entries: [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }], manifest: declarations,
+  return { suite: 'txflow', entries: [{ ...first, exitCode: 1 }, { report: privateReport, exitCode: 0 }], manifest: declarations, accepted: noAccepted,
     mode: 'collect', sourceHead: data.state.sourceHead };
 }
 test('a valid CPU-only miss beyond remeasurement is collection success', async () => {

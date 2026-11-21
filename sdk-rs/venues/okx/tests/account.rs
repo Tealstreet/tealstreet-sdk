@@ -715,6 +715,44 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     assert_eq!(fill_count(e.take_frame(10.0).unwrap()), 2);
 }
 
+// AGT-83: the native tradeId is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER, 5.0);
+    e.take_frame(6.0);
+    for (filled, identity) in [
+        ("2", r#""tradeId":"t1""#),
+        ("3", r#""tradeId":"t2""#),
+        ("4", r#""fillTime":"3""#),
+    ] {
+        let row = ORDER.replace("\"live\"", "\"partially_filled\"").replace(
+            "\"accFillSz\":\"1\"",
+            &format!(r#""accFillSz":"{filled}","fillSz":"1","fillPx":"38000",{identity}"#),
+        );
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    let fills = safe_cex_engine::wire::fills(e.take_frame(10.0).unwrap()).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| (fill.id.as_deref(), fill.order_id.as_str()))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        [
+            (Some("t1"), "123"),
+            (Some("t2"), "123"),
+            (Some("123"), "123")
+        ]
+    );
+    assert!(fills.iter().all(|fill| fill.amount == fills[0].amount));
+}
+
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();
@@ -872,6 +910,92 @@ fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
         ),
     );
     assert_eq!(e.store().order("algo123_tp").unwrap().price, 43000.0);
+}
+
+/// AGT-98: amend-algos adds a leg (`conditional` -> `oco`) or deletes one
+/// (`oco` -> `conditional`) under the same algoId. The update after a deletion
+/// no longer lists that leg, so its row goes and the other leg stays.
+#[test]
+fn an_algo_update_without_a_leg_removes_that_leg_row() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |row: &str| format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#);
+    let stop_only = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"conditional","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","reduceOnly":"true"}"#;
+    let both = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"oco","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","tpTriggerPx":"42000","tpOrdPx":"-1","tpTriggerPxType":"last","reduceOnly":"true"}"#;
+    ws(&mut e, business, &frame(stop_only));
+    assert!(e.store().order("algo7_sl").is_some());
+    assert!(e.store().order("algo7_tp").is_none());
+    ws(&mut e, business, &frame(both));
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    ws(&mut e, business, &frame(stop_only));
+    assert!(
+        e.store().order("algo7_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    let tp_only = both.replace("\"oco\"", "\"conditional\"").replace(
+        r#""slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","#,
+        "",
+    );
+    ws(&mut e, business, &frame(&tp_only));
+    assert!(e.store().order("algo7_sl").is_none());
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+}
+
+/// AGT-98 review: a reduce-only `trigger` amended across the reference price
+/// changes kind (TP to SL) and so its row suffix. The update removes the old
+/// suffix's row, and a cancel of the trigger stays a cancel-algos.
+#[test]
+fn a_trigger_crossing_the_reference_keeps_one_row_and_cancels_whole() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |px: &str| {
+        format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT-SWAP","algoId":"algo9","ordType":"trigger","state":"live","side":"sell","sz":"1","triggerPx":"{px}","triggerPxType":"last","ordPx":"-1","reduceOnly":"true"}}]}}"#
+        )
+    };
+    ws(&mut e, business, &frame("42000"));
+    assert_eq!(
+        e.store().order("algo9_tp").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::TakeProfit)
+    );
+    ws(&mut e, business, &frame("38000"));
+    assert!(
+        e.store().order("algo9_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(
+        e.store().order("algo9_sl").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::StopLoss)
+    );
+    // A stale sibling (as a census could restore) still never turns the cancel into a leg delete.
+    let mut stale = e.store().order("algo9_sl").unwrap().clone();
+    stale.id = "algo9_tp".into();
+    stale.kind = safe_cex_engine::model::OrderType::TakeProfit;
+    e.store_mut().upsert_order(stale);
+    e.handle(
+        6.0,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 9,
+            ids: vec!["algo9_sl".into()],
+        }),
+    );
+    let out = prepared(&mut e, 6.0);
+    let write = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r),
+            _ => None,
+        })
+        .expect("a cancel write");
+    assert!(
+        write.url.contains("/api/v5/trade/cancel-algos"),
+        "{}",
+        write.url
+    );
 }
 
 #[test]

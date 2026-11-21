@@ -150,3 +150,48 @@ it('native snapshots and midpoint clears decode into the generated contract with
   expect(worker.tickers[0]).toEqual(store.tickers[0]);
   expect(getTickerPredictedBestAsk(worker.tickers[0])).toBe(2);
 }, 120_000);
+
+it('deltas and observations in one frame copy each row once and never touch published rows', () => {
+  const store = new FrameStore();
+  const rows = [
+    ticker,
+    { ...ticker, id: 'ETH', symbol: 'ETH-PERP', midPrice: 7 },
+    { ...ticker, id: 'SOL', symbol: 'SOL-PERP' },
+  ];
+  store.apply(
+    nativeFixture(
+      { tickers: rows },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  const published = store.tickers;
+  const before = structuredClone(published);
+  // TICKER_DELTAS rev 1: row 0 sets bid and ask; row 1 clears its midpoint (bit 11, NaN).
+  const deltas = [0, 0b11, 10, 11, 1, 1 << 11, NaN];
+  // TICKER_OBSERVATIONS: row 0 (patched above) and row 1 (cleared above) and nothing for row 2.
+  const observations = [0, 5, -Infinity, 6, 1, 8, 9, -Infinity];
+  const bytes = new ArrayBuffer(16 + 8 + deltas.length * 8 + 8 + observations.length * 8);
+  const view = new DataView(bytes);
+  new Uint8Array(bytes, 0, 4).set([83, 67, 88, 70]);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 2, true);
+  let at = 16;
+  for (const [kind, revision, values] of [
+    [4, 1, deltas],
+    [24, 0, observations],
+  ] as const) {
+    view.setUint16(at, kind, true);
+    view.setUint16(at + 2, revision, true);
+    view.setUint32(at + 4, values.length * 8, true);
+    values.forEach((value, slot) => view.setFloat64(at + 8 + slot * 8, value, true));
+    at += 8 + values.length * 8;
+  }
+  store.apply(new Frame(bytes));
+  expect(store.tickers[0]).toEqual({ ...ticker, bid: 10, ask: 11, observedAt: [5, null, 6] });
+  expect(store.tickers[1]).toEqual({ ...ticker, id: 'ETH', symbol: 'ETH-PERP', observedAt: [8, 9, null] });
+  expect(store.tickers[1]).not.toHaveProperty('midPrice');
+  expect(store.tickers[2]).toBe(published[2]);
+  expect(store.tickersBySymbol['BTC-PERP']).toBe(store.tickers[0]);
+  expect(store.tickersById.ETH).toBe(store.tickers[1]);
+  expect(published).toEqual(before);
+});

@@ -207,6 +207,35 @@ fn duplicate_execution_emits_one_fill_and_never_regresses_order_state() {
     );
 }
 
+// AGT-83: the native trade id `t` is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
+    e.take_frame(1000.0);
+    for (filled, trade) in [("1", r#""t":71,"#), ("2", r#""t":72,"#), ("3", "")] {
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            &format!(
+                r#"{{"e":"orderFill","i":"123","c":42,"E":3000000,"X":"PartiallyFilled","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"{filled}","l":"1","L":"139.5",{trade}"f":"GTC"}}"#
+            ),
+        );
+    }
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(2000.0).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["71", "72", "123"].map(|id| (Some(id.to_owned()), "123".to_owned(), 1.0))
+    );
+}
+
 #[test]
 fn documented_trigger_quantity_is_y_and_trigger_failure_is_terminal() {
     let (mut e, socket) = ready();

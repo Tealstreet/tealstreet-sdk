@@ -165,3 +165,66 @@ fn full_owner_capacity_refuses_each_at_genuine_admission() {
         "each refusal needs a genuine Mutation entry: {native:#?}"
     );
 }
+
+// AGT-115: legs attach only to a limit/market entry that is not reduce-only, so a stop
+// entry or a reduce-only order carrying them was placed without them. Both now refuse
+// the whole command before any I/O, a plain limit beside them too.
+#[test]
+fn dropped_attached_legs_refuse_before_any_io() {
+    let stop_refusal = safe_cex_engine::model::stop_entry_legs_refusal("Lighter");
+    let reduce_refusal = "Attaching a stop-loss or take-profit to a reduce-only order isn't supported on Lighter, so nothing was sent. Place the stop-loss as its own order.";
+    let mut cases = Vec::new();
+    for kind in [
+        "stop_market",
+        "take_profit_market",
+        "conditional",
+        "trailing_stop_market",
+    ] {
+        cases.push((
+            json!({"type":kind,"price":95,"triggerPrice":95}),
+            stop_refusal.as_str(),
+        ));
+    }
+    for kind in ["limit", "market"] {
+        cases.push((
+            json!({"type":kind,"price":95,"reduceOnly":true}),
+            reduce_refusal,
+        ));
+    }
+    for (entry, message) in cases {
+        for legs in [
+            json!({"stopLoss":80}),
+            json!({"takeProfit":120}),
+            json!({"stopLoss":0,"takeProfit":120}),
+        ] {
+            let mut bracket = json!({"symbol":"ETH","side":"buy","amount":0.2});
+            for (k, v) in entry
+                .as_object()
+                .unwrap()
+                .iter()
+                .chain(legs.as_object().unwrap())
+            {
+                bracket[k] = v.clone();
+            }
+            let case = format!("{entry} {legs}");
+            let (mut e, _) = ready();
+            let actions = run(
+                &mut e,
+                Command::PlaceOrders {
+                    command: OWNER,
+                    orders: vec![
+                        order(
+                            json!({"symbol":"ETH","type":"limit","side":"buy","amount":0.2,"price":90}),
+                        ),
+                        order(bracket),
+                    ],
+                },
+            );
+            no_io(&actions, &case);
+            let errors = failure(&actions);
+            assert_eq!(errors.len(), 1, "{case}: one terminal");
+            assert_eq!(errors[0].outcome, Some(Outcome::NotSent), "{case}");
+            assert_eq!(errors[0].legacy_text(), message, "{case}");
+        }
+    }
+}
