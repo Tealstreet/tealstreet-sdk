@@ -2123,7 +2123,7 @@ impl Session {
                 self.send(envelope::error(
                     Some(&name),
                     &format!(
-                        "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded",
+                        "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded.",
                         algo_action_label(&msg.op)
                     ),
                 ));
@@ -5412,7 +5412,7 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| f.contains("chaser:start was not run") && f.contains("acct")),
+                .any(|f| f.contains("Starting the chase wasn’t possible") && f.contains("acct")),
             "{frames:?}"
         );
     }
