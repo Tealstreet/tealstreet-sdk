@@ -201,9 +201,10 @@ separate orders after the entry (OKX limit/market entries, Binance limit/market 
 `stop_market`/`take_profit_market` entries, Kraken limit entries): exactly one entry ID
 followed by one ID per requested leg is `placed` with the entry as `venueOrderId`
 (AGT-111, AGT-112). On those, a split entry, a lone entry ID or any other count stays unknown.
-OKX places a stop-type or `conditional` entry, and Binance a `conditional` or trailing
-one, without its attached legs, so that single ID is `placed` as the entry alone; Kraken
-refuses those brackets before any write.
+OKX places a stop-type or `conditional` entry, and Binance USD-M/PM a `conditional` or
+trailing one, without its attached legs, so that single ID is `placed` as the entry alone.
+Kraken, Binance Spot and COIN-M refuse those brackets before any write, except a COIN-M
+trailing entry, which places its legs uncounted and so stays unknown.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives

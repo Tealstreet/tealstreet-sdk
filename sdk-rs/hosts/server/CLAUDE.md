@@ -401,7 +401,8 @@ stop-type, Kraken limit; `order_contract::bracket_protective_legs`) one entry ID
 exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live: OKX and
 Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
 Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
-entry (and an OKX stop-type one) counts no legs: those adapters drop the attached legs.
+entry (and an OKX stop-type one) counts no legs: OKX and Binance USD-M/PM place it without
+its attached legs; Kraken refuses it before any write.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
