@@ -174,7 +174,7 @@ blocks or fails a trading path.
 
 ## HTTP routes
 
-- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner}`. The last field carries aggregates only: no account, symbol or key ever appears here.
+- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner, typedOutcomes}`. `remoteSigner` and `typedOutcomes` carry aggregates only: no account, symbol or key ever appears here. `typedOutcomes` is described under "Order audit stage timings".
 - **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` added.
 - **`OPTIONS`** on the three routes above returns 204 with the existing public CORS headers.
 - **WebSocket upgrade:** accepted on `/` and on `/account`.
@@ -1068,6 +1068,44 @@ shared typed decoder (`HostInput`). Module: `hosts/server/src/methods.rs`
 - **Cutover set:** `placeOrder(s)`, `placeOrderWithClientOrderId`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`, `cancelAllOrders`, `findOrderByClientOrderId`, `setLeverage`, `fetchLeverage`, `setMarginType`, `setPositionMode`, `fetchPositionMode`, `nuke*`, `fetchOHLCV`, `fetchPublicTrades`, the `fetchHistorical*` reads and `fetchIncomeHistory*`.
 - **Unknown methods:** they fail with `callMethod:done` `{error: {name:'UnsupportedMethod'}}`. They never get a guessed command.
 - **No retries:** the server never retries a trading command. A disconnect never cancels or replays a write, which is FrameServer's orphan rule.
+
+### Order audit stage timings
+
+Every `order audit` line for a Session command (`callMethod` writes and each
+`order.submit`/`order.action` leg) carries `stages_us`: integer microseconds
+from the first stamp, keyed by stage name. Stamps are monotonic `Instant`s taken
+on this box; a stage that was never observed is omitted, never estimated.
+
+| Stage | Stamped when |
+|---|---|
+| `received` | `Session::handle` starts on the socket frame |
+| `admitted` | the command passed Session checks and holds its command ID |
+| `queued` | it is handed to the account engine's command queue, after any load wait |
+| `sent` | its native write identity arrives (`commandProgress`); the engine releases it immediately before that write's I/O, so only placements carry it |
+| `responded` | the native `done` completion arrives |
+| `replied` | the outcome frame is handed to the socket writer |
+
+The origin is `received`, or `admitted` when no frame preceded the command.
+Non-final cancel-all legs have no `replied`: the group answers once. Algo
+(`origin: "algo"`), nuke and preflight refusal lines carry no stages. Stamps
+add only numbers to the existing allowlisted line; no new identifier is logged.
+
+`scripts/audit-latency.sh` (read-only, needs `jq`) reports per-venue
+p50/p95/p99 in milliseconds for `admit` (received to admitted), `queue`
+(admitted to queued), `release` (queued to sent), `venue` (sent to responded),
+`dispatch` (queued to responded, for every write), `reply` and `total`, plus
+each venue's count of lines whose result outcome is `unknown`:
+
+```bash
+journalctl CONTAINER_NAME=exchange-server -o cat --since '1 hour ago' \
+  | sdk-rs/hosts/server/scripts/audit-latency.sh
+```
+
+Router time is not on this line: the box sees a frame only once the router has
+forwarded it. `/health` `typedOutcomes` counts every typed `order.outcome` and
+`order.actionOutcome` this process sent (`settled`) and those that were
+`unknown`; the box-wide unknown rate is their ratio since `bootId` changed.
+Box Slack alerting stays deferred, so nothing alerts on it yet.
 
 ## Accounts and runtime (fe7lgm)
 
