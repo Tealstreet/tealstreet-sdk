@@ -2047,3 +2047,50 @@ fn alloc_ts_rounded_whole_unit_lots_above_maximum() {
 fn alloc_ts_rounded_lots_adjacent_underallocation_control() {
     assert_ts_allocated_writes(2.0, 0.95, 0.1, &["0.6", "0.6", "0.6", "0.1"], 1.9);
 }
+
+// AGT-115, live on Bitunix 2026-11-21: a stop_market with legs became a position TP/SL
+// order without them, receipt `placed`. Every stop entry with a non-zero leg now refuses
+// the whole command before any I/O, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_io() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Bitunix");
+    for kind in [
+        "stop_market",
+        "take_profit_market",
+        "conditional",
+        "trailing_stop_market",
+    ] {
+        for legs in [
+            r#","stopLoss":95000"#,
+            r#","takeProfit":70000"#,
+            r#","stopLoss":0,"takeProfit":70000"#,
+        ] {
+            let (mut e, _) = startup();
+            let stop: PlaceOrderOpts = serde_json::from_str(&format!(
+                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","price":80000,"triggerPrice":80000,"amount":0.0021,"reduceOnly":true{legs}}}"#
+            ))
+            .unwrap();
+            e.handle(
+                1.0,
+                Event::Command(Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![order(""), stop],
+                }),
+            );
+            let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "{kind}{legs}"
+            );
+            assert!(
+                actions.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 1, error })
+                        if error.legacy_text() == refusal
+                            && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                )),
+                "{kind}{legs}: {actions:?}"
+            );
+        }
+    }
+}

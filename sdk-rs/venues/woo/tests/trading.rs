@@ -2185,3 +2185,42 @@ fn parent_cancel_unknown_stops_before_replacement() {
     );
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), 1);
 }
+
+// AGT-115: legs are placed only after a limit/market entry; sized and whole-position
+// stops and trailing algos dropped them. Each now refuses the whole command before any
+// request, a plain limit beside it too.
+#[test]
+fn a_stop_or_trailing_entry_with_attached_legs_is_refused_before_any_request() {
+    let refusal = stop_entry_legs_refusal("WOO");
+    for (kind, amount) in [
+        (OrderType::StopLoss, 0.01),
+        (OrderType::StopLoss, 0.0),
+        (OrderType::TakeProfit, 0.01),
+        (OrderType::TakeProfit, 0.0),
+        (OrderType::TrailingStopLoss, 0.01),
+    ] {
+        for (stop_loss, take_profit) in [
+            (Some(65000.0), None),
+            (None, Some(50000.0)),
+            (Some(0.0), Some(50000.0)),
+        ] {
+            let mut e = engine();
+            e.store_mut().set_positions(vec![position()]);
+            let mut stop = opts();
+            stop.kind = kind;
+            stop.side = OrderSide::Sell;
+            stop.amount = amount;
+            stop.price = Some(58000.0);
+            stop.reduce_only = Some(true);
+            stop.stop_loss = stop_loss;
+            stop.take_profit = take_profit;
+            let a = placed(&mut e, vec![opts(), stop]);
+            assert!(
+                !a.iter().any(|a| matches!(a, Action::Http(_))),
+                "{kind:?} {amount}"
+            );
+            assert_eq!(result(&a).unwrap_err(), refusal, "{kind:?} {amount}");
+            assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
+    }
+}
