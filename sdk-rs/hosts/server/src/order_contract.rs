@@ -259,7 +259,7 @@ pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
     let entries: &[&str] = match venue {
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => &["limit", "market"],
         // AGT-112: Binance also derives legs after a stop-type entry (USD-M live 2026-11-21).
-        // OKX places stop-type and `conditional` entries without legs; Kraken refuses them.
+        // With legs, OKX refuses every non-limit/market entry and Kraken any non-limit (AGT-115).
         "binance" | "binancespot" | "binancepm" | "binanceinverse" => {
             &["limit", "market", "stop_market", "take_profit_market"]
         }

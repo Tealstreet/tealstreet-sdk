@@ -732,6 +732,23 @@ impl PlaceOrderOpts {
         ) && self.trigger_price.is_some()
             && self.trigger_price == self.price
     }
+
+    /// AGT-115: a stop-type, trigger or trailing entry carrying a non-zero attached
+    /// stop-loss or take-profit. An adapter that would place it without those legs
+    /// refuses it before any write with [`stop_entry_legs_refusal`].
+    pub fn stop_entry_with_attached_legs(&self) -> bool {
+        !matches!(self.kind, OrderType::Limit | OrderType::Market)
+            && [self.stop_loss, self.take_profit]
+                .iter()
+                .any(|leg| leg.is_some_and(|price| price != 0.0))
+    }
+}
+
+/// One refusal copy for every venue that cannot attach legs to a stop entry (AGT-115).
+pub fn stop_entry_legs_refusal(venue: &str) -> String {
+    format!(
+        "Attaching a stop-loss or take-profit to a stop entry isn't supported on {venue}, so nothing was sent. Place the stop-loss after the entry fills."
+    )
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
@@ -784,6 +801,47 @@ mod tests {
         assert_eq!(
             closes,
             inline.iter().map(|row| row.close).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn only_a_non_plain_entry_with_a_non_zero_leg_is_a_stop_entry_bracket() {
+        let order = |kind: &str, legs: &str| -> PlaceOrderOpts {
+            serde_json::from_str(&format!(
+                r#"{{"symbol":"X","type":"{kind}","side":"buy","amount":1{legs}}}"#
+            ))
+            .unwrap()
+        };
+        for kind in [
+            "conditional",
+            "stop_market",
+            "take_profit_market",
+            "trailing_stop_market",
+        ] {
+            for legs in [
+                r#","stopLoss":1"#,
+                r#","takeProfit":2"#,
+                r#","stopLoss":0,"takeProfit":2"#,
+            ] {
+                assert!(
+                    order(kind, legs).stop_entry_with_attached_legs(),
+                    "{kind}{legs}"
+                );
+            }
+            for legs in ["", r#","stopLoss":0"#, r#","stopLoss":null,"takeProfit":0"#] {
+                assert!(
+                    !order(kind, legs).stop_entry_with_attached_legs(),
+                    "{kind}{legs}"
+                );
+            }
+        }
+        for kind in ["limit", "market"] {
+            assert!(
+                !order(kind, r#","stopLoss":1,"takeProfit":2"#).stop_entry_with_attached_legs()
+            );
+        }
+        assert!(
+            stop_entry_legs_refusal("OKX").contains("isn't supported on OKX, so nothing was sent")
         );
     }
 

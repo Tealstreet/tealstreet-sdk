@@ -95,6 +95,14 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
+## Stop-entry brackets (AGT-115)
+
+`plan_place` derives stop-loss/take-profit legs only after a limit/market entry, as
+the TS reference does. Any algo entry (`conditional`, `stop_market`,
+`take_profit_market`, `trailing_stop_market`) with a non-zero attached leg used to
+be placed without it; the whole command now refuses before any write with the
+engine's shared `stop_entry_legs_refusal` copy. A zero leg still means "none".
+
 ## Entire-position TP/SL (AGT-68, AGT-98)
 
 OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and

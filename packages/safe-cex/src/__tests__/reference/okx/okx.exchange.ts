@@ -73,6 +73,7 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
@@ -1811,6 +1812,8 @@ export class OKXExchange extends BaseExchange {
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(opts);
+    // AGT-115: legs derive only from limit/market entries; an algo entry would drop them.
+    if (opts.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('OKX'));
     // need to ensure position mode is loaded
     await this.getOrFetchPositionMode();
     const [algoOrders, normalOrders] = partition(opts, (o) => this.isAlgoOrder(o.type));

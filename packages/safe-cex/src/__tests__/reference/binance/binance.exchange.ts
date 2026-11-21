@@ -75,6 +75,7 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
 import { mapBinanceHistoricalOrder } from './binance.order-history';
@@ -1803,6 +1804,15 @@ export class BinanceExchange extends BaseExchange {
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts): { regular: any[]; algo: any[] } => {
+    // AGT-115: a trailing entry returns below before its legs are formatted; refuse, as
+    // Rust does for trailing and conditional entries. Every caller formats before writing.
+    if (
+      (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) &&
+      stopEntryWithAttachedLegs(opts)
+    ) {
+      this.rejectPreflight(stopEntryLegsRefusal('Binance'));
+    }
+
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[opts.symbol];
 
