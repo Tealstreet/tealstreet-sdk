@@ -53,7 +53,7 @@ impl Marker {
             return envelope::algo_notice(
                 account,
                 &format!(
-                    "The previous server ({display}) lost its memory-only delegated key (waiting for your key). Only client-retained TWAP schedules can be restored, paused. Check Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill."
+                    "Trading on the previous server ({display}) was interrupted and needs your key again. Saved TWAPs can be restored paused. Check your open orders before restarting automated orders."
                 ),
                 None,
             );
@@ -61,7 +61,7 @@ impl Marker {
         envelope::algo_notice(
             account,
             &format!(
-                "Your algos on the previous server ({}) were stopped. Check your algos and Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill.",
+                "Your automated orders on the previous server ({}) were stopped. Check your open orders before restarting them.",
                 display
             ),
             None,
@@ -278,6 +278,7 @@ impl Notices {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,7 +300,7 @@ mod tests {
             notice["d"]["data"][0]
                 .as_str()
                 .unwrap()
-                .contains("waiting for your key")
+                .contains("needs your key again")
         );
     }
     #[tokio::test(start_paused = true)]

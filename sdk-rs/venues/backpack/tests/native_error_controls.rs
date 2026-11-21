@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Outcome, VenueError};
@@ -7,7 +8,8 @@ use support::managed::*;
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const UNKNOWN_MESSAGE: &str = ENGINE_UNKNOWN_TEXT;
 
 fn assert_unknown(error: &VenueError) {
@@ -227,7 +229,7 @@ fn definitive_trigger_replacement_refusal_keeps_rejection_wording() -> Result {
         Some(safe_cex_engine::error::Protection::Unprotected)
     );
     assert!(error.message.contains("replacement was refused"));
-    assert!(!error.message.contains("outcome is unknown"));
+    assert!(!error.message.contains("confirm"));
     assert_eq!(error.venue_code.as_deref(), Some("INVALID_ORDER"));
     assert_eq!(error.venue_message.as_deref(), Some("synthetic refusal"));
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));

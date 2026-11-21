@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Remaining private reads and writes retain genuine admission and DATA custody.
 mod support;
 
@@ -582,7 +583,7 @@ fn retired_setting_is_fenced_before_its_queued_successor_wakes() {
         if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandFailed { command, error })
-        if *command == COMMAND + 1 && error.message.contains("awaiting reconciliation"))));
+        if *command == COMMAND + 1 && error.message.contains("settings update hasn’t been confirmed"))));
 }
 
 #[test]

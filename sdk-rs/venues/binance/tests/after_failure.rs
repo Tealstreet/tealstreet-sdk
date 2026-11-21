@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Continue/stop decisions belong to the venue's legacy TypeScript policy.
 mod support;
 use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts};
@@ -5,7 +6,8 @@ use safe_cex_engine::{Command, Event, Method};
 use safe_cex_venue_binance::Variant;
 use support::{Harness, Options};
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 fn root(variant: Variant) -> &'static str {
     if variant == Variant::CoinM {
@@ -392,7 +394,7 @@ fn a_later_gateway_failure_keeps_accepted_refused_unknown_and_unissued_rows() {
             error.partial.as_ref().unwrap().order_ids,
             ["7", "8", "9", "10", "1", "2", "3", "4", "5"]
         );
-        assert!(error.message.contains("outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"));
+        assert!(error.message.contains("This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."));
         let rows = error.elements.as_ref().unwrap();
         assert_eq!(rows.len(), 16);
         assert!(

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Unsigned public-trades custody and unchanged signed-read compatibility.
 #[path = "../../../engine/tests/support/account_snapshot.rs"]
 mod account_snapshot;
@@ -320,7 +321,10 @@ fn shared_context_capacity_refuses_history_before_native_active_slot_or_io() {
     );
     let error = failure(&output, OWNER);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(error.outcome.is_none());
     assert!(
         peers.iter().all(|peer| e.http_preparation_pending(*peer)),

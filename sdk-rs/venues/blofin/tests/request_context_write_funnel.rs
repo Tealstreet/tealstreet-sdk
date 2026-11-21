@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original controls for the trading write funnel
 //! (`docs/plans/RUST_BLOFIN_WRITE_FUNNEL.md`, W1): every trading command owns a
 //! Preflight root and one streamed serial Plan; writes are Primary managed
@@ -598,7 +599,7 @@ fn a_plain_cancel_gone_is_satisfied_fences_and_reconciles() {
     );
     assert_eq!(
         failure(&h, 9).message,
-        "Placement outcome is uncertain; reconcile before cancel-all"
+        "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
     );
     assert_eq!(
         count(&h, "cancel-batch-orders"),
@@ -765,7 +766,7 @@ fn an_unknown_placement_stays_fenced_until_a_fresh_complete_order_read() {
         assert_eq!(count(h, "batch-orders"), 0, "no retry POST while uncertain");
         let error = failure(h, id);
         assert_eq!(error.outcome, Some(Outcome::NotSent));
-        assert!(error.message.contains("uncertain"));
+        assert!(error.message.contains("confirm"));
     };
     refused(&mut h, 701);
 
@@ -926,7 +927,7 @@ fn a_new_uncertain_amend_requires_a_census_started_after_its_mark() {
         "a post-mark last family cannot make a pre-mark first page fresh"
     );
     assert_eq!(failure(&h, 782).outcome, Some(Outcome::NotSent));
-    assert!(failure(&h, 782).message.contains("uncertain"));
+    assert!(failure(&h, 782).message.contains("confirm"));
     let reask_at = h.now + 1_000.;
     fire_until(&mut h, reask_at);
     for path in [
@@ -1113,7 +1114,11 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
     let error = failure(&h, 7);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{}",
         error.message
     );

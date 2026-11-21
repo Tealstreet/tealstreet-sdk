@@ -147,7 +147,7 @@ A definite native refusal is recorded and the next distinct lot, batch row or
 cancellation still sends. Native engine write journals retain accepted IDs and
 refusals, delivered in the structured CommandFailed event. A genuine Unknown
 halts the action under the recorded stop-after-UNKNOWN parity exception, with
-"The outcome is unknown. Check Open Orders". No engine fence is bypassed and
+"We couldn’t confirm this change. Check your open orders before trying again.". No engine fence is bypassed and
 the venue's reporting-only WritePlan never controls dispatch or retries.
 Venue-authored Unknown terminals also emit one `order.outcome_unknown` diagnostic
 with command correlation, operation and outcome. It carries the same canonical

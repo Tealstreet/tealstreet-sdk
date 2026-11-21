@@ -2662,3 +2662,11 @@ contains only the events that could be uniquely assigned (possibly zero).
 Source rows outside all reconstructed intervals remain in that separate list.
 This is an in-memory result, not a new durable income-ingestion axis or a repair
 of previously persisted rows. Reported-position PnL/fee conventions are unchanged.
+
+## Notification wording
+
+SDK error and warning text is shown verbatim by web/mobile. Use calm wording
+without transport/runtime jargon; unconfirmed orders still say to check open
+orders before trying again. Locale summary fragments retain check-before-retry guidance for consumers
+that show them directly. Presenters with a shared footer avoid repeating it. Cross Trade holds recognize both the previous and current wording
+while server, WASM and retained notices move through the rollout.

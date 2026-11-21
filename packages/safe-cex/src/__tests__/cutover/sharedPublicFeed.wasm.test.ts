@@ -1,3 +1,5 @@
+// Rule 5 (#3726): closed RPC and startup disposal keep their distinct display messages.
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { Candle, ExchangeOptions, Market, OrderBook, PublicDataSource, StoreData } from '../../types';
@@ -477,7 +479,7 @@ describe('native public-feed ownership through real private workers', () => {
     await waitFor(() => expect(workers[1].worker.exchange?.isDisposed).toBe(true));
     expect(workers[1].input.sockets.every((socket) => socket.closed)).toBe(true);
     await expect((workers[1].worker.exchange as RustEngineExchange).fetchPublicTrades('BTC-USD')).rejects.toThrow(
-      /disposed/,
+      /coinbasespot was closed/,
     );
   }, 15_000);
 
@@ -581,7 +583,7 @@ describe('native public-feed ownership through real private workers', () => {
       publicFeed: { mode: 'shared', port: pending.port2 as unknown as MessagePort },
     });
     waiting.account.dispose();
-    await expect(waiting.startup).rejects.toThrow(/disposed/);
+    await expect(waiting.startup).rejects.toThrow(/Exchange disposed during startup/);
   });
 
   it.each([

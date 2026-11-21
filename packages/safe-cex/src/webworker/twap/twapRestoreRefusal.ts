@@ -44,8 +44,8 @@ export const twapRestoreRefusal = (
       state.nextOrderAt + intervalMs * (1 + (options.randomnessPercentage || 0) / 100) + TWAP_RESTORE_SCHEDULE_GRACE_MS;
     if (!Number.isFinite(latestMs) || nowMs > latestMs) {
       return inFlight
-        ? 'its schedule lapsed, so no tab was running it; a slice may have been in flight, check open orders and fills'
-        : 'its schedule lapsed, so no tab was running it';
+        ? 'its saved schedule expired with a slice still pending; check your open orders and fills before restarting it'
+        : 'its saved schedule has expired';
     }
   }
   return undefined;

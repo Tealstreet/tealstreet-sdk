@@ -648,7 +648,8 @@ async fn stopped_reply(
         _ => envelope::error(
             Some("acct"),
             &format!(
-                "{op} was not run: this account is not connected yet. Try again once it has loaded"
+                "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded.",
+                super::super::algo_action_label(op)
             ),
         ),
     };

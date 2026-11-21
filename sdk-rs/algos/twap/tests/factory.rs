@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer lifecycle messages; owner, no-cancel and no-replay assertions stay intact.
 //! The runtime adapter: ops in, engine commands and wire replies out.
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -372,9 +373,9 @@ async fn typed_start_reports_owner_change_during_first_effects() {
                         result.expect_err("discarded work must never report Starting TWAP");
                     assert!(
                         message.message.contains(if after_dispatch {
-                            "outcome is unknown"
+                            "The account connection changed while the TWAP was starting. Check your open orders before restarting it."
                         } else {
-                            "cancelled-for-owner-change"
+                            "The TWAP couldn’t start because the account connection changed"
                         }),
                         "{message:?}"
                     );
@@ -460,7 +461,7 @@ async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
                         );
                         assert!(port.emits.borrow().iter().any(|(op, data)| {
                             op == "error"
-                                && data == "TWAPs stopped: authenticated connection binding changed"
+                                && data == "TWAPs stopped because the account connection changed"
                         }));
                     }
                     cx.scope.dispose();

@@ -28,7 +28,7 @@ pub fn starts_job(op: &str) -> bool {
 }
 
 pub fn refusal() -> Value {
-    json!({"name":"ServerDraining", "kind":"venueUnavailable", "message":"The server is draining; new algo jobs are not accepted", "outcome":"notSent"})
+    json!({"name":"ServerDraining", "kind":"venueUnavailable", "message":"The server is preparing to restart and isn’t starting new automated orders", "outcome":"notSent"})
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -601,6 +601,7 @@ impl Drop for Socket {
 
 pub const FORCE_DEADLINE: Duration = Duration::from_secs(25);
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

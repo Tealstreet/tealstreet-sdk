@@ -1312,7 +1312,7 @@ impl MexcFutures {
                 error.presents = true;
                 if error.outcome == Some(Outcome::Unknown) {
                     error.message = format!(
-                        "Your {} protection status is unknown: {}; check Open Orders and your position before replacing protection",
+                        "Your {} protection wasn’t confirmed: {}. Check your open orders and position before adding protection.",
                         edit.observed.symbol, error.message
                     );
                 } else {

@@ -26,13 +26,18 @@ const CALL_MS: u32 = 20_000;
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
-const UNKNOWN_WRITE: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_WRITE: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains("Check your open orders")
         && !(error.message.contains("unknown") && error.message.contains("Check Open Orders"))
     {
-        format!("{UNKNOWN_WRITE}: {}", error.message)
+        format!(
+            "We couldn’t confirm this change: {}. Check your open orders before trying again.",
+            error.message.trim_end_matches('.')
+        )
     } else {
         error.message.clone()
     }
@@ -975,7 +980,10 @@ impl Blofin {
                 || !matches!(source.position_side.as_str(), "net" | "long" | "short")
             {
                 if conditional {
-                    return Err("BloFin replacement provenance is incomplete".into());
+                    return Err(
+                        "BloFin’s original order details aren’t complete enough to replace it"
+                            .into(),
+                    );
                 }
             } else {
                 payload.margin_mode = source.margin_mode.clone();
@@ -1024,7 +1032,10 @@ impl Blofin {
                     "last" | "mark" | "index"
                 ) || !(source.order_price == -1.0 || source.order_price > 0.0)
                 {
-                    return Err("BloFin trigger replacement provenance is incomplete".into());
+                    return Err(
+                        "BloFin’s original trigger details aren’t complete enough to replace it"
+                            .into(),
+                    );
                 }
                 payload.trigger_price_type = Some(source.trigger_price_type.clone());
                 payload.order_price = Some(num::format(source.order_price));
@@ -1280,7 +1291,7 @@ impl Blofin {
             let real = id.split("__").next().unwrap_or(id);
             let source = self.account.sources.get(id);
             if family == 2 && source.is_none_or(|s| s.algo_id != *id || s.inst_id != m.id) {
-                return Err("BloFin conditional cancel requires authoritative provenance".into());
+                return Err("The BloFin conditional order’s details need to load before it can be cancelled".into());
             }
             // Inline attached legs share the normal parent's native cancel target.
             let family = if family == 1
@@ -1781,7 +1792,9 @@ impl Blofin {
             return Ok(rows);
         }
         if order.kind == OrderType::Conditional && source.is_none() {
-            return Err("BloFin trigger replacement requires provenance".into());
+            return Err(
+                "The BloFin trigger’s details need to load before it can be replaced".into(),
+            );
         }
         if let Some(price) = price {
             positive(num::adjust(price, m.precision.price), "amend price")?;
@@ -2376,7 +2389,7 @@ impl Blofin {
                 })
                 .unwrap_or_else(|| "order".into());
             let words = format!(
-                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                "Your replacement {what} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
             );
             let _ = cx.present_plan_failure(&plan, words);
         }
@@ -3655,11 +3668,17 @@ fn unknown_event(cx: &mut Cx<'_, Pending>, command: CommandId, message: &str) {
 }
 
 fn unknown_guidance(mut error: VenueError) -> VenueError {
-    if error.outcome == Some(Outcome::Unknown) && !error.message.contains(UNKNOWN_WRITE) {
+    if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains("Check your open orders")
+        && !error.message.contains("Check Open Orders")
+    {
         error.message = if error.presents
             || matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout))
         {
-            format!("{UNKNOWN_WRITE}: {}", error.message)
+            format!(
+                "We couldn’t confirm this change: {}. Check your open orders before trying again.",
+                error.message.trim_end_matches('.')
+            )
         } else {
             UNKNOWN_WRITE.into()
         };
@@ -3794,6 +3813,7 @@ fn margin_on_flat_symbols(cx: &mut Cx<'_, Pending>, mode: MarginType) {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3885,5 +3905,94 @@ mod tests {
             verdict("152420", Intent::Place),
             Verdict::Refused(ErrorKind::InvalidInput)
         );
+    }
+}
+
+// Rule 5 (#3726): display decoration must preserve existing guidance and all typed error facts.
+#[cfg(test)]
+mod notification_display_tests {
+    use super::*;
+
+    fn display(error: &VenueError) -> VenueError {
+        {
+            let mut rendered = error.clone();
+            rendered.message = terminal_failure_text(error);
+            rendered
+        }
+    }
+
+    #[test]
+    fn already_guided_unknown_display_is_idempotent() {
+        for message in [
+            "We couldn’t confirm this change. Check your open orders before trying again.",
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "The outcome of this order change is unknown. Check Open Orders",
+            "Restoring the original wasn’t confirmed. Check your open orders before adding protection.",
+        ] {
+            let original = VenueError::new(message)
+                .outcome(Outcome::Unknown)
+                .kind(ErrorKind::RateLimited)
+                .venue_code("429");
+            let rendered = display(&original);
+            assert_eq!(rendered.message, message);
+            assert_eq!(display(&rendered).message, message);
+            assert_eq!(rendered.outcome, original.outcome);
+            assert_eq!(rendered.kind, original.kind);
+            assert_eq!(rendered.venue_code, original.venue_code);
+        }
+    }
+
+    #[test]
+    fn unguided_unknown_gets_one_action_and_refusals_remain_unchanged() {
+        let original = VenueError::new("No reply arrived").outcome(Outcome::Unknown);
+        let rendered = display(&original);
+        assert_eq!(
+            rendered
+                .message
+                .matches("Check your open orders before trying again.")
+                .count(),
+            1
+        );
+        assert_eq!(display(&rendered).message, rendered.message);
+        assert_eq!(rendered.outcome, original.outcome);
+        for outcome in [None, Some(Outcome::NotSent), Some(Outcome::Rejected)] {
+            let mut refusal = VenueError::new("Order declined")
+                .kind(ErrorKind::Rejected)
+                .venue_code("10001");
+            refusal.outcome = outcome;
+            let rendered = display(&refusal);
+            assert_eq!(rendered.message, refusal.message);
+            assert_eq!(rendered.outcome, refusal.outcome);
+            assert_eq!(rendered.kind, refusal.kind);
+            assert_eq!(rendered.venue_code, refusal.venue_code);
+        }
+    }
+}
+
+// Rule 5 (#3726): inner guidance cannot repeat an engine HTTP action.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_failure_retains_text_and_facts() {
+        let original = VenueError::new("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
+            .outcome(Outcome::Unknown).kind(ErrorKind::Network).venue_code("429");
+        let shown = unknown_guidance(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.kind, original.kind);
+        assert_eq!(shown.venue_code, original.venue_code);
+    }
+    #[test]
+    fn unguided_inner_failure_keeps_one_action_and_refusals_remain_unchanged() {
+        let shown = unknown_guidance(
+            VenueError::new("lost")
+                .outcome(Outcome::Unknown)
+                .kind(ErrorKind::Network),
+        );
+        assert!(shown.message.contains("lost"));
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        assert_eq!(unknown_guidance(original.clone()).message, original.message);
     }
 }

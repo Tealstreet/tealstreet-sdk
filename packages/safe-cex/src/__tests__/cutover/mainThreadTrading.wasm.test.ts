@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
@@ -292,7 +293,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     ['store payload', false],
   ])('Nuke sends no second close when the read fails, and says not confirmed (%s bridge)', async (_mode, frames) => {
     const { tape } = await start(frames, () => ({ status: 500, body: '{"code":-1000,"msg":"down"}' }));
-    await expect(main!.nuke()).rejects.toThrow(/could not confirm the account is flat/);
+    await expect(main!.nuke()).rejects.toThrow(/Nuke couldn’t confirm all positions were closed/);
     expect(closesIn(tape.writes())).toHaveLength(1);
   });
 
@@ -379,7 +380,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
   it('keeps an unstarted instance without a worker bridge local, sending nothing', async () => {
     main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
     const dispatch = vi.spyOn(main.emitter, 'dispatch');
-    await expect(main.cancelSymbolOrders('BTCUSDT')).rejects.toThrow('engine is not started');
+    await expect(main.cancelSymbolOrders('BTCUSDT')).rejects.toThrow('binance is still loading');
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

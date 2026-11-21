@@ -2123,8 +2123,8 @@ impl Session {
                 self.send(envelope::error(
                     Some(&name),
                     &format!(
-                        "{} was not run: this account is not connected yet. Try again once it has loaded",
-                        msg.op
+                        "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded.",
+                        algo_action_label(&msg.op)
                     ),
                 ));
             }
@@ -2942,7 +2942,7 @@ impl Session {
                 name,
                 completion,
                 "ServerDraining",
-                "Router lease expired; no new work was sent",
+                "The server connection expired; no new orders were sent",
                 Some("notSent"),
                 order_frame,
             );
@@ -3791,6 +3791,7 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         .then_some("Unauthenticated public Bybit init cannot include account or routing fields")
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5417,7 +5418,7 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| f.contains("chaser:start was not run") && f.contains("acct")),
+                .any(|f| f.contains("Starting the chase wasn’t possible") && f.contains("acct")),
             "{frames:?}"
         );
     }
@@ -6885,7 +6886,7 @@ mod tests {
                 audit: None,
             },
         );
-        let message = "Your BTCUSDT edit was sent, but Bybit did not confirm that the old order was cancelled, so a second stop may exist; check Open Orders [proof: axis=target http=503; axis=final final-len=0]";
+        let message = "Your BTCUSDT edit was sent before the old stop’s cancellation was confirmed ({}). Check your open orders for a second stop.";
         let notice =
             json!({"type":"done","command":4,"error":message,"detail":{"kind":"rejected"}});
         notice_to_msg(&out, "acct", &notice, &pending);
@@ -6932,3 +6933,17 @@ mod delegated_e2e;
 #[cfg(test)]
 #[path = "session/tests/delegated_resume.rs"]
 mod delegated_resume;
+
+/// Display names only, as the SDK's `algoActionLabel`; the op itself is unchanged.
+fn algo_action_label(op: &str) -> &'static str {
+    match op {
+        "chaser:start" => "Starting the chase",
+        "chaser:terminate" => "Stopping the chase",
+        "twap:start" => "Starting the TWAP",
+        "twap:resume" => "Resuming the TWAP",
+        "twap:pause" => "Pausing the TWAP",
+        "twap:stop" => "Stopping the TWAP",
+        "exec" => "Running this trading request",
+        _ => "This automated order request",
+    }
+}

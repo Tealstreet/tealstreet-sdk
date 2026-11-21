@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome};
 use safe_cex_venue_lighter::Lighter;
@@ -174,7 +175,7 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
             "{change}: {out:?}"
         );
         if change != "valid" {
-            assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.message.contains("outcome unknown")&&error.protection.is_none())),"{out:?}");
+            assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.message.contains("didn’t confirm the cancellation")&&error.protection.is_none())),"{out:?}");
         }
     }
 }
@@ -206,7 +207,11 @@ fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
             .unwrap();
         let message = error.message.to_ascii_lowercase();
         assert!(
-            message.contains("unknown") && message.contains("check open orders"),
+            message.contains("confirm")
+                && message
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(
@@ -307,7 +312,7 @@ fn putback_unknown_never_claims_restored_or_both_refused() {
         reply_at(&mut e, NOW + 100.0, &r, status, body);
         let out = advance(&mut e, &mut t, NOW + 1500.0);
         assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{out:?}");
-        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::Unknown)&&error.protection.is_none()&&error.message.contains("check Open Orders"))),"{out:?}");
+        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::Unknown)&&error.protection.is_none()&&error.message.contains("Check your open orders"))),"{out:?}");
     }
 }
 #[test]
@@ -1133,7 +1138,7 @@ fn a_pre_modify_census_cannot_regrant_old_provenance_after_success_or_unknown() 
         );
         let out = safe_cex_engine::test_support::prepared_actions(&mut e, now + 2.);
         assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{unknown}: {out:?}");
-        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:9,error}) if (error.message.contains("original unavailable") || (unknown && error.message.contains("outcome is uncertain")))&&error.outcome==Some(Outcome::NotSent))),"{unknown}: {out:?}");
+        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:9,error}) if (error.message.contains("original unavailable") || (unknown && error.message.contains("An earlier order hasn’t been confirmed")))&&error.outcome==Some(Outcome::NotSent))),"{unknown}: {out:?}");
     }
 }
 

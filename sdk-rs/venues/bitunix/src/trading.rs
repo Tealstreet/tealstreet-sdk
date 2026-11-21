@@ -47,7 +47,7 @@ fn unknown_inventory_row(
     cx.event(
         safe_cex_engine::Level::Warn,
         "command.unknown_inventory",
-        "The outcome is unknown. Check Open Orders",
+        "We couldn’t confirm this change. Check your open orders before trying again.",
         fields,
     );
 }
@@ -450,6 +450,19 @@ fn split_quantities(
         sizes.push(quantity(rest)?);
     }
     Ok(sizes)
+}
+
+fn unknown_failure_text(message: &str) -> String {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
+        return message.to_owned();
+    }
+    if message.is_empty() {
+        "We couldn’t confirm this change. Check your open orders before trying again.".into()
+    } else {
+        format!(
+            "{message}. We couldn’t confirm this change. Check your open orders before trying again."
+        )
+    }
 }
 
 impl BitunixFutures {
@@ -1866,7 +1879,7 @@ impl BitunixFutures {
         if let Some((_, symbol, side, kind)) = job.kept.take() {
             let unknown = error.outcome == Some(Outcome::Unknown);
             let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
-            error.message = format!("{gone}: {}", error.message);
+            error.message = safe_cex_engine::error::with_detail(&gone, &error.message);
         }
     }
     // This observes existing identities only; the engine journal owns outcomes.
@@ -1887,14 +1900,7 @@ impl BitunixFutures {
     fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
         self.kept_gone(command, &mut error);
         if error.outcome == Some(Outcome::Unknown) {
-            error.message = if error.message.is_empty() {
-                "The outcome is unknown. Check Open Orders".into()
-            } else {
-                format!(
-                    "{}. The outcome is unknown. Check Open Orders",
-                    error.message
-                )
-            };
+            error.message = unknown_failure_text(&error.message);
             error.presents = true;
         }
         let Some(live) = self.take_live(command) else {
@@ -2528,7 +2534,7 @@ impl BitunixFutures {
                 .first()
                 .cloned()
                 .ok_or_else(|| "Bitunix place response has no order ID".to_owned()),
-            Ok((_, true)) => Err("Malformed Bitunix order acknowledgement".to_owned()),
+            Ok((_, true)) => Err("Bitunix’s order reply couldn’t be read".to_owned()),
             Err(error) => Err(error),
         };
         if let Ok(id) = &accepted
@@ -2575,7 +2581,11 @@ impl BitunixFutures {
             error_code: Option<error::Code>,
         }
         let Ok(rows) = serde_json::from_str::<BatchResult<'_>>(data) else {
-            return Self::record(cx, request, Err("Malformed Bitunix batch response".into()));
+            return Self::record(
+                cx,
+                request,
+                Err("Bitunix’s batch reply couldn’t be read".into()),
+            );
         };
         let (successes, mut malformed) = match ack_rows(rows.success_list) {
             Ok(rows) => (rows, false),
@@ -2697,7 +2707,11 @@ impl BitunixFutures {
             serde_json::from_str::<Canceled<'_>>(data)
         };
         let Ok(ack) = ack else {
-            return Self::record(cx, request, Err("Malformed Bitunix cancellation".into()));
+            return Self::record(
+                cx,
+                request,
+                Err("Bitunix’s cancellation reply couldn’t be read".into()),
+            );
         };
         let raw_ids: Vec<_> = ids
             .iter()
@@ -2881,7 +2895,7 @@ impl BitunixFutures {
             "Bitunix cancellation not acknowledged for every order; replacement was not placed"
                 .to_owned()
         } else if message.is_empty() {
-            "Malformed Bitunix cancellation acknowledgement".to_owned()
+            "Bitunix didn’t confirm the requested cancellation".to_owned()
         } else {
             message.join_with("; ")
         };
@@ -2901,7 +2915,7 @@ impl BitunixFutures {
                 | WriteResult::Failed(error),
             ) => {
                 if error.outcome == Some(Outcome::Unknown) {
-                    const UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
+                    const UNKNOWN: &str = "We couldn’t confirm this change. Check your open orders before trying again.";
                     if let Some(live) = self.trading.live.get_mut(&request.command) {
                         live.note = Some(match live.note.take() {
                             Some(note) => format!("{note}; {UNKNOWN}"),
@@ -3133,6 +3147,7 @@ fn append_protection(
     Ok(())
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod split_tests {
     use super::split_quantities;
@@ -3234,5 +3249,26 @@ mod real_ack_tests {
             ack_identity(r#"{"orderId":null,"clientId":null}"#, true).unwrap(),
             (None, false)
         );
+    }
+}
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(unknown_failure_text(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = unknown_failure_text("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
     }
 }

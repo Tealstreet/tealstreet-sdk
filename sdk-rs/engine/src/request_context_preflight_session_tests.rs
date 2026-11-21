@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! N7 (RUST_PLAN_SESSION_WAIT): a retained Preflight read parked on a login
 //! Session before issue, resumed by `session_ready` under its own generation.
 use super::*;
@@ -584,7 +585,7 @@ fn an_ended_preflight_hook_cannot_bind_its_retired_session() {
     let terminals = terminals(&actions);
     assert_eq!(terminals.len(), 1, "one terminal");
     let error = terminals[0].as_ref().unwrap_err();
-    assert_eq!(error.message, "HTTP read admission failed");
+    assert_eq!(error.message, "This data request couldn’t be prepared");
     assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
     assert_eq!(error.kind, Some(crate::ErrorKind::InvalidInput));
 }

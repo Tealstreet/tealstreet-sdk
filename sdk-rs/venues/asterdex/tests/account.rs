@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Official Aster V3 account, positionRisk and user-data payload contracts.
 //! https://github.com/asterdex/api-docs/blob/master/V3(Recommended)/EN/aster-finance-futures-api-v3.md
 use safe_cex_engine::model::{OrderStatus, PositionSide};
@@ -1018,7 +1019,7 @@ fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
     assert!(
         h.logs
             .iter()
-            .any(|l| l.contains("position mode read failed"))
+            .any(|l| l.contains("position mode couldn’t be loaded"))
     );
     let reduce =
         json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1,"reduceOnly":true});
@@ -1028,7 +1029,7 @@ fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
         result(&h, 30)
             .as_ref()
             .unwrap_err()
-            .contains("position mode has not loaded")
+            .contains("position mode is still loading")
     );
     h.fire_after(1_000.0);
     h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
@@ -1837,8 +1838,11 @@ const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
 /// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &H) {
     let error = result(h, 991).as_ref().unwrap_err();
+    // Native detail sits between what happened and the single action (#3726).
     assert!(
-        error.contains("outcome is unknown. Check Open Orders"),
+        (error.contains("wasn’t confirmed")
+            || error.contains("The exchange reply didn’t confirm this change."))
+            && error.matches("Check your open orders").count() == 1,
         "{error}"
     );
     let words = error.to_ascii_lowercase();
@@ -2177,8 +2181,11 @@ fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         h.respond_status(restore, status, "");
         let error = h.failures.last().unwrap().clone();
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("immediately trigger"),
             "{status}: {}",
             error.message
@@ -2291,14 +2298,17 @@ fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
     // Exactly master's terminal: the order is gone and its replacement refused.
     let error = h.failures.last().unwrap();
     assert!(
-        error.message.contains("order is gone") && error.message.contains("replacement refused"),
+        error
+            .message
+            .contains("order was cancelled and its replacement was declined")
+            && error.message.contains("replacement was declined"),
         "{error:?}"
     );
     assert_eq!(
         error.protection,
         Some(safe_cex_engine::error::Protection::Unprotected)
     );
-    assert!(!error.message.contains("unknown"), "{error:?}");
+    assert!(!error.message.contains("confirm"), "{error:?}");
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }
 

@@ -504,7 +504,7 @@ impl BybitLinear {
         );
         let Ok((plan, execution, founder)) = admitted else {
             let error =
-                internal("Bybit trading plan admission was refused").outcome(Outcome::NotSent);
+                internal("Bybit couldn’t prepare this order change").outcome(Outcome::NotSent);
             let _ = cx.fail_preflight(&entry.preflight, error);
             return;
         };

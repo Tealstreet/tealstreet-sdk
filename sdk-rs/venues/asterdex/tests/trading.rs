@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native request contract from the official Aster V3 New Order, Cancel Order,
 //! Change Initial Leverage and STP examples. Synthetic credentials only.
 use safe_cex_engine::model::*;
@@ -1301,7 +1302,10 @@ fn a_refused_limit_replacement_says_the_order_is_gone() {
         r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
-    assert!(message.contains("order is gone"), "{message}");
+    assert!(
+        message.contains("order was cancelled and its replacement was declined"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1372,7 +1376,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("The outcome is unknown. Check Open Orders")
+                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.") || error.message.contains("We couldn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

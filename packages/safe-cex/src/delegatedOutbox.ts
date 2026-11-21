@@ -441,7 +441,7 @@ export class DelegatedOutbox {
     if (this.connection) this.disconnect(this.connection);
     requireDelegatedActivation(connection.capabilities, flags, connection.venue);
     if (!connection.ready)
-      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
+      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'The trading connection is still getting ready');
     const captured = this.connect(connection);
     this.activationConnection = captured;
     return captured;
@@ -529,7 +529,7 @@ export class DelegatedOutbox {
       if (!connection || this.activationConnection !== connection || !this.current(connection))
         throw new DelegatedActivationError(
           'delegatedConnectionNotAdmitted',
-          'DELEGATED action requires activation on this connection',
+          'This connection isn’t ready to make changes yet',
         );
       if (action !== 'place' && action !== 'close') requireDelegatedAction(action, {});
       const params = clone(paramsOrOptions as Record<string, unknown>);
@@ -874,7 +874,7 @@ export class DelegatedOutbox {
     row.cancelPending = handedOff;
     row.state = row.cancelPending ? 'unknown' : 'canceled';
     if (row.action && row.cancelPending)
-      row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
+      row.error = { message: 'We’re waiting for confirmation. Check your open orders before trying again.', outcome: 'unknown' };
     this.stopTimer(intentId);
     this.changed(row);
     this.arm(row);

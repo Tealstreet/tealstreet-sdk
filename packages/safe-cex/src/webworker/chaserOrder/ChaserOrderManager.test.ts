@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { Exchange } from '../../exchanges/base';
 import type { Market, Order, StoreData, Ticker } from '../../types';
 
@@ -991,7 +992,7 @@ describe('ChaserOrderManager', () => {
 
     expect(instance.isStopped).toBe(true);
     expect(manager.instances).not.toContain(instance);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringMatching(/failed to place orders/i));
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringMatching(/stopped after .* unsuccessful order attempts/i));
   });
 
   it('cancels orders placed during the user-cancel window so STOP fully clears the book', async () => {
@@ -1359,7 +1360,7 @@ describe('ChaserOrderManager lost placement', () => {
 
     expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
     expect(instance.isStopped).toBe(true);
-    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringContaining('check open orders'));
+    expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringContaining('Check your open orders before starting it again.'));
     const completions = (exchange.emitter.emit as any).mock.calls.filter(
       ([event]: [string]) => event === 'chaser:complete',
     );

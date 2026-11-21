@@ -209,6 +209,7 @@ impl MergedScopeAuth {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod merged_scope_auth_tests {
     use super::{AuthOutcome, AuthOutcome::*, MergedScopeAuth, Response};
@@ -646,10 +647,10 @@ pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_PLACEMENT: &str =
-    "Placement outcome is uncertain; reconcile before placing or amending";
+const UNCERTAIN_PLACEMENT: &str = "An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders.";
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
+const UNCERTAIN_CANCEL_ALL: &str =
+    "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.";
 #[cfg(feature = "order-locks")]
 fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
     match hold {
@@ -657,6 +658,23 @@ fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
         None => VenueError::new(message),
     }
     .outcome(crate::Outcome::NotSent)
+}
+
+// Each warning and terminal detail owns its existing action; summary guidance is a fallback.
+fn command_failure_message(summary: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        return summary.to_owned();
+    }
+    let summary =
+        if detail.contains("Check your open orders") || detail.contains("Check Open Orders") {
+            summary
+                .strip_suffix(" Check your open orders before trying again.")
+                .or_else(|| summary.strip_suffix(" Check Open Orders"))
+                .unwrap_or(summary)
+        } else {
+            summary
+        };
+    format!("{summary}\nContext: {detail}")
 }
 
 /// Every order of this placement is reduce-only and its venue enforces that.
@@ -3946,17 +3964,9 @@ impl crate::engine::CoreCx<'_> {
         if let Err(error) = &mut result
             && let Some(summary) = (self.io.core.command_failure_summary)(error)
         {
-            error.message = if error.message.is_empty() {
-                summary.clone()
-            } else {
-                format!("{summary}\nContext: {}", error.message)
-            };
+            error.message = command_failure_message(&summary, &error.message);
             for report in &mut reports {
-                *report = if report.is_empty() {
-                    summary.clone()
-                } else {
-                    format!("{summary}\nContext: {report}")
-                };
+                *report = command_failure_message(&summary, report);
             }
         }
         for message in reports {
@@ -4116,7 +4126,7 @@ impl<V: Venue> Clone for HttpRelease<V> {
 }
 
 /// One exchange implementation. All methods are synchronous and must not block.
-const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.";
+const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live market data couldn’t connect; charts and order books aren’t updating. Check your network connection.";
 
 /// One notice per outage when no public socket opens. A connect timeout or a backoff
 /// timer always delivers an event while a feed is failing, so `is_due` needs no timer.
@@ -8892,6 +8902,83 @@ mod streaming_tests {
         );
     }
 
+    // Rule 5 (#3726): terminal errors and each warning retain their own single action.
+    #[test]
+    fn summary_keeps_guidance_once_and_retains_context() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        for detail in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "A previous change is unknown. Check Open Orders",
+        ] {
+            let message = command_failure_message(summary, detail);
+            assert_eq!(
+                message,
+                format!("Bitunix couldn’t confirm this change.\nContext: {detail}")
+            );
+            assert_eq!(
+                message.matches("Check your open orders").count()
+                    + message.matches("Check Open Orders").count(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn summary_guides_unguided_details_and_keeps_empty_details() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            command_failure_message(summary, "native diagnostic"),
+            format!("{summary}\nContext: native diagnostic")
+        );
+        assert_eq!(command_failure_message(summary, ""), summary);
+        assert_eq!(
+            command_failure_message("SUMMARY", "detail"),
+            "SUMMARY\nContext: detail"
+        );
+    }
+
+    #[test]
+    fn guided_summary_preserves_native_error_and_warning_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.command_failure_summary = |error| {
+            (error.outcome == Some(crate::Outcome::Unknown))
+            .then(|| "Bitunix couldn’t confirm this change. Check your open orders before trying again.".to_owned())
+        };
+        let detail = "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
+        let expected = VenueError::new(detail)
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec![detail.into(), "raw warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = format!("Bitunix couldn’t confirm this change.\nContext: {detail}");
+        let guided = presented.message.clone();
+        let raw = "Bitunix couldn’t confirm this change. Check your open orders before trying again.\nContext: raw warning";
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message: first }),
+            Action::Notice(Notice::CommandError { command: 7, message: second }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if first == &guided && second == raw && *error == presented)
+        );
+    }
+
     #[test]
     fn command_progress_skips_empty_batches_and_precedes_io_without_store_changes() {
         let mut engine = frame_engine();
@@ -9207,12 +9294,13 @@ mod streaming_tests {
         let mut engine = frame_engine();
         engine.venue.scoped = false;
         engine.venue.symbol_amend = true;
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         let unknown = |engine: &mut Engine<StreamVenue>, id: u32| {
@@ -9262,7 +9350,7 @@ mod streaming_tests {
             engine.drain_actions().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 10, error })
                     if error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("cancel-all"))),
+                        && error.legacy_text().contains("before cancelling all orders"))),
             "a fenced symbol's cancel-all is refused before any I/O"
         );
         assert_eq!(engine.venue.commands.len(), admitted);
@@ -9398,7 +9486,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all" && error.outcome == Some(crate::Outcome::NotSent))));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders." && error.outcome == Some(crate::Outcome::NotSent))));
         }
         engine
             .io
@@ -9470,7 +9558,7 @@ mod streaming_tests {
             "later cancel-all is dispatched"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("uncertain"))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("An earlier order hasn’t been confirmed"))));
     }
 
     #[cfg(feature = "order-locks")]
@@ -9532,12 +9620,13 @@ mod streaming_tests {
                 })
                 .unwrap()
         };
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         engine.handle(0., Event::Command(held_place(1, "A")));

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native synchronous history replies must acquire genuine Read authority.
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, Notice, Query, RequestId, Response, VenueError,
@@ -140,7 +141,10 @@ fn full_registry_refuses_unsupported_lookup_without_replacing_its_typed_error() 
     let actions = query(&mut e, NOW, lookup());
     let error = result(&actions).expect_err("capacity must refuse");
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(error.outcome, None);
     e.handle(
         NOW + 1.,
@@ -175,7 +179,10 @@ fn full_registry_refuses_a_missing_symbol_result_without_publishing_empty_rows()
     let actions = query(&mut e, NOW, fills(None, 2., 1.));
     let error = result(&actions).expect_err("capacity cannot publish []");
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(error.outcome, None);
 }
 
@@ -186,6 +193,9 @@ fn full_registry_keeps_capacity_instead_of_a_native_range_error() {
     let actions = query(&mut e, NOW, fills(Some("BTCUSDT"), 2., 1.));
     let error = result(&actions).expect_err("capacity must refuse");
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(error.outcome, None);
 }

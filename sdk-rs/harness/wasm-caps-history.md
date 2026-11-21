@@ -1757,3 +1757,19 @@ left to the master reserve bot. combined, hyperliquid and polymarket are unchang
 | phemex | 2262919 | 2255872 | 2273280 |
 | weex | 2170718 | 2163712 | 2181120 |
 | woo | 2909489 | 2888704 | 2920448 |
+
+## 2026-11-21 — #3726 notification composition raises 3 family caps
+
+The engine composition helpers (with_detail, join_note, the closed guidance set)
+link into every family. Rule-17 raise per `harness/CLAUDE.md`, generated with
+`update-wasm-caps.mjs` from PR run 44892581584 (sealed source
+`c237795ad9b2d868bda855fc19bfbf27a14fee4a`, whose tree equals PR head
+`6cf734453e210c70117f3e483a980428cbc6b4ac`). The committed `wasm-caps.json` is
+that output filtered to the families measured above their ceiling; the raw output
+also raised 24 reserve-only families, which were reverted for the master bot.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| asterdex | 2398952 | 2397184 | 2409472 |
+| bybit | 2741848 | 2740224 | 2752512 |
+| orderly | 1917499 | 1916928 | 1928192 |

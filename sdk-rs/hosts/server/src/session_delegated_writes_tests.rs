@@ -773,7 +773,7 @@ async fn disabled_order_frames_refuse_even_an_existing_delegated_resident() {
             .unwrap();
             assert_eq!(
                 outcome["d"]["error"]["message"],
-                "not sent: account not admitted for order frames"
+                "Order submissions aren’t available on this account connection"
             );
             assert!(tape.writes.lock().unwrap().is_empty());
             session.close();

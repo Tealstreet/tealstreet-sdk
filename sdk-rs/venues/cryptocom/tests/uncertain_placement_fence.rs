@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! P1: an Unknown placement fences its symbol until a fresh order read proves
 //! what happened. Crypto.com has no placement scope, so this fence engages only
 //! with the engine's Phase B uncertainty marker (see RUST_CUTOVER_CALLERS.md).
@@ -44,7 +45,7 @@ fn sent(h: &Harness, path: &str) -> bool {
 fn refused_uncertain(h: &Harness) -> bool {
     h.failures
         .iter()
-        .any(|e| e.message.contains("Placement outcome is uncertain"))
+        .any(|e| e.message.contains("An earlier order hasn’t been confirmed"))
 }
 
 /// Answer one account cycle up to its orders read, leaving that read in flight.
@@ -224,7 +225,7 @@ fn cancel_all(h: &mut Harness, command: u32) {
 fn refused_cancel_all(h: &Harness) -> bool {
     h.failures
         .iter()
-        .any(|e| e.message.contains("reconcile before cancel-all"))
+        .any(|e| e.message.contains("before cancelling all orders"))
 }
 
 #[test]
@@ -247,7 +248,7 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
     assert!(
         h.failures
             .iter()
-            .any(|e| e.message.contains("reconcile before cancel-all")
+            .any(|e| e.message.contains("before cancelling all orders")
                 && e.outcome == Some(safe_cex_engine::Outcome::NotSent)),
         "cancel-all is refused NotSent while the placement is uncertain"
     );

@@ -8,7 +8,7 @@ native diagnostics; they never authorize a resend or protective put-back.
 Reads and documented refusals on non-ambiguous statuses keep their existing
 classification.
 
-Venue-decoded Unknown replies report `The outcome is unknown. Check Open Orders`
+Venue-decoded Unknown replies report `We couldn’t confirm this change. Check your open orders before trying again.`
 in the terminal failure and correlated command diagnostic, and emit one
 `order.outcome_unknown` event. The indexed journal retains accepted IDs, the
 uncertain elements and the unsent suffix. It observes the existing dispatch

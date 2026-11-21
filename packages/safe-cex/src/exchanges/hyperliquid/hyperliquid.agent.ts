@@ -238,7 +238,7 @@ export async function createAgentWalletWithBrowserWallet(
   agentName?: string,
   assertOwnerCurrent?: () => void,
 ): Promise<AgentWalletCreationResult> {
-  const cancelled = 'Agent wallet creation cancelled-for-owner-change';
+  const cancelled = 'Agent wallet creation stopped because the account connection changed';
   const assertCurrent = () => {
     try {
       assertOwnerCurrent?.();

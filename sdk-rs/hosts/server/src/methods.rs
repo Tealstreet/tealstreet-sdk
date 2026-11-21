@@ -406,7 +406,7 @@ pub fn translate_delegated(
     if public_only || !crate::delegated::enabled(venue) {
         return Err(refused(
             "UnsupportedMethod",
-            "DELEGATED methods are not enabled for this account",
+            "Server trading isn’t enabled for this account",
         ));
     }
     if matches!(
@@ -426,7 +426,7 @@ pub fn translate_delegated(
         return Err(refused(
             "DelegatedActionUnavailable",
             format!(
-                "DELEGATED {method} is unavailable; only place and reduce-only close are enabled"
+                "{method} isn’t available here; only placing orders and reduce-only closing are supported"
             ),
         ));
     }
@@ -446,7 +446,7 @@ pub fn translate_delegated_action(
     if public_only || !crate::delegated::enabled(venue) {
         return Err(refused(
             "UnsupportedMethod",
-            "DELEGATED methods are not enabled for this account",
+            "Server trading isn’t enabled for this account",
         ));
     }
     crate::full_writes::placement_capabilities(method, args, capabilities)?;
@@ -959,6 +959,7 @@ pub fn translate(
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

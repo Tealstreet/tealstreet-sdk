@@ -209,7 +209,7 @@ placement records and is not a WS API version.
 A bounded, authenticated v1 action whose operation or fields are not supported
 fails closed before any dispatch, returning `order.actionOutcome` with
 `version:1`, `outcome:"unsupported"`, `result:null`, and
-`error:{message:"Unsupported v1 action schema",outcome:"unsupported"}`.
+`error:{message:"This action isn’t supported by this version",outcome:"unsupported"}` (callers branch on `outcome`, never the text).
 This includes unknown envelope/request/action fields, nested order/target/update
 fields, unknown algo operations, and unknown nested algo fields. Invalid action
 shapes also receive this schema rejection. The server validates registration,

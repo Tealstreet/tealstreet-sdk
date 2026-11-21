@@ -95,7 +95,8 @@ pub struct TwapOrderRequest {
 pub type SliceFailure = safe_cex_engine::error::VenueError;
 
 fn unknown_outcome(mut error: SliceFailure) -> SliceFailure {
-    error.message = "The outcome is unknown. Check Open Orders".to_owned();
+    error.message =
+        "We couldn’t confirm this change. Check your open orders before trying again.".to_owned();
     error.outcome = Some(safe_cex_engine::error::Outcome::Unknown);
     error
 }

@@ -591,6 +591,12 @@ arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
 
+## User-facing notices
+
+Order/action receipt messages and algo interruption notices use plain wording
+and at most one action; typed outcomes and receipt fields remain unchanged.
+Proof-check details stay in `partial.proof_failed` diagnostics rather than the
+Bybit action message. Cancel-warning cleanup still recognizes retained old text.
 ## Venue rejections in typed action outcomes
 
 `order_actions::settle` treats an engine `rejected` error with no partial

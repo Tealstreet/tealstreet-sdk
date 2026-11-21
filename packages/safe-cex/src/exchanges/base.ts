@@ -1762,7 +1762,7 @@ export class BaseExchange implements Exchange {
   private readonly workerFrameRejectedSections = new WorkerFrameRecoveryScopes();
 
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
-    throw new Error('Engine snapshots are unavailable for this exchange');
+    throw new Error('Account snapshots aren’t available for this exchange');
   };
 
   protected observeOrderBookFrameRejections(symbol: string, observer?: (signal: OrderBookFrameRejection) => void) {
@@ -2112,7 +2112,7 @@ export class BaseExchange implements Exchange {
     // re-open resync (BaseWebSocket.trackConnected) with tries=10. Without these checks a disposed
     // account (browser gone / remote signer dead) would keep retrying
     // fetchOrders() — each retry signs a REST request that throws
-    // "Remote signer unavailable", flooding logs/CPU forever. See
+    // "Signing isn’t available for this account", flooding logs/CPU forever. See
     // base.ws.ts send()/dispose() guards for the matching reconnect side.
     if (this.isDisposed) return;
 

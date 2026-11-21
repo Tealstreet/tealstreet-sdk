@@ -49,7 +49,7 @@ describe('shared hosted provider presentation', () => {
       const callback = remote();
       vi.mocked(callback.sign).mockImplementation(async ({ id }) => ({ id, wsAuthSignature: malformed }));
       const provider = createRemoteSignerProvider({ exchangeName, identities: { primary: identity }, remoteSigner: callback });
-      await expect(provider(request(), context())).rejects.toThrow('Remote signing request refused');
+      await expect(provider(request(), context())).rejects.toThrow('This request couldn’t be signed');
     }
   });
 
@@ -120,18 +120,18 @@ describe('shared hosted provider presentation', () => {
     const s = setup(exchangeName, { secondary_key: 'read-public', secondary_passphrase: 'owned-read-presentation' });
     const unbound = ownedRequest(s.ids);
     unbound.operations = [{ kind: 'present', key: s.ids.primary!.passphrase! }];
-    await expect(s.capsule.signer(unbound, context())).rejects.toThrow('Remote signing request refused');
+    await expect(s.capsule.signer(unbound, context())).rejects.toThrow('This request couldn’t be signed');
     const interpolated = ownedRequest(s.ids);
     const operation = interpolated.operations[1];
     if (operation.kind !== 'sign') throw new Error('Fixture shape');
     operation.payload = [{ kind: 'credential', key: s.ids.primary!.passphrase! }];
-    await expect(s.capsule.signer(interpolated, context())).rejects.toThrow('Remote signing request refused');
+    await expect(s.capsule.signer(interpolated, context())).rejects.toThrow('This request couldn’t be signed');
     const crossSlot = ownedRequest(s.ids);
     crossSlot.operations[2] = { kind: 'present', key: s.ids.secondary!.passphrase! };
-    await expect(s.capsule.signer(crossSlot, context())).rejects.toThrow('Remote signing request refused');
+    await expect(s.capsule.signer(crossSlot, context())).rejects.toThrow('This request couldn’t be signed');
     const laterInvalid = ownedRequest(s.ids);
     laterInvalid.operations.push({ kind: 'sign', algorithm: 'hmacSha256', key: 'ref:foreign', payload: [] });
-    await expect(s.capsule.signer(laterInvalid, context())).rejects.toThrow('Remote signing request refused');
+    await expect(s.capsule.signer(laterInvalid, context())).rejects.toThrow('This request couldn’t be signed');
     expect(s.callback).not.toHaveBeenCalled();
   });
 
@@ -143,7 +143,7 @@ describe('shared hosted provider presentation', () => {
     expect(result.values[2]).toEqual(Array.from(Buffer.from('fixture-presentation')));
     expect(callback.sign).toHaveBeenCalledWith({ id: expect.any(String), type: 'ws-auth', exchangeName,
       wsAuth: { toSign: '1709209849123GET/api/account?x=%2B&x=second', outputFormat: 'base64' } });
-    await expect(s.capsule.signer(ownedRequest(s.ids, 'secondary'), context())).rejects.toThrow('Remote signing request refused');
+    await expect(s.capsule.signer(ownedRequest(s.ids, 'secondary'), context())).rejects.toThrow('This request couldn’t be signed');
     expect(callback.sign).toHaveBeenCalledTimes(1);
     expect(fallback).not.toHaveBeenCalled();
   });
@@ -161,7 +161,7 @@ describe('shared hosted provider presentation', () => {
     const pending = s.capsule.signer(input, { signal: abort.signal });
     expect(callback.sign).toHaveBeenCalledTimes(1);
     abort.abort();
-    await expect(pending).rejects.toThrow('Remote signing canceled');
+    await expect(pending).rejects.toThrow('Signing was cancelled');
     const id = vi.mocked(callback.sign).mock.calls[0][0].id;
     resolve({ id, wsAuthSignature: mac });
     await Promise.resolve();

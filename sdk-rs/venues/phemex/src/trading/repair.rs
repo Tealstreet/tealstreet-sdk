@@ -303,13 +303,13 @@ impl PhemexPerpetuals {
                 return Err(format!("HTTP {}: {}", response.status, response.body));
             }
             let env: Envelope = serde_json::from_str(response.body)
-                .map_err(|_| "Phemex malformed write acknowledgement".to_string())?;
+                .map_err(|_| "Phemex’s reply couldn’t be read".to_string())?;
             if env.error.is_some() || env.code.is_some_and(|code| code != 0) {
                 envelope_refusal = env.code.filter(|code| *code != 0).map(NativeCode::Int);
                 return Err(format!("Phemex {} {}", env.code.unwrap_or(-1), env.msg));
             }
             if env.code.is_none() {
-                return Err("Phemex malformed write acknowledgement".into());
+                return Err("Phemex’s reply couldn’t be read".into());
             }
             if self.account.order_revision() != active.native.revision {
                 return Err(
@@ -451,6 +451,7 @@ impl PhemexPerpetuals {
 #[path = "../../tests/support/repair_signer.rs"]
 mod repair_test_signer;
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

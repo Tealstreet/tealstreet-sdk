@@ -1512,7 +1512,7 @@ struct WriteLeg {
 
 /// A Plan the engine sealed Unknown on an unproven reply after an earlier
 /// refusal: that refusal's words would misreport what stands.
-pub const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub const UNKNOWN_AFTER_REFUSAL: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.

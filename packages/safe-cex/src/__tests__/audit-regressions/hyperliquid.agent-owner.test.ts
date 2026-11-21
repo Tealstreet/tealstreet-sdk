@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import { ethers } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,7 +14,7 @@ const NONCE = 1_700_000_000_123;
 const SIGNATURE = `0x${'11'.repeat(32)}${'22'.repeat(32)}1b`;
 // Deterministic synthetic wallet; no live key or account is used.
 const AGENT = ethers.HDNodeWallet.fromSeed(new Uint8Array(32).fill(3));
-const CANCELLED = { success: false, message: 'Agent wallet creation cancelled-for-owner-change' };
+const CANCELLED = { success: false, message: 'Agent wallet creation stopped because the account connection changed' };
 const stages = [
   'switch',
   'switch-failed',

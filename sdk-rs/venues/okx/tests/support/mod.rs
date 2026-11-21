@@ -1,16 +1,19 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use safe_cex_engine::{Action, Engine, Event, Method, Notice, Response, SocketId, TimerId};
 use safe_cex_venue_okx::{Okx, Options as NativeOptions};
 type Options = FixtureOptions;
 
 // The venue-authored literal and engine-sealed messages have distinct owners.
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 pub const ENGINE_HTTP_UNKNOWN_TEXT: &str =
-    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
-pub const ENGINE_UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+    "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 pub fn assert_unknown_message(error: &safe_cex_engine::VenueError, text: &str) {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    // Composition may put detail between the statement and its single final action (#3726).
     assert!(
-        error.message.contains(text),
+        safe_cex_engine::error::carries_guidance(&error.message, text),
         "expected {text:?}, got {:?}",
         error.message
     );

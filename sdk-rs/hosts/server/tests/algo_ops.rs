@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Every hosted algo op with the exact payload the web sends (NX call sites named
 //! on each test), through the server's algo host, asserting no refusal and the
 //! reply and event shapes the web's handlers read. The live e2e cannot exercise
@@ -592,23 +593,32 @@ async fn a_twap_queued_before_rebind_is_dropped_instead_of_adopted() {
                     algos.owner.rebind_owner("other-user");
                     let refusal = tokio::time::timeout(Duration::from_secs(2), async {
                         loop {
-                            let message: Value = serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
+                            let message: Value =
+                                serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
                             if message["d"]["op"] == "error" {
                                 break message["d"]["data"].clone();
                             }
                         }
-                    }).await.unwrap();
-                    assert_eq!(refusal[0], "Algo operation cancelled-for-owner-change: authenticated connection binding changed");
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(
+                        refusal[0],
+                        "The automated-order request stopped because its account connection changed"
+                    );
                     assert_eq!(refusal[1]["forceToast"], true);
                     tokio::time::sleep(Duration::from_millis(150)).await;
                     assert!(algos.commands.lock().unwrap().is_empty());
                     // A newly captured op still works under the new generation.
                     algos.op("twap:start", web_twap());
                 }
-                algos.next("frame", |data| !active_twaps(data).is_empty()).await;
+                algos
+                    .next("frame", |data| !active_twaps(data).is_empty())
+                    .await;
                 assert_eq!(algos.commands.lock().unwrap().len(), 1);
             }
-        }).await;
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -627,7 +637,7 @@ async fn a_same_user_resume_keeps_a_running_twap() {
                 !algos
                     .seen
                     .iter()
-                    .any(|event| event.to_string().contains("cancelled-for-owner-change")),
+                    .any(|event| event.to_string().contains("account connection changed")),
                 "a same-user resume cancelled the TWAP"
             );
         })
@@ -717,12 +727,9 @@ async fn an_exec_sleep_cannot_start_a_twap_after_its_binding_is_retired() {
                 let result = first(&result["data"]);
                 assert_eq!(result["success"], !rebind, "{result}");
                 if rebind {
-                    assert!(
-                        result["error"]
-                            .as_str()
-                            .unwrap()
-                            .contains("cancelled-for-owner-change")
-                    );
+                    assert!(result["error"].as_str().unwrap().contains(
+                        "The TWAP couldn’t start because the account connection changed"
+                    ));
                     assert!(algos.commands.lock().unwrap().is_empty());
                 } else {
                     assert!(algos.seen.iter().any(|event| {
@@ -963,7 +970,8 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
             assert_eq!(
                 kept.notices,
                 [algos::Notice {
-                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it.".into(),
+                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open. Check your open orders."
+                        .into(),
                     algo: Some(algos::AlgoRef {
                         kind: "chase",
                         id: id.as_str().unwrap().to_owned(),
@@ -1131,7 +1139,10 @@ async fn router_fence_parks_a_pending_slice_and_chase_without_any_cancel_or_repl
                 .await
                 .unwrap()
                 .unwrap();
-            assert!(kept.summary().contains("Resting orders were kept"));
+            assert!(
+                kept.summary()
+                    .contains("without cancelling existing orders")
+            );
             let mut frames = Vec::new();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while let Some(text) = algos.out.recv().await {

@@ -38,7 +38,7 @@ Genuine Unknown halts every affected action, including suffixes and batch fallba
 This is the recorded stop-after-UNKNOWN parity exception (Sean/daxx, 2026-11-08):
 TS continues in Spot payload catches and Linear/Inverse special/batch catches, but
 Rust preserves the duplicate-write fence. Errors retain placed and unknown rows
-and the canonical text "The outcome is unknown. Check Open Orders". The journal
+and the canonical text "We couldn’t confirm this change. Check your open orders before trying again.". The journal
 reports these decisions without making them.
 
 | Accepted effect | Correlation |
@@ -106,7 +106,7 @@ journal when the engine seals before venue decoding. Reporting errors emit
 diagnostics without refusing or terminating native dispatch.
 An HTTP-200 mutation decoded by the venue as Unknown also emits the warning
 event `order.outcome_unknown`, correlated by command ID. Its message and the
-journal's Unknown row use "The outcome is unknown. Check Open Orders".
+journal's Unknown row use "We couldn’t confirm this change. Check your open orders before trying again.".
 
 Known legacy issue: ordinary missing/zero prices and below-minimum notionals can
 follow accepted rows. Native batch errors can be followed by later writes. This

@@ -1,3 +1,4 @@
+// Rule 5: pin the refusal wording; NotSent and zero venue writes remain required.
 //! Exercises the wire handover, native probe, account admission and manual write together.
 use super::*;
 use crate::delegated::probe::RefusalStage;
@@ -847,7 +848,7 @@ async fn bybit_mobile_receipt(case: &str) {
         } else if case == "missing-type" {
             "invalid command"
         } else {
-            "not admitted"
+            "Order changes aren’t available on this account connection"
         }));
         assert!(venue.observed.lock().unwrap().writes.is_empty());
     } else {

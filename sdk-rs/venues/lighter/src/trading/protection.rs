@@ -557,9 +557,12 @@ impl Lighter {
             .original
             .observed;
         if error.outcome == Some(Outcome::Unknown) {
-            error.message = format!(
-                "Your {} protection outcome unknown; check Open Orders: {}",
-                old.symbol, error.message
+            error.message = safe_cex_engine::error::with_detail(
+                &format!(
+                    "Your {} protection wasn’t confirmed. Check your open orders before adding protection.",
+                    old.symbol
+                ),
+                &error.message,
             );
             error.protection = None;
         } else {

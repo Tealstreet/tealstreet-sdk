@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { describe, expect, it } from 'vitest';
@@ -42,7 +43,7 @@ describe('ChaserOrderHandler', () => {
     new ChaserOrderHandler(...handlerArgs(exchange)).handle(start);
     expect(exchange.emitter.emit).toHaveBeenCalledWith(
       'error',
-      'chaser:start was not run: algos run only on a Rust engine account',
+      'Starting the chase isn’t available for this account',
     );
   });
 

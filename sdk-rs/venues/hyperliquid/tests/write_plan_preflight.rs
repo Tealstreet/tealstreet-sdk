@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -348,7 +349,7 @@ fn runtime_failure_suffix(
                 element["error"]["message"]
                     .as_str()
                     .expect("element message")
-                    .contains(support::ENGINE_UNKNOWN_TEXT),
+                    .contains(if status >= 500 { "The exchange reply didn’t confirm this change. Check your open orders before trying again." } else { support::ENGINE_UNKNOWN_TEXT }),
                 "{element}"
             );
         }
@@ -365,10 +366,7 @@ fn runtime_failure_suffix(
         assert_eq!(tail["status"], "notSent");
         if fenced_suffix {
             assert_eq!(tail["error"]["outcome"], "notSent");
-            assert_eq!(
-                tail["error"]["message"],
-                "Request is not in a sendable state"
-            );
+            assert_eq!(tail["error"]["message"], "This request isn’t ready to send");
         } else {
             assert!(tail.get("error").is_none(), "{error}");
         }

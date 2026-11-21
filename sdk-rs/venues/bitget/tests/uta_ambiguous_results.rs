@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Bitget answers that name a busy server or a per-order failure: never read as a refusal or a success.
 mod support;
 use safe_cex_engine::model::*;
@@ -77,7 +78,9 @@ fn a_busy_or_timeout_answer_to_a_moved_stop_says_it_may_be_live() {
         );
         let failure = h.failures.last().expect("the move fails visibly");
         assert!(
-            failure.message.contains("may have no stop"),
+            failure
+                .message
+                .contains("stop was cancelled, but its replacement wasn’t confirmed"),
             "{code}: {}",
             failure.message
         );

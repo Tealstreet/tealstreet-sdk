@@ -41,7 +41,7 @@ fn unknown_inventory_row(
     cx.event(
         safe_cex_engine::Level::Warn,
         "command.unknown_inventory",
-        "The outcome is unknown. Check Open Orders",
+        "We couldn’t confirm this change. Check your open orders before trying again.",
         fields,
     );
 }
@@ -718,7 +718,7 @@ impl Cryptocom {
         };
         let mut error = error;
         error.message = format!(
-            "{}. The outcome is unknown. Check Open Orders",
+            "{}. We couldn’t confirm this change. Check your open orders before trying again.",
             error.message
         );
         error.presents = true;
@@ -1013,7 +1013,7 @@ impl Cryptocom {
         if unknown {
             self.report_unknown(cx, &request);
             let mut error = VenueError::new(format!(
-                "{}. The outcome is unknown. Check Open Orders",
+                "{}. We couldn’t confirm this change. Check your open orders before trying again.",
                 diagnostic.as_deref().unwrap_or("Write was not confirmed")
             ))
             .outcome(Outcome::Unknown);

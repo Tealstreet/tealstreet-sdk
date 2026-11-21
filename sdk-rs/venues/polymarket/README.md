@@ -44,7 +44,7 @@ refusal. Minimum-size and supported-order checks remain before dispatch.
 KNOWN-ISSUE: TS sends above-max; venue refuses. Decimal rounding can also
 under-allocate; the exact TS result is retained for exact parity per Sam's decision.
 
-Unknown write outcomes retain the native diagnostic and use `The outcome is unknown. Check Open Orders`.
+Unknown write outcomes retain the native diagnostic and use `We couldn’t confirm this change. Check your open orders before trying again.`.
 The passive indexed journal preserves accepted orders, the uncertain element and
 unsent suffix; the existing driver stops without retrying. A single attributed
 `CommandError` and `order.outcome_unknown` event accompany the terminal, without

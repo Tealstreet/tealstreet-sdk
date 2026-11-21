@@ -1855,7 +1855,7 @@ impl Grvt {
                         sell_leverage: f64,
                     }
                     let result: Result<String, String> = if failed {
-                        Err("Malformed GRVT leverage response".into())
+                        Err("GRVT’s leverage reply couldn’t be read".into())
                     } else if revision != self.account.settings_revision {
                         Err("GRVT leverage settings changed during read; retry query".into())
                     } else {

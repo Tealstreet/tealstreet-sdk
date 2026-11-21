@@ -67,9 +67,9 @@ let decoder: TextDecoder | undefined;
 const encodeUtf8 = (value: string) => (encoder ??= new TextEncoder()).encode(value);
 const decodeUtf8 = (value: Uint8Array) =>
   (decoder ??= new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })).decode(value);
-const refused = () => new Error('Remote signing request refused');
-const canceled = () => new Error('Remote signing canceled');
-const unavailable = () => new Error('Remote signer unavailable');
+const refused = () => new Error('This request couldn’t be signed');
+const canceled = () => new Error('Signing was cancelled');
+const unavailable = () => new Error('Signing isn’t available for this account');
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 

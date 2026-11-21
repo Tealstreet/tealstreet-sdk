@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
@@ -69,7 +70,7 @@ it('private AsterDEX V3 PayloadSigner with a wallet key retains its typed custod
     expect.objectContaining({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+      message: 'This signing connection supports AsterDEX V1 but not V3 account keys',
     }),
   );
   expect(payloadSigner).not.toHaveBeenCalled();
@@ -269,19 +270,19 @@ const privateRefusal = ({ name, version }: VenueCase, kind: 'remote' | 'payload'
   const policy = deriveRemoteSigningPolicy(name);
   if (policy?.enabled !== true)
     return kind === 'remote'
-      ? `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
-      : `${exchangeMetadata[name].prettyName} delegated signing is unsupported in this build`;
+      ? `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`
+      : `Server trading for ${exchangeMetadata[name].prettyName} isn’t available in this version`;
   if (kind === 'remote') return undefined;
   if (name === 'asterdex' && version === 'v3')
-    return 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+    return 'This signing connection supports AsterDEX V1 but not V3 account keys';
   if (policy.payloadSupported === true) return undefined;
-  if (name === 'apexomni') return 'ApeX Omni requires RemoteSigner HMAC and zkLink contract custody';
+  if (name === 'apexomni') return 'This signing connection doesn’t support ApeX Omni’s account keys';
   if (name === 'kraken')
-    return 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
+    return 'This signing connection doesn’t support Kraken Futures account keys';
   if (name === 'grvt') return 'GRVT PayloadSigner is unsupported';
   if (name === 'kucoin' || name === 'kucoinspot')
-    return 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
-  if (name === 'backpack') return 'Backpack requires RemoteSigner Ed25519 custody';
+    return 'This signing connection doesn’t support KuCoin’s key and passphrase checks';
+  if (name === 'backpack') return 'This signing connection doesn’t support Backpack account keys';
   return 'This Rust account has no REST-only PayloadSigner lifecycle';
 };
 
@@ -732,7 +733,7 @@ it('keeps the review controls for configured callbacks', () => {
     expect.objectContaining({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: `${exchangeMetadata.krakenspot.prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+      message: `${exchangeMetadata.krakenspot.prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
     }),
   );
   const privateKraken = new RustEngineExchange(

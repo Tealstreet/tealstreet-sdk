@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import { describe, expect, it } from 'vitest';
 
 import { isUnknownOutcome } from './unknownSendOutcome';
@@ -12,7 +13,7 @@ describe('isUnknownOutcome', () => {
   it('treats host interruption markers as unknown even when their text does not say so', () => {
     expect(
       isUnknownOutcome({
-        message: 'Exchange engine stopped; command outcome is unknown. Reconcile before retrying',
+        message: 'Trading was interrupted before this action was confirmed. Check your open orders before trying again.',
         outcome: 'unknown',
       }),
     ).toBe(true);

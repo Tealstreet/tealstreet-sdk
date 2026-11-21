@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Local history results still borrow genuine, bounded command-entry custody.
 mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
@@ -173,7 +174,7 @@ fn capacity(read: Query, expected: Result<&str, &str>) {
         &query(&mut e, NOW, 600, read.clone()),
         600,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     assert!(peers.iter().all(|peer| e.http_preparation_pending(*peer)));
     e.http_preparation_failed(
@@ -229,7 +230,7 @@ fn local_history_lookup_and_income_reject_invalid_clock_then_allow_id_reuse() {
                 &query(&mut e, now, 601, read.clone()),
                 601,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
             native(&query(&mut e, NOW, 601, read), 601, expected);
             assert!(e.take_frame(NOW).is_none());

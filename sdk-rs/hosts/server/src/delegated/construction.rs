@@ -36,10 +36,10 @@ impl DelegatedPair {
 
     pub(crate) fn validate(&self, init: &InitPayload) -> Result<(), String> {
         if !crate::delegated::enabled(&init.exchange_name) {
-            return Err("DELEGATED is not enabled for this venue".into());
+            return Err("Server trading isn’t available for this exchange".into());
         }
         if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
-            return Err("DELEGATED requires a private account".into());
+            return Err("Server trading requires a trading account with API credentials".into());
         }
         if self.key.as_str() != init.key
             || self.key.is_empty()
@@ -56,7 +56,7 @@ impl DelegatedPair {
                     || init.subkey_address.as_deref() != Some(init.key.as_str())
             })
         {
-            return Err("Invalid DELEGATED account setup".into());
+            return Err("The server couldn’t set up this trading account".into());
         }
         Ok(())
     }
@@ -77,7 +77,7 @@ impl ResidentCopy {
         init: &InitPayload,
     ) -> Result<PreparedDelegated, String> {
         if !super::enabled(&init.exchange_name) || init.public_only == Some(true) {
-            return Err("DELEGATED settings are not enabled for this account".into());
+            return Err("Server-managed settings aren’t enabled for this account".into());
         }
         let mut options = engine_options(init, false);
         let fields = options.as_object_mut().expect("engine options object");
@@ -116,7 +116,7 @@ pub fn prepare_delegated(
         drop(Zeroizing::new(key));
     }
     let mut native: safe_cex_venues::EngineOptions = serde_json::from_value(options.clone())
-        .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
+        .map_err(|_| "The server couldn’t set up this trading account".to_owned())?;
     native.key = Some(match pair.signing_key.as_mut() {
         Some(material) => std::mem::take(&mut **material),
         None => std::mem::take(&mut pair.key),
@@ -132,7 +132,7 @@ pub fn prepare_delegated(
         .map(|value| std::mem::take(&mut **value));
     let (protection, identities) =
         safe_cex_venues::prepare_protected_local_signer_for(&init.exchange_name, &mut native)
-            .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
+            .map_err(|_| "The server couldn’t set up this trading account".to_owned())?;
     if !protection.memory_locked() {
         crate::delegated_memory::warn_locking_unavailable();
     }
@@ -141,7 +141,7 @@ pub fn prepare_delegated(
         .as_ref()
         .is_none_or(|identity| identity.signing_ref().is_err())
     {
-        return Err("Invalid DELEGATED account setup".into());
+        return Err("The server couldn’t set up this trading account".into());
     }
     let state = safe_cex_venues::TrustedSignerState::capture(&init.exchange_name, &native);
     let fields = options.as_object_mut().expect("engine options object");
@@ -184,6 +184,7 @@ fn write_public_options(
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

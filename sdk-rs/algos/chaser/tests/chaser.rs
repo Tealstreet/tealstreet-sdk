@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Behaviour ported from the TS `ChaserOrderManager`/`ChaserOrderInstance`
 //! tests, against a fake account port on a paused clock.
 use std::cell::{Cell, Ref, RefCell};
@@ -949,9 +950,9 @@ async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
         settle(10).await;
         assert!(
             port.errors().iter().any(|e| e.contains("o1")
-                && e.contains("may still be open")
-                && e.contains("Open Orders")
-                && e.contains("Nuke")),
+                && e.contains("couldn’t confirm cancellation")
+                && e.to_ascii_lowercase().contains("open orders")
+                && e.contains("Cancel it from your open orders.")),
             "{:?}",
             port.errors()
         );
@@ -1033,8 +1034,13 @@ async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_u
         assert!(rows[0].is_stopped);
         assert!(
             rows[0].stop_reason.contains("retrying")
-                && rows[0].stop_reason.contains("Open Orders")
-                && rows[0].stop_reason.contains("Nuke"),
+                && rows[0]
+                    .stop_reason
+                    .to_ascii_lowercase()
+                    .contains("open orders")
+                && rows[0]
+                    .stop_reason
+                    .contains("Cancel it from your open orders."),
             "{}",
             rows[0].stop_reason
         );
@@ -1048,7 +1054,10 @@ async fn a_stop_keeps_cancelling_through_an_outage_past_60_s_and_the_row_stays_u
             warnings(&port)
         );
         assert!(
-            warnings(&port)[0].contains("Open Orders") && warnings(&port)[0].contains("Nuke"),
+            warnings(&port)[0]
+                .to_ascii_lowercase()
+                .contains("open orders")
+                && warnings(&port)[0].contains("Cancel it from your open orders."),
             "{:?}",
             warnings(&port)
         );
@@ -1256,12 +1265,17 @@ fn a_retrying_warning_and_the_message_that_ends_it_name_the_same_order() {
             vec!["o1"],
         ),
         (
-            "Chaser could not cancel BTCUSDT order o1, o2: refused; it may still be open",
+            "Chase couldn’t confirm cancellation of BTCUSDT order o1, o2: refused; it may still be open",
             vec!["o1", "o2"],
         ),
         (
-            "Chaser could not cancel BTCUSDT order o1: refused",
+            "Chase couldn’t confirm cancellation of BTCUSDT order o1: refused",
             vec!["o1"],
+        ),
+        // Rule 5 (Sam, 2026-11-20): retained old notices still retire the warning.
+        (
+            "Chaser could not cancel BTCUSDT order o1, o2: refused; it may still be open",
+            vec!["o1", "o2"],
         ),
         (retry, vec![]),
         ("Chase on BTCUSDT stopped with nothing filled.", vec![]),
@@ -1341,7 +1355,7 @@ async fn the_retries_end_at_their_bound_with_a_final_message() {
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
         assert_eq!(completions(&port), 1);
     })
@@ -1368,7 +1382,7 @@ async fn a_definite_refusal_after_retries_stays_final() {
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
     })
     .await;
@@ -2109,7 +2123,7 @@ async fn shutdown_during_the_retries_ends_them_with_one_try_and_a_final_message(
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
         assert_eq!(completions(&port), 1);
         let seen = cancels_seen(&port);
@@ -2210,14 +2224,16 @@ async fn an_order_still_open_when_its_cancel_is_refused_is_reported() {
         settle(2000).await;
         let errors = port.errors();
         assert!(
-            errors.iter().any(|e| e.contains("failed to cancel")),
+            errors
+                .iter()
+                .any(|e| e.contains("orders couldn’t be cancelled")),
             "{errors:?}"
         );
         assert!(
             errors.iter().any(|e| e.contains("o1")
-                && e.contains("may still be open")
-                && e.contains("Open Orders")
-                && e.contains("Nuke")),
+                && e.contains("couldn’t confirm cancellation")
+                && e.to_ascii_lowercase().contains("open orders")
+                && e.contains("Cancel it from your open orders.")),
             "{errors:?}"
         );
     })
@@ -2464,7 +2480,12 @@ async fn an_unknown_placement_outcome_stops_without_placing_again() {
             port.completes()[0]["stopReason"],
             UNCONFIRMED_ORDER_STOP_REASON
         );
-        assert!(port.messages("error")[0].contains("check open orders"));
+        assert!(
+            port.messages("error")[0]
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders")
+        );
     })
     .await;
 }
@@ -2750,7 +2771,12 @@ async fn an_unreadable_accepted_placement_stops_without_placing_again() {
                 UNCONFIRMED_ORDER_STOP_REASON,
                 "{result}"
             );
-            assert!(port.messages("error")[0].contains("check open orders"));
+            assert!(
+                port.messages("error")[0]
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders")
+            );
         })
         .await;
     }

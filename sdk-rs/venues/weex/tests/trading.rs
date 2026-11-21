@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Contract V3 documented trading examples and adversarial lifecycle contracts.
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -190,11 +191,14 @@ fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
                 );
                 assert_eq!(error.protection, None);
                 assert!(
-                    error.message.to_lowercase().contains("unknown"),
+                    error.message.to_lowercase().contains("confirm"),
                     "{operation} {status}: {error:?}"
                 );
                 assert!(
-                    error.message.contains("Check Open Orders"),
+                    error
+                        .message
+                        .replace("Check your open orders", "Check Open Orders")
+                        .contains("Check Open Orders"),
                     "{operation} {status}: {error:?}"
                 );
                 assert!(!error.message.contains("refused"), "{error:?}");
@@ -225,10 +229,16 @@ fn dispatched_ambiguity_native_rate_row_says_unknown() {
     let error = failure(&actions);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
-        error.message.to_lowercase().contains("unknown"),
+        error.message.to_lowercase().contains("confirm"),
         "{error:?}"
     );
-    assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    assert!(
+        error
+            .message
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{error:?}"
+    );
     assert!(writes(&actions).is_empty());
 }
 fn order(id: &str, kind: OrderType) -> Order {
@@ -2087,12 +2097,14 @@ fn write_failures_preserve_native_text_with_unknown_guidance() {
         if matches!(status, 429 | 502) {
             assert_eq!(
                 error.message,
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
         } else {
             assert_eq!(
                 error.message,
-                format!("HTTP {status}: {body}. The outcome is unknown. Check Open Orders")
+                format!(
+                    "HTTP {status}: {body}. We couldn’t confirm this change. Check your open orders before trying again."
+                )
             );
         }
         assert_eq!(
@@ -2500,7 +2512,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         json!({"code":"40006","msg":"invalid signature"}),
     );
     let error = done(&actions).unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 // AGT-115: the placeTpSlOrder payload has no tp/sl fields, so a stop or take-profit entry

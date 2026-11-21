@@ -1244,7 +1244,7 @@ impl Coinbase {
             .any(|r| r.uncertain && (r.call.symbol == symbol || r.call.symbol.is_empty()))
         {
             Err(invalid(
-                "drb previous write outcome is uncertain; wait for native read-back before placing or editing",
+                "A previous Coinbase change hasn’t been confirmed. Wait for the account to refresh before placing or editing orders.",
             ))
         } else {
             Ok(())

@@ -70,14 +70,17 @@ impl Request {
     }
 }
 
-pub(crate) const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub(crate) const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn write_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown) {
         // Projection retains uncertainty context without its presentation marker.
-        if error.message.contains(ENGINE_UNKNOWN_TEXT) {
+        if error.message.contains("Check your open orders")
+            || error.message.contains("Check Open Orders")
+        {
             error.message.clone()
-        } else if error.presents || error.message.contains("Check Open Orders") {
+        } else if error.presents {
             format!("{}: {ENGINE_UNKNOWN_TEXT}", error.message)
         } else {
             ENGINE_UNKNOWN_TEXT.to_owned()
@@ -574,7 +577,7 @@ impl AsterDex {
             {
                 (
                     command,
-                    Err("Aster position mode has not loaded yet; order placement is held until it does".into()),
+                    Err("Aster’s position mode is still loading. Wait for it to load before placing an order.".into()),
                 )
             }
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
@@ -978,7 +981,7 @@ impl AsterDex {
                 && let Some((symbol, ..)) = &job.replacing_stop
             {
                 let words = format!(
-                    "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                    "Your {symbol} replacement stop was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
                 );
                 let _ = cx.present_plan_failure(&plan, words);
             }
@@ -1306,7 +1309,7 @@ impl AsterDex {
                                             == Some(Outcome::Unknown),
                             )
                         }) {
-                        Some(gone) => format!("{gone}: {message}"),
+                        Some(gone) => safe_cex_engine::error::with_detail(&gone, message),
                         None => message.clone(),
                     };
                     let table = if protective {
@@ -1440,7 +1443,7 @@ impl AsterDex {
                         } else {
                             &error.message
                         };
-                        error.message = format!("{gone}: {detail}");
+                        error.message = safe_cex_engine::error::with_detail(&gone, detail);
                     }
                     job.error = Some(error);
                 }
@@ -1463,7 +1466,7 @@ impl AsterDex {
                 } else {
                     failed_element(
                         element_error
-                            .unwrap_or_else(|| VenueError::new("Aster write outcome is unknown")),
+                            .unwrap_or_else(|| VenueError::new("Aster didn’t confirm this change. Check your open orders before trying again.")),
                     )
                 };
                 let _ = journal.record(index, result);
@@ -2107,6 +2110,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::fee_rate;
@@ -2138,3 +2142,27 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/support/local_trade_refusals.rs"]
 mod local_trade_refusals;
+
+// Rule 5 (#3726): retained guidance remains a single action at the presentation boundary.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn retained_guidance_is_not_repeated() {
+        let original =
+            VenueError::new("The outcome is unknown. Check Open Orders").outcome(Outcome::Unknown);
+        assert_eq!(write_failure_text(&original), original.message);
+    }
+    #[test]
+    fn unguided_unknown_and_known_refusals_keep_their_distinction() {
+        let original = VenueError::new("lost").outcome(Outcome::Unknown);
+        assert_eq!(
+            write_failure_text(&original)
+                .matches("Check your open orders")
+                .count(),
+            1
+        );
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        assert_eq!(write_failure_text(&original), original.message);
+    }
+}

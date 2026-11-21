@@ -564,7 +564,7 @@ export class ExchangeWorker {
     this._publicDemand.clear();
     this._latestUiState = null;
     this._deferInterruptedRequests({
-      message: 'Exchange disposed; interrupted operation outcomes are unknown and were not replayed.',
+      message: 'The account closed before these actions were confirmed. Check your open orders before trying again.',
       name: 'EngineDisposedError',
       code: 'ENGINE_DISPOSED',
     });
@@ -765,7 +765,7 @@ export class ExchangeWorker {
 
   private _rejectUnavailablePayload(
     payload: StoreWorkerPayload,
-    message = 'Rust engine unavailable; operation was not replayed. Reinitialize the account if recovery failed.',
+    message = 'Trading hasn’t started for this account. Reload the account to reconnect.',
     errorDetails?: SerializedCommandError,
   ) {
     if (payload.op === 'callMethod') {
@@ -840,7 +840,7 @@ export class ExchangeWorker {
     this._activeTickerSymbols = [...(this._exchange?.getActiveTickerSymbols() ?? [])];
     this._deferInterruptedRequests({
       message:
-        'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
+        'Trading was interrupted before this action was confirmed. Check your open orders before trying again.',
       name: 'EngineDeadError',
       code: 'ENGINE_DEAD',
       kind: 'internal',
@@ -853,7 +853,7 @@ export class ExchangeWorker {
     this._exchange?.dispose();
     this._dropMessageBuffer();
     this._invalidateReadiness();
-    this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
+    this.log('warn', 'Trading was interrupted before pending changes were confirmed. Check your open orders before trying again.', {
       reason: error.message,
     });
     if (cannotRecover) {
@@ -862,8 +862,8 @@ export class ExchangeWorker {
       const message = !ownerCurrent
         ? 'TWAP owner changed; reinitialize the account worker.'
         : this._options.publicFeed?.mode === 'shared'
-          ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
-          : 'Rust engine recovery exhausted; reinitialize the account to retry.';
+          ? 'Market data needs to reconnect. Reload the account.'
+          : 'Trading couldn’t reconnect. Reload the account.';
       this._ctx.postMessage({ op: 'warning', data: [message] });
       return;
     }
@@ -874,7 +874,7 @@ export class ExchangeWorker {
       void this._recoverEngine(token).catch((failure: unknown) => {
         if (token !== this._startupToken || this._stopped) return;
         this.dispose();
-        this.logError('Rust engine recovery failed; reinitialize the account.', failure);
+        this.logError('Trading couldn’t reconnect. Reload the account.', failure);
       });
     }, 500);
   }
@@ -898,7 +898,7 @@ export class ExchangeWorker {
     this._startRetries++;
     this._recovering = true;
     this._deferInterruptedRequests({
-      message: 'Exchange start timed out; interrupted operation outcomes are unknown and were not replayed.',
+      message: 'Account startup timed out, and pending actions weren’t confirmed. Check your open orders before trying again.',
       name: 'EngineDisposedError',
       code: 'ENGINE_DISPOSED',
     });
@@ -947,7 +947,7 @@ export class ExchangeWorker {
     if (!started && this.retryTimedOutStart()) return;
     if (!started || this._exchange?.isDisposed) {
       this.dispose();
-      this._ctx.postMessage({ op: 'warning', data: ['Rust engine recovery failed; reinitialize the account.'] });
+      this._ctx.postMessage({ op: 'warning', data: ['Trading couldn’t reconnect. Reload the account.'] });
       return;
     }
     this._recovering = false;

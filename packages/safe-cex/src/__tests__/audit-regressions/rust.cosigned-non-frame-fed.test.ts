@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, Order } from '../../types';
@@ -237,7 +238,7 @@ describe('Worker-mirror manual writes without a frame-fed implementation', () =>
         const { exchange, calls } = mirror('bybit', { signingMode });
         const reason =
           failure === 'failed supported construction'
-            ? "the account's page manual-write engine did not initialize."
+            ? "the account couldn’t get ready to make changes."
             : "this page could not load or verify the venue's frame-fed manual-write support.";
         await expect(exchange.placeOrder(placed)).rejects.toMatchObject({
           message: `bybit placeOrder was not sent: ${reason}`,
@@ -268,7 +269,7 @@ describe('Worker-mirror manual writes without a frame-fed implementation', () =>
       const { exchange, calls } = mirror('hyperliquid', { signingMode });
       await expect(exchange.scheduleCancel()).rejects.toMatchObject({
         message:
-          'hyperliquid scheduleCancel was not sent: this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.',
+          'hyperliquid scheduleCancel was not sent: this exchange doesn’t support making this change from the current connection.',
         kind: 'unsupported',
         outcome: 'notSent',
       });
@@ -285,7 +286,7 @@ describe('Worker-mirror manual writes without a frame-fed implementation', () =>
     const { exchange, calls } = mirror('mexc', { signingMode: 'delegated' });
     await expect(exchange.placeOrder(placed)).rejects.toMatchObject({
       message:
-        'mexc placeOrder was not sent: this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.',
+        'mexc placeOrder was not sent: this account makes changes through its server connection.',
       kind: 'unsupported',
       outcome: 'notSent',
     });

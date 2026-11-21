@@ -4,10 +4,11 @@
 use super::{CommandId, LogEvent, RequestId, VenueError};
 
 /// Canonical venue-authored Unknown guidance; presentation only.
-pub const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const UNKNOWN_OUTCOME_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 /// Shared unproven-envelope guidance for HTTP and WebSocket mutations.
 pub const UNKNOWN_HTTP_OUTCOME_TEXT: &str =
-    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+    "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
 
 /// Immutable facts after the engine sealed a released mutation Unknown.
 /// No request, completion, classification, Store or retry authority is provided.

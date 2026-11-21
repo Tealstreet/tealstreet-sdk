@@ -2688,7 +2688,7 @@ async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit(
             let outcome = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(outcome["d"]["outcome"], if kind == "nuke" {"refused"} else {"unknown"});
             if stage == "pre_actor" {
-                assert_eq!(outcome["d"]["error"]["message"], "Action registration retired before dispatch");
+                assert_eq!(outcome["d"]["error"]["message"], "This action couldn’t start because the account connection changed");
             }
             assert_eq!(outcome["d"]["error"]["outcome"], if kind == "nuke" {"notSent"} else {"unknown"});
             assert!(tape.writes.lock().unwrap().is_empty());
@@ -2765,7 +2765,7 @@ async fn nuke_post_store_lease_fence_audits_io_without_changing_receipt() {
             assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
             assert_eq!(
                 outcome["d"]["error"]["message"],
-                "Action registration retired before dispatch"
+                "This action couldn’t start because the account connection changed"
             );
             assert!(tape.writes.lock().unwrap().is_empty());
             let audits = actor_refusal_audits(capture.finish(), "nuke");

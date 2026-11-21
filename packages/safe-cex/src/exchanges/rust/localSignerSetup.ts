@@ -116,7 +116,7 @@ export const resolveSetupPassphrase = (
   const required = complete && rule !== undefined && rule !== 'optional'
     && !(rule === 'requiredForPrivate' && slot === 'primary' && publicDataOnly);
   if (required && (typeof effective !== 'string' || effective.length === 0)) {
-    const message = `Rust engine ${slot} signing credentials require a passphrase`;
+    const message = `The ${slot} API credentials need a passphrase`;
     throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
   }
   return { value: typeof effective === 'string' ? effective : undefined, inheritPrimary };
@@ -152,7 +152,7 @@ export class LocalSignerSetup {
     if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
       || (!secondarySigningFromPrimary
         && !credentialPresent(options.secondary_secret, secondaryMetadata?.trimSigning === true)))) {
-      const message = 'Rust engine secondary signing keys require a nonempty key and secret';
+      const message = 'The extra API credentials need both a key and secret';
       throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
     }
     this.hasSecondary = secondary;

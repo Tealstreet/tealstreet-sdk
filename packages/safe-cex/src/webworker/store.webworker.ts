@@ -313,7 +313,7 @@ const start = (ctx: Worker, shared = false) => {
           ctx.postMessage({ op: 'start-status', data: false });
           ctx.postMessage({
             op: 'warning',
-            data: ['Rust engine recovery is in progress; account commands are temporarily unavailable.'],
+            data: ['The account is reconnecting and trading is temporarily unavailable. Wait for it to reconnect before making changes.'],
           });
           return;
         } else if (existingWorker.exchange?.isDisposed) {

@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { describe, expect, it } from 'vitest';
@@ -46,7 +47,7 @@ describe('CommandHandler', () => {
     const exchange = plainExchange();
     new CommandHandler(...handlerArgs(exchange)).handle(exec({ symbol: 'BTCUSDT', command: 'buy 1' }));
     expect(exchange.emitter.emit).toHaveBeenCalledWith('exec-log', {
-      message: 'exec was not run: algos run only on a Rust engine account',
+      message: 'Running this trading request isn’t available for this account',
     });
     expect(exchange.emitter.emit).toHaveBeenCalledTimes(1);
   });

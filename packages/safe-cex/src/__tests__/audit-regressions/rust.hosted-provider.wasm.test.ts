@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -276,8 +277,8 @@ it('actual WASM signing errors and disposal settle without exposing secrets, iss
     }),
   ]);
   expect(results).toEqual([
-    { id: 'http-capture', error: 'Hosted HTTP signing failed' },
-    { id: 'disposed-ws', error: 'Hosted WS auth signing failed' },
+    { id: 'http-capture', error: 'This request couldn’t be signed' },
+    { id: 'disposed-ws', error: 'The account connection couldn’t be signed in' },
   ]);
   expect(JSON.stringify(results)).not.toContain(PRIMARY_SECRET);
   expect(JSON.stringify(results)).not.toContain(SECONDARY_SECRET);
@@ -412,7 +413,7 @@ it('actual WASM refuses WS capture without provider credentials and does not man
       exchangeName: 'binance',
       wsAuth: { toSign: 'GET/realtime1700999999999', outputFormat: 'hex' },
     }),
-  ).resolves.toEqual({ id: 'no-identity', error: 'Hosted WS auth signing failed' });
+  ).resolves.toEqual({ id: 'no-identity', error: 'The account connection couldn’t be signed in' });
   const unsigned = await exchange.signHttpRequest(http('binance', { params: { symbol: 'BTCUSDT' } }));
   expect(unsigned.error).toBeUndefined();
   expect(unsigned.config?.params).toEqual({ symbol: 'BTCUSDT' });

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
@@ -486,7 +487,8 @@ pub fn answer_order_status(e: &mut Engine<Hyperliquid>, r: &HttpRequest) {
     reply(e, r, 200, &reply_body);
 }
 
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub fn assert_unknown_publication(
     error: &serde_json::Value,

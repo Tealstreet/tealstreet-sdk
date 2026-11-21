@@ -65,7 +65,7 @@
       "code": -1111,
       "error": {
         "kind": "internal",
-        "message": "Bitrue -1111: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue -1111: ordinary pin; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -80,7 +80,7 @@
       "code": -1136,
       "error": {
         "kind": "internal",
-        "message": "Bitrue -1136: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue -1136: ordinary pin; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -94,7 +94,7 @@
       "additionalOrderPosts": 0,
       "code": -1155,
       "error": {
-        "message": "Bitrue HTTP 400: {\"code\":\"-1155\",\"msg\":\"ordinary pin\"}; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue HTTP 400: {\"code\":\"-1155\",\"msg\":\"ordinary pin\"}; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -109,7 +109,7 @@
       "code": -2017,
       "error": {
         "kind": "rejected",
-        "message": "Bitrue -2017: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue -2017: ordinary pin; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "partial": {
           "orderIds": [
             "2334151155877155281"
@@ -124,7 +124,7 @@
       "code": -1111,
       "error": {
         "kind": "rateLimited",
-        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "message": "HTTP response does not prove the write outcome. We couldn’t confirm this change. Check your open orders before trying again.",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -139,7 +139,7 @@
       "code": -1111,
       "error": {
         "kind": "venueUnavailable",
-        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "message": "HTTP response does not prove the write outcome. We couldn’t confirm this change. Check your open orders before trying again.",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -154,7 +154,7 @@
       "code": -5999,
       "error": {
         "kind": "internal",
-        "message": "Bitrue -5999: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue -5999: ordinary pin; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -169,7 +169,7 @@
       "code": -1003,
       "error": {
         "kind": "internal",
-        "message": "Bitrue -1003: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "message": "Bitrue -1003: ordinary pin; Your E-BTC-USDT order was cancelled and its replacement was declined",
         "outcome": "unknown",
         "partial": {
           "orderIds": [

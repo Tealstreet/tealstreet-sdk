@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use crate::ControlFrame;
 fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     let (mut engine, context, socket) = websocket_connecting_fixture(signed);
@@ -46,7 +47,15 @@ fn websocket_write_claim_before_handshake_is_not_sent() {
         .drain_actions()
         .find_map(WebSocketWriteBinding::from_action)
         .expect("bound write on a connecting socket");
-    assert!(engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")).is_err());
+    assert!(
+        engine
+            .claim_websocket_write(
+                0.,
+                binding,
+                &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")
+            )
+            .is_err()
+    );
     assert!(engine.venue.releases.is_empty());
     assert!(engine.http_release(request).is_none());
     assert_eq!(engine.venue.failures.len(), 1);
@@ -107,10 +116,20 @@ fn release_websocket_actions(
             } => {
                 let binding = WebSocketWriteBinding::from_action(action).expect("typed binding");
                 let mut frame = None;
-                let _ = engine.claim_websocket_write(now, binding, &mut |socket, text, commit: &mut crate::WebSocketCommit<'_>| {
-                    let mut text = Some(text);
-                    commit(&mut || { frame = Some(Action::WsSend {socket, text:text.take().expect("one handoff")}); true })
-                });
+                let _ = engine.claim_websocket_write(
+                    now,
+                    binding,
+                    &mut |socket, text, commit: &mut crate::WebSocketCommit<'_>| {
+                        let mut text = Some(text);
+                        commit(&mut || {
+                            frame = Some(Action::WsSend {
+                                socket,
+                                text: text.take().expect("one handoff"),
+                            });
+                            true
+                        })
+                    },
+                );
                 frame
             }
             action => Some(action),
@@ -281,15 +300,17 @@ fn assert_websocket_binding_rejects_previous_engine(signed_write: bool) {
     assert!(b.venue.failures.is_empty(), "B's pending work stays live");
     assert!(b.http_release(request_b).is_none());
     assert_eq!(b.websocket_write_socket(&binding_b), Some(socket_b));
-    assert_eq!(
-        b.claim_websocket_write(2., binding_b, &mut handoff),
-        Ok(())
-    );
+    assert_eq!(b.claim_websocket_write(2., binding_b, &mut handoff), Ok(()));
     assert_eq!(
         frames,
         vec![(
             socket_b,
-            if signed_write { "signed auth" } else { "B-order" }.into()
+            if signed_write {
+                "signed auth"
+            } else {
+                "B-order"
+            }
+            .into()
         )],
         "only B's current binding reaches the physical handoff"
     );
@@ -486,7 +507,7 @@ fn websocket_write_unproven_response_diagnostics_are_transport_neutral() {
             .expect("one terminal write failure");
         assert_eq!(
             error.message,
-            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
         );
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
@@ -618,7 +639,11 @@ fn websocket_write_cannot_borrow_a_read_only_http_permit() {
     .unwrap();
     assert_eq!(engine.websocket_write_socket(&binding), None);
     assert_eq!(
-        engine.claim_websocket_write(0., binding, &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")),
+        engine.claim_websocket_write(
+            0.,
+            binding,
+            &mut |_, _, _: &mut crate::WebSocketCommit<'_>| panic!("must not hand off")
+        ),
         Err(Error::Revoked)
     );
     assert!(engine.venue.releases.is_empty());
@@ -705,20 +730,28 @@ fn websocket_write_signing_recipe_cannot_replace_the_authorized_socket() {
     assert_eq!(engine.venue.failures.len(), 1);
 }
 
-
 #[test]
 fn websocket_write_cannot_commit_through_http_claim() {
-    let (mut engine, context, socket)=websocket_fixture(false);
-    let request=queue_websocket_write(&mut engine,&context,socket,false);
-    let permit=engine.drain_actions().find_map(|action| match action {
-        Action::SignedOutbound {attempt:RequestId(0),outbound} => match *outbound {
-            Action::ManagedHttp(packet) => match *packet { HttpAction::Bind {permit,..}=>Some(permit), _=>None },
-            _=>None,
-        },
-        _=>None,
-    }).expect("bound socket permit");
-    assert_eq!(engine.claim_http(0.,permit),Err(Error::Revoked));
+    let (mut engine, context, socket) = websocket_fixture(false);
+    let request = queue_websocket_write(&mut engine, &context, socket, false);
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SignedOutbound {
+                attempt: RequestId(0),
+                outbound,
+            } => match *outbound {
+                Action::ManagedHttp(packet) => match *packet {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("bound socket permit");
+    assert_eq!(engine.claim_http(0., permit), Err(Error::Revoked));
     assert!(engine.http_release(request).is_none());
     assert!(engine.venue.releases.is_empty());
-    assert_eq!(engine.venue.failures[0].1,Some(crate::Outcome::NotSent));
+    assert_eq!(engine.venue.failures[0].1, Some(crate::Outcome::NotSent));
 }

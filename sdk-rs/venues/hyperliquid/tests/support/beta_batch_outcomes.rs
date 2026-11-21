@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::*;
 use safe_cex_engine::{Outcome, VenueError};
 
@@ -208,7 +209,10 @@ fn cancel_batch_with_unknown_row_retains_applied_and_unknown_journal() {
                     panic!("unconfirmed cancellation must stay Unknown: {row:?}");
                 };
                 assert_eq!(error.outcome, Some(Outcome::Unknown));
-                assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+                assert_eq!(
+                    error.message,
+                    "We couldn’t confirm this change. Check your open orders before trying again."
+                );
                 assert_eq!(
                     error.venue_message.as_deref(),
                     Some("unclassified cancel result")
@@ -232,7 +236,10 @@ fn cancel_batch_with_unknown_row_publishes_guidance_and_native_diagnostic() {
     for unknown_index in [1, 0, 2] {
         let actions = unknown_cancel_batch(unknown_index);
         let error = failed(&actions);
-        assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+        assert_eq!(
+            error.message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        );
         assert_eq!(
             error.venue_message.as_deref(),
             Some("unclassified cancel result")
@@ -254,11 +261,9 @@ fn cancel_batch_with_unknown_row_emits_one_independent_correlated_diagnostic() {
             })
             .collect();
         assert_eq!(events.len(), 1, "independent Unknown diagnostic");
-        assert!(
-            events[0]
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(events[0].message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
         assert!(
             events[0]
                 .fields

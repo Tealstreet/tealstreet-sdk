@@ -674,7 +674,7 @@ impl TwapInstance {
         if chaser.is_some_and(|chaser| chaser.order_may_be_open) {
             self.halt_unknown(
                 timeout.element_index.saturating_sub(1),
-                VenueError::new("chaser order may be open"),
+                VenueError::new("The chase order wasn’t confirmed cancelled"),
                 effects,
             );
             return;
@@ -691,7 +691,7 @@ impl TwapInstance {
                 Some(_) => {}
                 None => self.halt_unknown(
                     timeout.element_index.saturating_sub(1),
-                    VenueError::new("chaser end is unknown"),
+                    VenueError::new("The chase completion wasn’t confirmed"),
                     effects,
                 ),
             }
@@ -770,7 +770,11 @@ impl TwapInstance {
                     .map(|_| *index)
             })
         {
-            self.halt_unknown(index, VenueError::new("chaser order may be open"), effects);
+            self.halt_unknown(
+                index,
+                VenueError::new("The chase order wasn’t confirmed cancelled"),
+                effects,
+            );
             return;
         }
         let now = env.now_ms();
