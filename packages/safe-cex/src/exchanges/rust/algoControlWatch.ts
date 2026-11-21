@@ -37,7 +37,8 @@ const chaseOutcome = ({ symbol, size, filled = 0 }: ChaseEnd) => {
 const unendedChase = (chase: ActiveChaser) => {
   const orders = chase.currentOrderIds?.length ? `order ${chase.currentOrderIds.join(', ')}` : 'order';
   return (
-    `Chase on ${chase.symbol} was interrupted. ` +
+    // NX isPageEngineLostChaseNotice matches this prefix to keep it off Hosted accounts.
+    `Chase on ${chase.symbol} ended without a result: it was interrupted. ` +
     `Its ${orders} may still be open or may have filled. Check your open orders and positions.`
   );
 };

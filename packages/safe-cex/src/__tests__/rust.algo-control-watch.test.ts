@@ -211,7 +211,8 @@ describe('a running chase whose engine went away', () => {
     expect(told).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(told).toHaveLength(1);
-    expect(told[0]).toContain('Chase on BTCUSDT was interrupted');
+    // NX hostedAlgoInterruption.ts isPageEngineLostChaseNotice matches this exact prefix.
+    expect(told[0]).toMatch(/^Chase on \S+ ended without a result: /);
     expect(told[0]).toContain('Its order o1 may still be open or may have filled');
     // NX unmanagedOrderRisk keeps an error toast sticky only while it says 'may still be open'.
     expect(told[0]).toContain('may still be open');

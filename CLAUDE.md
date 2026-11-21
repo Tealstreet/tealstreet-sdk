@@ -158,3 +158,7 @@ in NX `apps/web/src/components/toasts/unmanagedOrderRisk.ts`): NX keeps those
 toasts on screen by matching text, so a calmer rewrite without it lets an
 order-risk warning auto-dismiss. Native detail goes before a trailing "Check …"
 action (`safe_cex_engine::error::with_detail`), never after it.
+**The LOCAL lost-chase notice (`algoControlWatch.ts` `unendedChase`) must start
+"Chase on X ended without a result: "**: NX `isPageEngineLostChaseNotice`
+(`apps/web/src/order/hostedAlgoInterruption.ts`) matches that prefix to drop it on
+Hosted accounts, whose own notice replaces it.
