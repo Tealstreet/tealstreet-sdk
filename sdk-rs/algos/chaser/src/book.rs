@@ -988,6 +988,11 @@ impl ChaserBook {
         if order_price == Some(best) {
             return Ok(());
         }
+        // An amended constraint can pin the replacement at the resting price;
+        // cancelling it would only spend an attempt on the same quote.
+        if order_price.is_some() && self.best_price(chase).ok() == order_price {
+            return Ok(());
+        }
         chase.increment_attempts();
         if chase.is_stopped() {
             return Ok(());

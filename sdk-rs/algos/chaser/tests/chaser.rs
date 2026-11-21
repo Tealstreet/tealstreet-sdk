@@ -382,6 +382,45 @@ async fn amend_changes_only_the_next_chaser_attempt() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn amended_chaser_keeps_an_order_already_at_its_constrained_quote() {
+    for (update, quote) in [
+        (serde_json::json!({"limitPrice":101.0,"offset":0.5}), 101.0),
+        (serde_json::json!({"offset":0.5}), 101.5),
+    ] {
+        local(async {
+            let port = FakePort::new("bybit");
+            port.accept_placements();
+            let (factory, cx) = start(&port, BUY_ONE);
+            settle(1100).await;
+            let id = factory.book().active_chasers()[0].id.clone();
+            factory
+                .handle(
+                    "chaser:amend",
+                    &serde_json::json!({"id":id,"update":update}).to_string(),
+                    &cx,
+                )
+                .unwrap();
+            port.set_ticker(102.0, 102.5);
+            settle(1100).await;
+            assert_eq!(port.placements(), vec![(100.0, 1.0), (quote, 1.0)]);
+            let attempts = factory.book().active_chasers()[0].attempts;
+            for _ in 0..3 {
+                port.set_ticker(102.0, 102.5);
+                settle(1100).await;
+            }
+            assert_eq!(
+                port.placements(),
+                vec![(100.0, 1.0), (quote, 1.0)],
+                "an unchanged touch must not re-place the same constrained quote: {update}"
+            );
+            assert_eq!(port.cancels().len(), 1);
+            assert_eq!(factory.book().active_chasers()[0].attempts, attempts);
+        })
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn amend_refuses_immutable_chaser_fields_and_ended_jobs() {
     local(async {
         let port = FakePort::new("bybit");
