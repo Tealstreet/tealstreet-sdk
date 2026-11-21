@@ -1,4 +1,7 @@
+import type { BybitLifecycle } from './bybit.lifecycles';
 import type { PositionRecord } from './position.types';
+
+import BigNumber from 'bignumber.js';
 
 import { withHistoryCompleteness } from '../historyCompleteness';
 import { PositionSide } from '../types';
@@ -99,6 +102,7 @@ export type BybitPositionAdapterDeps = {
  * exists, `closeCount` makes the fold visible to consumers and these limits are stated
  * rather than hidden behind a confident-looking number.
  */
+/** @deprecated Compatibility for unaudited variants and diagnostics. Canonical Bybit uses the joined fold below. */
 export const aggregateBybitClosedPnl = (
   rows: Array<Record<string, any>>,
   deps: BybitPositionAdapterDeps,
@@ -158,6 +162,108 @@ export const aggregateBybitClosedPnl = (
   }
 
   return records.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
+};
+
+export type BybitLifecycleAdapterDeps = BybitPositionAdapterDeps & {
+  readonly lifecycles: readonly BybitLifecycle[];
+  readonly from?: number;
+  readonly to?: number;
+};
+
+/** Fold only complete, source-joined lifecycles. Native rows remain available
+ * through fetchClosedPositions when the fills cannot prove their grouping. */
+export const aggregateBybitClosedLifecycles = (
+  rows: Array<Record<string, unknown>>,
+  deps: BybitLifecycleAdapterDeps,
+): PositionRecord[] => {
+  const records: PositionRecord[] = [];
+  const byOrder = new Map<string, Record<string, unknown>>();
+  const conflicted = new Set<string>();
+  let unresolved = false;
+  const inWindow = (row: Record<string, unknown>) => {
+    const at = num(row.updatedTime) || num(row.createdTime);
+    return !(at > 0) || (at >= (deps.from ?? -Infinity) && at <= (deps.to ?? Infinity));
+  };
+  for (const row of rows) {
+    const id = String(row.orderId ?? '');
+    if (!id) {
+      if (inWindow(row)) unresolved = true;
+      continue;
+    }
+    if (conflicted.has(id)) continue;
+    const prior = byOrder.get(id);
+    if (prior && JSON.stringify(prior) !== JSON.stringify(row)) {
+      unresolved = true;
+      conflicted.add(id);
+      byOrder.delete(id);
+      continue;
+    }
+    byOrder.set(id, row);
+  }
+  const assigned = new Set<string>();
+  const memberships = new Map<string, number>();
+  for (const lifecycle of deps.lifecycles) {
+    for (const id of lifecycle.closingOrderIds) memberships.set(id, (memberships.get(id) ?? 0) + 1);
+  }
+  for (const lifecycle of deps.lifecycles) {
+    const { interval } = lifecycle;
+    const run = lifecycle.closingOrderIds.flatMap((id) => {
+      const row = byOrder.get(id);
+      return row ? [row] : [];
+    });
+    const leg = interval.positionSide;
+    const closingSide = interval.side === PositionSide.Long ? 'Sell' : 'Buy';
+    const size = run.reduce((sum, row) => sum + Math.abs(num(row.closedSize)), 0);
+    if (
+      !interval.complete ||
+      run.length !== lifecycle.closingOrderIds.length ||
+      lifecycle.closingOrderIds.some((id) => memberships.get(id) !== 1) ||
+      run.some(
+        (row) =>
+          row.symbol !== interval.symbol ||
+          row.side !== closingSide ||
+          !(num(row.updatedTime) || num(row.createdTime)) ||
+          !new BigNumber(String(row.closedSize)).eq(lifecycle.closingOrderSizes.get(String(row.orderId)) ?? NaN) ||
+          deps.resolveLeg?.(String(row.orderId)) !== leg,
+      ) ||
+      Math.abs(size - interval.closedSize) > 1e-9 * Math.max(1, size)
+    ) {
+      if (
+        interval.closedAt !== undefined &&
+        interval.closedAt >= (deps.from ?? -Infinity) &&
+        interval.closedAt <= (deps.to ?? Infinity)
+      )
+        unresolved = true;
+      continue;
+    }
+    for (const id of lifecycle.closingOrderIds) assigned.add(id);
+    // Partial closes belong to a still-open lifecycle, not a closed round trip.
+    if (interval.closedAt === undefined || !lifecycle.closingId) continue;
+    const record = foldRun(run, deps, leg);
+    if (
+      !record ||
+      record.closedAt === undefined ||
+      record.closedAt < (deps.from ?? -Infinity) ||
+      record.closedAt > (deps.to ?? Infinity)
+    )
+      continue;
+    records.push({
+      ...record,
+      key: JSON.stringify([
+        'bybit-lifecycle-v2',
+        deps.account,
+        interval.symbol,
+        leg,
+        lifecycle.openingId,
+        lifecycle.closingId,
+      ]),
+      openedAt: record.openedAt ?? interval.openedAt,
+      avgEntryPrice: run.reduce((sum, row) => sum + Math.abs(num(row.closedSize)) * num(row.avgEntryPrice), 0) / size,
+    });
+  }
+  for (const [id, row] of byOrder) if (inWindow(row) && !assigned.has(id)) unresolved = true;
+  records.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
+  return unresolved ? withHistoryCompleteness(records, { incomplete: true, reason: 'unresolvedLifecycle' }) : records;
 };
 
 const foldRun = (run: Array<Record<string, any>>, deps: BybitPositionAdapterDeps, leg: PositionSide | 'both'): PositionRecord | null => {

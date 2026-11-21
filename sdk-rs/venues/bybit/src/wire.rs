@@ -1196,6 +1196,8 @@ pub struct TransactionRow<'a> {
     #[serde(borrow, default)]
     pub size: Opt<'a>,
     #[serde(borrow, default)]
+    pub qty: Opt<'a>,
+    #[serde(borrow, default)]
     pub symbol: Opt<'a>,
     #[serde(rename = "type", borrow, default)]
     pub kind: Opt<'a>,
