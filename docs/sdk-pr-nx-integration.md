@@ -13,6 +13,9 @@ nothing else, and every account that can push an SDK branch already reads NX.
 Fork PRs and a missing key refuse explicitly before private checkout.
 No production credentials, self-hosted runner, artifact upload or write
 credential are used. The key is present only during admission and checkout.
+The gate's own scripts run from a sparse `gate/` checkout of the merge ref
+(`github.sha`), the same revision as this workflow file; the PR head is only
+the overlay's source, so a branch cut before the scripts existed still runs.
 Private NX command output stays in mode-600 runner-temporary logs and is never
 uploaded; public logs report the gate and its result. Failures retain nonzero
 status. Reproducing the pinned command in an authorized NX checkout provides
