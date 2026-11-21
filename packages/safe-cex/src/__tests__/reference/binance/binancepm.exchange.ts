@@ -894,16 +894,19 @@ export class BinancePMExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(orders);
-    // AGT-115: as Rust's shared Binance `format_order`, refuse a trailing or conditional
-    // entry with attached legs rather than place it unprotected.
-    const dropsLegs = (o: PlaceOrderOpts) =>
-      (o.type === OrderType.TrailingStopLoss || o.type === OrderType.Conditional) && stopEntryWithAttachedLegs(o);
-    if (orders.some(dropsLegs)) this.rejectPreflight(stopEntryLegsRefusal('Binance'));
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    // AGT-115: as Rust's shared Binance `format_order`, refuse a trailing or conditional
+    // entry with attached legs. Both placement paths format every order before writing.
+    if (
+      (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) &&
+      stopEntryWithAttachedLegs(opts)
+    ) {
+      this.rejectPreflight(stopEntryLegsRefusal('Binance'));
+    }
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       return this.formatCreateTrailingStopLossOrder(opts);

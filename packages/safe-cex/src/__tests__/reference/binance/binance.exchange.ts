@@ -1762,12 +1762,6 @@ export class BinanceExchange extends BaseExchange {
     const allRegular: any[] = [];
     const allAlgo: any[] = [];
 
-    // AGT-115: a trailing entry returns before its legs are formatted; refuse, as Rust does
-    // for trailing and conditional entries, instead of placing it unprotected.
-    const dropsLegs = (o: PlaceOrderOpts) =>
-      (o.type === OrderType.TrailingStopLoss || o.type === OrderType.Conditional) && stopEntryWithAttachedLegs(o);
-    if (orders.some(dropsLegs)) this.rejectPreflight(stopEntryLegsRefusal('Binance'));
-
     for (const o of orders) {
       const { regular, algo } = this.formatCreateOrder(o);
       allRegular.push(...regular);
@@ -1810,6 +1804,15 @@ export class BinanceExchange extends BaseExchange {
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts): { regular: any[]; algo: any[] } => {
+    // AGT-115: a trailing entry returns below before its legs are formatted; refuse, as
+    // Rust does for trailing and conditional entries. Every caller formats before writing.
+    if (
+      (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) &&
+      stopEntryWithAttachedLegs(opts)
+    ) {
+      this.rejectPreflight(stopEntryLegsRefusal('Binance'));
+    }
+
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[opts.symbol];
 
