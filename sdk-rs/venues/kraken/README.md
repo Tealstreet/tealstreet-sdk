@@ -92,6 +92,14 @@ controls remain strict: one invalid row rejects its whole page. Only earlier
 accepted pages may be returned with `history.incomplete` / `laterPageFailed`;
 rows staged from the failed page are discarded rather than silently skipped.
 
+An order event's `quantity` is the **unfilled remainder**, not the order size:
+a full fill reports `quantity: "0"` beside its `filled` size (live `full_fill`
+updates and immediately filled IoC placements). A historical order's `amount` is
+therefore `quantity + filled`, and a non-cancel event is closed when its
+remainder is zero. Only a non-cancel row with neither remainder nor fill refuses
+as `quantityZero`; `filled` above the remainder is valid. Reading `quantity` as the
+size refused every full fill and failed whole windows (Sentry TEALSTREET-NEXT-DQM).
+
 ## Futures order-row diagnostics
 
 Unmappable REST/open-orders snapshot rows retain the existing identity coverage:

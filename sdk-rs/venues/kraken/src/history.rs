@@ -1084,20 +1084,15 @@ impl Kraken {
                 HistoryDecodeReason::QuantityNegative,
                 "economics.quantity.negative",
             ))
-        } else if order.quantity == 0.0 && !canceled {
-            Some((
-                HistoryDecodeReason::QuantityZero,
-                "economics.quantity.zeroForActiveOrder",
-            ))
         } else if order.filled < 0.0 {
             Some((
                 HistoryDecodeReason::FilledQuantityNegative,
                 "economics.filled.negative",
             ))
-        } else if order.filled > order.quantity {
+        } else if order.quantity == 0.0 && order.filled == 0.0 && !canceled {
             Some((
-                HistoryDecodeReason::FilledQuantityExceedsQuantity,
-                "economics.filled.exceedsQuantity",
+                HistoryDecodeReason::QuantityZero,
+                "economics.quantity.zeroForActiveOrder",
             ))
         } else if order.timestamp < 0.0 {
             Some((HistoryDecodeReason::Timestamp, "time.timestamp.negative"))
@@ -1115,9 +1110,11 @@ impl Kraken {
         if !request.within(event.timestamp, &symbol) {
             return Ok(());
         }
+        // Kraken's order-event `quantity` is the UNFILLED remainder, not the size:
+        // a full fill reports `quantity: "0"` beside the filled size.
         let status = if canceled {
             OrderStatus::Canceled
-        } else if order.filled == order.quantity {
+        } else if order.quantity == 0.0 {
             OrderStatus::Closed
         } else {
             return Ok(());
@@ -1135,7 +1132,8 @@ impl Kraken {
             kind: order_kind,
             status,
             price: order.limit_price,
-            amount: order.quantity,
+            // Size = remainder + filled, summed at the inputs' decimal precision.
+            amount: safe_cex_engine::num::decimal_subtract(order.quantity, -order.filled),
             filled: order.filled,
             reduce_only: order.reduce_only,
             created_time: order.timestamp,
