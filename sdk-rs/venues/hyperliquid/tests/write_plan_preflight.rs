@@ -343,10 +343,7 @@ fn runtime_failure_suffix(
         assert_eq!(tail["status"], "notSent");
         if fenced_suffix {
             assert_eq!(tail["error"]["outcome"], "notSent");
-            assert_eq!(
-                tail["error"]["message"],
-                "This request isn’t ready to send"
-            );
+            assert_eq!(tail["error"]["message"], "This request isn’t ready to send");
         } else {
             assert!(tail.get("error").is_none(), "{error}");
         }
