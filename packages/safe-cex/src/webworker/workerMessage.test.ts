@@ -20,6 +20,12 @@ describe('worker routing envelope', () => {
     expect(isWorkerMessage({ op: '__workerConfig', data: { hostSpecificSetting: true } })).toBe(true);
   });
 
+  it('routes running-algo amendments to their handlers like the start operations', () => {
+    for (const op of ['chaser:start', 'chaser:amend', 'twap:start', 'twap:amend']) {
+      expect(isWorkerMessage({ op, instanceId: 'generation', data: { id: 'job', update: {} } })).toBe(true);
+    }
+  });
+
   it('checks init routing fields without resolving venue or credential policy', () => {
     const data = { exchangeName: 'bybit', options: {}, accountName: 'connection:account' };
     expect(isWorkerMessage({ op: 'init', instanceId: 'generation', data })).toBe(true);

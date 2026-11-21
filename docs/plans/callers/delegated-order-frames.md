@@ -208,7 +208,9 @@ a COIN-M trailing entry, which places its legs uncounted and so stays unknown.
 The same refusal covers every adapter that dropped those legs (AGT-115 follow-up): any
 non-limit/market entry on AsterDEX, Bitget, Bitunix, Hyperliquid, Lighter, MEXC and WOO;
 trailing entries, and stops closing a covering position, on Bybit and HyroTrader; stop and take-profit on WEEX;
-trailing on Phemex. Lighter also refuses legs on a reduce-only limit/market entry.
+trailing on Phemex. An order that can only reduce (`reduceOnly` or `close`) never carries
+legs on any venue: the engine refuses it `notSent` before the venue sees it, because the legs
+would outlive the position as stray reduce-only triggers (AGT-120; Lighter did this alone first).
 Hyperliquid perps group a limit or market entry's legs into the entry's own `normalTpsl` write
 (market entries dropped them until AGT-117) and the reply names only the entry, so one ID is
 the whole bracket there and a refused leg stays unknown as partial evidence. Hyperliquid spot

@@ -228,8 +228,10 @@ bound (AGT-125: bursts reported unknown at 10 s and were then placed). An in-fli
 their own clocks, with 5 s future tolerance, so an ACK can land after 10 s. An
 `acknowledged` intent is admitted and may be waiting in the venue's write queue,
 so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s): the
-receipt bound + the engine's 120 s `DEFAULT_COMMAND_WAIT_MS` + a 20 s venue write, so
-no client verdict lands while the box can still execute it. Each then becomes
+receipt bound + the engine's 120 s `DEFAULT_COMMAND_WAIT_MS` + a 20 s venue write.
+That age never proves the box is done: a write plan's own span can exceed the command
+wait (a 32-target Bybit cancel), so hosts must not infer "not placed" from it (NX gates
+those verdicts on the outcome or a disconnect). Each then becomes
 `unknown`; a late ACK returns an `unknown` intent to `acknowledged`. These windows
 never resend or extend admission. `delegatedOutboxBounds.test.ts` pins them to the
 Rust limits. Direct close also changes
@@ -359,10 +361,14 @@ continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
 
-Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
-unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
-keeps the same job and schedule; never emulate amendment with automatic
-stop-and-replace.
+AGT-97 uses shared Rust `chaser:amend`/`twap:amend` with typed v1 `{id,update}`.
+Chaser permits limitPrice/offset/maxAttempts; TWAP permits intervalMs/remainingSlices.
+Side, symbol and quantity stay immutable and unsupported fields refuse by name
+before enqueue. Finished/stopping/unknown jobs refuse. A LOCAL amendment the
+worker cannot dispatch reports an error like a start (`USER_ALGORITHM_REQUESTS`). Edits affect the next
+attempt/slice, preserve in-flight children and never stop-and-replace; receipts
+retain conservative algo uncertainty. See the caller contract for exact units,
+future-quantity repartition, restore semantics and mobile enablement.
 
 The hosted typed v1 action decoder rejects duplicate object keys recursively in
 placement orders, close orders, scheduling values and algo payloads before they

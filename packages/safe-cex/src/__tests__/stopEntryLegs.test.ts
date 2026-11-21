@@ -18,7 +18,7 @@ import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { MexcExchange } from './reference/mexc/mexc.exchange';
 import { OKXExchange } from './reference/okx/okx.exchange';
 import { PhemexExchange } from './reference/phemex/phemex.exchange';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from './reference/stopEntryLegs';
+import { REDUCE_ONLY_LEGS_REFUSAL, stopEntryLegsRefusal, stopEntryWithAttachedLegs } from './reference/stopEntryLegs';
 import { WeexExchange } from './reference/weex/weex.exchange';
 import { WOOXExchange } from './reference/woo/woo.exchange';
 
@@ -328,6 +328,7 @@ describe('more venues refuse an entry whose attached legs they would drop', () =
     }
   });
 
+  // AGT-120 moved this refusal (and its copy) from Lighter to every venue: reduceOnlyLegs.test.ts.
   it('Lighter refuses legs on a reduce-only limit or market entry', async () => {
     const lighter = subjects.find((s) => s.venue === 'Lighter')!;
     for (const type of [OrderType.Limit, OrderType.Market]) {
@@ -336,8 +337,8 @@ describe('more venues refuse an entry whose attached legs they would drop', () =
         ...lighter.single,
         ...lighter.batch.filter((n) => n !== 'placeOrder'),
       ]);
-      await expect(exchange.placeOrder(bracket)).rejects.toThrow("isn't supported on Lighter, so nothing was sent");
-      await expect(exchange.placeOrders([plain, bracket])).rejects.toThrow('reduce-only order');
+      await expect(exchange.placeOrder(bracket)).rejects.toThrow(REDUCE_ONLY_LEGS_REFUSAL);
+      await expect(exchange.placeOrders([plain, bracket])).rejects.toThrow(REDUCE_ONLY_LEGS_REFUSAL);
       for (const write of Object.values(writes)) expect(write).not.toHaveBeenCalled();
     }
   });

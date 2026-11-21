@@ -3,6 +3,7 @@ import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import { customAlphabet } from 'nanoid';
+import { mapSeries } from 'p-iteration';
 
 import { BaseExchange } from '../../../exchanges/base';
 import { FrameStore } from '../../../store/frameStore';
@@ -30,6 +31,7 @@ import {
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './krakenspot.api';
 import {
   ENDPOINTS,
@@ -309,7 +311,17 @@ export class KrakenSpotExchange extends BaseExchange {
     return orders;
   };
 
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];

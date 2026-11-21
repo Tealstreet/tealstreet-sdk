@@ -168,11 +168,12 @@ fn full_owner_capacity_refuses_each_at_genuine_admission() {
 
 // AGT-115: legs attach only to a limit/market entry that is not reduce-only, so a stop
 // entry or a reduce-only order carrying them was placed without them. Both now refuse
-// the whole command before any I/O, a plain limit beside them too.
+// the whole command before any I/O, a plain limit beside them too. AGT-120 moved the
+// reduce-only refusal (and its copy) from this adapter into the engine, for every venue.
 #[test]
 fn dropped_attached_legs_refuse_before_any_io() {
     let stop_refusal = safe_cex_engine::model::stop_entry_legs_refusal("Lighter");
-    let reduce_refusal = "Attaching a stop-loss or take-profit to a reduce-only order isn't supported on Lighter, so nothing was sent. Place the stop-loss as its own order.";
+    let reduce_refusal = safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL;
     let mut cases = Vec::new();
     for kind in [
         "stop_market",

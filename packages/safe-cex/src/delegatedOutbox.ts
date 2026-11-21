@@ -11,6 +11,7 @@ import {
   isDelegatedFullWriteAction,
 } from './delegatedActions';
 import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
+import { unsupportedAlgoAmendField } from './delegatedAlgoActions';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -127,10 +128,10 @@ const MAX_AGE_MS = 10_000;
  */
 export const DELEGATED_RECEIPT_MAX_AGE_MS = 20_000;
 /**
- * A box-ACKed intent is admitted and may wait in the venue's write queue; that wait is
- * not the admission budget. The box can still execute it until its receipt (within the
- * receipt bound) + the engine's 120 s command wait + a 20 s venue write: this bound covers
- * that, so no client verdict lands while the box can still act (AGT-125). Pinned by
+ * A box-ACKed intent is admitted and may wait in the venue's write queue; that wait is not
+ * the admission budget. It waits for its outcome this long (the receipt bound + the engine's
+ * 120 s command wait + one 20 s venue write attempt), then is unknown (AGT-125). A write
+ * plan's own span can run longer, so this age never proves the box is done. Pinned by
  * `delegatedOutboxBounds.test.ts` against the Rust sources.
  */
 export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 160_000;
@@ -538,7 +539,7 @@ export class DelegatedOutbox {
       requireDelegatedAction(action, params);
       return this.enqueue(params);
     }
-    if (!isDelegatedAction(action)) throw new Error('Invalid delegated action');
+    if (!isDelegatedAction(action)) throw new Error(unsupportedAlgoAmendField(action) ?? 'Invalid delegated action');
     return this.enqueueIntent({}, clone(action), paramsOrOptions as EnqueueOptions | undefined);
   }
 

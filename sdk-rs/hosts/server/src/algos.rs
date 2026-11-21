@@ -321,11 +321,13 @@ fn notice_text(data: &str) -> std::borrow::Cow<'_, str> {
 /// Bound on settling chaser cancels before the engine is disposed anyway.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
-pub const OPS: [&str; 10] = [
+pub const OPS: [&str; 12] = [
     "chaser:start",
+    "chaser:amend",
     "chaser:terminate",
     "chaser:terminateAll",
     "twap:start",
+    "twap:amend",
     "twap:resume",
     "twap:cleanup",
     "twap:pause",
@@ -1239,6 +1241,10 @@ pub(crate) async fn run_with_identity(
                                 Err(error) => {
                                     if action.is_some() { audit_refusal("draining"); }
                                     port.emit("error", error.to_string());
+                                    // A refused amendment changed nothing; starts keep the existing receipt.
+                                    if matches!(op.as_str(), "chaser:amend" | "twap:amend") && let Some(receipt) = action {
+                                        receipt.finish(Err(crate::user_drain::refusal()));
+                                    }
                                     continue;
                                 }
                             }
@@ -1259,12 +1265,20 @@ pub(crate) async fn run_with_identity(
                         }
                         None => serde_json::json!({"message": "unhandled op"}),
                     };
+                    let amend_refusal = if matches!(op.as_str(), "chaser:amend" | "twap:amend") {
+                        match &dispatched { Some(Err(error)) => Some(error.clone()), _ => None }
+                    } else { None };
                     crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
                     if let Some(Err(error)) = dispatched {
                         port.emit("error", Value::String(error).to_string());
                     }
                     publish();
                     if let Some(receipt) = action {
+                        if let Some(message) = amend_refusal {
+                            // Shared amend validates synchronously before changing future settings.
+                            receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"})));
+                            continue;
+                        }
                         // Dispatch admission is not proof that an asynchronous job or
                         // its venue writes completed. Ordinary algo events reconcile it.
                         receipt.finish(Err(serde_json::json!({"message":"Algo operation dispatched; reconcile its account events","outcome":"unknown"})));

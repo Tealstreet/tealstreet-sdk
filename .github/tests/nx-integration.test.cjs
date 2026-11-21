@@ -303,3 +303,11 @@ test('private command output is withheld while a nonzero child stays a failure',
   assert.match(readFileSync(join(directory, 'nx-test.log'), 'utf8'), /PRIVATE_FIXTURE_OUTPUT/);
   assert.equal(require('node:fs').statSync(join(directory, 'nx-test.log')).mode & 0o777, 0o600);
 });
+
+test('gate scripts run from the workflow merge ref, not the PR head checkout', () => {
+  // A PR branch cut before these scripts existed has no .github/scripts at its head.
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}\n          path: gate\n          sparse-checkout: \.github\/scripts\n          persist-credentials: false/);
+  const invocations = [...workflow.matchAll(/node (\S*)\.github\/scripts\//g)].map((match) => match[1]);
+  assert.ok(invocations.length >= 8, `found ${invocations.length} gate script invocations`);
+  assert.deepEqual([...new Set(invocations)], ['gate/']);
+});

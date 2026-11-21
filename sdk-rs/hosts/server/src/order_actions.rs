@@ -386,11 +386,15 @@ pub(crate) fn decode_request(text: &str) -> Result<Request, serde_json::Error> {
 /// Schema rejection is terminal but never fabricates replay/no-handoff brands.
 /// Only the bound, authenticated pre-dispatch path may emit this outcome.
 pub fn unsupported(out: &Out, name: &str, id: &Value, seq: u64) {
+    unsupported_message(out, name, id, seq, "Unsupported v1 action schema");
+}
+
+pub fn unsupported_message(out: &Out, name: &str, id: &Value, seq: u64, message: &'static str) {
     out.action_outcome(
         name,
         json!({"version":1,"intentId":id,"seq":seq,
         "outcome":"unsupported","result":null,
-        "error":{"message":"Unsupported v1 action schema","outcome":"unsupported"}}),
+        "error":{"message":message,"outcome":"unsupported"}}),
     );
 }
 

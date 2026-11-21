@@ -40,6 +40,7 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
@@ -1069,7 +1070,17 @@ export class OrderlyExchange extends BaseExchange {
     return positionSide;
   };
 
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts.type)) {
       return this.placeAlgoOrder(opts);

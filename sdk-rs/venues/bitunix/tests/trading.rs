@@ -2053,44 +2053,52 @@ fn alloc_ts_rounded_lots_adjacent_underallocation_control() {
 // the whole command before any I/O, a plain limit beside it too.
 #[test]
 fn a_stop_entry_with_attached_legs_is_refused_before_any_io() {
-    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Bitunix");
-    for kind in [
-        "stop_market",
-        "take_profit_market",
-        "conditional",
-        "trailing_stop_market",
-    ] {
-        for legs in [
-            r#","stopLoss":95000"#,
-            r#","takeProfit":70000"#,
-            r#","stopLoss":0,"takeProfit":70000"#,
+    let stop_refusal = safe_cex_engine::model::stop_entry_legs_refusal("Bitunix");
+    // AGT-120: a reduce-only one is refused by the engine first, with its own copy.
+    for reduce in [false, true] {
+        let refusal = if reduce {
+            safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.to_owned()
+        } else {
+            stop_refusal.clone()
+        };
+        for kind in [
+            "stop_market",
+            "take_profit_market",
+            "conditional",
+            "trailing_stop_market",
         ] {
-            let (mut e, _) = startup();
-            let stop: PlaceOrderOpts = serde_json::from_str(&format!(
-                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","price":80000,"triggerPrice":80000,"amount":0.0021,"reduceOnly":true{legs}}}"#
+            for legs in [
+                r#","stopLoss":95000"#,
+                r#","takeProfit":70000"#,
+                r#","stopLoss":0,"takeProfit":70000"#,
+            ] {
+                let (mut e, _) = startup();
+                let stop: PlaceOrderOpts = serde_json::from_str(&format!(
+                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","price":80000,"triggerPrice":80000,"amount":0.0021,"reduceOnly":{reduce}{legs}}}"#
             ))
             .unwrap();
-            e.handle(
-                1.0,
-                Event::Command(Command::PlaceOrders {
-                    command: 1,
-                    orders: vec![order(""), stop],
-                }),
-            );
-            let actions = safe_cex_engine::test_support::prepared_now(&mut e);
-            assert!(
-                !actions.iter().any(|a| matches!(a, Action::Http(_))),
-                "{kind}{legs}"
-            );
-            assert!(
-                actions.iter().any(|a| matches!(
-                    a,
-                    Action::Notice(Notice::CommandFailed { command: 1, error })
-                        if error.legacy_text() == refusal
-                            && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                )),
-                "{kind}{legs}: {actions:?}"
-            );
+                e.handle(
+                    1.0,
+                    Event::Command(Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![order(""), stop],
+                    }),
+                );
+                let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+                assert!(
+                    !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                    "{kind}{legs}"
+                );
+                assert!(
+                    actions.iter().any(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandFailed { command: 1, error })
+                            if error.legacy_text() == refusal
+                                && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                    )),
+                    "{kind}{legs}: {actions:?}"
+                );
+            }
         }
     }
 }

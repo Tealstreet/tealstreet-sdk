@@ -91,6 +91,19 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
 });
 
 describe('DELEGATED versioned actions', () => {
+  it('names unsupported algo amendment fields before durable enqueue or transmission', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection);
+    for (const op of ['chaser:amend', 'twap:amend']) {
+      await expect(
+        Reflect.apply(box.enqueueAction, box, [{ kind: 'algo', op, data: { id: 'job', update: { size: 2 } } }]),
+      ).rejects.toThrow('unsupported amend field');
+    }
+    expect(f.rows.size).toBe(0);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
   it('preserves a typed unsupported v1 outcome across restore without replay or a fabricated notSent proof', async () => {
     const f = setup();
     const box = await DelegatedOutbox.open(f.options);

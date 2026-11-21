@@ -737,12 +737,26 @@ impl PlaceOrderOpts {
     /// stop-loss or take-profit. An adapter that would place it without those legs
     /// refuses it before any write with [`stop_entry_legs_refusal`].
     pub fn stop_entry_with_attached_legs(&self) -> bool {
-        !matches!(self.kind, OrderType::Limit | OrderType::Market)
-            && [self.stop_loss, self.take_profit]
-                .iter()
-                .any(|leg| leg.is_some_and(|price| price != 0.0))
+        !matches!(self.kind, OrderType::Limit | OrderType::Market) && self.has_attached_legs()
+    }
+
+    /// AGT-120: an order that can only reduce the position (`reduceOnly` or `close`)
+    /// carrying a non-zero stop-loss or take-profit. Its legs would outlive the position
+    /// as stray reduce-only triggers, so the engine refuses it before any venue sees it.
+    pub fn reduce_only_with_attached_legs(&self) -> bool {
+        (self.reduce_only == Some(true) || self.close == Some(true)) && self.has_attached_legs()
+    }
+
+    fn has_attached_legs(&self) -> bool {
+        [self.stop_loss, self.take_profit]
+            .iter()
+            .any(|leg| leg.is_some_and(|price| price != 0.0))
     }
 }
+
+/// AGT-120: one copy for every venue. Like [`stop_entry_legs_refusal`] it omits "nothing
+/// was sent": the outcome is `NotSent` and the app's placement toast already says so.
+pub const REDUCE_ONLY_LEGS_REFUSAL: &str = "A stop-loss or take-profit can't be attached to a reduce-only order. Place it as its own order.";
 
 /// One refusal copy for every venue that cannot attach legs to a stop entry (AGT-115).
 /// It omits "nothing was sent": the outcome is `NotSent`, and the app's placement
@@ -841,6 +855,35 @@ mod tests {
             assert!(
                 !order(kind, r#","stopLoss":1,"takeProfit":2"#).stop_entry_with_attached_legs()
             );
+        }
+        for (reduce, legs, expected) in [
+            (r#","reduceOnly":true"#, r#","stopLoss":1"#, true),
+            (r#","close":true"#, r#","takeProfit":2"#, true),
+            (
+                r#","reduceOnly":true"#,
+                r#","stopLoss":0,"takeProfit":2"#,
+                true,
+            ),
+            (r#","reduceOnly":true"#, "", false),
+            (
+                r#","reduceOnly":true"#,
+                r#","stopLoss":0,"takeProfit":null"#,
+                false,
+            ),
+            (
+                r#","reduceOnly":false,"close":false"#,
+                r#","stopLoss":1"#,
+                false,
+            ),
+            ("", r#","stopLoss":1,"takeProfit":2"#, false),
+        ] {
+            for kind in ["limit", "market", "stop_market"] {
+                assert_eq!(
+                    order(kind, &format!("{reduce}{legs}")).reduce_only_with_attached_legs(),
+                    expected,
+                    "{kind}{reduce}{legs}"
+                );
+            }
         }
         assert_eq!(
             stop_entry_legs_refusal("OKX"),
