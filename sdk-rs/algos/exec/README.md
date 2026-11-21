@@ -34,7 +34,9 @@ fragment, including the intentional cross-symbol ID-suffix cancellation rule.
 
 Buy/sell sizes accept USD prefix/suffix or balance/position percentages and
 convert into native contracts. Price, lot rounding, protective stop, reduce-only
-clamp and instrument preflight follow cli-core's order policy. Comma symbols
+clamp and instrument preflight follow cli-core's order policy. `reduce` with an
+attached `stop` is refused before sizing with the engine's
+`REDUCE_ONLY_LEGS_REFUSAL` copy (AGT-135), as the engine would refuse it (AGT-120). Comma symbols
 issue one engine command at a time, preparing each successor from the current
 store; failures stop that symbol fan-out without retry. An explicit semicolon
 chain continues after failures as in TS, except a failed sleep/wait stops its
