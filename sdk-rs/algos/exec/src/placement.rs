@@ -14,6 +14,7 @@ pub(crate) struct Placement {
     reduce: bool,
     post_only: bool,
 }
+pub(crate) const REDUCE_ONLY_STOP_REFUSAL: &str = "A stop-loss or take-profit can't be attached to a reduce-only order. Place the reduce-only order on its own, then add the stop with `stop`. Nothing was sent.";
 pub(crate) fn number(text: &str) -> Option<f64> {
     let mut dots = 0;
     if text.is_empty()
@@ -95,6 +96,11 @@ pub(crate) fn parse(
     let price = operand("at")?;
     let stop = operand("stop")?;
     let best = args.iter().any(|a| a.eq_ignore_ascii_case("best"));
+    let reduce = args.iter().any(|a| a == "reduce");
+    // The engine refuses SL/TP on a reduce-only order (AGT-120); say so before sizing anything.
+    if reduce && stop.is_some() {
+        return Err(REDUCE_ONLY_STOP_REFUSAL.into());
+    }
     if price.is_none() && !best && stop.is_none() {
         for tok in args.iter().skip(size_index + 1) {
             if number(tok).is_some() {
@@ -111,7 +117,7 @@ pub(crate) fn parse(
             price: price.clone(),
             best,
             stop: stop.clone(),
-            reduce: args.iter().any(|a| a == "reduce"),
+            reduce,
             post_only: args.iter().any(|a| a == "po"),
         })
         .collect())

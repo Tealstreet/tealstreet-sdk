@@ -195,6 +195,23 @@ describe('BuyCommand', () => {
       );
     });
 
+    // AGT-135: the engine refuses a reduce-only order carrying SL/TP (AGT-120),
+    // so the grammar refuses the combination before anything is sent.
+    it.each([
+      [['buy', '$100', 'reduce', 'stop', '49000']],
+      [['buy', '$100', 'at', '49500', 'reduce', 'stop', '49000']],
+      [['buy', '$100', 'best', 'stop', '49000', 'reduce']],
+      [['buy', '$100', 'reduce', 'tp', '52000']],
+    ])('refuses a reduce-only order with an attached stop or take-profit: %j', async (args) => {
+      const exchange = createMockExchange();
+      const ctx = createMockContext(args, exchange, 'BTCUSDT');
+      const result = await command.execute(ctx);
+
+      expect(result.success).toBe(false);
+      expect(exchange.placeOrder).not.toHaveBeenCalled();
+      expect(result.error).toContain("can't be attached to a reduce-only order");
+    });
+
     it('places orders for multiple symbols', async () => {
       const exchange = createMockExchange();
       const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$100'], exchange);

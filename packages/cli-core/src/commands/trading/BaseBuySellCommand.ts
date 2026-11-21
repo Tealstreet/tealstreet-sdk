@@ -35,6 +35,13 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     ctx = this.resolveLeadingSymbolSlot(ctx, 1);
     const duplicate = this.refuseDuplicateModifiers(ctx, [['reduce'], ['po'], ['best', 'at'], ['stop'], ['tp']]);
     if (duplicate) return duplicate;
+    // The engine refuses SL/TP on a reduce-only order (AGT-120); refuse here before sizing anything.
+    const modifiers = this.getRawArgs(ctx);
+    if (modifiers.includes('reduce') && (modifiers.includes('stop') || modifiers.includes('tp'))) {
+      return this.error(
+        "A stop-loss or take-profit can't be attached to a reduce-only order. Place the reduce-only order on its own, then add the stop with `stop`. Nothing was sent.",
+      );
+    }
 
     // Fail closed on a typo'd explicit symbol. Without this, an
     // unresolved symbol token is silently dropped and the order routes

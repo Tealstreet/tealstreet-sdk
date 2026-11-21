@@ -70,6 +70,28 @@ fn limit_best_and_attached_stop_round_prices_and_keep_post_only() {
     let (_, p) = run("buy $100 po");
     assert_eq!(p.calls[0].2[0]["timeInForce"], "GoodTillCancel");
 }
+// AGT-135: the engine refuses a reduce-only order carrying SL/TP (AGT-120), so
+// the grammar refuses the combination before anything is dispatched.
+#[test]
+fn reduce_only_with_attached_stop_refuses_before_dispatch() {
+    for command in [
+        "buy $100 reduce stop 49000",
+        "buy $100 at 49500 reduce stop 49000",
+        "sell $100 best stop 51000 reduce",
+        "buy BTC,ETH $100 reduce stop 1%",
+    ] {
+        let (_, p) = run(command);
+        assert!(p.calls.is_empty(), "{command}");
+        assert_eq!(result(&p)["success"], false, "{command}");
+        assert!(
+            result(&p)
+                .to_string()
+                .contains("can't be attached to a reduce-only order"),
+            "{command}: {}",
+            result(&p)
+        );
+    }
+}
 #[test]
 fn typo_bare_size_stray_price_and_missing_market_refuse_before_dispatch() {
     for command in [
