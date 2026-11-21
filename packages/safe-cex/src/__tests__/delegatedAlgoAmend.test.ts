@@ -26,4 +26,13 @@ describe('typed running algo amendments', () => {
       }
     }
   });
+
+  it('refuses chaser values the shared Rust decoder would refuse, before enqueue', () => {
+    for (const update of [{ offset: -1 }, { maxAttempts: -1 }, { limitPrice: 0 }, { maxAttempts: 0xffff_ffff }]) {
+      expect(isDelegatedAction({ kind: 'algo', op: 'chaser:amend', data: { id: 'job', update } })).toBe(false);
+    }
+    for (const update of [{ offset: 0 }, { maxAttempts: 0 }]) {
+      expect(isDelegatedAction({ kind: 'algo', op: 'chaser:amend', data: { id: 'job', update } })).toBe(true);
+    }
+  });
 });
