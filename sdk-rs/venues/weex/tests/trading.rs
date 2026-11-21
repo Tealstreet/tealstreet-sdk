@@ -2508,35 +2508,43 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
 // command before any write; a conditional entry keeps carrying its legs natively.
 #[test]
 fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
-    let refusal = stop_entry_legs_refusal("WEEX");
-    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
-        for (stop_loss, take_profit) in [
-            (Some(58000.0), None),
-            (None, Some(70000.0)),
-            (Some(0.0), Some(70000.0)),
-        ] {
-            let mut e = engine();
-            let mut stop = opts("");
-            stop.kind = kind;
-            stop.side = OrderSide::Sell;
-            stop.price = Some(68000.0);
-            stop.reduce_only = Some(true);
-            stop.stop_loss = stop_loss;
-            stop.take_profit = take_profit;
-            let actions = command(
-                &mut e,
-                Command::PlaceOrders {
-                    command: 1,
-                    orders: vec![opts(""), stop],
-                },
-            );
-            assert!(writes(&actions).is_empty(), "{kind:?}");
-            assert!(e.store().orders().is_empty());
-            assert_eq!(done(&actions).unwrap_err(), refusal);
-            assert_eq!(
-                failure(&actions).outcome,
-                Some(safe_cex_engine::Outcome::NotSent)
-            );
+    let stop_refusal = stop_entry_legs_refusal("WEEX");
+    // AGT-120: a reduce-only one is refused by the engine first, with its own copy.
+    for reduce in [false, true] {
+        let refusal = if reduce {
+            safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.to_owned()
+        } else {
+            stop_refusal.clone()
+        };
+        for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+            for (stop_loss, take_profit) in [
+                (Some(58000.0), None),
+                (None, Some(70000.0)),
+                (Some(0.0), Some(70000.0)),
+            ] {
+                let mut e = engine();
+                let mut stop = opts("");
+                stop.kind = kind;
+                stop.side = OrderSide::Sell;
+                stop.price = Some(68000.0);
+                stop.reduce_only = Some(reduce);
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                let actions = command(
+                    &mut e,
+                    Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![opts(""), stop],
+                    },
+                );
+                assert!(writes(&actions).is_empty(), "{kind:?}");
+                assert!(e.store().orders().is_empty());
+                assert_eq!(done(&actions).unwrap_err(), refusal);
+                assert_eq!(
+                    failure(&actions).outcome,
+                    Some(safe_cex_engine::Outcome::NotSent)
+                );
+            }
         }
     }
     let mut e = engine();

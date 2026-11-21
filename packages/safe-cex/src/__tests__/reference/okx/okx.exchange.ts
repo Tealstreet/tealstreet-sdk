@@ -73,7 +73,13 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
@@ -1589,7 +1595,7 @@ export class OKXExchange extends BaseExchange {
     };
 
     await this.cancelAlgoOrders(orders);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   private updateTriggerAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
@@ -1807,10 +1813,14 @@ export class OKXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     return await this.placeOrders([opts]);
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (opts.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(opts);
     // AGT-115: legs derive only from limit/market entries; an algo entry would drop them.
     if (opts.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('OKX'));

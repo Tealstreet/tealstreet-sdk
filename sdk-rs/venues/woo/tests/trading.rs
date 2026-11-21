@@ -2191,36 +2191,44 @@ fn parent_cancel_unknown_stops_before_replacement() {
 // request, a plain limit beside it too.
 #[test]
 fn a_stop_or_trailing_entry_with_attached_legs_is_refused_before_any_request() {
-    let refusal = stop_entry_legs_refusal("WOO");
-    for (kind, amount) in [
-        (OrderType::StopLoss, 0.01),
-        (OrderType::StopLoss, 0.0),
-        (OrderType::TakeProfit, 0.01),
-        (OrderType::TakeProfit, 0.0),
-        (OrderType::TrailingStopLoss, 0.01),
-    ] {
-        for (stop_loss, take_profit) in [
-            (Some(65000.0), None),
-            (None, Some(50000.0)),
-            (Some(0.0), Some(50000.0)),
+    let stop_refusal = stop_entry_legs_refusal("WOO");
+    // AGT-120: a reduce-only one is refused by the engine first, with its own copy.
+    for reduce in [false, true] {
+        let refusal = if reduce {
+            safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.to_owned()
+        } else {
+            stop_refusal.clone()
+        };
+        for (kind, amount) in [
+            (OrderType::StopLoss, 0.01),
+            (OrderType::StopLoss, 0.0),
+            (OrderType::TakeProfit, 0.01),
+            (OrderType::TakeProfit, 0.0),
+            (OrderType::TrailingStopLoss, 0.01),
         ] {
-            let mut e = engine();
-            e.store_mut().set_positions(vec![position()]);
-            let mut stop = opts();
-            stop.kind = kind;
-            stop.side = OrderSide::Sell;
-            stop.amount = amount;
-            stop.price = Some(58000.0);
-            stop.reduce_only = Some(true);
-            stop.stop_loss = stop_loss;
-            stop.take_profit = take_profit;
-            let a = placed(&mut e, vec![opts(), stop]);
-            assert!(
-                !a.iter().any(|a| matches!(a, Action::Http(_))),
-                "{kind:?} {amount}"
-            );
-            assert_eq!(result(&a).unwrap_err(), refusal, "{kind:?} {amount}");
-            assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+            for (stop_loss, take_profit) in [
+                (Some(65000.0), None),
+                (None, Some(50000.0)),
+                (Some(0.0), Some(50000.0)),
+            ] {
+                let mut e = engine();
+                e.store_mut().set_positions(vec![position()]);
+                let mut stop = opts();
+                stop.kind = kind;
+                stop.side = OrderSide::Sell;
+                stop.amount = amount;
+                stop.price = Some(58000.0);
+                stop.reduce_only = Some(reduce);
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                let a = placed(&mut e, vec![opts(), stop]);
+                assert!(
+                    !a.iter().any(|a| matches!(a, Action::Http(_))),
+                    "{kind:?} {amount}"
+                );
+                assert_eq!(result(&a).unwrap_err(), refusal, "{kind:?} {amount}");
+                assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
+            }
         }
     }
 }

@@ -48,7 +48,13 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './weex.api';
 import {
   ENDPOINTS,
@@ -608,6 +614,8 @@ export class WeexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (weexDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('WEEX'));
     const payload = this.formatOrderPayload(opts);
@@ -654,6 +662,8 @@ export class WeexExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(weexDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('WEEX'));
     const ids: string[] = [];
@@ -765,7 +775,7 @@ export class WeexExchange extends BaseExchange {
     };
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(nextOrder);
+    return await replacing(this, () => this.placeOrder(nextOrder));
   };
 
   cancelOrders = async (orders: Order[]): Promise<void> => {
