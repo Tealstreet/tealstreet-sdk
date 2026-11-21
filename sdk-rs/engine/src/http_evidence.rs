@@ -224,17 +224,14 @@ impl EvidenceBudget {
     /// Append a venue's terminal note within the same text budget.
     #[cfg(feature = "http-plans")]
     pub(super) fn note(&mut self, message: &mut String, note: &str) {
-        // Display only: a note part the presented message already carries would repeat it.
-        let note = note
-            .split("; ")
-            .filter(|part| !part.is_empty() && !message.contains(part))
-            .collect::<Vec<_>>()
-            .join("; ");
         if note.is_empty() {
             return;
         }
-        let note = self.text(&note);
-        *message = format!("{message}; {note}").into_boxed_str().into_string();
+        let note = self.text(note);
+        // Display only: one action, last, and no part the message already carries.
+        *message = crate::error::join_note(message, &note)
+            .into_boxed_str()
+            .into_string();
     }
 
     fn admit_identity(&mut self, id: &str) -> bool {
@@ -343,7 +340,7 @@ mod write_plan_tests {
         assert_eq!(note(&cancel, GUIDANCE), cancel);
         assert_eq!(
             note(&cancel, &format!("lost read; {GUIDANCE}")),
-            format!("{cancel}; lost read")
+            "Cancel not acknowledged. We couldn’t confirm this change; lost read. Check your open orders before trying again."
         );
         assert_eq!(
             note("Refused by the venue", "lost read"),
@@ -351,7 +348,12 @@ mod write_plan_tests {
         );
         assert_eq!(
             note("Refused by the venue", &format!("lost read; {GUIDANCE}")),
-            format!("Refused by the venue; lost read; {GUIDANCE}")
+            "Refused by the venue; lost read; We couldn’t confirm this change. Check your open orders before trying again."
+        );
+        // A whole matching part is dropped; a substring of an unrelated part is not.
+        assert_eq!(
+            note("Refused order 123", "order 12"),
+            "Refused order 123; order 12"
         );
     }
 

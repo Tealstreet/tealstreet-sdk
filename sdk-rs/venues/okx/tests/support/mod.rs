@@ -11,8 +11,9 @@ pub const ENGINE_HTTP_UNKNOWN_TEXT: &str =
 pub const ENGINE_UNKNOWN_AFTER_REFUSAL: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 pub fn assert_unknown_message(error: &safe_cex_engine::VenueError, text: &str) {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    // Composition may put detail between the statement and its single final action (#3726).
     assert!(
-        error.message.contains(text),
+        safe_cex_engine::error::carries_guidance(&error.message, text),
         "expected {text:?}, got {:?}",
         error.message
     );

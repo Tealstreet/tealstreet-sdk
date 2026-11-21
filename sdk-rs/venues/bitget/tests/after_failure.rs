@@ -617,9 +617,10 @@ fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
         "{}",
         error.message
     );
+    // Composition may put detail between the statement and its single final action (#3726).
     assert!(
-        error.message.contains(ENGINE_UNKNOWN_TEXT)
-            || error.message.contains(ENGINE_SEALED_UNKNOWN_TEXT),
+        safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+            || safe_cex_engine::error::carries_guidance(&error.message, ENGINE_SEALED_UNKNOWN_TEXT),
         "{}",
         error.message
     );
@@ -686,7 +687,10 @@ fn classic_batch_row_timeout_emits_unknown_once_without_suffix_writes() {
             1
         );
         unknown_pin(&h, &placed, unknown);
-        assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
+        assert!(safe_cex_engine::error::carries_guidance(
+            &h.failures[0].message,
+            ENGINE_UNKNOWN_TEXT
+        ));
         let event = h
             .events
             .iter()

@@ -388,7 +388,10 @@ fn assert_unknown_halt(h: &mut Harness, expected_writes: &[&str], index: usize, 
             .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
     );
     let guidance = ENGINE_UNKNOWN_TEXT;
-    let message_ok = error.message.contains(guidance)
+    // The composed message keeps one action, last, and no ".;" join (#3726).
+    let message_ok = error.message.contains("couldn’t confirm this change")
+        && error.message.matches("Check your open orders").count() == 1
+        && !error.message.contains(".;")
         && !error.message.to_ascii_lowercase().contains("reject")
         && !error.message.to_ascii_lowercase().contains("refused")
         && unknown.message.contains(guidance);

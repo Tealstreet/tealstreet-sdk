@@ -2968,7 +2968,8 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
         .expect_err("an unconfirmed cancellation stays Unknown");
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains(
+        safe_cex_engine::error::carries_guidance(
+            &error.message,
             "We couldn’t confirm this change. Check your open orders before trying again."
         ),
         "Unknown cancellation must explain reconciliation: {error:?}"
@@ -3071,7 +3072,8 @@ fn cancel_batch_unknown_reporting_distinguishes_satisfied_and_refused_rows() {
         let terminal = terminals(&out, 2);
         let error = terminal[0].as_ref().unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(error.message.contains(
+        assert!(safe_cex_engine::error::carries_guidance(
+            &error.message,
             "We couldn’t confirm this change. Check your open orders before trying again."
         ));
         assert!(
@@ -3163,11 +3165,10 @@ fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
     assert_eq!(error.kind, Some(ErrorKind::RateLimited));
     assert_eq!(error.venue_code.as_deref(), Some(code));
     assert_eq!(error.venue_message.as_deref(), Some("Rate limit"));
-    assert!(
-        error.message.contains(
-            "We couldn’t confirm this change. Check your open orders before trying again."
-        )
-    );
+    assert!(safe_cex_engine::error::carries_guidance(
+        &error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    ));
     let partial = error.partial.as_ref().expect("indexed applied batch");
     assert!(partial.order_ids.is_empty());
     assert_eq!(partial.total, Some(2));

@@ -34,7 +34,10 @@ pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
         && !error.message.contains("Check your open orders")
         && !(error.message.contains("unknown") && error.message.contains("Check Open Orders"))
     {
-        format!("{UNKNOWN_WRITE}: {}", error.message)
+        format!(
+            "We couldn’t confirm this change: {}. Check your open orders before trying again.",
+            error.message.trim_end_matches('.')
+        )
     } else {
         error.message.clone()
     }
@@ -3672,7 +3675,10 @@ fn unknown_guidance(mut error: VenueError) -> VenueError {
         error.message = if error.presents
             || matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout))
         {
-            format!("{UNKNOWN_WRITE}: {}", error.message)
+            format!(
+                "We couldn’t confirm this change: {}. Check your open orders before trying again.",
+                error.message.trim_end_matches('.')
+            )
         } else {
             UNKNOWN_WRITE.into()
         };

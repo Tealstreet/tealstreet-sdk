@@ -1508,9 +1508,12 @@ impl Trading {
                             "unknown":unknown_labels,
                             "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
                         });
-                        error.message = format!(
-                            "{}; placed order IDs: {}; unknown placements: {}",
-                            error.message, journal["placed"], journal["unknown"]
+                        error.message = safe_cex_engine::error::with_detail(
+                            &error.message,
+                            &format!(
+                                "placed order IDs: {}; unknown placements: {}",
+                                journal["placed"], journal["unknown"]
+                            ),
                         );
                         cx.event(
                             Level::Error,

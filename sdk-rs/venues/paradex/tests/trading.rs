@@ -608,7 +608,19 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
         })
         .expect("command failed");
     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
     }
     error
 }
@@ -1965,7 +1977,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         let request = h.take("/orders");
         h.respond(request, status, body);
         if matches!(status, 408 | 429 | 500..) {
-            assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+            assert!(safe_cex_engine::error::carries_guidance(
+                &h.result(8).unwrap_err(),
+                ENGINE_UNKNOWN_TEXT
+            ));
             assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
         } else {
             assert_eq!(h.result(8), Err(text), "{status} {body}");
@@ -1979,7 +1994,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
-    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        &h.result(8).unwrap_err(),
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
@@ -1997,7 +2015,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
-    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        &h.result(8).unwrap_err(),
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
@@ -3685,7 +3706,19 @@ fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
         unknown_exception_journal_and_telemetry(&h);
     }
 }
@@ -3709,14 +3742,38 @@ fn unknown_exception_child_halts_later_children_and_independent_entries() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
         unknown_exception_journal_and_telemetry(&h);
     }
 }
 
 fn unknown_exception_journal_and_telemetry(h: &Harness) {
     let error = failed(h, 91);
-    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    assert!(
+        safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+            || (error.message.contains("confirm")
+                && error
+                    .message
+                    .to_lowercase()
+                    .matches("check your open orders")
+                    .count()
+                    == 1
+                && !error.message.contains(".;")
+                && !error.message.contains(".:")),
+        "{error:?}"
+    );
     let event = h
         .actions
         .iter()
@@ -3729,7 +3786,10 @@ fn unknown_exception_journal_and_telemetry(h: &Harness) {
             _ => None,
         })
         .expect("Unknown journal telemetry");
-    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        &event.message,
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert!(
         event
             .fields

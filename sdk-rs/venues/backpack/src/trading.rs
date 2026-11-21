@@ -1697,7 +1697,12 @@ impl Backpack {
             ),
             (_, false, false) => (gone_text(&symbol, side, kind, true), None),
         };
-        error.message = format!("{message} ({})", error.message);
+        // A guided text keeps its action last; the refusal forms keep their parenthesis.
+        error.message = if message.contains(". Check ") {
+            safe_cex_engine::error::with_detail(&message, &error.message)
+        } else {
+            format!("{message} ({})", error.message)
+        };
         error.protection = protection;
         if data {
             let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);

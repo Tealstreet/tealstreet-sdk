@@ -909,28 +909,147 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
-/// Adds native `detail` after what happened, keeping a trailing action sentence
-/// last: joining after the action would read "…again.: detail".
-pub fn with_detail(text: &str, detail: &str) -> String {
-    let guided = detail.contains("Check your open orders") || detail.contains("Check Open Orders");
-    match text.split_once(". Check ") {
-        // The detail already ends with its own action: one is enough.
-        Some((what, _)) if guided => format!("{what}: {detail}"),
-        Some((what, action)) => format!("{what}: {}. Check {action}", detail.trim_end_matches('.')),
-        None => format!("{text}: {detail}"),
+/// Splits a trailing action sentence ("Check …", either case) off user text.
+pub fn split_action(text: &str) -> (&str, Option<&str>) {
+    let text = text.trim();
+    if text.starts_with("Check ") || text.starts_with("check ") {
+        return ("", Some(text));
+    }
+    let at = [". Check ", ". check "]
+        .iter()
+        .filter_map(|marker| text.rfind(marker))
+        .max();
+    match at {
+        // Only a final, plain sentence is an action: "Check …. More text" and
+        // "Check ….: detail" are not.
+        Some(at)
+            if !text[at + 2..].trim_end_matches('.').contains(". ")
+                && !text[at + 2..].contains([':', ';']) =>
+        {
+            (&text[..at], Some(&text[at + 2..]))
+        }
+        _ => (text, None),
     }
 }
 
+/// One action for a composed text: protection advice wins, then the earliest.
+fn pick_action<'a>(actions: impl IntoIterator<Item = Option<&'a str>>) -> Option<&'a str> {
+    let actions: Vec<&str> = actions.into_iter().flatten().collect();
+    actions
+        .iter()
+        .find(|action| action.contains("protection"))
+        .or(actions.first())
+        .copied()
+}
+
+fn finish(body: &str, action: Option<&str>) -> String {
+    let body = body.trim().trim_end_matches(['.', ';', ':', ' ']);
+    let Some(action) = action else {
+        return body.to_owned();
+    };
+    let mut action = action.trim().trim_end_matches('.').to_owned();
+    if let Some(first) = action.get(..1) {
+        action.replace_range(..1, &first.to_uppercase());
+    }
+    if body.is_empty() {
+        format!("{action}.")
+    } else {
+        format!("{body}. {action}.")
+    }
+}
+
+/// Adds native `detail` after what happened. A composed text keeps one action
+/// sentence, last; joining after an action would read "…again.: detail".
+pub fn with_detail(text: &str, detail: &str) -> String {
+    let (what, text_action) = split_action(text);
+    let (detail, detail_action) = split_action(detail);
+    if text_action.is_none() && detail_action.is_none() {
+        // No action to keep last: the detail stays verbatim.
+        return if detail.trim().is_empty() {
+            text.to_owned()
+        } else {
+            format!("{}: {}", text.trim_end_matches('.'), detail.trim())
+        };
+    }
+    let detail = detail.trim().trim_end_matches('.');
+    let what = what.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        what.to_owned()
+    } else {
+        format!("{what}: {detail}")
+    };
+    finish(&body, pick_action([text_action, detail_action]))
+}
+
 /// A declined replacement whose put-back of the original is unconfirmed: the
-/// decline is fact, only the restore is uncertain, and the action comes last.
+/// decline is fact, only the restore is uncertain, and one action comes last.
 pub fn restore_unconfirmed_text(declined: &str, unknown: &str, detail: &str) -> String {
-    let action = unknown
-        .split_once(". Check ")
-        .map_or(String::new(), |(_, action)| format!(" Check {action}"));
-    format!(
-        "{declined}; restoring the original wasn’t confirmed: {}.{action}",
-        detail.trim_end_matches('.')
+    let (declined, declined_action) = split_action(declined);
+    let (_, unknown_action) = split_action(unknown);
+    let (detail, detail_action) = split_action(detail);
+    let detail = detail.trim().trim_end_matches('.');
+    let declined = declined.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        format!("{declined}; restoring the original wasn’t confirmed")
+    } else {
+        format!("{declined}; restoring the original wasn’t confirmed: {detail}")
+    };
+    finish(
+        &body,
+        pick_action([unknown_action, declined_action, detail_action]),
     )
+}
+
+/// Whether `message` says what `text` says, ends with exactly one action (a
+/// protection action may outrank `text`'s) and has no ".;" or ".:" join.
+pub fn carries_guidance(message: &str, text: &str) -> bool {
+    let (body, action) = split_action(text);
+    let body = body.trim_end_matches('.');
+    let lower = message.to_lowercase();
+    let actions = lower.matches("check your open orders").count()
+        + lower.matches("check open orders").count();
+    message.contains(body)
+        && !message.contains(".;")
+        && !message.contains(".:")
+        && (action.is_none() || (split_action(message).1.is_some() && actions == 1))
+}
+
+/// Appends a venue's terminal note to the presented message. A part the message
+/// already carries is not repeated, and the result keeps one action, last.
+pub fn join_note(message: &str, note: &str) -> String {
+    let (body, message_action) = split_action(message);
+    let body = body.trim_end_matches('.');
+    let present: Vec<&str> = body
+        .split("; ")
+        .map(|part| part.trim_end_matches('.'))
+        .collect();
+    let mut actions = vec![message_action];
+    let mut added: Vec<&str> = Vec::new();
+    for part in note.split("; ") {
+        let (part, action) = split_action(part);
+        actions.push(action);
+        let part = part.trim().trim_end_matches('.');
+        if part.is_empty()
+            || present.contains(&part)
+            || body.ends_with(part)
+            || added.contains(&part)
+        {
+            continue;
+        }
+        added.push(part);
+    }
+    let body = if added.is_empty() {
+        body.to_owned()
+    } else if body.is_empty() {
+        added.join("; ")
+    } else {
+        format!("{body}; {}", added.join("; "))
+    };
+    match pick_action(actions) {
+        Some(action) => finish(&body, Some(action)),
+        None if added.is_empty() => message.to_owned(),
+        None => body,
+    }
 }
 
 /// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
@@ -1265,6 +1384,55 @@ mod venue_message_tests {
 mod gone_detail_tests {
     use super::*;
 
+    fn actions(text: &str) -> usize {
+        let lower = text.to_lowercase();
+        lower.matches("check your open orders").count() + lower.matches("check open orders").count()
+    }
+
+    /// Every composer, over the gone texts all venues share and the engine's own
+    /// guided and unguided messages: no ".;" or ".:", and at most one action.
+    #[test]
+    fn composed_user_text_keeps_one_action_and_clean_joins() {
+        use crate::model::{OrderSide, OrderType};
+        let mut texts = vec![
+            String::new(),
+            "No reply arrived".into(),
+            "lost write response.".into(),
+            "We couldn’t confirm this change. Check your open orders before trying again.".into(),
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.".into(),
+            "Too many new orders. check Open Orders before retrying".into(),
+        ];
+        for unknown in [true, false] {
+            texts.push(order_gone_text("BTCUSDT", unknown));
+            for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+                texts.push(stop_gone_text("BTCUSDT", OrderSide::Sell, kind, unknown));
+            }
+        }
+        for a in &texts {
+            for b in &texts {
+                let composed = [
+                    with_detail(a, b),
+                    join_note(a, b),
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), a, b),
+                ];
+                for text in composed {
+                    assert!(
+                        !text.contains(".;") && !text.contains(".:"),
+                        "{a:?} + {b:?}: {text}"
+                    );
+                    assert!(actions(&text) <= 1, "{a:?} + {b:?}: {text}");
+                    if actions(a) + actions(b) > 0 && !text.contains("restoring") {
+                        assert_eq!(actions(&text), 1, "{a:?} + {b:?}: {text}");
+                    }
+                }
+            }
+        }
+        let stop = stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, true);
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert!(with_detail(&stop, guided).ends_with("before adding protection."));
+        assert!(join_note(guided, &stop).ends_with("before adding protection."));
+    }
+
     #[test]
     fn detail_sits_before_the_action_and_never_after_its_full_stop() {
         let unknown = order_gone_text("BTCUSDT", true);
@@ -1295,5 +1463,8 @@ mod gone_detail_tests {
                 .count(),
             1
         );
+        let restored = restore_unconfirmed_text(&declined, &unknown, guided);
+        assert_eq!(restored.matches("Check your open orders").count(), 1);
+        assert!(restored.ends_with(guided), "{restored}");
     }
 }

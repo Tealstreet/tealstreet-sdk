@@ -194,7 +194,15 @@ fn protective_refusal_puts_back_only_after_a_clean_proof() -> Result {
             }
             let error = failed(&out)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT) || error.message.contains("We couldn’t confirm this change. Check your open orders before trying again."));
+            assert!(
+                safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                    || safe_cex_engine::error::carries_guidance(
+                        &error.message,
+                        "We couldn’t confirm this change. Check your open orders before trying again."
+                    ),
+                "{}",
+                error.message
+            );
             assert_eq!(error.protection, None);
             assert_eq!(
                 out.iter()
