@@ -77,7 +77,12 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  reduceOnlyWithAttachedLegs,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { AsterDEXPrivateWebsocket } from './asterdex.ws-private';
 import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
@@ -809,6 +814,8 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // AGT-115: brackets are built only for limit/market; a stop entry would drop its legs.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
@@ -1039,6 +1046,8 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     const orderIds: string[] = [];

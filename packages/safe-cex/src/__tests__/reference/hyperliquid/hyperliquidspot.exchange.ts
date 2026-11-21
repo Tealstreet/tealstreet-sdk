@@ -47,7 +47,12 @@ import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  reduceOnlyWithAttachedLegs,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './hyperliquid.api';
 import {
   orderRequestToOrderWire,
@@ -746,6 +751,8 @@ export class HyperliquidSpotExchange extends BaseExchange {
 
   // AGT-115: the base batch places one by one, so refuse a stop entry with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
@@ -753,6 +760,8 @@ export class HyperliquidSpotExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     // The caller's ID goes on the main wire verbatim; otherwise we mint one. Each TP/SL leg gets its own.
     const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
     if (opts.type === OrderType.TrailingStopLoss) {

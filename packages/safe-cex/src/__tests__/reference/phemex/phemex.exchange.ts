@@ -60,7 +60,12 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  reduceOnlyWithAttachedLegs,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { BROKER_ID, createAPI } from './phemex.api';
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
@@ -1305,6 +1310,8 @@ export class PhemexExchange extends BaseExchange {
 
   // AGT-115: the base batch places one by one, so refuse a trailing entry with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     if (orders.some(phemexDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Phemex'));
     this.assertCallerClientOrderIds(orders);
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
@@ -1312,6 +1319,8 @@ export class PhemexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (phemexDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Phemex'));
     const payloads = await this.formatCreateOrder(opts);

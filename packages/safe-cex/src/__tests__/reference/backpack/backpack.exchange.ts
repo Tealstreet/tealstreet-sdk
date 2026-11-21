@@ -40,6 +40,7 @@ import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
@@ -910,6 +911,8 @@ export class BackpackExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
@@ -1235,6 +1238,8 @@ export class BackpackExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const orderIds: string[] = [];
 

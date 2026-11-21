@@ -60,6 +60,7 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './bybit.api';
 import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
@@ -830,6 +831,8 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -971,6 +974,8 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       this.getOrderExecutionParams(order);

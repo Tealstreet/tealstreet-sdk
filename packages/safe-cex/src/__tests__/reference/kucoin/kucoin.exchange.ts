@@ -43,6 +43,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, reduceOnlyWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI } from './kucoin.api';
 import {
   ENDPOINTS,
@@ -878,7 +879,17 @@ export class KucoinExchange extends BaseExchange {
     return firstPosition.marginType;
   }
 
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (this.isAlgoOrder(opts)) {
       const payload = this.formatAlgoOrder(opts);

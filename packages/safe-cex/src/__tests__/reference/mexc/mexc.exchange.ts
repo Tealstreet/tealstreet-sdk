@@ -42,7 +42,12 @@ import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  reduceOnlyWithAttachedLegs,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './mexc.api';
 import {
   ENDPOINTS,
@@ -780,6 +785,8 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (reduceOnlyWithAttachedLegs(opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     // AGT-115: stop bodies carry only their own trigger; refuse rather than drop the legs.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
@@ -1281,6 +1288,8 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some(reduceOnlyWithAttachedLegs)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
     if (orders.some((order) => order.type === OrderType.Conditional || order.type === OrderType.TrailingStopLoss)) {
