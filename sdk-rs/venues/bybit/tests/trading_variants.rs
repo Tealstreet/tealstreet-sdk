@@ -8062,62 +8062,52 @@ fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
     assert!(!h.has_request("/v5/order/create"));
 }
 
-// AGT-115, live on Bybit 2026-11-21: a position stop and a trailing stop carrying legs
-// were each placed without them. Both go to trading-stop with only their own price, so
-// a bracketed stop, take-profit or trailing entry refuses the whole batch before any I/O.
+// AGT-115, live on Bybit 2026-11-21: a trailing stop carrying legs went to trading-stop
+// with only its distance. Planning now refuses the whole batch before any write, on every
+// variant; account.rs pins the position-stop case and the create path that keeps legs.
 #[test]
-fn a_stop_or_trailing_entry_with_attached_legs_is_refused_before_any_io() {
+fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
     for (variant, symbol, venue) in [
         (Variant::Linear, "BTCUSDT", "Bybit"),
         (Variant::Inverse, "BTCUSD", "Bybit"),
         (Variant::Demo, "BTCUSDT", "Bybit"),
         (Variant::Hyrotrader, "BTCUSDT", "HyroTrader"),
     ] {
-        for kind in [
-            OrderType::StopLoss,
-            OrderType::TakeProfit,
-            OrderType::TrailingStopLoss,
+        for (stop_loss, take_profit) in [
+            (Some(90.0), None),
+            (None, Some(110.0)),
+            (Some(0.0), Some(110.0)),
         ] {
-            for (stop_loss, take_profit) in [
-                (Some(90.0), None),
-                (None, Some(110.0)),
-                (Some(0.0), Some(110.0)),
-            ] {
-                let mut h = ready(variant);
-                let mut stop = order(symbol, 1.0);
-                stop.kind = kind;
-                stop.side = OrderSide::Sell;
-                stop.reduce_only = Some(true);
-                stop.stop_loss = stop_loss;
-                stop.take_profit = take_profit;
-                place(&mut h, 1, vec![order(symbol, 1.0), stop]);
-                assert!(
-                    h.requests.is_empty(),
-                    "{variant:?} {kind:?}: {:?}",
-                    h.paths()
+            let mut h = ready(variant);
+            let mut trailing = order(symbol, 1.0);
+            trailing.kind = OrderType::TrailingStopLoss;
+            trailing.side = OrderSide::Sell;
+            trailing.price = Some(5.0);
+            trailing.stop_loss = stop_loss;
+            trailing.take_profit = take_profit;
+            place(&mut h, 1, vec![order(symbol, 1.0), trailing]);
+            // Only the position-mode read may precede planning.
+            if h.has_request("/v5/position/list") {
+                let mode = h.take("/v5/position/list");
+                h.reply(
+                    mode.id,
+                    200,
+                    &format!(r#"{{"retCode":0,"result":{{"list":[{{"symbol":"{symbol}","positionIdx":0}}]}}}}"#),
                 );
-                assert_eq!(
-                    h.result(1),
-                    Some(&Err(safe_cex_engine::model::stop_entry_legs_refusal(venue))),
-                    "{variant:?} {kind:?}"
-                );
-                assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::NotSent));
             }
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|r| r.method == safe_cex_engine::Method::Get),
+                "{variant:?}: {:?}",
+                h.paths()
+            );
+            assert_eq!(
+                h.result(1),
+                Some(&Err(safe_cex_engine::model::stop_entry_legs_refusal(venue))),
+                "{variant:?}"
+            );
+            assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::NotSent));
         }
-    }
-    // A conditional entry carries its legs natively, and a zero leg means none.
-    for (kind, stop_loss) in [
-        (OrderType::Conditional, Some(90.0)),
-        (OrderType::StopLoss, Some(0.0)),
-    ] {
-        let mut h = ready(Variant::Linear);
-        let mut entry = order("BTCUSDT", 1.0);
-        entry.kind = kind;
-        entry.trigger_price = Some(105.0);
-        entry.price = Some(105.0);
-        entry.stop_loss = stop_loss;
-        place(&mut h, 2, vec![entry]);
-        assert!(h.result(2).is_none(), "{kind:?}: {:?}", h.result(2));
-        assert!(!h.requests.is_empty(), "{kind:?}");
     }
 }

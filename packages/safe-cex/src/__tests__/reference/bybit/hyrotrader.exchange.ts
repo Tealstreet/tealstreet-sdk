@@ -14,7 +14,7 @@ import {
 import { PositionMode } from '../../../types';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { stopEntryLegsRefusal } from '../stopEntryLegs';
-import { bybitDropsStopEntryLegs, BybitExchange } from './bybit.exchange';
+import { BybitExchange } from './bybit.exchange';
 import { getBybitResponseMeta } from './bybit.response';
 import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recovery';
 import { HyroPrivateWebsocket } from './hyrotrader.ws-private';
@@ -353,7 +353,7 @@ export class HyrotraderExchange extends BybitExchange {
       this.fail('HyroTrader does not support Bybit BBO or TickSize slippage controls');
     }
     // AGT-115: runs for single and batch placement before any write.
-    if (bybitDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('HyroTrader'));
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('HyroTrader'));
   }
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {

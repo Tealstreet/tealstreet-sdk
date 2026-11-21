@@ -1566,6 +1566,9 @@ export class BybitInverseExchange extends BaseExchange {
     return this.publicInverseWebsocket.listenOrderBook(symbol, callback);
   };
 
+  private dropsStopEntryLegs = (order: PlaceOrderOpts) =>
+    bybitDropsStopEntryLegs(order, this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount));
+
   _hasFullSizedPositionOppositeSide = (symbol: string, side: OrderSide, amount: number) => {
     return side === OrderSide.Buy
       ? this.store.positions.some(
@@ -1589,7 +1592,7 @@ export class BybitInverseExchange extends BaseExchange {
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     // AGT-115: as linear, trailing and position stops would drop attached legs.
-    if (bybitDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -1867,7 +1870,7 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     this.assertCallerClientOrderIds(orders);
-    if (orders.some(bybitDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
+    if (orders.some(this.dropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }

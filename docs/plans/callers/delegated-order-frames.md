@@ -207,7 +207,7 @@ entry without its legs). Kraken, Binance Spot and COIN-M also refuse those brack
 a COIN-M trailing entry, which places its legs uncounted and so stays unknown.
 The same refusal covers every adapter that dropped those legs (AGT-115 follow-up): any
 non-limit/market entry on AsterDEX, Bitget, Bitunix, Hyperliquid, Lighter, MEXC and WOO;
-stop, take-profit and trailing entries on Bybit and HyroTrader; stop and take-profit on WEEX;
+trailing entries, and stops closing a covering position, on Bybit and HyroTrader; stop and take-profit on WEEX;
 trailing on Phemex. Lighter also refuses legs on a reduce-only limit/market entry.
 
 The box checks the key's own timestamp against its current time: future

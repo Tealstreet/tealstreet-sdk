@@ -3,7 +3,7 @@ import type { PlaceOrderOpts } from '../types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../store/frameStore';
-import { OrderSide, OrderType } from '../types';
+import { OrderSide, OrderType, PositionSide } from '../types';
 import { AsterDEXExchange } from './reference/asterdex/asterdex.exchange';
 import { BinanceExchange } from './reference/binance/binance.exchange';
 import { BinancePMExchange } from './reference/binance/binancepm.exchange';
@@ -192,14 +192,14 @@ describe('more venues refuse an entry whose attached legs they would drop', () =
       make: () => new BybitExchange('bybit', options as any, store()),
       single: ['placeBatchOrders', 'placeStopLossOrTakeProfit', 'placeTrailingStopLoss'],
       batch: ['placeBatchOrders', 'placeOrder'],
-      types: [STOP, TP, TRAIL],
+      types: [TRAIL],
     },
     {
       venue: 'Bybit',
       make: () => new BybitInverseExchange('bybitinverse', options as any, store()),
       single: ['placeBatchOrders', 'placeBatchOrdersForCategory'],
       batch: ['placeBatchOrders', 'placeBatchOrdersForCategory', 'placeOrder'],
-      types: [STOP, TP, TRAIL],
+      types: [TRAIL],
       extra: { symbol: 'BTCUSD' },
     },
     {
@@ -213,7 +213,7 @@ describe('more venues refuse an entry whose attached legs they would drop', () =
       },
       single: ['placeBatchOrders', 'placeStopLossOrTakeProfit', 'placeTrailingStopLoss'],
       batch: ['placeBatchOrders', 'placeOrder'],
-      types: [STOP, TP, TRAIL],
+      types: [TRAIL],
     },
     {
       venue: 'Hyperliquid',
@@ -289,6 +289,44 @@ describe('more venues refuse an entry whose attached legs they would drop', () =
       });
     }
   }
+
+  // Bybit's stop and take-profit go to trading-stop, dropping legs, only when they close a
+  // covering position; otherwise order create carries the legs (live, 2026-11-21).
+  it('Bybit refuses a stop with legs only when it closes a covering position', async () => {
+    const long = [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 }];
+    for (const subject of subjects.filter((s) => s.venue === 'Bybit' && !s.extra)) {
+      for (const type of [STOP, TP]) {
+        for (const leg of legs) {
+          const bracket = order(type, leg);
+          const covered = stubbed(subject, subject.batch);
+          Object.defineProperty(covered.exchange.store, 'positions', { value: long });
+          await expect(covered.exchange.placeOrders([plain, bracket])).rejects.toThrow(stopEntryLegsRefusal('Bybit'));
+          for (const write of Object.values(covered.writes)) expect(write).not.toHaveBeenCalled();
+          const open = stubbed(subject, subject.batch);
+          await open.exchange.placeOrders([bracket]);
+          expect(Object.values(open.writes).some((write) => write.mock.calls.length > 0)).toBe(true);
+        }
+      }
+    }
+  });
+
+  // Past the check, the first write-shaping call throws a marker: reaching it proves the
+  // shape was not refused, without any network.
+  it('still sends the shapes whose legs the venue carries', async () => {
+    const carried: [string, OrderType, string][] = [
+      ['Phemex', STOP, 'formatCreateOrder'],
+      ['WEEX', COND, 'formatOrderPayload'],
+    ];
+    for (const [venue, type, shaping] of carried) {
+      const exchange = subjects.find((s) => s.venue === venue)!.make() as any;
+      exchange[shaping] = vi.fn(() => {
+        throw new Error('reached the write path');
+      });
+      await expect(exchange.placeOrder(order(type, { stopLoss: 120, takeProfit: 60 }))).rejects.toThrow(
+        'reached the write path',
+      );
+    }
+  });
 
   it('Lighter refuses legs on a reduce-only limit or market entry', async () => {
     const lighter = subjects.find((s) => s.venue === 'Lighter')!;

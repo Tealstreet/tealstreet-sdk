@@ -198,6 +198,8 @@ reported zero remains zero. Timestamps, pagination and order identity are unchan
 
 A trailing stop, and a stop/take-profit that closes a covering position, go to
 `/v5/position/trading-stop` with only their own price, so attached legs were dropped (both
-live, 2026-11-21). `ordinary_gate` now refuses any stop, take-profit or trailing entry with a
-non-zero leg before any I/O, on every variant, with the engine's shared `stop_entry_legs_refusal` copy (`HyroTrader` names Hyro). A
-`conditional` entry still carries its legs natively in the create body.
+live, 2026-11-21). `plan_place` (and `hyro_stop`) now refuse those routes when the order
+carries a non-zero leg, failing the whole command before any write with the engine's shared
+`stop_entry_legs_refusal` copy (`HyroTrader` names Hyro). The check sits at the routing point,
+so it sees the same position the route does. A stop with no covering position goes through
+order create and keeps its legs (live: a `__stop_loss` row came back), as does `conditional`.

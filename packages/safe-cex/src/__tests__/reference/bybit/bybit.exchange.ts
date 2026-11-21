@@ -118,13 +118,6 @@ const MAX_CLOSED_PNL_PAGES = 20;
 
 const INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY = 1_000;
 const PRIVATE_SNAPSHOT_REFRESH_DEBOUNCE_MS = 250;
-
-/** AGT-115: trailing and position stops drop attached legs; conditional entries carry them. */
-export const bybitDropsStopEntryLegs = (order: PlaceOrderOpts) =>
-  (order.type === OrderType.StopLoss ||
-    order.type === OrderType.TakeProfit ||
-    order.type === OrderType.TrailingStopLoss) &&
-  stopEntryWithAttachedLegs(order);
 const PRIVATE_SNAPSHOT_REFRESH_MAX_WAIT_MS = 1_200;
 const BYBIT_POSITION_TPSL_MODES = new Set(['Full', 'Partial']);
 const BYBIT_LEVERAGE_NOT_MODIFIED_CODE = 110043;
@@ -406,6 +399,15 @@ const getBybitTriggerDirectionPrice = (opts: PlaceOrderOpts, ticker: Ticker) => 
   }
   return ticker.last;
 };
+
+/**
+ * AGT-115: trading-stop carries only the order's own price, so a trailing stop or a stop
+ * closing a covering position drops attached legs; a stop sent through order create keeps them.
+ */
+export const bybitDropsStopEntryLegs = (order: PlaceOrderOpts, closesPosition: boolean) =>
+  stopEntryWithAttachedLegs(order) &&
+  (order.type === OrderType.TrailingStopLoss ||
+    ((order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) && closesPosition));
 
 export class BybitExchange extends BaseExchange {
   protected readonly clientOrderIdRule: ClientOrderIdRule | undefined = patternClientOrderIdRule(
@@ -2732,6 +2734,9 @@ export class BybitExchange extends BaseExchange {
         );
   };
 
+  protected dropsStopEntryLegs = (order: PlaceOrderOpts) =>
+    bybitDropsStopEntryLegs(order, this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount));
+
   private getOrderExecutionParams = (opts: PlaceOrderOpts) => {
     try {
       return getBybitOrderExecutionParams(opts, this.getCategoryForSymbol(opts.symbol));
@@ -2745,7 +2750,7 @@ export class BybitExchange extends BaseExchange {
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.validateOrderCapabilities(opts);
-    if (bybitDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     const category = this.getCategoryForSymbol(opts.symbol);
     if (category === 'option') return this.placeOptionOrder(opts, clientOrderId);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
@@ -3063,7 +3068,7 @@ export class BybitExchange extends BaseExchange {
     // Explicit execution controls and caller client IDs must reject atomically
     // before any request; the special-order loop continues after transport errors.
     this.assertCallerClientOrderIds(orders);
-    if (orders.some(bybitDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
+    if (orders.some(this.dropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     for (const order of orders) {
       if (isBybitOptionSymbol(order.symbol)) this.assertOptionOrderPlaceable(order);
       else this.getOrderExecutionParams(order);

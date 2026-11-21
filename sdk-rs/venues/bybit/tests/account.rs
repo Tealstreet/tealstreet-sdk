@@ -4744,3 +4744,51 @@ fn owned_history_later_failure_identifies_each_native_read_operation() {
         assert!(!h.has_request(path));
     }
 }
+
+// AGT-115, live on Bybit 2026-11-21: a stop closing the held long went to trading-stop
+// with only its own price and dropped its legs; with no covering position the same stop
+// went through order create and kept them (a `__stop_loss` row came back). Only the
+// trading-stop route refuses, before any write.
+#[test]
+fn a_stop_closing_the_position_with_attached_legs_is_refused_before_any_write() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Bybit");
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for amount in [0.0, 0.01] {
+            for (stop_loss, take_profit) in [
+                (Some(99000.0), None),
+                (None, Some(80000.0)),
+                (Some(0.0), Some(80000.0)),
+            ] {
+                let mut h = ready();
+                let mut stop = limit("BTCUSDT", OrderSide::Sell, amount, 86000.0);
+                stop.kind = kind;
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                let plain = limit("BTCUSDT", OrderSide::Buy, 0.01, 85000.0);
+                place(&mut h, 11, vec![plain, stop]);
+                assert!(
+                    h.requests.iter().all(|r| r.method == Method::Get),
+                    "{kind:?} {amount}: {:?}",
+                    h.paths()
+                );
+                assert!(
+                    matches!(h.result(11), Some(Err(message)) if *message == refusal),
+                    "{kind:?} {amount}: {:?}",
+                    h.result(11)
+                );
+            }
+        }
+    }
+    // A buy stop has no covering position, so it goes through order create with its leg.
+    let mut h = ready();
+    let mut stop = limit("BTCUSDT", OrderSide::Buy, 0.01, 99000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.stop_loss = Some(90000.0);
+    place(&mut h, 12, vec![stop]);
+    let create = h.take("/v5/order/create");
+    assert!(
+        body(&create).contains(r#""stopLoss":"90000""#),
+        "{}",
+        body(&create)
+    );
+}
