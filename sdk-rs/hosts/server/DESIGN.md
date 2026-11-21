@@ -1083,7 +1083,7 @@ on this box; a stage that was never observed is omitted, never estimated.
 | `queued` | it is handed to the account engine's command queue, after any load wait |
 | `sent` | its native write identity arrives (`commandProgress`); the engine releases it immediately before that write's I/O, so only placements carry it |
 | `responded` | the native `done` completion arrives |
-| `replied` | the outcome frame is handed to the socket writer |
+| `replied` | the outcome frame is accepted by the socket's output queue |
 
 The origin is `received`, or `admitted` when no frame preceded the command.
 Non-final cancel-all legs have no `replied`: the group answers once. Algo
@@ -1094,7 +1094,8 @@ add only numbers to the existing allowlisted line; no new identifier is logged.
 p50/p95/p99 in milliseconds for `admit` (received to admitted), `queue`
 (admitted to queued), `release` (queued to sent), `venue` (sent to responded),
 `dispatch` (queued to responded, for every write), `reply` and `total`, plus
-each venue's count of lines whose result outcome is `unknown`:
+each venue's count of all audit lines, stamped or not, and of those whose
+result outcome is `unknown`:
 
 ```bash
 journalctl CONTAINER_NAME=exchange-server -o cat --since '1 hour ago' \
@@ -1103,9 +1104,9 @@ journalctl CONTAINER_NAME=exchange-server -o cat --since '1 hour ago' \
 
 Router time is not on this line: the box sees a frame only once the router has
 forwarded it. `/health` `typedOutcomes` counts every typed `order.outcome` and
-`order.actionOutcome` this process sent (`settled`) and those that were
-`unknown`; the box-wide unknown rate is their ratio since `bootId` changed.
-Box Slack alerting stays deferred, so nothing alerts on it yet.
+`order.actionOutcome` this process handed to a live output (`settled`) and
+those that were `unknown`; the box-wide unknown rate is their ratio since
+`bootId` changed. Box Slack alerting stays deferred, so nothing alerts on it yet.
 
 ## Accounts and runtime (fe7lgm)
 

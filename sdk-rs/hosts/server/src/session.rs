@@ -3354,7 +3354,8 @@ fn settle(out: &Out, name: &str, mut pending: Pending, outcome: Result<Value, Va
     }
 }
 
-/// Sends the command's reply; `false` when a grouped leg leaves it to a later leg.
+/// Sends the command's reply; `false` when a grouped leg leaves it to a later
+/// leg or the output did not take the frame.
 fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) -> bool {
     let outcome = match &pending.group {
         None => outcome,
@@ -3407,8 +3408,7 @@ fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>)
                 value
             }
         });
-        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
-        return true;
+        return crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
     }
     if let methods::Reply::Intent {
         client_order_id,
@@ -3416,7 +3416,7 @@ fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>)
         protective_legs,
     } = &pending.reply
     {
-        order_frames::settle_intent(
+        return order_frames::settle_intent(
             out,
             name,
             &pending.request_id,
@@ -3425,7 +3425,6 @@ fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>)
             *protective_legs,
             outcome,
         );
-        return true;
     }
     let data = match outcome {
         Ok(result) => {
@@ -3448,8 +3447,7 @@ fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>)
         }
         Err(detail) => json!({"requestId": pending.request_id, "success": false, "result": detail}),
     };
-    let _ = out.send(envelope::msg(name, "callMethod:done", data));
-    true
+    out.send(envelope::msg(name, "callMethod:done", data))
 }
 
 /// Last-message times alone change on every frame; they go out at most this often.

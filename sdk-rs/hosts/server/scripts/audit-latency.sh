@@ -30,13 +30,13 @@ jq -Rrn '
     ["reply", "responded", "replied"],
     ["total", "received", "replied"]
   ] as $spans
-  | [inputs | fromjson? | select(type == "object" and .msg == "order audit"
-      and (.stages_us | type) == "object")]
+  | [inputs | fromjson? | select(type == "object" and .msg == "order audit")]
   | group_by(.venue) as $venues
   | (["venue", "stage", "n", "p50_ms", "p95_ms", "p99_ms"] | @tsv),
     ($venues[] as $lines
       | $spans[] as [$name, $from, $to]
-      | [$lines[] | .stages_us | span($from; $to)] | sort
+      | [$lines[] | select((.stages_us | type) == "object") | .stages_us | span($from; $to)]
+      | sort
       | select(length > 0)
       | [$lines[0].venue, $name, length, (pct(0.50) | ms), (pct(0.95) | ms), (pct(0.99) | ms)]
       | @tsv),
