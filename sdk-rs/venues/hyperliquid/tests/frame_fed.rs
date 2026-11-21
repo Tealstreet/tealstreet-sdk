@@ -3,7 +3,7 @@
 //! source's frames, and sends each write as exactly one venue request.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use serde_json::Value;
 use support::*;
@@ -150,6 +150,120 @@ fn an_unknown_placement_outcome_is_never_re_sent_or_read_back() {
     reply(&mut e, &sent[0], 502, "bad gateway");
     let later = requests(&mut e);
     assert!(later.is_empty(), "{later:?}");
+}
+
+#[test]
+fn confirmed_fills_leave_frame_fed_positions_and_refresh_timers_to_the_provider() {
+    let (mut source, socket) = ready("disabled");
+    let snapshot = source.snapshot_frame(1500.).to_vec();
+    let (mut page, _) = page_engine();
+    page.apply_frame(1500., &snapshot, true).unwrap();
+    let before = page.store().positions().to_vec();
+    let mut local_refreshes = 0;
+    let mut recurring_refreshes = 0;
+
+    for (command, now) in [(93, 2000.), (94, 4000.)] {
+        let order: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTC-PERP","type":"market","side":"buy","amount":1}"#,
+        )
+        .unwrap();
+        page.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order],
+            }),
+        );
+        let sent = prepared_now(&mut page);
+        let writes: Vec<_> = sent
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            writes.len(),
+            1,
+            "a provider-fed write must actually dispatch"
+        );
+        assert!(writes[0].url.ends_with("/exchange"));
+        reply(
+            &mut page,
+            writes[0],
+            200,
+            &format!(
+                r#"{{"status":"ok","response":{{"type":"order","data":{{"statuses":[{{"filled":{{"oid":{command},"totalSz":"1","avgPx":"100"}}}}]}}}}}}"#
+            ),
+        );
+        let acknowledged = prepared_now(&mut page);
+        assert!(acknowledged.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command: completed, .. }) if *completed == command
+        )), "the fixture must confirm both fills: {acknowledged:?}");
+        assert!(
+            !acknowledged
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+
+        for action in acknowledged {
+            if let Action::SetTimer { timer, at_ms } = action
+                && at_ms == now + 350.
+            {
+                local_refreshes += 1;
+                page.handle(at_ms, Event::TimerFired { timer });
+                let after_tick = prepared_now(&mut page);
+                assert!(
+                    !after_tick
+                        .iter()
+                        .any(|action| matches!(action, Action::Http(_))),
+                    "a frame-fed engine must neither read account state nor resend"
+                );
+                recurring_refreshes += after_tick
+                    .iter()
+                    .filter(|action| {
+                        matches!(action,
+                            Action::SetTimer { at_ms: next, .. } if *next == at_ms + 350.
+                        )
+                    })
+                    .count();
+            }
+        }
+        assert_eq!(
+            page.store().positions(),
+            before,
+            "ACKs are not provider snapshots"
+        );
+    }
+
+    assert_eq!(
+        recurring_refreshes, 0,
+        "a discarded frame-fed account read must not create a recurring 350-ms loop after the next fill"
+    );
+    assert_eq!(
+        local_refreshes, 0,
+        "frame-fed fills must not arm local account refreshes"
+    );
+
+    let mut updated: Value = serde_json::from_str(STATE).unwrap();
+    updated["assetPositions"][0]["position"]["szi"] = "4".into();
+    updated["time"] = 5000.into();
+    message(
+        &mut source,
+        socket,
+        5000.,
+        &serde_json::json!({
+            "channel":"clearinghouseState", "data":{"dex":"", "clearinghouseState":updated}
+        })
+        .to_string(),
+    );
+    page.apply_frame(5001., source.snapshot_frame(5001.), true)
+        .unwrap();
+    assert_eq!(page.store().positions()[0].contracts, 4.);
+    assert!(
+        requests(&mut page).is_empty(),
+        "the provider remains the account authority"
+    );
 }
 
 #[test]

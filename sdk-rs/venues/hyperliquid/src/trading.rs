@@ -1363,7 +1363,18 @@ impl Hyperliquid {
                     let (id, resting) = match status {
                         Status::Error { .. } => continue,
                         Status::Resting { resting } => (Some(resting.oid.to_string()), true),
-                        Status::Filled { filled } => (Some(filled.oid.to_string()), false),
+                        Status::Filled { filled } => {
+                            if !self.spot
+                                && let Some(record) = records.get(index)
+                                && cx
+                                    .store
+                                    .market(&record.order.symbol)
+                                    .is_some_and(|market| market.is_spot != Some(true))
+                            {
+                                self.schedule_position_refresh(cx, &record.order.symbol);
+                            }
+                            (Some(filled.oid.to_string()), false)
+                        }
                         // Ruled: a rested full-position trigger has no oid, and [] reads as nothing
                         // placed; its cloid is the pending id, and the order read names it.
                         Status::Text(s) if s == "waitingForTrigger" && full_position => {
