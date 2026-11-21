@@ -119,10 +119,16 @@ export interface OutboxConnection extends OutboxScope {
   send(frame: string): boolean;
 }
 
+/** Admission budget: an intent not handed off by now was never sent. */
 const MAX_AGE_MS = 10_000;
 /**
- * A box-ACKed intent is admitted and waits in the venue's pacing queue; that wait is
- * not the admission budget above. It still settles unknown at this bound (AGT-125).
+ * A handed-off intent awaits its router/box receipt. Both admit a key until it is 10 s
+ * old by their own clocks (5 s future tolerance), so a receipt can land after the budget.
+ */
+export const DELEGATED_RECEIPT_MAX_AGE_MS = 20_000;
+/**
+ * A box-ACKed intent is admitted and waits in the venue's write queue; that wait is not
+ * the admission budget. It still settles unknown at this bound (AGT-125).
  */
 export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 60_000;
 const MAX_PENDING = 1024;
@@ -898,7 +904,8 @@ export class DelegatedOutbox {
   }
 
   private maxAge(row: DelegatedIntent): number {
-    return row.state === 'acknowledged' ? DELEGATED_ACKNOWLEDGED_MAX_AGE_MS : MAX_AGE_MS;
+    if (row.state === 'acknowledged') return DELEGATED_ACKNOWLEDGED_MAX_AGE_MS;
+    return row.state === 'sending' ? DELEGATED_RECEIPT_MAX_AGE_MS : MAX_AGE_MS;
   }
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {

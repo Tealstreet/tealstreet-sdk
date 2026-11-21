@@ -220,13 +220,15 @@ encoding compares the exact original intent bits; foreign/numeric IDs and idless
 `placed` remain rejected. Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
-and admission waits), a never-forwarded queued intent becomes `notSent` and an
-in-flight (`sending`) intent becomes `unknown`. An `acknowledged` intent was
-admitted by the box and may still be waiting in the venue's pacing queue, so it
-waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (60 s) from
-creation, then becomes `unknown` (AGT-125: a burst queued behind Hyperliquid's
-per-order drain reported unknown at 10 s and was then placed). The ten seconds
-is admission's budget; the ACK window never resends or extends admission. Direct close also changes
+and admission waits), a never-forwarded queued intent becomes `notSent`. Handed-off
+intents wait longer, because ten seconds is admission's budget, not a delivery
+bound (AGT-125: bursts reported unknown at 10 s and were then placed). An in-flight
+(`sending`) intent waits for its router/box receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s): both admit a key until it is 10 s old by
+their own clocks, with 5 s future tolerance, so an ACK can land after 10 s. An
+`acknowledged` intent is admitted and may be waiting in the venue's write queue,
+so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (60 s).
+Each then becomes `unknown`. These windows never resend or extend admission. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send

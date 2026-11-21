@@ -4,7 +4,12 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 import { describe, expect, it } from 'vitest';
 
 import { delegatedActionFingerprint } from '../delegatedActions';
-import { createDelegatedIntentId, DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, DelegatedOutbox } from '../delegatedOutbox';
+import {
+  createDelegatedIntentId,
+  DELEGATED_ACKNOWLEDGED_MAX_AGE_MS,
+  DELEGATED_RECEIPT_MAX_AGE_MS,
+  DelegatedOutbox,
+} from '../delegatedOutbox';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
@@ -316,7 +321,8 @@ describe('action writes share the handoff evidence model', () => {
       const box = await DelegatedOutbox.open(f.options);
       const c = box.connect(f.connection());
       const id = await box.enqueueAction(cancel);
-      if (event === 'deadline') f.advance(10_000);
+      // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+      if (event === 'deadline') f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
       if (event === 'disconnect') box.disconnect(c);
       if (event === 'replace') box.connect(f.connection('replacement'));
       if (event === 'cancel') await box.cancel(id);

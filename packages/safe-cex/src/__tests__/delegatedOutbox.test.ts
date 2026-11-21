@@ -9,6 +9,7 @@ import { delegatedIntentFingerprint } from '../delegatedOrderFrames';
 import {
   createDelegatedIntentId,
   DELEGATED_ACKNOWLEDGED_MAX_AGE_MS,
+  DELEGATED_RECEIPT_MAX_AGE_MS,
   DelegatedOutbox,
   markDelegatedNotSent,
 } from '../delegatedOutbox';
@@ -717,7 +718,8 @@ describe('DELEGATED host-neutral outbox', () => {
     });
     const id = await box.enqueue(params);
     expect(f.writes).toHaveLength(1);
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     await box.flush(c);
     expect(box.entries()[0].state).toBe('unknown');
     box.close();
@@ -826,7 +828,8 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     const id = await box.enqueue(params);
     expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'sending' });
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     expect(box.entries()[0].state).toBe('unknown');
     await box.flush(c);
     expect([...f.rows.values()][0].state).toBe('unknown');
@@ -882,6 +885,39 @@ describe('DELEGATED host-neutral outbox', () => {
       box.close();
     },
   );
+  // AGT-125 (okx-t, 40-order burst): the router admits a key until it is 10 s old by its
+  // own clock and ACKs it after that; four ACKs landed at 10.2-10.7 s and all four placed.
+  it('keeps a handed-off intent waiting for a receipt that lands just after the admission budget', async () => {
+    const f = fixture();
+    const states: string[] = [];
+    f.options.changed = (row) => states.push(row.state);
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(10_400);
+    expect(box.entries()[0].state).toBe('sending');
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'venue-2', clientOrderId: id, error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(states).not.toContain('unknown');
+    box.close();
+  });
+  it('bounds a handed-off intent with no receipt by DELEGATED_RECEIPT_MAX_AGE_MS, then unknown without a replay', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS - 1);
+    expect(box.entries()[0].state).toBe('sending');
+    f.advance(1);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    await box.flush(c);
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
   it('bounds an acknowledged intent by DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, then unknown without a replay', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
@@ -1824,7 +1860,8 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     const replayed = await box.enqueue(params);
     const live = await box.enqueue(params);
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     expect(box.entries().map((row) => row.state)).toEqual(['unknown', 'unknown']);
     await box.receive(
       c,
