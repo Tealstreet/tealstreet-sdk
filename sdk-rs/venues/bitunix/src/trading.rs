@@ -1920,7 +1920,12 @@ impl BitunixFutures {
                 if let Some((slot, context)) = &live.current {
                     let _ = cx.finish_plan_call(plan, slot, context);
                 }
-                let failed = match &live.note {
+                // An Unknown cancel already ends with this guidance; noting it again doubles the action.
+                let failed = match live
+                    .note
+                    .as_deref()
+                    .filter(|note| !error.message.contains(note))
+                {
                     Some(note) => cx.fail_plan_noted(plan, error, note),
                     None => cx.fail_plan(plan, error),
                 };
