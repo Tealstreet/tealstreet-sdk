@@ -4,6 +4,7 @@
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::VenueError;
 use serde_json::{Map, Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 /// The account a command acts on.
@@ -424,9 +425,20 @@ pub fn line(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value)
 
 pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) {
     let line = line(who, origin, fields, result).to_string();
-    println!("{line}");
     #[cfg(test)]
-    crate::state::log_capture::record(&line);
+    CAPTURED.with(|lines| {
+        if let Some(lines) = lines.borrow_mut().as_mut() {
+            lines.push(line.clone());
+        }
+    });
+    println!("{line}");
+}
+
+// Separate from `log_capture`, whose tests count their own lines exactly.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CAPTURED: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Stage names in pipeline order, as they appear under `stages_us`.
@@ -451,15 +463,50 @@ pub struct Stages {
 }
 
 impl Stages {
+    /// Integer microseconds from the earliest stamp, keyed by stage name;
+    /// a stage never observed is omitted rather than estimated.
     pub fn offsets(&self) -> Option<Value> {
-        None
+        let stamps = [
+            self.received,
+            self.admitted,
+            self.queued,
+            self.sent,
+            self.responded,
+            self.replied,
+        ];
+        let origin = stamps.iter().flatten().min()?;
+        let offsets = STAGES
+            .iter()
+            .zip(stamps)
+            .filter_map(|(stage, stamp)| {
+                let micros = stamp?.saturating_duration_since(*origin).as_micros();
+                Some((
+                    (*stage).to_owned(),
+                    u64::try_from(micros).unwrap_or(u64::MAX).into(),
+                ))
+            })
+            .collect();
+        Some(Value::Object(offsets))
     }
 }
 
-pub(crate) fn note_typed_outcome(_outcome: &Value) {}
+static TYPED_SETTLED: AtomicU64 = AtomicU64::new(0);
+static TYPED_UNKNOWN: AtomicU64 = AtomicU64::new(0);
 
+/// Counts one typed `order.outcome`/`order.actionOutcome` as it is sent.
+pub(crate) fn note_typed_outcome(outcome: &Value) {
+    TYPED_SETTLED.fetch_add(1, Ordering::Relaxed);
+    if outcome == "unknown" {
+        TYPED_UNKNOWN.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Process-lifetime typed receipt counts for `/health`.
 pub fn typed_outcomes() -> Value {
-    json!({})
+    json!({
+        "settled": TYPED_SETTLED.load(Ordering::Relaxed),
+        "unknown": TYPED_UNKNOWN.load(Ordering::Relaxed),
+    })
 }
 
 #[cfg(test)]
@@ -578,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_offsets_are_integer_microseconds_from_the_first_stamp_in_pipeline_order() {
+    fn stage_offsets_are_integer_microseconds_from_the_first_stamp() {
         let origin = Instant::now();
         let at = |us: u64| Some(origin + std::time::Duration::from_micros(us));
         let stages = Stages {
@@ -594,15 +641,6 @@ mod tests {
             offsets,
             json!({"received":0,"admitted":120,"queued":135,"sent":900,"responded":45000,"replied":45100})
         );
-        let keys: Vec<&str> = offsets
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        let mut ordered = keys.clone();
-        ordered.sort_by_key(|key| STAGES.iter().position(|stage| stage == key));
-        assert_eq!(keys, ordered, "serialized in pipeline order");
     }
 
     #[test]

@@ -985,12 +985,12 @@ async fn order_frames_audit_line_carries_monotonic_stage_offsets() {
             let tape = Tape::default();
             let account = delegated_account(&registry, "A", "bybit", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-            let capture = crate::state::log_capture::capture();
+            crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
             submit(&mut session, 0, None).await;
             let outcome = order_frame(&mut sent, "order.outcome").await;
             assert_eq!(outcome["d"]["outcome"], "placed");
-            let audits: Vec<Value> = capture
-                .finish()
+            let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
+            let audits: Vec<Value> = lines
                 .iter()
                 .map(|line| serde_json::from_str::<Value>(line).unwrap())
                 .filter(|line| line["msg"] == "order audit")

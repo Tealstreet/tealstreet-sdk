@@ -1327,6 +1327,7 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
                 &json!({"op":"setLeverage","symbol":"BTCUSDT","leverage":2}),
             )
             .unwrap(),
+            stages: crate::audit::Stages::default(),
         }),
     };
     let capture = crate::state::log_capture::capture();

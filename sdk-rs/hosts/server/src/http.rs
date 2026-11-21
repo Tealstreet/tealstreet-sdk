@@ -194,6 +194,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "accountStartPanics": app.registry.threads().panics(),
         "inits": inits,
         "disposes": disposes,
+        "typedOutcomes": crate::audit::typed_outcomes(),
     });
     let status = if draining {
         StatusCode::SERVICE_UNAVAILABLE

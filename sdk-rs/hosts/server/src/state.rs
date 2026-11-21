@@ -77,7 +77,7 @@ pub(crate) mod log_capture {
         Capture(PhantomData)
     }
 
-    pub(crate) fn record(line: &str) {
+    pub(super) fn record(line: &str) {
         LINES.with(|lines| {
             if let Some(lines) = lines.borrow_mut().as_mut() {
                 lines.push(line.to_owned());
