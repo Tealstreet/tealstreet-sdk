@@ -87,6 +87,32 @@ fn typo_bare_size_stray_price_and_missing_market_refuse_before_dispatch() {
         assert_eq!(result(&p)["success"], false, "{command}");
     }
 }
+// AGT-135: the engine refuses a reduce-only order carrying a stop-loss (AGT-120), so exec
+// refuses `reduce` with `stop` up front, with the engine's copy, before sizing or dispatch.
+#[test]
+fn reduce_with_an_attached_stop_is_refused_before_dispatch() {
+    for command in [
+        "buy $100 reduce stop 49000",
+        "sell $100 at 51000 stop 52000 reduce",
+        "sell 50% reduce stop 52000",
+        "buy BTC,ETH $100 stop 49000 reduce",
+    ] {
+        let (_, p) = run(command);
+        assert!(p.calls.is_empty(), "{command}");
+        let r = result(&p);
+        assert_eq!(r["success"], false, "{command}");
+        assert!(
+            r.to_string()
+                .contains(safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL),
+            "{command}: {r}"
+        );
+    }
+    // Each alone is still accepted.
+    for command in ["buy $100 at 50000 stop 49000", "buy $100 reduce"] {
+        let (_, p) = run(command);
+        assert_eq!(p.calls.len(), 1, "{command}");
+    }
+}
 #[test]
 fn balance_percent_and_hedged_reduce_percent_use_correct_units() {
     let mut p = port();

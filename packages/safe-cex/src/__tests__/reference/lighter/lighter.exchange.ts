@@ -87,7 +87,6 @@ import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   REDUCE_ONLY_LEGS_REFUSAL,
-  reduceOnlyWithAttachedLegs,
   refusesReduceOnlyLegs,
   replacing,
   stopEntryLegsRefusal,
