@@ -255,6 +255,8 @@ pub(crate) fn trigger_refuses_caller_id(
 /// and complete with `[entry, ..protective]`, so one unsplit bracket names its entry first:
 /// OKX (AGT-111, as the TS reference), Binance and Kraken (each verified live 2026-11-20
 /// through `order.action`). Each adapter places one leg per non-zero price, never fewer.
+/// Hyperliquid groups legs into the entry's own write and replies with the entry's ID alone,
+/// so it counts none (AGT-117).
 pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
     let entries: &[&str] = match venue {
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => &["limit", "market"],
@@ -599,6 +601,16 @@ mod activation_tests {
         }
         for venue in ["bitget", "bybit", "blofin", "binanceoptions", "krakenspot"] {
             assert_eq!(legs(venue, json!({"stopLoss":0.03})), 0, "{venue}");
+        }
+        // AGT-117: Hyperliquid groups a limit or market entry's legs into its own write, and
+        // the reply names only the entry (each leg answers `waitingForFill`/`waitingForTrigger`
+        // without an ID), so its whole bracket completes with exactly one ID. A refused leg is
+        // partial evidence, which `settle_intent` keeps unknown. Spot refuses a bracket whole.
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            for kind in ["limit", "market"] {
+                let extra = json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05});
+                assert_eq!(legs(venue, extra), 0, "{venue} {kind}");
+            }
         }
     }
 

@@ -706,7 +706,7 @@ Private diagnostics should include outbound user/order subscription frames and i
 | `Market`           | `{ limit: { tif: "Gtc" } }` with 5% slippage price          | `na`                                                      |
 | `TakeProfit`       | `{ trigger: { isMarket: true, tpsl: "tp", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
 | `StopLoss`         | `{ trigger: { isMarket: true, tpsl: "sl", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
-| Limit + TP + SL    | Combined wires                                              | `normalTpsl`                                              |
+| Limit/Market+TP/SL | Combined wires (market entries too since AGT-117)           | `normalTpsl`                                              |
 | `TrailingStopLoss` | **Not supported** (throws before submission)                | -                                                         |
 
 ### Reduce-only sizing
@@ -898,7 +898,13 @@ instead of waiting until REST actually stops returning the order.
 ### Order Grouping
 
 - `na`: Standalone order (limit, market, partial TP/SL with `sz > 0`)
-- `normalTpsl`: Limit order with attached TP and/or SL
+- `normalTpsl`: Limit or market order with attached TP and/or SL. Each leg is a market
+  trigger (reduce-only on perps) at the entry's size and limit price (the slippage-capped price
+  for a market entry; the venue applies its own 10% slippage when the trigger fires). Market
+  entries dropped their legs until AGT-117 (verified live 2026-11-21 on a perp: filled parent,
+  then two `waitingForTrigger` legs that rest as reduce-only triggers). The reply names only the
+  entry. Spot has no trigger orders: the venue refuses a spot bracket as one error row, "Placing
+  trigger orders is not enabled on spot trading yet." (live 2026-11-21).
 - `positionTpsl`: Full position TP/SL (size = 0, closes entire position)
 
 ### Market Order Implementation

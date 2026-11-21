@@ -1,4 +1,5 @@
 import type { Axios } from 'axios';
+import type { OrderWire } from '../../../exchanges/hyperliquid/hyperliquid.types';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
@@ -714,6 +715,35 @@ export class HyperliquidSpotExchange extends BaseExchange {
   //   "vaultAddress": null
   // }
 
+  /**
+   * The SL/TP legs a limit or market entry carries under `normalTpsl`, at the entry's size and
+   * limit price; spot wires are never reduce-only. AGT-117: market entries dropped them.
+   */
+  private bracketLegWires = (opts: PlaceOrderOpts, market: Market, limitPx: number) => {
+    const legs: OrderWire[] = [];
+    for (const [tpsl, triggerPx] of [
+      ['sl', opts.stopLoss],
+      ['tp', opts.takeProfit],
+    ] as const) {
+      if (!triggerPx) continue;
+      legs.push(
+        orderRequestToOrderWire(
+          {
+            coin: market.symbol,
+            is_buy: opts.side !== OrderSide.Buy,
+            sz: opts.amount,
+            limit_px: +this.priceToPrecision(market.symbol, limitPx),
+            order_type: { trigger: { isMarket: true, tpsl, triggerPx } },
+            reduce_only: false,
+            cloid: mintHyperliquidCloid(),
+          },
+          market.info.hyperliquidId,
+        ),
+      );
+    }
+    return legs;
+  };
+
   // AGT-115: the base batch places one by one, so refuse a stop entry with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
@@ -728,7 +758,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
-    // AGT-115: legs are grouped only with a limit entry; a trigger entry would drop them.
+    // AGT-115: legs are grouped only with a limit or market entry; a trigger entry would drop them.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
 
     // Use O(1) hashmap lookup instead of O(n) find
@@ -776,16 +806,14 @@ export class HyperliquidSpotExchange extends BaseExchange {
         return;
       }
 
+      const limitPx = (ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95);
       const orderWire = orderRequestToOrderWire(
         {
           coin: market.symbol,
           is_buy: opts.side === OrderSide.Buy,
           sz: opts.amount,
           //limit_px: adjust((ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95), pPrice),
-          limit_px: +this.priceToPrecision(
-            ticker.symbol,
-            (ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95),
-          ),
+          limit_px: +this.priceToPrecision(ticker.symbol, limitPx),
           order_type: {
             limit: {
               tif: 'Gtc' as any,
@@ -796,7 +824,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
         assetIndex,
       );
-      const action = orderWiresToOrderAction([orderWire]);
+      // AGT-117: the entry is a marketable limit, so its legs group with it as a limit's do.
+      const orderWires = [orderWire, ...this.bracketLegWires(opts, market, limitPx)];
+      const action =
+        orderWires.length > 1 ? orderWiresToNormalTPSLAction(orderWires) : orderWiresToOrderAction(orderWires);
 
       const nonce = +Date.now();
       const signature = await signL1Action(createWalletFromPrivateKey(this.options.secret), action, null, nonce);
@@ -971,53 +1002,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
       //                     }
       //                 }
 
-      if (opts.stopLoss) {
-        orderWires.push(
-          orderRequestToOrderWire(
-            {
-              coin: market.symbol,
-              is_buy: opts.side !== OrderSide.Buy,
-              sz: opts.amount,
-              //limit_px: opts.price || 0,
-              limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-              order_type: {
-                trigger: {
-                  isMarket: true,
-                  tpsl: 'sl',
-                  triggerPx: opts.stopLoss,
-                },
-              },
-              reduce_only: false,
-              cloid: mintHyperliquidCloid(),
-            },
-            assetIndex,
-          ),
-        );
-      }
-
-      if (opts.takeProfit) {
-        orderWires.push(
-          orderRequestToOrderWire(
-            {
-              coin: market.symbol,
-              is_buy: opts.side !== OrderSide.Buy,
-              sz: opts.amount,
-              //limit_px: opts.price || 0,
-              limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-              order_type: {
-                trigger: {
-                  isMarket: true,
-                  tpsl: 'tp',
-                  triggerPx: opts.takeProfit,
-                },
-              },
-              reduce_only: false,
-              cloid: mintHyperliquidCloid(),
-            },
-            assetIndex,
-          ),
-        );
-      }
+      orderWires.push(...this.bracketLegWires(opts, market, opts.price || 0));
 
       const action =
         opts.takeProfit || opts.stopLoss
