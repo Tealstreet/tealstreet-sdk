@@ -104,10 +104,14 @@ derives the same weight from the request body.
 
 ## Stop-entry brackets (AGT-115)
 
-`wires` groups legs (`normalTpsl`) only with a limit entry. A stop or take-profit entry
-with a non-zero attached leg used to be placed without it; `preflight` now refuses the whole
-batch before any write with the engine's shared `stop_entry_legs_refusal` copy.
+`wires` groups legs (`normalTpsl`) only with a limit or market entry. A stop or take-profit
+entry with a non-zero attached leg used to be placed without it; `preflight` now refuses the
+whole batch before any write with the engine's shared `stop_entry_legs_refusal` copy.
 
-KNOWN-ISSUE: a market entry's legs are still dropped, in Rust and the TS reference alike. The
-venue supports TP/SL on a market order, so it is not refused; attaching them under
-`normalTpsl` is the fix and needs a live check first (AGT-115).
+A market entry dropped its legs too until AGT-117. It is a marketable Gtc limit at the
+slippage-capped price, so its legs now group with it exactly as a limit entry's do: reduce-only
+market triggers at the entry's size, each with the entry's `p` (the venue applies its own 10%
+slippage when a trigger fires). Verified live 2026-11-21: a 220 DOGE market buy with SL and TP
+answered `[filled, "waitingForTrigger", "waitingForTrigger"]` and both legs rested as reduce-only
+triggers of 220. The reply names only the entry, so the result is that one ID; the hosted
+receipt counts no separate legs for Hyperliquid, and a refused leg stays partial evidence.

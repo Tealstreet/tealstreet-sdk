@@ -632,7 +632,7 @@ impl Hyperliquid {
             ) {
                 return Err("Hyperliquid order type is not supported".into());
             }
-            // AGT-115: `wires` groups legs only with a limit entry; a trigger entry would
+            // AGT-115: `wires` groups legs only with a limit or market entry; a trigger entry would
             // be placed without them, so the whole batch is refused before any write.
             if o.stop_entry_with_attached_legs() {
                 return Err(safe_cex_engine::model::stop_entry_legs_refusal(

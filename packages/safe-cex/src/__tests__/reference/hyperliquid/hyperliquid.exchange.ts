@@ -3909,7 +3909,7 @@ export class HyperliquidExchange extends BaseExchange {
   // `cloid` is the main wire's client order ID. `updateOrder` calls this directly
   // so it knows which cloid its replacement went out with.
   private placeOrderWithCloid = async (opts: PlaceOrderOpts, cloid: string): Promise<string[]> => {
-    // AGT-115: legs are grouped only with a limit entry; a trigger entry would drop them.
+    // AGT-115: legs are grouped only with a limit or market entry; a trigger entry would drop them.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');

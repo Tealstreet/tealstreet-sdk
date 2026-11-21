@@ -800,7 +800,7 @@ fn deferred_group_without_proven_parent_keeps_unknown_fence() {
     );
 }
 
-// AGT-115: `wires` groups legs only with a limit entry, so a stop or take-profit entry
+// AGT-115: `wires` groups legs only with a limit or market entry, so a stop or take-profit entry
 // was placed without them. It now refuses the whole batch before any write.
 #[test]
 fn a_stop_entry_with_attached_legs_refuses_entire_batch() {

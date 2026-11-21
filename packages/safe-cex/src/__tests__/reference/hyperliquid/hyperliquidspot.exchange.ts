@@ -758,7 +758,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
-    // AGT-115: legs are grouped only with a limit entry; a trigger entry would drop them.
+    // AGT-115: legs are grouped only with a limit or market entry; a trigger entry would drop them.
     if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
 
     // Use O(1) hashmap lookup instead of O(n) find
