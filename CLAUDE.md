@@ -135,6 +135,9 @@ not promote the orders axis grade. The projection and limits are documented in
 It imports the master image caches with a read-only automatic token; it never publishes images or caches.
 The existing master-only workflows remain the sole image publishers and signers.
 
+The wrapper-owned SDK staging signal and narrow automatic supersession exception
+are documented in `docs/plans/callers/beta-wasm-auto-release.md`.
+
 ## User-facing notification wording
 
 Messages shown in the UI use calm, plain language: what happened, then at most
@@ -145,6 +148,3 @@ Venue display decorators preserve retained and current check-open-orders guidanc
 without adding a second action.
 Summary formatting retains diagnostic context and checks each warning separately
 from the terminal error when omitting repeated guidance.
-
-The wrapper-owned SDK staging signal and narrow automatic supersession exception
-are documented in `docs/plans/callers/beta-wasm-auto-release.md`.
