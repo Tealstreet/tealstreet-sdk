@@ -1926,6 +1926,7 @@ impl Registry {
                 "the user is draining",
                 None,
                 DisposalCause::Moving,
+                None,
             );
             return Err("The user is draining; reconnecting".into());
         }
@@ -2559,12 +2560,14 @@ impl Registry {
     }
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
+    /// `server_stopped` marks a stop the box itself made (`AlgoInput::Dispose`).
     fn stop(
         &self,
         account: &Arc<Account>,
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
         cause: DisposalCause,
+        server_stopped: Option<tokio::sync::oneshot::Sender<()>>,
     ) {
         if let Some(resident) = &account.delegated() {
             let mut accounts = self.accounts.lock().unwrap();
@@ -2610,6 +2613,7 @@ impl Registry {
                 .send(crate::algos::AlgoInput::Dispose {
                     reason: reason.to_owned(),
                     stopped,
+                    server_stopped,
                 })
                 .is_ok()
         });
@@ -2788,7 +2792,7 @@ impl Registry {
         } else {
             DisposalCause::Stopped
         };
-        self.stop(account, reason, stopped, cause);
+        self.stop(account, reason, stopped, cause, None);
     }
 
     /// The process is stopping: every account's algos settle and its engine ends,
@@ -2798,15 +2802,24 @@ impl Registry {
         self.stopping.store(true, Ordering::Relaxed);
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
+        let mut queued = Vec::new();
         for account in &accounts {
-            if account.delegated().is_some() {
+            let server_stopped = if account.delegated().is_some() {
                 self.host_notify(account, crate::host_notify::restart_shutdown());
-            }
+                self.host_notify.as_ref().map(|_| {
+                    let (sender, receiver) = tokio::sync::oneshot::channel();
+                    queued.push(receiver);
+                    sender
+                })
+            } else {
+                None
+            };
             self.stop(
                 account,
                 "the server is restarting",
                 None,
                 DisposalCause::Stopped,
+                server_stopped,
             );
         }
         let until = tokio::time::Instant::now() + deadline;
@@ -2820,9 +2833,20 @@ impl Registry {
             true
         };
         // Best-effort and bounded; it runs beside, never after, the engine wait.
+        // Each algo host queues its `algoStopped` notices first; a host that is
+        // gone drops its sender, which ends that wait too.
         let flushed = async {
             if let Some(notifier) = &self.host_notify {
-                notifier.flush(crate::host_notify::RESTART_FLUSH).await;
+                let until = tokio::time::Instant::now() + crate::host_notify::RESTART_FLUSH;
+                let _ = tokio::time::timeout_at(until, async {
+                    for receiver in queued {
+                        let _ = receiver.await;
+                    }
+                })
+                .await;
+                notifier
+                    .flush(until.saturating_duration_since(tokio::time::Instant::now()))
+                    .await;
             }
         };
         tokio::join!(stopped, flushed).0
@@ -2897,9 +2921,11 @@ impl Registry {
         let registry = self.clone();
         let (user, id) = (user.to_owned(), id.to_owned());
         Some(tokio::spawn(async move {
-            for account in accounts {
-                let keep = registry.keep_notice(&account, &id);
-                let weak = Arc::downgrade(&account);
+            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            let mut queued = Vec::new();
+            for account in &accounts {
+                let keep = registry.keep_notice(account, &id);
+                let weak = Arc::downgrade(account);
                 let stopped = Box::new(move |kept: crate::algos::Kept| {
                     if let Some(account) = weak.upgrade() {
                         for frame in kept.frames(&account.name) {
@@ -2908,14 +2934,25 @@ impl Registry {
                     }
                     keep(kept);
                 });
+                let (server_stopped, receiver) = tokio::sync::oneshot::channel();
+                queued.push(receiver);
                 registry.stop(
-                    &account,
+                    account,
                     "the operator forced a user drain",
                     Some(stopped),
                     DisposalCause::Stopped,
+                    Some(server_stopped),
                 );
             }
-            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            // The host's DELEGATED check reads the signer weakly, and an absent user's
+            // account may have no other owner: hold it until its stops are queued.
+            let _ = tokio::time::timeout(crate::host_notify::RESTART_FLUSH, async {
+                for receiver in queued {
+                    let _ = receiver.await;
+                }
+            })
+            .await;
+            drop(accounts);
             let settled = loop {
                 if registry.user_drains.status(&user)["algosDone"] == true {
                     break true;
@@ -3838,6 +3875,16 @@ pub mod testing {
         link: Arc<SignerLink>,
         inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) -> Arc<Account> {
+        run_algos_notifying(account, link, inbox, None)
+    }
+
+    /// `run_algos` with the host notification tap `build` adds when the lane is on.
+    pub(crate) fn run_algos_notifying(
+        account: Arc<Account>,
+        link: Arc<SignerLink>,
+        inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+        notify: Option<crate::algo_notify::AlgoNotify>,
+    ) -> Arc<Account> {
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         let owner = account.algo_owner.clone();
         let (emit, broadcast) = algo_reach(owner);
@@ -3857,7 +3904,7 @@ pub mod testing {
             account.running.clone(),
             account.twap_owner.clone(),
             account.identity.clone(),
-            None,
+            notify,
             inbox,
         ));
         account
@@ -4716,6 +4763,72 @@ pub(crate) mod tests {
             .await;
     }
 
+    /// AGT-119: a box stop (drain, SIGTERM, a forced user drain) reports each chase
+    /// it cut short once, before the host settles, and the chase's own end adds none.
+    #[tokio::test(start_paused = true)]
+    async fn a_box_stop_reports_the_running_chase_its_algo_host_stops() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let running = Arc::new(crate::algos::Running::default());
+                let venue = HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                };
+                let (account, inbox) =
+                    held_account_on(venue, Some(link.clone()), String::new(), running.clone());
+                let notifier = crate::host_notify::HostNotifier::unstarted();
+                let notify = crate::algo_notify::AlgoNotify::new(
+                    notifier.clone(),
+                    account.notify_scope(),
+                    Arc::new(|| true),
+                    account.held.clone(),
+                );
+                let account = testing::run_algos_notifying(account, link, inbox, Some(notify));
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                testing::algo_op(
+                    &account,
+                    "chaser:start",
+                    r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#,
+                );
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                assert_eq!(running.counts(), (1, 0), "the chase runs");
+                let (queued, done) = tokio::sync::oneshot::channel();
+                assert!(
+                    account
+                        .algos
+                        .as_ref()
+                        .unwrap()
+                        .send(crate::algos::AlgoInput::Dispose {
+                            reason: "the server is restarting".into(),
+                            stopped: None,
+                            server_stopped: Some(queued),
+                        })
+                        .is_ok()
+                );
+                done.await.expect("the host says once its stops are queued");
+                let stops = || -> Vec<Value> {
+                    notifier
+                        .queued()
+                        .iter()
+                        .map(|notification| serde_json::to_value(notification).unwrap())
+                        .filter(|notification| notification["kind"] == "algoStopped")
+                        .collect()
+                };
+                let first = stops();
+                assert_eq!(first.len(), 1, "{first:?}");
+                assert_eq!(
+                    first[0]["fields"],
+                    json!({"symbol":"BTCUSDT","side":"buy","verb":"stopped","algo":"chase","cause":"serverRestart"})
+                );
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                assert_eq!(running.counts(), (0, 0), "the host settled");
+                assert_eq!(stops(), first, "the settled chase's own end is not reported");
+            })
+            .await;
+    }
+
     pub(crate) fn registry() -> Arc<Registry> {
         let mut registry = Registry::new(
             EngineThreads::start(1).unwrap(),
@@ -4990,7 +5103,9 @@ pub(crate) mod tests {
                 );
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 match algos.try_recv() {
-                    Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                    Ok(crate::algos::AlgoInput::Dispose {
+                        reason, stopped, ..
+                    }) => {
                         assert!(stopped.is_some(), "expiry keeps a notice for the next init");
                         assert_eq!(reason, "no browser for 60s")
                     }

@@ -104,7 +104,8 @@ struct TwapSeen {
 /// The algo host's observer, on its engine thread.
 pub(crate) struct Tap {
     notify: AlgoNotify,
-    /// The main loop ended: disposal's stops are covered by `delegated.shutdown`.
+    /// The main loop ended: disposal's stops are not ordinary ends. Only a box
+    /// stop reports them (`server_stopped`).
     ended: Cell<bool>,
     fills: RefCell<HashMap<String, PendingFill>>,
     pub(crate) wake: tokio::sync::Notify,
@@ -147,22 +148,26 @@ fn algo_name(algo: Algo) -> &'static str {
     }
 }
 
-fn stopped(algo: Algo, symbol: &str, side: Option<Side>, finished: bool) -> (Fields, Severity) {
+/// How an algo ended, as its `algoStopped` verb, cause and severity.
+#[derive(Clone, Copy)]
+enum End {
+    Finished,
+    Errored,
+    /// The box itself stopped it: a drain, SIGTERM or a forced user drain.
+    ServerStopped,
+}
+
+fn stopped(algo: Algo, symbol: &str, side: Option<Side>, end: End) -> (Fields, Severity) {
     let mut fields = Fields::default().symbol(symbol).algo(algo);
     if let Some(side) = side {
         fields = fields.side(side);
     }
-    if finished {
-        (
-            fields.verb(Verb::Finished).cause(Cause::AlgoFinished),
-            Severity::Info,
-        )
-    } else {
-        (
-            fields.verb(Verb::Stopped).cause(Cause::AlgoError),
-            Severity::Warning,
-        )
-    }
+    let (verb, cause, severity) = match end {
+        End::Finished => (Verb::Finished, Cause::AlgoFinished, Severity::Info),
+        End::Errored => (Verb::Stopped, Cause::AlgoError, Severity::Warning),
+        End::ServerStopped => (Verb::Stopped, Cause::ServerRestart, Severity::Warning),
+    };
+    (fields.verb(verb).cause(cause), severity)
 }
 
 impl Tap {
@@ -381,23 +386,74 @@ impl Tap {
         {
             return;
         }
-        let (fields, severity) = stopped(
-            Algo::Chase,
-            symbol,
-            side_of(&end["side"]),
-            FINISHED_CHASE_STOPS.contains(&reason),
-        );
+        let how = if FINISHED_CHASE_STOPS.contains(&reason) {
+            End::Finished
+        } else {
+            End::Errored
+        };
+        self.algo_stopped(Algo::Chase, id, symbol, side_of(&end["side"]), how);
+    }
+
+    /// One `algoStopped`, keyed per algo end. A TWAP's box stop gets its own key:
+    /// the TWAP is restored under its id, and sharing the key would make the
+    /// gateway drop its later real end as a duplicate (it keys rows by id).
+    fn algo_stopped(&self, algo: Algo, id: &str, symbol: &str, side: Option<Side>, end: End) {
+        let (fields, severity) = stopped(algo, symbol, side, end);
+        let name = algo_name(algo);
+        let natural_key = match (algo, end) {
+            (Algo::Twap, End::ServerStopped) => {
+                format!("{name}\0{id}\0serverRestart\0{}", crate::accounts::now_ms())
+            }
+            _ => format!("{name}\0{id}"),
+        };
         self.notify.emit(Draft {
             kind: Kind::AlgoStopped,
             severity,
-            natural_key: format!("chase\0{id}"),
+            natural_key,
             fields,
             deadline: None,
             collapse: Some(crate::host_notify::opaque_key(
                 &self.notify.scope.account_digest,
-                &format!("chase:{id}"),
+                &format!("{name}:{id}"),
             )),
         });
+    }
+
+    /// A box stop (drain, SIGTERM, forced user drain): one `serverRestart` stop per
+    /// chase and TWAP still running, as chases are never restored. Stopping chases,
+    /// slices, paused TWAPs and TWAPs with a client stop in flight are skipped.
+    pub(crate) fn server_stopped(&self, chases: &[safe_cex_chaser::ActiveChaser], twaps: &[Value]) {
+        if !self.delegated() {
+            return;
+        }
+        for chase in chases
+            .iter()
+            .filter(|chase| !chase.is_stopped && chase.twap_id.is_none())
+        {
+            self.algo_stopped(
+                Algo::Chase,
+                &chase.id,
+                &chase.symbol,
+                Some(side(chase.side)),
+                End::ServerStopped,
+            );
+        }
+        let client_stopped = self.client_stopped.borrow();
+        for twap in twaps {
+            let Some(id) = twap["id"].as_str() else {
+                continue;
+            };
+            if twap["status"] == "paused" || client_stopped.contains(id) {
+                continue;
+            }
+            self.algo_stopped(
+                Algo::Twap,
+                id,
+                twap["activeMarket"]["symbol"].as_str().unwrap_or_default(),
+                side_of(&twap["side"]),
+                End::ServerStopped,
+            );
+        }
     }
 
     /// TWAP's slice-failure and shortfall reports (`report` in the TWAP factory)
@@ -460,18 +516,12 @@ impl Tap {
             return;
         }
         for (id, seen) in ended {
-            let (fields, severity) = stopped(Algo::Twap, &seen.symbol, seen.side, !seen.errored);
-            self.notify.emit(Draft {
-                kind: Kind::AlgoStopped,
-                severity,
-                natural_key: format!("twap\0{id}"),
-                fields,
-                deadline: None,
-                collapse: Some(crate::host_notify::opaque_key(
-                    &self.notify.scope.account_digest,
-                    &format!("twap:{id}"),
-                )),
-            });
+            let end = if seen.errored {
+                End::Errored
+            } else {
+                End::Finished
+            };
+            self.algo_stopped(Algo::Twap, &id, &seen.symbol, seen.side, end);
         }
     }
 }

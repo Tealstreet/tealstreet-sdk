@@ -827,6 +827,7 @@ async fn a_dispose_settles_a_running_chase_well_inside_its_deadline() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -863,6 +864,7 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -910,6 +912,7 @@ async fn a_chase_that_ended_with_no_browser_is_kept_past_the_dispose() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: Some(Box::new(move |notice| {
                         if let Some(kept) = kept.lock().unwrap().take() {
                             let _ = kept.send(notice);
@@ -949,6 +952,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: Some(Box::new(move |text| {
                         if let Some(kept) = kept.lock().unwrap().take() {
                             let _ = kept.send(text);
@@ -1010,6 +1014,7 @@ async fn each_stopped_chase_and_twap_is_its_own_notice_naming_its_algo() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -1069,6 +1074,7 @@ async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
