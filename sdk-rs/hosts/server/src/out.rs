@@ -168,6 +168,11 @@ impl Out {
         }
     }
 
+    /// The client registration (init `instanceId`) this output answers, if any.
+    pub(crate) fn instance_id(&self) -> Option<&str> {
+        self.instance_id.as_deref()
+    }
+
     pub(crate) fn with_account_label(&self, label: &str) -> Self {
         Self {
             account_label: Some(Arc::from(label)),

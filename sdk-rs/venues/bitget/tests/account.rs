@@ -376,6 +376,64 @@ fn uta_fill_topic_emits_exact_executions_and_order_snapshot_does_not_duplicate()
     assert!(h.sent.iter().any(|(_, t)| t.contains("\"topic\":\"fill\"")));
 }
 
+fn fill_identities(h: &mut Harness) -> Vec<(Option<String>, String, f64)> {
+    safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect()
+}
+
+// AGT-83: a last-fill row's tradeId is the fill identity; a cumulative delta keeps the order id.
+#[test]
+fn classic_trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::classic();
+    delivered_fills(&mut h);
+    let execution = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0.4","accBaseVolume":"0.4","fillPrice":"99","price":"90","side":"buy","orderType":"limit","status":"partially_filled","tradeId":"t1"}]}"#;
+    h.private_message(execution);
+    h.private_message(
+        &execution
+            .replace("\"accBaseVolume\":\"0.4\"", "\"accBaseVolume\":\"0.8\"")
+            .replace("\"t1\"", "\"t2\""),
+    );
+    h.private_message(
+        &execution
+            .replace("\"baseVolume\":\"0.4\",", "")
+            .replace("\"accBaseVolume\":\"0.4\"", "\"accBaseVolume\":\"1.2\"")
+            .replace("\"t1\"", "\"cumulative\""),
+    );
+    let identities = fill_identities(&mut h);
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities
+            .iter()
+            .map(|(id, order, _)| (id.as_deref(), order.as_str()))
+            .collect::<Vec<_>>(),
+        [(Some("t1"), "1"), (Some("t2"), "1"), (Some("1"), "1")]
+    );
+    assert!(
+        identities
+            .iter()
+            .all(|(_, _, amount)| (amount - 0.4).abs() < 1e-12)
+    );
+}
+
+// AGT-83: the UTA fill topic's execId is the fill identity.
+#[test]
+fn uta_exec_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = uta(r#"{"code":"00000","data":[]}"#);
+    h.engine.take_frame(h.now);
+    for exec in ["e1", "e2"] {
+        h.private_message(&format!(
+            r#"{{"arg":{{"topic":"fill"}},"action":"snapshot","data":[{{"category":"usdt-futures","symbol":"BTCUSDT","orderId":"1","execId":"{exec}","execPrice":"200","execQty":"1","side":"buy"}}]}}"#
+        ));
+    }
+    assert_eq!(
+        fill_identities(&mut h),
+        ["e1", "e2"].map(|id| (Some(id.to_owned()), "1".to_owned(), 1.0))
+    );
+}
+
 #[test]
 fn classic_40085_without_array_promotes_route_and_ignores_old_http_generation() {
     let mut h = Harness::classic();

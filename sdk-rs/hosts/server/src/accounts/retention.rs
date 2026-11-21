@@ -203,6 +203,8 @@ impl Registry {
     }
 
     /// Explicit removal/disable also applies while this user's account is retained.
+    /// AGT-79 left this unconditional: an unjoined socket names no registration, so
+    /// its dispose cannot be told apart from this device's own stale socket.
     pub(crate) fn dispose_delegated(&self, user: &str, name: &str) {
         let accounts = self.accounts.lock().unwrap();
         let mut matches = accounts.values().filter(|account| {

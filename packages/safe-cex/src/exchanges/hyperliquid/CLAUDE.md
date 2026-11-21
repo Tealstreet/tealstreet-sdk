@@ -109,6 +109,14 @@ Both classes may use the same 200-weight reserve. Caller history and candles are
 ceiling, leaving 200 for critical work within the same total. Native and shared
 queues keep FIFO within each class, and native refill is continuous. Queued
 candles retain their original 20 s bound, shortened by a smaller caller wait.
+**A candle read reserves its requested span, not the venue maximum**: 20 plus one
+per 60 candles, counting ceil(span/step)+1 because both boundary candles return
+(`1M` is a fixed, epoch-aligned 30-day bucket, not a calendar month). The cap is
+6,000 rows (120), not 5,000: a full 1m reply was observed at 5,182 rows. Both the
+native queue and the shared host budget derive it from the sent `startTime`/`endTime`;
+an unreadable body reserves 120. Until AGT-113 every read reserved 104, about four
+times a 330-bar chart read's real cost, so a chart's first reads queued ~15 s each
+behind each other (Sentry E6Z).
 Startup-only fees/builder wait for pending financial reads before their managed
 20 s deadline starts. A live placement may release its queued builder check;
 this does not promote it to critical. Catalogue completion refreshes its own DEX,
@@ -698,7 +706,7 @@ Private diagnostics should include outbound user/order subscription frames and i
 | `Market`           | `{ limit: { tif: "Gtc" } }` with 5% slippage price          | `na`                                                      |
 | `TakeProfit`       | `{ trigger: { isMarket: true, tpsl: "tp", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
 | `StopLoss`         | `{ trigger: { isMarket: true, tpsl: "sl", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
-| Limit + TP + SL    | Combined wires                                              | `normalTpsl`                                              |
+| Limit/Market+TP/SL | Combined wires (market entries too since AGT-117)           | `normalTpsl`                                              |
 | `TrailingStopLoss` | **Not supported** (throws before submission)                | -                                                         |
 
 ### Reduce-only sizing
@@ -890,7 +898,13 @@ instead of waiting until REST actually stops returning the order.
 ### Order Grouping
 
 - `na`: Standalone order (limit, market, partial TP/SL with `sz > 0`)
-- `normalTpsl`: Limit order with attached TP and/or SL
+- `normalTpsl`: Limit or market order with attached TP and/or SL. Each leg is a market
+  trigger (reduce-only on perps) at the entry's size and limit price (the slippage-capped price
+  for a market entry; the venue applies its own 10% slippage when the trigger fires). Market
+  entries dropped their legs until AGT-117 (verified live 2026-11-21 on a perp: filled parent,
+  then two `waitingForTrigger` legs that rest as reduce-only triggers). The reply names only the
+  entry. Spot has no trigger orders: the venue refuses a spot bracket as one error row, "Placing
+  trigger orders is not enabled on spot trading yet." (live 2026-11-21).
 - `positionTpsl`: Full position TP/SL (size = 0, closes entire position)
 
 ### Market Order Implementation

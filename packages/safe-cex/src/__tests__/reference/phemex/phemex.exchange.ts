@@ -60,9 +60,14 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { BROKER_ID, createAPI } from './phemex.api';
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
+
+/** AGT-115: a trailing entry sends only its peg; stop entries carry their legs natively. */
+const phemexDropsStopEntryLegs = (order: PlaceOrderOpts) =>
+  order.type === OrderType.TrailingStopLoss && stopEntryWithAttachedLegs(order);
 
 export class PhemexExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('Phemex', /^.{1,40}$/, {
@@ -1298,8 +1303,17 @@ export class PhemexExchange extends BaseExchange {
     return await this.placeOrder(newOrder);
   };
 
+  // AGT-115: the base batch places one by one, so refuse a trailing entry with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some(phemexDropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Phemex'));
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
     this.resolveCallerClientOrderId(opts);
+    if (phemexDropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Phemex'));
     const payloads = await this.formatCreateOrder(opts);
     const orderIds = [];
     const openOrders: Order[] = [];

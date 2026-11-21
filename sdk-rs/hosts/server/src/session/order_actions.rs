@@ -249,6 +249,10 @@ impl Session {
             return;
         };
         let account = self.joined[name].account.clone();
+        let label = self.joined[name]
+            .out
+            .account_label(&account.name)
+            .to_owned();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
             name.to_owned(),
@@ -290,7 +294,7 @@ impl Session {
                 Some("Action registration retired; no further action command was sent")
             } else if !account.running.io_allowed() {
                 Some("io_fenced")
-            } else if !registry.holds(&account, socket) {
+            } else if !registry.holds_label(&account, socket, &label) {
                 Some("holder_changed")
             } else {
                 None

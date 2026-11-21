@@ -500,9 +500,52 @@ describe('cross-worker Hyperliquid info admission', () => {
     ['metaAndAssetCtxs', 20],
     ['frontendOpenOrders', 20],
     ['userFillsByTime', 120],
-    ['candleSnapshot', 104],
+    // AGT-113: a body with no readable span reserves the 6,000-row maximum (was 104).
+    ['candleSnapshot', 120],
   ])('reserves the documented weight for %s including bounded reply surcharges', (type, weight) => {
     expect(hyperliquidInfoWeight(JSON.stringify({ type }))).toBe(weight);
+  });
+
+  const candles = (interval: string, startTime: unknown, endTime: unknown) =>
+    JSON.stringify({ type: 'candleSnapshot', req: { coin: 'BTC', interval, startTime, endTime } });
+  const HOUR = 3_600_000;
+  const T = Date.parse('2026-11-20T20:33:08Z');
+  it.each([
+    // E6Z's sampled first reads: Hyperliquid returned 330, 95 and 0 candles for these.
+    ['a 330-bar 1m chart read', candles('1m', T - 329 * 60_000, T), 26],
+    ['a 330-bar 4h chart read', candles('4h', T - 329 * 4 * HOUR, T), 26],
+    ['a 330-day daily read', candles('1d', T - 330 * 24 * HOUR, T), 26],
+    // Both boundary candles return: 10:30..12:00 on 1h is 10:00, 11:00 and 12:00.
+    ['a span crossing three hourly opens', candles('1h', 10.5 * HOUR, 12 * HOUR), 21],
+    ['a zero-width span', candles('1m', T, T), 21],
+    // Hyperliquid returned 5,182 rows for a full 1m reply, so the cap is 6,000 rows.
+    ['a span beyond 6,000 candles', candles('1m', 0, T), 120],
+    ['a two-month span of 30-day buckets', candles('1M', 0, 60 * 24 * HOUR), 21],
+    ['an unknown interval', candles('7m', 0, HOUR), 120],
+    ['a reversed span', candles('1m', T, T - HOUR), 120],
+    ['a string timestamp', candles('1m', String(T - HOUR), T), 120],
+    ['a missing request', JSON.stringify({ type: 'candleSnapshot' }), 120],
+  ])('reserves %s by its requested span', (_label, body, weight) => {
+    expect(hyperliquidInfoWeight(body)).toBe(weight);
+  });
+
+  it("admits a chart's first reads behind a saturated bulk ceiling before their 20 s deadline", async () => {
+    // AGT-113: at 104 each, the fourth read needed 25 s of refill and expired at 20 s.
+    const budget = client();
+    await spend(budget, 800);
+    const start = Date.now();
+    const body = candles('1m', T - 329 * 60_000, T);
+    const sent: number[] = [];
+    const reads = [0, 1, 2, 3].map(async () => {
+      const deadline = start + 20_000;
+      const grant = await budget.wait(ORIGIN, body, deadline, signal(), 'bulk');
+      return budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => sent.push(Date.now() - start));
+    });
+    const settled = Promise.allSettled(reads);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await settled).map((read) => read.status)).toEqual(Array(4).fill('fulfilled'));
+    expect(sent).toHaveLength(4);
+    expect(Math.max(...sent)).toBeLessThan(20_000);
   });
 });
 
@@ -618,7 +661,8 @@ describe('managed transport admission', () => {
     ['legacy', 'frontendOpenOrders', 20],
     ['managed', 'frontendOpenOrders', 20],
     ['managed', 'metaAndAssetCtxs', 20],
-    ['managed', 'candleSnapshot', 104],
+    // AGT-113: a span-less candle body reserves the 6,000-row maximum (was 104).
+    ['managed', 'candleSnapshot', 120],
   ] as const)(
     'applies the shared budget to two actual %s transports for %s before dispatch',
     async (mode, type, weight) => {

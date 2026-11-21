@@ -77,6 +77,7 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { AsterDEXPrivateWebsocket } from './asterdex.ws-private';
 import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
@@ -809,6 +810,8 @@ export class AsterDEXExchange extends BaseExchange {
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: brackets are built only for limit/market; a stop entry would drop its legs.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     // Aster requires callbackRate for TRAILING_STOP_MARKET, but shared order
     // inputs do not expose it. Reject this before any capacity checks or REST
     // calls so programmatic callers cannot submit an invalid order.
@@ -1037,6 +1040,7 @@ export class AsterDEXExchange extends BaseExchange {
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     const orderIds: string[] = [];
     let errMsg = '';
 

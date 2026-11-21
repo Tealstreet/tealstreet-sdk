@@ -1184,6 +1184,7 @@ impl BybitLinear {
         let Some(side) = order_side(row.side.as_deref()) else {
             return true;
         };
+        // A cumulative order-row delta has no native execution identity.
         cx.fill(Fill {
             id: None,
             order_id: row.order_id.to_string(),
@@ -3690,7 +3691,8 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         return;
     };
     // Legacy frames without an execution ID cannot be deduplicated safely.
-    if let Some(id) = present(&row.exec_id) {
+    let execution = present(&row.exec_id);
+    if let Some(id) = execution {
         let key = (row.symbol.to_string(), id.to_owned());
         if !account.executions.insert(key.clone()) {
             return;
@@ -3703,7 +3705,7 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         }
     }
     cx.fill(Fill {
-        id: None,
+        id: execution.map(str::to_owned),
         order_id: row.order_id.to_string(),
         symbol: row.symbol.to_string(),
         side,

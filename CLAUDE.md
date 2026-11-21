@@ -60,6 +60,11 @@ a placement without a leg replaces it. The REST pending list has no `type`, so
 `full_position_ids` remembers ids learned from `POSITION_TPSL` pushes and position
 placements; a push that adds a leg lists both legs under derived ids (AGT-71).
 
+OKX keeps one entire-position TP/SL algo per position. A lone full leg beside a
+held one-leg full algo joins it through amend-algos (OKX makes it an `oco`), and
+cancelling one leg of a two-leg algo deletes only that leg. See
+`sdk-rs/venues/okx/README.md` "Entire-position TP/SL" (AGT-68, AGT-98).
+
 ## Shared artifact census
 
 Shared WASM budget and construction-policy memberships are checked against
@@ -129,3 +134,7 @@ not promote the orders axis grade. The projection and limits are documented in
 `docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
 It imports the master image caches with a read-only automatic token; it never publishes images or caches.
 The existing master-only workflows remain the sole image publishers and signers.
+
+
+The wrapper-owned SDK staging signal and narrow automatic supersession exception
+are documented in `docs/plans/callers/beta-wasm-auto-release.md`.

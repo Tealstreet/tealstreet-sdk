@@ -139,13 +139,15 @@
       "ciRun": 41423920329,
       "ciHead": "0dd6d7cbbe1",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/41423920329",
-      "note": "#2831 makes a Rust symbol cancel also sweep the venue (Kraken cancelallorders, Bitunix cancel_all_orders); TS does not. Both private tapes now answer that sweep with an impl:rust record, so each transport audits only its own writes. Kraken rehashed 2bf4d2df.. -> 8142c148..; Bitunix e8d90eda.. -> fc56199e... The declared paths are unchanged: every failure line is identical locally on the new hashes."
+      "note": "#2831 makes a Rust symbol cancel also sweep the venue (Kraken cancelallorders, Bitunix cancel_all_orders); TS does not. Both private tapes now answer that sweep with an impl:rust record, so each transport audits only its own writes. Kraken rehashed 2bf4d2df.. -> 8142c148..; Bitunix e8d90eda.. -> fc56199e... The declared paths are unchanged: every failure line is identical locally on the new hashes."    },
+    "apexomniZeroBoundSignature20261121": {
+      "note": "AGT-75 removes ApeX's signed-read legacy resend. Live read-only checks showed ApeX accepts the primary signature over a zero time bound and refuses the legacy one, so the private tape now accepts the zero-bound fills read first instead of refusing it and accepting a resend. ApeX rehashed d851f4fb.. -> 8899fbc5..; the declared paths are unchanged."
     }
   },
   "failures": [
     {
       "venue": "apexomni",
-      "tapeSha256": "d851f4fbe8ee28b264d7e949b44de4bfc50e4dbf755cb3314eef02a177922eaf",
+      "tapeSha256": "8899fbc5cf7240971668e11e7a10333988ff627673317b4299a06fff3c3d81fe",
       "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
       "diagnostics": [
         {
@@ -16837,28 +16839,6 @@
       "tapeSha256": "6c710d7beae430bf2ddec1ef1e2a09e5c4552a91a10884e51a7c1d5b598b23ff",
       "tape": "sdk-rs/harness/tapes/grvt-private.jsonl",
       "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "account fills[1].executionId",
-            "checkpoint 1 account.fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 2 account.fills[1].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 3 account.fills[1].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 4 account.fills[1].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 5 account.fills[1].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 6 account.fills[1].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 7 account.fills[1].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 8 account.fills[1].executionId"
-          ]
-        },
         {
           "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
           "keys": [
@@ -42609,31 +42589,6 @@
       "tape": "sdk-rs/harness/tapes/weex-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "account fills[1].executionId",
-            "checkpoint 1 account.fills[0].executionId",
-            "checkpoint 1 account.fills[1].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 2 account.fills[1].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 3 account.fills[1].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 4 account.fills[1].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 5 account.fills[1].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 6 account.fills[1].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 7 account.fills[1].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 8 account.fills[1].executionId",
-            "checkpoint 9 account.fills[0].executionId",
-            "checkpoint 9 account.fills[1].executionId"
-          ]
-        },
-        {
           "divergence": "Actual TS execution metadata is present while the native live-fill frame lacks it.",
           "keys": [
             "account fills[0].timestamp",
@@ -47567,26 +47522,6 @@
       "tape": "sdk-rs/harness/tapes/mexc-private.jsonl",
       "diagnostics": [
         {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "checkpoint 1 account.fills[0].executionId",
-            "checkpoint 10 account.fills[0].executionId",
-            "checkpoint 11 account.fills[0].executionId",
-            "checkpoint 12 account.fills[0].executionId",
-            "checkpoint 13 account.fills[0].executionId",
-            "checkpoint 14 account.fills[0].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 9 account.fills[0].executionId"
-          ]
-        },
-        {
           "divergence": "Protective trigger reference is absent or differs; attached TP and SL sources are compared independently.",
           "keys": [
             "checkpoint 7 account.orders[2].stopLossTrigger",
@@ -47861,94 +47796,6 @@
       "tapeSha256": "9d71837d4fc35be11d2b84fccb60c036880aa5d930f7d675469ca7302cbfb687",
       "tape": "sdk-rs/harness/tapes/woo-private.jsonl",
       "diagnostics": [
-        {
-          "divergence": "Actual TS execution identity survives its event path; the Rust live-fill frame does not carry the same identity.",
-          "keys": [
-            "account fills[0].executionId",
-            "account fills[1].executionId",
-            "account fills[2].executionId",
-            "account fills[3].executionId",
-            "checkpoint 1 account.fills[0].executionId",
-            "checkpoint 1 account.fills[1].executionId",
-            "checkpoint 1 account.fills[2].executionId",
-            "checkpoint 10 account.fills[0].executionId",
-            "checkpoint 10 account.fills[1].executionId",
-            "checkpoint 10 account.fills[2].executionId",
-            "checkpoint 11 account.fills[0].executionId",
-            "checkpoint 11 account.fills[1].executionId",
-            "checkpoint 11 account.fills[2].executionId",
-            "checkpoint 12 account.fills[0].executionId",
-            "checkpoint 12 account.fills[1].executionId",
-            "checkpoint 12 account.fills[2].executionId",
-            "checkpoint 13 account.fills[0].executionId",
-            "checkpoint 13 account.fills[1].executionId",
-            "checkpoint 13 account.fills[2].executionId",
-            "checkpoint 14 account.fills[0].executionId",
-            "checkpoint 14 account.fills[1].executionId",
-            "checkpoint 14 account.fills[2].executionId",
-            "checkpoint 14 account.fills[3].executionId",
-            "checkpoint 15 account.fills[0].executionId",
-            "checkpoint 15 account.fills[1].executionId",
-            "checkpoint 15 account.fills[2].executionId",
-            "checkpoint 15 account.fills[3].executionId",
-            "checkpoint 16 account.fills[0].executionId",
-            "checkpoint 16 account.fills[1].executionId",
-            "checkpoint 16 account.fills[2].executionId",
-            "checkpoint 16 account.fills[3].executionId",
-            "checkpoint 17 account.fills[0].executionId",
-            "checkpoint 17 account.fills[1].executionId",
-            "checkpoint 17 account.fills[2].executionId",
-            "checkpoint 17 account.fills[3].executionId",
-            "checkpoint 18 account.fills[0].executionId",
-            "checkpoint 18 account.fills[1].executionId",
-            "checkpoint 18 account.fills[2].executionId",
-            "checkpoint 18 account.fills[3].executionId",
-            "checkpoint 19 account.fills[0].executionId",
-            "checkpoint 19 account.fills[1].executionId",
-            "checkpoint 19 account.fills[2].executionId",
-            "checkpoint 19 account.fills[3].executionId",
-            "checkpoint 2 account.fills[0].executionId",
-            "checkpoint 2 account.fills[1].executionId",
-            "checkpoint 2 account.fills[2].executionId",
-            "checkpoint 20 account.fills[0].executionId",
-            "checkpoint 20 account.fills[1].executionId",
-            "checkpoint 20 account.fills[2].executionId",
-            "checkpoint 20 account.fills[3].executionId",
-            "checkpoint 21 account.fills[0].executionId",
-            "checkpoint 21 account.fills[1].executionId",
-            "checkpoint 21 account.fills[2].executionId",
-            "checkpoint 21 account.fills[3].executionId",
-            "checkpoint 22 account.fills[0].executionId",
-            "checkpoint 22 account.fills[1].executionId",
-            "checkpoint 22 account.fills[2].executionId",
-            "checkpoint 22 account.fills[3].executionId",
-            "checkpoint 23 account.fills[0].executionId",
-            "checkpoint 23 account.fills[1].executionId",
-            "checkpoint 23 account.fills[2].executionId",
-            "checkpoint 23 account.fills[3].executionId",
-            "checkpoint 3 account.fills[0].executionId",
-            "checkpoint 3 account.fills[1].executionId",
-            "checkpoint 3 account.fills[2].executionId",
-            "checkpoint 4 account.fills[0].executionId",
-            "checkpoint 4 account.fills[1].executionId",
-            "checkpoint 4 account.fills[2].executionId",
-            "checkpoint 5 account.fills[0].executionId",
-            "checkpoint 5 account.fills[1].executionId",
-            "checkpoint 5 account.fills[2].executionId",
-            "checkpoint 6 account.fills[0].executionId",
-            "checkpoint 6 account.fills[1].executionId",
-            "checkpoint 6 account.fills[2].executionId",
-            "checkpoint 7 account.fills[0].executionId",
-            "checkpoint 7 account.fills[1].executionId",
-            "checkpoint 7 account.fills[2].executionId",
-            "checkpoint 8 account.fills[0].executionId",
-            "checkpoint 8 account.fills[1].executionId",
-            "checkpoint 8 account.fills[2].executionId",
-            "checkpoint 9 account.fills[0].executionId",
-            "checkpoint 9 account.fills[1].executionId",
-            "checkpoint 9 account.fills[2].executionId"
-          ]
-        },
         {
           "divergence": "Actual TS execution metadata is present while the native live-fill frame lacks it.",
           "keys": [

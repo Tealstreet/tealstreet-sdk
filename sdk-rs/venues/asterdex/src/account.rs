@@ -1497,9 +1497,11 @@ impl AsterDex {
         }
         let head = serde_json::from_str::<TradeHead>(text).ok();
         let position_side = head.as_ref().and_then(|h| hedge_side(h.o.ps.as_deref()));
+        // A non-trade update carries `t = 0`; it is no execution identity.
         let execution = head
             .and_then(|h| h.o.t)
-            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
+            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t)
+            .filter(|t| *t > 0);
         let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
             .then(|| {
                 let qty =
@@ -1526,7 +1528,7 @@ impl AsterDex {
                     }
                 }
                 cx.fill(Fill {
-                    id: None,
+                    id: Some(execution.to_string()),
                     order_id: id.clone(),
                     symbol: o.s.to_string(),
                     side: order_side(&o.side),

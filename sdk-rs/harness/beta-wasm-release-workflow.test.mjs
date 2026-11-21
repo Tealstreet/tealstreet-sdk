@@ -4,9 +4,13 @@
 // builds or publishes until those proofs (and the roster) succeeded.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+
+import { assertCertified } from './beta-wasm-release-guard.mjs';
 
 const rustWorkflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
 const workflow = readFileSync(new URL('../../.github/workflows/rust-beta-wasm-release.yml', import.meta.url), 'utf8');
@@ -74,7 +78,7 @@ test('nothing builds or publishes without the roster job, and only the release j
   assert.match(job('release'), /gh release create "\$TAG" --repo "\$GITHUB_REPOSITORY" --verify-tag/);
 });
 
-test('an automatic run superseded by a newer release publishes nothing; a manual cut is not checked', () => {
+test('an ordinary automatic source superseded by a newer release publishes nothing; a manual cut is not checked', () => {
   const roster = job('roster');
   const certified = roster.indexOf('beta-wasm-release-guard.mjs certified');
   const superseded = roster.indexOf('beta-wasm-release-guard.mjs superseded "$GITHUB_REPOSITORY" "$SDK_SHA"');
@@ -145,4 +149,137 @@ test('the reusable source step rejects a different SHA before exposing build out
   assert.equal(mismatch.status, 1);
   assert.match(mismatch.stdout, /sdk_sha must match the master push/);
   assert.equal(source(head, 'rust-beta-wasm-bbbbbbbbbbb').status, 1);
+});
+
+// M58: a staged source survived in NX while the one-pending-run collapse
+// cancelled its SDK push run and a later descendant published first.
+const stagedSdk = '335cab44d92b958de3d9967b7b43d3872f225cfd';
+const laterTag = 'rust-beta-wasm-79c0a92fbec';
+const publishDecision = (event, { staged = stagedSdk, superseded = laterTag, existing = '', stageError = false } = {}) => {
+  const script = job('roster').match(/- name: Publish only new sdk-rs inputs[\s\S]*?run: \|\n([\s\S]*?)(?=\n {6}# Only an authenticated)/)?.[1]
+    .replace(/^ {10}/gm, '').replaceAll('${{ github.event_name }}', event);
+  assert.ok(script, 'run the real workflow selection block');
+  const fakeNode = `node() {
+    if [ "$2" = - ]; then
+      printf 'guard:staged\\n' >&2
+      [ "$STAGE_ERROR" != true ] || return 1
+      printf '%s\\n' "$STAGED"
+      return
+    fi
+    printf 'guard:%s\\n' "$2" >&2
+    case "$2" in
+      superseded) printf '%s\\n' "$SUPERSEDED" ;;
+      published) printf '%s\\n' "$EXISTING" ;;
+      *) [ "$1" = --input-type=module ] || return 99; printf '%s\\n' fixture-fingerprint ;;
+    esac
+  }\n`;
+  // Actions supplies a regular output file; Linux cannot reopen Node's piped stdout.
+  const directory = mkdtempSync(join(tmpdir(), 'sdk-release-output-'));
+  const output = join(directory, 'step-output');
+  writeFileSync(output, '');
+  try {
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', fakeNode + script], {
+      encoding: 'utf8', env: { SDK_SHA: stagedSdk, GITHUB_REPOSITORY: 'Tealstreet/tealstreet-sdk',
+        GITHUB_OUTPUT: output, SUPERSEDED: superseded, STAGED: staged, EXISTING: existing,
+        STAGE_ERROR: String(stageError) },
+    });
+    return { ...result, stdout: result.stdout + readFileSync(output, 'utf8') };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+};
+
+test('M58: the currently staged 335cab44 remains publishable after descendant release 79c0a92fbec', () => {
+  const result = publishDecision('workflow_run');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^publish=true$/m);
+  assert.doesNotMatch(result.stdout, /^publish=false$/m);
+});
+
+test('an ordinary superseded source remains skipped and a manual cut remains deliberate', () => {
+  const ordinary = publishDecision('workflow_run', { staged: 'a'.repeat(40) });
+  assert.equal(ordinary.status, 0, ordinary.stderr);
+  assert.match(ordinary.stdout, /^publish=false$/m);
+  const manual = publishDecision('workflow_dispatch', { stageError: true });
+  assert.equal(manual.status, 0, manual.stderr);
+  assert.match(manual.stdout, /^publish=true$/m);
+  assert.doesNotMatch(manual.stderr, /guard:(?:superseded|staged)/);
+});
+
+// AGT-21: only supersession is exempted; input deduplication and command failures remain authoritative.
+test('matching staged inputs still deduplicate and an unproven exemption never publishes', () => {
+  const duplicate = publishDecision('workflow_run', { existing: 'rust-beta-wasm-already-published' });
+  assert.equal(duplicate.status, 0, duplicate.stderr);
+  assert.match(duplicate.stdout, /^publish=false$/m);
+  const unproven = publishDecision('workflow_run', { stageError: true });
+  assert.notEqual(unproven.status, 0);
+  assert.doesNotMatch(unproven.stdout, /^publish=true$/m);
+});
+
+
+test('a latest automatic source needs no staging lookup', () => {
+  const result = publishDecision('push', { superseded: '', stageError: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^publish=true$/m);
+  assert.doesNotMatch(result.stderr, /guard:staged/);
+});
+
+
+const stagedProgram = workflow.match(/<<'STAGED'\n([\s\S]*?)\n {10}STAGED/)?.[1].replace(/^ {10}/gm, '');
+const lookupStage = async (reply, { throws = false } = {}) => {
+  assert.ok(stagedProgram);
+  const logs = [], errors = [], calls = [];
+  await runInNewContext(`(async () => { ${stagedProgram} })()`, {
+    process: { argv: ['node', '-', 'Tealstreet/tealstreet-sdk', stagedSdk], env: { GH_TOKEN: 'synthetic-read-token' } },
+    console: { log: value => logs.push(value), error: value => errors.push(value) },
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (throws) throw new Error('synthetic-private-network-error');
+      return { status: reply.status, json: async () => reply.json };
+    },
+  });
+  return { logs, errors, calls };
+};
+
+test('the actual inline lookup grants only an exact commit ref using the existing read token', async () => {
+  const ref = { ref: 'refs/heads/copybara/sdk-import-staged', object: { type: 'commit', sha: stagedSdk } };
+  const valid = await lookupStage({ status: 200, json: ref });
+  assert.deepEqual(valid.logs, [stagedSdk]);
+  assert.equal(valid.calls.length, 1);
+  assert.equal(valid.calls[0].url, 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/ref/heads/copybara/sdk-import-staged');
+  assert.equal(valid.calls[0].init.method, undefined, 'default GET, never write');
+  for (const invalid of [{}, { ...ref, ref: 'refs/heads/master' },
+    { ...ref, object: { type: 'tag', sha: stagedSdk } }, { ...ref, object: { type: 'commit', sha: 'a'.repeat(40) } }]) {
+    assert.deepEqual((await lookupStage({ status: 200, json: invalid })).logs, []);
+  }
+});
+
+for (const status of [404, 401, 403, 429, 500, 502]) test(`an absent or unreadable SDK ref grants no exception (${status})`, async () => {
+  const result = await lookupStage({ status });
+  assert.deepEqual(result.logs, []);
+  assert.equal(result.calls.length, 1);
+  if (status !== 404) assert.match(result.errors.join(''), new RegExp(`HTTP ${status}`));
+});
+
+test('a ref transport failure reveals no raw exception and grants no exception', async () => {
+  const result = await lookupStage({}, { throws: true });
+  assert.deepEqual(result.logs, []);
+  assert.doesNotMatch(result.errors.join(''), /synthetic-private-network-error/);
+});
+
+test('M58: the cancelled push is uncertified until its real required-coverage job succeeds on rerun', async () => {
+  let coverage = 'cancelled';
+  const api = async (_method, path) => {
+    if (path.includes('/actions/workflows/rust.yml/runs?')) return { status: 200, json: { workflow_runs: [
+      { id: 44586023187, head_sha: stagedSdk, head_branch: 'master', event: 'push', status: 'completed', conclusion: 'cancelled' },
+    ] } };
+    if (path.includes('/actions/runs/44586023187/jobs?')) return { status: 200, json: { jobs: [
+      { name: 'Rust / required coverage', status: 'completed', conclusion: coverage },
+    ] } };
+    throw new Error(`unexpected route ${path}`);
+  };
+  await assert.rejects(assertCertified({ api, repo: 'Tealstreet/tealstreet-sdk', sha: stagedSdk }), /refusing to publish uncertified/);
+  coverage = 'success';
+  await assertCertified({ api, repo: 'Tealstreet/tealstreet-sdk', sha: stagedSdk });
+  assert.match(publishDecision('workflow_run').stdout, /^publish=true$/m);
 });

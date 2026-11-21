@@ -89,7 +89,7 @@ impl Hyperliquid {
             let _ = cx.fail_context(&read.context, "Market not found");
             return;
         };
-        let Some(body) = candle_body(
+        let Some((body, weight)) = candle_body(
             read.now,
             coin,
             read.interval,
@@ -103,6 +103,7 @@ impl Hyperliquid {
         self.queue_candles(
             cx,
             body,
+            weight,
             Box::new(ManagedCandleRead {
                 context: read.context,
                 candles: Vec::new(),

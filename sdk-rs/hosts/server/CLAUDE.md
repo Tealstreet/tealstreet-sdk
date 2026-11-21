@@ -33,6 +33,11 @@ are documented in `DESIGN.md` under Connection-local publication interval.
 Keep cadence in the socket/account pump, never in shared engine identity or
 configuration. Private financial sections and outcomes bypass the public coalescer.
 
+The optional `activeTickerSymbols` init field and `set-active-ticker-symbols` op
+(AGT-107) select this connection's ticker rows the same way; see DESIGN.md under
+Connection-local ticker selection. A selected table renumbers rows, so every
+selection change must re-send a full `TICKERS`, never deltas against old rows.
+
 ## Sentry owner identity
 
 The native Sentry allowlist and captured authentication-subject contract live in
@@ -254,6 +259,8 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+A refused proof read fails the join without a second signature: the venue crate
+no longer sends ApeX's whole-second legacy read resend (AGT-75).
 
 Exact `binanceoptions` mainnet proves possession through its existing signed
 EAPI margin-account, position and open-order startup reads. Public exchange-info,
@@ -365,10 +372,16 @@ condition; receipts keep `clientOrderId: null`. WOO also receives none: until
 2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
 before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
 to accept it before the box emits one. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Backpack and GRVT retain their current
-refusal pending their separate bounded-hash mapping. Bybit protection also omits
-its unsupported caller ID and reports null. HyroTrader retains its native
-caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
+remains primary dedupe in every case. Backpack and GRVT also omit the caller ID: their numeric fields cannot carry
+the UUID losslessly. HyroTrader omits it because the native codec supports no
+caller IDs. Those native validators are unchanged; explicit unsupported caller
+IDs still refuse. Bybit protection also omits its unsupported caller ID and
+reports null, as do orders whose adapter refuses a caller ID by shape
+(`trigger_refuses_caller_id`: BloFin, Phemex, OKX, Bitget, KuCoin, Bitunix, ApeX Omni,
+Crypto.com, Binance (USD-M/Spot/PM), BingX, Paradex, Coinbase/Coinbase Spot; AGT-46/#3758/AGT-110). Adding a newly hosted
+venue means auditing its adapter's caller-ID guard first. A pre-dispatch refusal of
+such a submit also reports null, since no ID was sent (`OrderReceipt::Placement`'s
+`caller_id`). Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
@@ -382,6 +395,15 @@ Placement completions (`settle_intent`) send `refused` with `error.outcome:
 `protection`. Every other failure without `notSent` proof, including a partially
 accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
 as the venue's refusal; the SDK still keeps the intent unknown and never resends.
+A successful completion is `placed` only with one native ID, or (a single bracket on a
+venue that places its legs after the entry: OKX limit/market, Binance limit/market and
+stop-type, Kraken limit; `order_contract::bracket_protective_legs`) one entry ID followed by
+exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live: OKX and
+Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
+Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
+entry (and an OKX stop-type one) with legs counts none: OKX, Binance USD-M/PM and Kraken
+refuse it before any write (AGT-115; OKX and Binance used to drop the legs). Ten more
+adapters refuse the entry kinds whose legs they would drop; `delegated-order-frames.md` lists them.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
@@ -503,11 +525,31 @@ without a seed remains unchanged and supplies no placement-signing capability.
 Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
-cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately
+once the last live holder disposes; see DELEGATED holder-refcounted dispose.
 For a selected proxy transport, token expiry is a terminal stop/erase with
 recorded reason `proxy-token-expired`; there is no issuer renewal, direct
 fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+## DELEGATED holder-refcounted dispose
+
+AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
+detaches only that holder in `Registry::release_with_labels`. The shared actor and
+resident signer keep running only while a LIVE holder of ANOTHER client
+registration (init `instanceId`, kept in `Holders::confirmed`) confirmed a
+DELEGATED request; otherwise `dispose_for` stops and erases as before. Before this,
+one device switching that account to LOCAL/COSIGNED (which disposes first) stopped
+it for every device. What never keeps the key: a COSIGNED tab attached to the
+resident, a parked holder, and the leaving registration's own half-open socket
+(detached with it, so its idle-out cannot start 48 h retention). An unjoined
+socket's `dispose_delegated` stays unconditional: it names no registration.
+Detachment and the keep decision run on EVERY disposed alias, including when the
+socket keeps another alias. A detached label loses command authority through
+`Registry::holds_label`, which session cleanup, order admission and the deferred
+action guard check instead of the socket-wide `holds`.
+Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 
 ## Host notifications (AGT-37)
 

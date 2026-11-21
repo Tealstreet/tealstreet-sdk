@@ -1319,7 +1319,7 @@ impl Kucoin {
                         self.account.executions.remove(&old);
                     }
                     cx.fill(Fill {
-                        id: None,
+                        id: (!row.trade_id.is_empty()).then(|| row.trade_id.to_owned()),
                         order_id: orders[0].id.clone(),
                         symbol: orders[0].symbol.clone(),
                         side: orders[0].side,

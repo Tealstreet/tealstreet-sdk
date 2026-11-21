@@ -76,8 +76,10 @@ import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal } from '../stopEntryLegs';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { bybitDropsStopEntryLegs } from './bybit.exchange';
 import { normalizeBybitExecutionTimestampMs, normalizeBybitExecutionTimestampSeconds } from './bybit.execution-time';
 import { bybitFeeOverlay } from './bybit.fee-overlay';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
@@ -1564,6 +1566,9 @@ export class BybitInverseExchange extends BaseExchange {
     return this.publicInverseWebsocket.listenOrderBook(symbol, callback);
   };
 
+  private dropsStopEntryLegs = (order: PlaceOrderOpts) =>
+    bybitDropsStopEntryLegs(order, this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount));
+
   _hasFullSizedPositionOppositeSide = (symbol: string, side: OrderSide, amount: number) => {
     return side === OrderSide.Buy
       ? this.store.positions.some(
@@ -1586,6 +1591,8 @@ export class BybitInverseExchange extends BaseExchange {
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
     const clientOrderId = this.resolveCallerClientOrderId(opts);
+    // AGT-115: as linear, trailing and position stops would drop attached legs.
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -1863,6 +1870,7 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(this.dropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }

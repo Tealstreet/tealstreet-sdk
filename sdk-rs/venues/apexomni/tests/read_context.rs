@@ -295,10 +295,11 @@ fn fill_history_data_at_the_original_receipt_deadline_is_a_strict_timeout() {
     );
 }
 
-// GREEN control: the native one-time re-sign after a signature refusal keeps
-// the same path and refs; a second refusal fails without a third request.
+// AGT-75: a signature refusal fails the read without a second signature.
+// The removed legacy resend floored its stamp to whole seconds, and ApeX
+// verifies the primary canonical text, so it could only repeat the refusal.
 #[test]
-fn signed_read_signature_refusal_re_signs_once_then_fails() {
+fn signed_read_signature_refusal_fails_without_a_resend() {
     let (mut engine, _) = seeded();
     let first = command(
         &mut engine,
@@ -306,12 +307,11 @@ fn signed_read_signature_refusal_re_signs_once_then_fails() {
         Command::FetchAccount { command: COMMAND },
         None,
     );
-    let resent = reply(&mut engine, 21., &first.requests[0], SIGNATURE);
-    assert_eq!(resent.requests.len(), 1);
-    signed(&resent.requests[0], "/v3/account");
-    let failed = reply(&mut engine, 22., &resent.requests[0], SIGNATURE);
-    assert!(failed.requests.is_empty());
-    assert!(terminal(&failed, COMMAND).is_err());
+    signed(&first.requests[0], "/v3/account");
+    let failed = reply(&mut engine, 21., &first.requests[0], SIGNATURE);
+    assert!(failed.requests.is_empty(), "no resend after a refusal");
+    let error = terminal(&failed, COMMAND).unwrap_err();
+    assert!(error.message.contains("20016"), "{}", error.message);
 }
 
 // GREEN control: a signed GET survives three transport losses on the same
@@ -337,17 +337,15 @@ fn signed_read_transport_loss_retries_three_times_then_fails() {
     assert!(terminal(&failed, COMMAND).is_err());
 }
 
-// GREEN control: signed symbols keep the one native re-sign, then defer to
-// the startup backoff; a transport loss never retries inline.
+// Signed symbols defer a signature refusal or a transport loss to the
+// startup backoff; neither resends inline.
 #[test]
-fn signed_symbols_re_sign_once_and_never_transport_retry() {
+fn signed_symbols_never_resend_inline() {
     let mut refusal = engine(Some("pass"));
     refusal.start(0.);
     let first = drain(&mut refusal, 0.).requests.remove(0);
-    let resent = reply(&mut refusal, 1., &first, SIGNATURE);
-    assert_eq!(resent.requests.len(), 1);
-    signed(&resent.requests[0], "/v3/symbols");
-    let refused = reply(&mut refusal, 2., &resent.requests[0], SIGNATURE);
+    signed(&first, "/v3/symbols");
+    let refused = reply(&mut refusal, 1., &first, SIGNATURE);
     assert!(refused.requests.is_empty());
     assert!(
         refused
@@ -399,7 +397,7 @@ fn refused(engine: &mut TestEngine, now: f64) -> Output {
 }
 
 #[test]
-fn signature_resend_and_transport_retries_are_managed_attempts() {
+fn transport_retries_are_managed_attempts() {
     let (mut engine, _) = seeded();
     let first = command(
         &mut engine,
@@ -407,9 +405,8 @@ fn signature_resend_and_transport_retries_are_managed_attempts() {
         Command::FetchAccount { command: COMMAND },
         None,
     );
-    let resent = reply(&mut engine, 21., &first.requests[0], SIGNATURE);
-    managed(&resent, 1);
-    let mut output = transport_loss(&mut engine, 22., &resent.requests[0]);
+    managed(&first, 1);
+    let mut output = transport_loss(&mut engine, 22., &first.requests[0]);
     for attempt in 0..3 {
         managed(&output, 1);
         let request = output.requests.remove(0);
