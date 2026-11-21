@@ -1879,7 +1879,7 @@ impl BitunixFutures {
         if let Some((_, symbol, side, kind)) = job.kept.take() {
             let unknown = error.outcome == Some(Outcome::Unknown);
             let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
-            error.message = format!("{gone}: {}", error.message);
+            error.message = safe_cex_engine::error::with_detail(&gone, &error.message);
         }
     }
     // This observes existing identities only; the engine journal owns outcomes.
@@ -1920,12 +1920,7 @@ impl BitunixFutures {
                 if let Some((slot, context)) = &live.current {
                     let _ = cx.finish_plan_call(plan, slot, context);
                 }
-                // An Unknown cancel already ends with this guidance; noting it again doubles the action.
-                let failed = match live
-                    .note
-                    .as_deref()
-                    .filter(|note| !error.message.contains(note))
-                {
+                let failed = match &live.note {
                     Some(note) => cx.fail_plan_noted(plan, error, note),
                     None => cx.fail_plan(plan, error),
                 };

@@ -224,10 +224,16 @@ impl EvidenceBudget {
     /// Append a venue's terminal note within the same text budget.
     #[cfg(feature = "http-plans")]
     pub(super) fn note(&mut self, message: &mut String, note: &str) {
+        // Display only: a note part the presented message already carries would repeat it.
+        let note = note
+            .split("; ")
+            .filter(|part| !part.is_empty() && !message.contains(part))
+            .collect::<Vec<_>>()
+            .join("; ");
         if note.is_empty() {
             return;
         }
-        let note = self.text(note);
+        let note = self.text(&note);
         *message = format!("{message}; {note}").into_boxed_str().into_string();
     }
 
@@ -322,6 +328,32 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
 mod write_plan_tests {
     use super::*;
     use crate::write_plan::{Element, ElementResult, WritePlan};
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn a_terminal_note_adds_only_parts_the_presented_message_lacks() {
+        const GUIDANCE: &str =
+            "We couldn’t confirm this change. Check your open orders before trying again.";
+        let note = |message: &str, note: &str| {
+            let mut error = VenueError::new(message);
+            note_unprojected(&mut error, note);
+            error.message
+        };
+        let cancel = format!("Cancel not acknowledged. {GUIDANCE}");
+        assert_eq!(note(&cancel, GUIDANCE), cancel);
+        assert_eq!(
+            note(&cancel, &format!("lost read; {GUIDANCE}")),
+            format!("{cancel}; lost read")
+        );
+        assert_eq!(
+            note("Refused by the venue", "lost read"),
+            "Refused by the venue; lost read"
+        );
+        assert_eq!(
+            note("Refused by the venue", &format!("lost read; {GUIDANCE}")),
+            format!("Refused by the venue; lost read; {GUIDANCE}")
+        );
+    }
 
     #[test]
     fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {
