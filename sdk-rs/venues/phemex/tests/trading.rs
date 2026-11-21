@@ -4597,7 +4597,15 @@ fn protective_post_cancel_rate_pause_is_unknown_and_unprotected() {
         Some(safe_cex_engine::error::ErrorKind::RateLimited)
     );
     assert!(error.retry_after_ms.is_some_and(|ms| ms > 0.0));
-    assert!(error.message.contains("re-place"), "{}", error.message);
+    // An unknown replacement may have landed: check first, never "re-place" (#3726).
+    assert!(!error.message.contains("re-place"), "{}", error.message);
+    assert_eq!(
+        error.message.matches("Check your open orders").count(),
+        1,
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains(".;"), "{}", error.message);
     assert!(
         !error.message.contains("mutation was not sent"),
         "{}",

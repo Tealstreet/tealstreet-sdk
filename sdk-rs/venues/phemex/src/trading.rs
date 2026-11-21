@@ -2004,10 +2004,8 @@ impl PhemexPerpetuals {
         if job.protect.is_some()
             && let Some(gone) = job.gone_note(true)
         {
-            let _ = cx.present_plan_failure(
-                &job.plan,
-                format!("{gone}; check Open Orders and re-place it if missing"),
-            );
+            // The unconfirmed gone text already says to check before adding protection.
+            let _ = cx.present_plan_failure(&job.plan, gone);
         }
     }
 
@@ -2820,7 +2818,12 @@ impl PhemexPerpetuals {
         {
             error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
             error.presents = true;
-            error.message = format!("{gone}; please re-place it ({})", error.message);
+            // Only a declined replacement is safe to re-place; an unknown one may have landed.
+            error.message = if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                safe_cex_engine::error::with_detail(gone, &error.message)
+            } else {
+                format!("{gone}; please re-place it ({})", error.message)
+            };
         }
         if job.effective || !job.ids.is_empty() {
             error.outcome = None;

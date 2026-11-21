@@ -2504,7 +2504,7 @@ fn a_refused_put_back_is_unprotected_and_never_retried() {
     let out = actions(&mut e);
     let error = failure_of(&out);
     assert!(
-        error.message.contains("both refused") && error.message.contains("re-place"),
+        error.message.contains("the put-back was refused too") && error.message.contains("re-place"),
         "{}",
         error.message
     );
@@ -2591,7 +2591,7 @@ fn a_stop_that_filled_during_its_cancel_or_a_partly_filled_entry_leg_is_not_put_
         let out = actions(&mut e);
         let error = failure_of(&out);
         assert!(
-            error.message.contains("was removed") && error.message.contains("please re-place it"),
+            error.message.contains("has no stop") && error.message.contains("please re-place it"),
             "leg {leg}: {}",
             error.message
         );
@@ -2723,7 +2723,7 @@ fn a_put_back_is_one_attempt_on_the_wire() {
     let out = actions(&mut e);
     assert!(placements(&http(out.clone())).is_empty(), "never resent");
     let error = failure_of(&out);
-    assert!(error.message.contains("both refused"), "{}", error.message);
+    assert!(error.message.contains("the put-back was refused too"), "{}", error.message);
     assert_eq!(error.protection, Some(Protection::Unprotected));
 }
 
@@ -2780,9 +2780,9 @@ fn a_put_back_refused_before_sending_says_the_stop_was_removed() {
     let out = actions(&mut e);
     let error = failure_of(&out);
     assert!(
-        error.message.contains("was removed")
+        error.message.contains("has no stop")
             && error.message.contains("please re-place it")
-            && !error.message.contains("both refused"),
+            && !error.message.contains("the put-back was refused too"),
         "{}",
         error.message
     );
