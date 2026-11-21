@@ -23,6 +23,10 @@ fn clients(step: &Step) -> Vec<Option<String>> {
             }
             clients
         }
+        Step::Places(orders) => orders
+            .iter()
+            .map(|order| order.client_order_id.clone())
+            .collect(),
         Step::Cancel(orders) => orders
             .iter()
             .map(|order| order.client_order_id.clone())

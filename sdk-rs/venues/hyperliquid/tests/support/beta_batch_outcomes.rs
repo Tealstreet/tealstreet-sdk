@@ -364,11 +364,15 @@ fn beta_all_refused_rows_have_no_partial_ids_or_published_orders() {
 fn beta_prior_accepted_call_then_refusal_keeps_ids_and_unknown() {
     let (mut e, _) = ready("disabled");
     let order = opts(r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#);
+    // A standalone stop keeps the limit in a later write of its own: plain rows on one DEX
+    // share one action since feat/hyperliquid-batched-placements.
+    let stop =
+        opts(r#"{"symbol":"BTC-PERP","type":"stop_market","side":"sell","price":80,"amount":1}"#);
     e.handle(
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 81,
-            orders: vec![order.clone(), order],
+            orders: vec![stop, order],
         }),
     );
     let request = write(&mut e);
