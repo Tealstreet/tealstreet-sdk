@@ -3735,53 +3735,46 @@ export class HyperliquidExchange extends BaseExchange {
     //                     }
     //                 }
 
-    if (opts.stopLoss) {
-      orderWires.push(
-        orderRequestToOrderWire(
-          {
-            coin,
-            is_buy: opts.side !== OrderSide.Buy,
-            sz: orderSize,
-            limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-            order_type: {
-              trigger: {
-                isMarket: true,
-                tpsl: 'sl',
-                triggerPx: +this.priceToPrecision(market.symbol, opts.stopLoss),
-              },
-            },
-            reduce_only: this.resolveReduceOnly(market, true),
-            cloid: mintHyperliquidCloid(),
-          },
-          assetIndex,
-        ),
-      );
-    }
-
-    if (opts.takeProfit) {
-      orderWires.push(
-        orderRequestToOrderWire(
-          {
-            coin,
-            is_buy: opts.side !== OrderSide.Buy,
-            sz: orderSize,
-            limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-            order_type: {
-              trigger: {
-                isMarket: true,
-                tpsl: 'tp',
-                triggerPx: +this.priceToPrecision(market.symbol, opts.takeProfit),
-              },
-            },
-            reduce_only: this.resolveReduceOnly(market, true),
-            cloid: mintHyperliquidCloid(),
-          },
-          assetIndex,
-        ),
-      );
-    }
+    orderWires.push(...this.bracketLegWires(opts, market, coin, orderSize, opts.price || 0));
 
     return orderWires;
+  };
+
+  /**
+   * The SL/TP legs a limit or market entry carries under `normalTpsl`: reduce-only market
+   * triggers on the opposite side, each at the entry's size and limit price. A zero or absent
+   * price adds no leg. AGT-117: market entries dropped them until 2026-11-21.
+   */
+  private bracketLegWires = (opts: PlaceOrderOpts, market: Market, coin: string, size: number, limitPx: number) => {
+    const assetIndex = market.info.hyperliquidId;
+    const legs: OrderWire[] = [];
+    for (const [tpsl, triggerPx] of [
+      ['sl', opts.stopLoss],
+      ['tp', opts.takeProfit],
+    ] as const) {
+      if (!triggerPx) continue;
+      legs.push(
+        orderRequestToOrderWire(
+          {
+            coin,
+            is_buy: opts.side !== OrderSide.Buy,
+            sz: size,
+            limit_px: +this.priceToPrecision(market.symbol, limitPx),
+            order_type: {
+              trigger: {
+                isMarket: true,
+                tpsl,
+                triggerPx: +this.priceToPrecision(market.symbol, triggerPx),
+              },
+            },
+            reduce_only: this.resolveReduceOnly(market, true),
+            cloid: mintHyperliquidCloid(),
+          },
+          assetIndex,
+        ),
+      );
+    }
+    return legs;
   };
 
   placeLimitOrder = async (opts: PlaceOrderOpts, cloid: string = mintHyperliquidCloid()) => {
@@ -3969,13 +3962,16 @@ export class HyperliquidExchange extends BaseExchange {
       // would rest as a limit instead of crossing. Perps keep mark-first
       // (closer to oracle, avoids "price too far from oracle" rejections).
       const basePrice = this.getOrderBasePrice(market, 'market order');
+      const coin = symbolToCoin(market.symbol);
+      const size = adjust(opts.amount, nAmount);
+      const limitPx = basePrice * (opts.side === OrderSide.Buy ? 1.05 : 0.95);
 
       const orderWire = orderRequestToOrderWire(
         {
-          coin: symbolToCoin(market.symbol),
+          coin,
           is_buy: opts.side === OrderSide.Buy,
-          sz: adjust(opts.amount, nAmount),
-          limit_px: +this.priceToPrecision(market.symbol, basePrice * (opts.side === OrderSide.Buy ? 1.05 : 0.95)),
+          sz: size,
+          limit_px: +this.priceToPrecision(market.symbol, limitPx),
           order_type: {
             limit: {
               tif: 'Gtc' as any,
@@ -3986,11 +3982,16 @@ export class HyperliquidExchange extends BaseExchange {
         },
         assetIndex,
       );
+      // AGT-117: the entry is a marketable limit, so its legs group with it as a limit's do.
+      const orderWires = [orderWire, ...this.bracketLegWires(opts, market, coin, size, limitPx)];
 
       // Get builder info if wallet is approved for builder fee
       const builderInfo = await this.getBuilderInfo();
 
-      const action = orderWiresToOrderAction([orderWire], builderInfo);
+      const action =
+        orderWires.length > 1
+          ? orderWiresToNormalTPSLAction(orderWires, builderInfo)
+          : orderWiresToOrderAction(orderWires, builderInfo);
 
       const nonce = this.generateNonce();
       const signature = await signL1Action(
@@ -4003,7 +4004,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
       // A market order is a Gtc limit at 5% slippage; an unfilled remainder rests as one.
-      this.recordPlacement([orderWire], market.symbol);
+      this.recordPlacement(orderWires, market.symbol);
       const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
