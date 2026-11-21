@@ -630,9 +630,6 @@ export class PolymarketExchange extends BaseExchange {
     };
   }
 
-  /**
-   * Place an order
-   */
   // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
@@ -641,6 +638,9 @@ export class PolymarketExchange extends BaseExchange {
     return orderIds.flat();
   };
 
+  /**
+   * Place an order
+   */
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
     if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
