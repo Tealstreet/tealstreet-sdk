@@ -294,18 +294,57 @@ const LIST_READS = new Set([
   'validatorStats',
 ]);
 
+const MINUTE_MS = 60_000;
+const DAY_MS = 1440 * MINUTE_MS;
+// Hyperliquid's 1M candle is a fixed, epoch-aligned 30-day bucket, not a calendar month.
+const CANDLE_STEP_MS = new Map([
+  ['1m', MINUTE_MS],
+  ['3m', 3 * MINUTE_MS],
+  ['5m', 5 * MINUTE_MS],
+  ['15m', 15 * MINUTE_MS],
+  ['30m', 30 * MINUTE_MS],
+  ['1h', 60 * MINUTE_MS],
+  ['2h', 120 * MINUTE_MS],
+  ['4h', 240 * MINUTE_MS],
+  ['8h', 480 * MINUTE_MS],
+  ['12h', 720 * MINUTE_MS],
+  ['1d', DAY_MS],
+  ['3d', 3 * DAY_MS],
+  ['1w', 7 * DAY_MS],
+  ['1M', 30 * DAY_MS],
+]);
+
+// A full reply was seen past 5,000 rows (5,182), so the cap is 6,000 rows: 120 weight.
+const MAX_CANDLE_ROWS = 6000;
+const MAX_CANDLE_WEIGHT = 20 + MAX_CANDLE_ROWS / 60;
+
+/**
+ * 20 plus one per 60 candles, from the span the body asks for: both boundary candles
+ * are returned, so at most ceil(span/step)+1. A flat 104 queued a chart's 330-bar reads
+ * ~15 s each (AGT-113); an unreadable body reserves the maximum.
+ */
+function candleSnapshotWeight(req: unknown): number {
+  const { interval, startTime, endTime } = (req ?? {}) as Record<string, unknown>;
+  const step = typeof interval === 'string' ? CANDLE_STEP_MS.get(interval) : undefined;
+  if (!step || typeof startTime !== 'number' || typeof endTime !== 'number') return MAX_CANDLE_WEIGHT;
+  const span = endTime - startTime;
+  if (!Number.isFinite(span) || span < 0) return MAX_CANDLE_WEIGHT;
+  return 20 + Math.ceil(Math.min(MAX_CANDLE_ROWS, Math.ceil(span / step) + 1) / 60);
+}
+
 export function hyperliquidInfoWeight(body: string | undefined): number {
-  let type: unknown;
+  let parsed: { type?: unknown; req?: unknown };
   try {
-    type = JSON.parse(body ?? '{}').type;
+    parsed = JSON.parse(body ?? '{}') ?? {};
   } catch {
     return 20;
   }
+  const type = parsed.type;
   if (type === 'userRole') return 60;
   if (typeof type === 'string' && LOW_WEIGHT.has(type)) return 2;
-  // Reserve the SDK's maximum 2,000-row history page or 5,000-candle reply before sending.
+  // Reserve the SDK's maximum 2,000-row history page before sending.
   if (typeof type === 'string' && LIST_READS.has(type)) return 120;
-  if (type === 'candleSnapshot') return 104;
+  if (type === 'candleSnapshot') return candleSnapshotWeight(parsed.req);
   return 20;
 }
 

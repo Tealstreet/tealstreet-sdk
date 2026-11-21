@@ -478,13 +478,14 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         body: String,
+        weight: u32,
         read: Box<crate::ManagedCandleRead>,
     ) {
         self.account.reads.push_back(QueuedRead {
             body,
             continuation: ReadContinuation::Candles(read),
             streamed: true,
-            weight: 104,
+            weight,
             priority: ReadPriority::Bulk,
         });
         self.pump_reads(cx);

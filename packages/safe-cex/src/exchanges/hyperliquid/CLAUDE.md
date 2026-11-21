@@ -109,6 +109,14 @@ Both classes may use the same 200-weight reserve. Caller history and candles are
 ceiling, leaving 200 for critical work within the same total. Native and shared
 queues keep FIFO within each class, and native refill is continuous. Queued
 candles retain their original 20 s bound, shortened by a smaller caller wait.
+**A candle read reserves its requested span, not the venue maximum**: 20 plus one
+per 60 candles, counting ceil(span/step)+1 because both boundary candles return
+(`1M` is a fixed, epoch-aligned 30-day bucket, not a calendar month). The cap is
+6,000 rows (120), not 5,000: a full 1m reply was observed at 5,182 rows. Both the
+native queue and the shared host budget derive it from the sent `startTime`/`endTime`;
+an unreadable body reserves 120. Until AGT-113 every read reserved 104, about four
+times a 330-bar chart read's real cost, so a chart's first reads queued ~15 s each
+behind each other (Sentry E6Z).
 Startup-only fees/builder wait for pending financial reads before their managed
 20 s deadline starts. A live placement may release its queued builder check;
 this does not promote it to critical. Catalogue completion refreshes its own DEX,
