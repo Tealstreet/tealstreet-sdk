@@ -803,6 +803,14 @@ impl Okx {
         {
             return Err("Implied volatility is supported only for options".into());
         }
+        // AGT-115: legs are derived only after a limit/market entry; an algo entry
+        // would be placed without them, so refuse the whole command before any write.
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(stop_entry_legs_refusal("OKX"));
+        }
         let mut seen = HashSet::new();
         for o in &orders {
             let m = cx

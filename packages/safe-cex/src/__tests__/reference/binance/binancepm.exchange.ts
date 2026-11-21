@@ -58,6 +58,7 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { markBinanceOrdersCanceled } from './binance.utils';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import { BinancePMPrivateWebsocket } from './binancepm.ws-private';
@@ -893,6 +894,11 @@ export class BinancePMExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
     this.assertCallerClientOrderIds(orders);
+    // AGT-115: as Rust's shared Binance `format_order`, refuse a trailing or conditional
+    // entry with attached legs rather than place it unprotected.
+    const dropsLegs = (o: PlaceOrderOpts) =>
+      (o.type === OrderType.TrailingStopLoss || o.type === OrderType.Conditional) && stopEntryWithAttachedLegs(o);
+    if (orders.some(dropsLegs)) this.rejectPreflight(stopEntryLegsRefusal('Binance'));
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };

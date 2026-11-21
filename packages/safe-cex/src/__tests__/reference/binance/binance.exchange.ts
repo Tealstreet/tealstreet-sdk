@@ -75,6 +75,7 @@ import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
 import { mapBinanceHistoricalOrder } from './binance.order-history';
@@ -1760,6 +1761,12 @@ export class BinanceExchange extends BaseExchange {
     this.assertCallerClientOrderIds(orders);
     const allRegular: any[] = [];
     const allAlgo: any[] = [];
+
+    // AGT-115: a trailing entry returns before its legs are formatted; refuse, as Rust does
+    // for trailing and conditional entries, instead of placing it unprotected.
+    const dropsLegs = (o: PlaceOrderOpts) =>
+      (o.type === OrderType.TrailingStopLoss || o.type === OrderType.Conditional) && stopEntryWithAttachedLegs(o);
+    if (orders.some(dropsLegs)) this.rejectPreflight(stopEntryLegsRefusal('Binance'));
 
     for (const o of orders) {
       const { regular, algo } = this.formatCreateOrder(o);
