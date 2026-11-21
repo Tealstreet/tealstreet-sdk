@@ -59,6 +59,11 @@ export function externallyImportedVenues(sources) {
   return imported;
 }
 
+// AGENTS.md: write paths must RUN combined consumers, never merely select it out.
+// Venue crates, the Rust bridge, and the safe-cex tests that drive it (#3521/#3523);
+// `*.wasm.test.*` run only in that job.
+const WRITE_PATH = /^(?:sdk-rs\/venues\/|packages\/safe-cex\/src\/(?:exchanges\/rust\/|__tests__\/(?:.*\/)?rust\.|.*\.wasm\.test\.))/;
+
 export function selectCi({ paths, manifests, full = false, documents = { paths: new Set(), unresolved: false }, externalImports = new Set() }) {
   if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string' || !path || path.startsWith('/') || path.split('/').includes('..')))
     throw new Error('Invalid changed paths');
@@ -70,6 +75,7 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
       if (documents.unresolved || documents.paths.has(path)) { full = true; reasons.push(`Rust include: ${path}`); }
       continue;
     }
+    if (WRITE_PATH.test(path)) consumerTests = true;
     const venue = /^sdk-rs\/venues\/([^/]+)\/(.*)$/.exec(path);
     if (venue) {
       try { crateFamily(venue[1]); } catch { full = true; reasons.push(path); continue; }
