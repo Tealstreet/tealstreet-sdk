@@ -4,6 +4,7 @@
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::VenueError;
 use serde_json::{Map, Value, json};
+use std::time::Instant;
 
 /// The account a command acts on.
 #[derive(Clone, Debug, Default)]
@@ -422,7 +423,43 @@ pub fn line(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value)
 }
 
 pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) {
-    println!("{}", line(who, origin, fields, result));
+    let line = line(who, origin, fields, result).to_string();
+    println!("{line}");
+    #[cfg(test)]
+    crate::state::log_capture::record(&line);
+}
+
+/// Stage names in pipeline order, as they appear under `stages_us`.
+pub const STAGES: [&str; 6] = [
+    "received",
+    "admitted",
+    "queued",
+    "sent",
+    "responded",
+    "replied",
+];
+
+/// Monotonic stamps for one audited command, in `STAGES` order.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Stages {
+    pub received: Option<Instant>,
+    pub admitted: Option<Instant>,
+    pub queued: Option<Instant>,
+    pub sent: Option<Instant>,
+    pub responded: Option<Instant>,
+    pub replied: Option<Instant>,
+}
+
+impl Stages {
+    pub fn offsets(&self) -> Option<Value> {
+        None
+    }
+}
+
+pub(crate) fn note_typed_outcome(_outcome: &Value) {}
+
+pub fn typed_outcomes() -> Value {
+    json!({})
 }
 
 #[cfg(test)]
@@ -538,6 +575,92 @@ mod tests {
             "a clear too"
         );
         assert!(ORDER_METHODS.contains(&"scheduleCancel"));
+    }
+
+    #[test]
+    fn stage_offsets_are_integer_microseconds_from_the_first_stamp_in_pipeline_order() {
+        let origin = Instant::now();
+        let at = |us: u64| Some(origin + std::time::Duration::from_micros(us));
+        let stages = Stages {
+            received: at(0),
+            admitted: at(120),
+            queued: at(135),
+            sent: at(900),
+            responded: at(45_000),
+            replied: at(45_100),
+        };
+        let offsets = stages.offsets().expect("a stamped command has offsets");
+        assert_eq!(
+            offsets,
+            json!({"received":0,"admitted":120,"queued":135,"sent":900,"responded":45000,"replied":45100})
+        );
+        let keys: Vec<&str> = offsets
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut ordered = keys.clone();
+        ordered.sort_by_key(|key| STAGES.iter().position(|stage| stage == key));
+        assert_eq!(keys, ordered, "serialized in pipeline order");
+    }
+
+    #[test]
+    fn unobserved_stages_are_omitted_and_the_origin_falls_back_to_admission() {
+        let origin = Instant::now();
+        let at = |us: u64| Some(origin + std::time::Duration::from_micros(us));
+        // No socket frame (received) and no native write identity (sent).
+        let stages = Stages {
+            admitted: at(0),
+            queued: at(40),
+            responded: at(3_000),
+            replied: at(3_050),
+            ..Stages::default()
+        };
+        assert_eq!(
+            stages.offsets().unwrap(),
+            json!({"admitted":0,"queued":40,"responded":3000,"replied":3050})
+        );
+        assert!(Stages::default().offsets().is_none());
+    }
+
+    #[test]
+    fn a_stamped_line_stays_bounded_and_carries_only_integer_offsets() {
+        let origin = Instant::now();
+        let late = Some(origin + std::time::Duration::from_secs(86_400 * 365));
+        let stages = Stages {
+            received: Some(origin),
+            admitted: late,
+            queued: late,
+            sent: late,
+            responded: late,
+            replied: late,
+        };
+        let mut fields =
+            command(&json!({"op":"cancelOrders","command":3,"ids":["o-1"],"secret":"s"})).unwrap();
+        fields.insert("stages_us".into(), stages.offsets().unwrap());
+        let stamped_line = line(&who(), "socket:1/client:2", &fields, "ok".into());
+        let stamped = stamped_line.to_string();
+        let offsets = stamped_line["stages_us"].as_object().unwrap();
+        assert_eq!(offsets.len(), STAGES.len());
+        assert!(offsets.values().all(Value::is_u64));
+        fields.remove("stages_us");
+        let bare = line(&who(), "socket:1/client:2", &fields, "ok".into()).to_string();
+        assert!(stamped.len() - bare.len() < 160, "stage fields stay small");
+        assert!(!stamped.contains("secret"));
+    }
+
+    #[test]
+    fn typed_outcomes_count_settled_and_unknown_receipts() {
+        let before = typed_outcomes();
+        for outcome in ["placed", "applied", "refused", "unknown", "unknown"] {
+            note_typed_outcome(&json!(outcome));
+        }
+        let after = typed_outcomes();
+        let delta = |key: &str| after[key].as_u64().unwrap() - before[key].as_u64().unwrap();
+        // Other tests settle receipts concurrently; this test's own five are a floor.
+        assert!(delta("settled") >= 5);
+        assert!(delta("unknown") >= 2);
     }
 
     fn who() -> Who {
