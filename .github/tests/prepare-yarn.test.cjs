@@ -145,7 +145,7 @@ test('all Yarn jobs prepare before probing caches or installing', () => {
       assert.equal(job.match(/uses: \.\/\.github\/actions\/prepare-yarn/g)?.length, 1, file);
     }
   }
-  assert.deepEqual(jobs, ['ci.yml:ci', 'rust.yml:harness', 'rust.yml:families',
+  assert.deepEqual(jobs, ['ci.yml:checks', 'rust.yml:harness', 'rust.yml:families',
     'rust.yml:combined', 'rust.yml:browser', 'rust.yml:replay', 'rust.yml:replay-native-consumers', 'rust.yml:replay-consumers', 'rust.yml:gate', 'exchange-mcp-release.yml:release']);
   const rust = readFileSync(join(root, '.github/workflows/rust.yml'), 'utf8');
   assert.equal(rust.match(/'\.github\/actions\/prepare-yarn\/\*\*'/g)?.length, 1, 'helper changes must be in the Rust push and PR scope');
