@@ -50,6 +50,11 @@ in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
 
+A reduce-only or `close` order carrying a non-zero stop-loss or take-profit is refused
+`NotSent` by the engine, for every venue, before any lock, fence or venue sees it
+(`PlaceOrderOpts::reduce_only_with_attached_legs`, AGT-120). The TS reference mirrors it in
+every `placeOrder`/`placeOrders` with `reduceOnlyWithAttachedLegs`.
+
 Lighter placements complete only on venue proof (an `accountOrders` row or a
 failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
 modify, completed only by its executed `tx`. A failed or unproven transaction
