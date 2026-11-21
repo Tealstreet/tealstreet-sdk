@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from 'vitest';
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
 import { delegatedIntentFingerprint } from '../delegatedOrderFrames';
-import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
+import {
+  createDelegatedIntentId,
+  DELEGATED_ACKNOWLEDGED_MAX_AGE_MS,
+  DelegatedOutbox,
+  markDelegatedNotSent,
+} from '../delegatedOutbox';
 import { DelegatedOutbox as LegacyOutbox } from './fixtures/delegatedOutbox.7232375420';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
@@ -825,6 +830,69 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(box.entries()[0].state).toBe('unknown');
     await box.flush(c);
     expect([...f.rows.values()][0].state).toBe('unknown');
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  // AGT-125: a box-ACKed intent waits in the venue's pacing queue; that wait is not the
+  // ten-second admission budget, so it keeps waiting for the real outcome up to its own bound.
+  it.each(['placement', 'action'] as const)(
+    'keeps an acknowledged %s waiting past the admission budget until its outcome',
+    async (kind) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect({
+        ...f.connection(),
+        capabilities: {
+          delegatedOrderFramesV1: true,
+          delegatedOrderLedgerV1: true,
+          delegatedOrderActionsV1: true,
+          delegatedOrderActionLedgerV1: true,
+        },
+      });
+      const id =
+        kind === 'placement'
+          ? await box.enqueue(params)
+          : await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-1', symbol: 'BTCUSDT' } });
+      f.advance(400);
+      await box.receive(
+        c,
+        response(id, kind === 'placement' ? 'order.ack' : 'order.actionAck', { version: 1, received: true }),
+      );
+      expect(box.entries()[0].state).toBe('acknowledged');
+      f.advance(25_000);
+      expect(box.entries()[0].state).toBe('acknowledged');
+      await box.receive(
+        c,
+        kind === 'placement'
+          ? response(id, 'order.outcome', {
+              outcome: 'placed',
+              venueOrderId: 'venue-2',
+              clientOrderId: id,
+              error: null,
+            })
+          : response(id, 'order.actionOutcome', {
+              version: 1,
+              outcome: 'applied',
+              result: { kind: 'cancel' },
+              error: null,
+            }),
+      );
+      expect(box.entries()[0].state).toBe(kind === 'placement' ? 'placed' : 'applied');
+      expect(f.writes).toHaveLength(1);
+      box.close();
+    },
+  );
+  it('bounds an acknowledged intent by DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, then unknown without a replay', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS - 1);
+    expect(box.entries()[0].state).toBe('acknowledged');
+    f.advance(1);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    await box.flush(c);
     expect(f.writes).toHaveLength(1);
     box.close();
   });

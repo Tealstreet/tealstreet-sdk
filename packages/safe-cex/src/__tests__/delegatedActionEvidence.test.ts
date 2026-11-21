@@ -4,7 +4,7 @@ import type { DelegatedIntent, OutboxConnection, OutboxOptions } from '../delega
 import { describe, expect, it } from 'vitest';
 
 import { delegatedActionFingerprint } from '../delegatedActions';
-import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
+import { createDelegatedIntentId, DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, DelegatedOutbox } from '../delegatedOutbox';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
 function fixture(owner = 'alice', rows = new Map<string, DelegatedIntent>()) {
@@ -371,8 +371,13 @@ describe('action writes share the handoff evidence model', () => {
         d: { version: 1, accountName: 'main', instanceId: 'registration', intentId: id, seq: 1, received: true },
       });
       expect(box.entries()[0].state).toBe('acknowledged');
+      // AGT-125: an ACKed action outlives the 10 s admission budget (it waits in the
+      // venue queue) and becomes unknown at its own bound, never notSent or resent.
       f.advance(10_000);
+      expect(box.entries()[0].state).toBe('acknowledged');
+      f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS - 10_000);
       expect(box.entries()[0].state).toBe('unknown');
+      expect(f.writes).toHaveLength(1);
       box.close();
     },
   );
