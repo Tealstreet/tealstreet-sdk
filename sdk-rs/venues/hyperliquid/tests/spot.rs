@@ -353,8 +353,9 @@ fn spot_currency_valuation_resolves_native_token_id_aliases() {
 fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     let (mut e, _) = ready(true);
     e.drain_plain().for_each(drop);
+    // AGT-120: a reduce-only order may not carry legs (the engine refuses it), so the legs
+    // ride on an opening entry here; spot wires are still never reduce-only.
     let mut o = order("HFUN/USDC");
-    o.reduce_only = Some(true);
     o.stop_loss = Some(0.0008);
     o.take_profit = Some(0.0012);
     o.time_in_force = Some(TimeInForce::PostOnly);

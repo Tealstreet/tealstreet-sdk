@@ -103,7 +103,7 @@ fn legacy_split_preserves_attachments_and_distinct_ids() {
     let mut intent = order(12.0);
     intent["takeProfit"] = json!(65000.04);
     intent["stopLoss"] = json!(55000.04);
-    intent["reduceOnly"] = json!(true);
+    // AGT-120: a reduce-only order may not carry legs, so the split is checked opening.
     place(&mut h, json!([intent]));
     let rows = accept_batch(&mut h, 100);
     // KNOWN-ISSUE: legacy TS under-allocates (sum 11 of requested 12); kept for exact TS parity per Sam's decision
@@ -117,7 +117,7 @@ fn legacy_split_preserves_attachments_and_distinct_ids() {
     let mut ids = std::collections::HashSet::new();
     for (row, size) in rows.into_iter().zip(["3", "3", "3", "2"]) {
         assert_eq!(row["size"], size);
-        assert_eq!(row["reduceOnly"], true);
+        assert_ne!(row["reduceOnly"], true);
         assert_eq!(row["attachAlgoOrders"][0]["tpTriggerPrice"], "65000");
         assert_eq!(row["attachAlgoOrders"][0]["slTriggerPrice"], "55000");
         assert!(ids.insert(row["clientOrderId"].clone().to_string()));
