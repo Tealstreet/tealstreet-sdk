@@ -60,7 +60,7 @@ async fn delegated_algo_amend_never_bypasses_the_typed_ledger_with_a_legacy_mess
             let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":op,"data":{"id":"missing","update":{"size":2}}}}).to_string()).await.unwrap();
-            let error = action_frame(&mut sent, "error").await;
+            let error = msg_error_frame(&mut sent).await;
             assert!(error.to_string().contains("DelegatedActionUnavailable"), "{error}");
             assert!(tape.writes.lock().unwrap().is_empty());
             assert!(account.running.jobs().0.is_empty());
@@ -88,6 +88,21 @@ async fn action_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
     })
     .await
     .expect("bounded native action receipt")
+}
+
+// Session refusals are `{t:"msg",d:{op:"error"}}`, not a top-level frame kind.
+async fn msg_error_frame(sent: &mut crate::out::Receiver) -> Value {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["t"] == "msg" && frame["d"]["op"] == "error" {
+                return frame;
+            }
+        }
+        panic!("missing session error")
+    })
+    .await
+    .expect("bounded session error")
 }
 
 fn native_request_rows(tape: &Tape, suffix: &str) -> Vec<Value> {
