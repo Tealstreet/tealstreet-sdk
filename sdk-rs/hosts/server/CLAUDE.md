@@ -402,7 +402,8 @@ exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live
 Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
 Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
 entry (and an OKX stop-type one) with legs counts none: OKX, Binance USD-M/PM and Kraken
-refuse it before any write (AGT-115; OKX and Binance used to drop the legs).
+refuse it before any write (AGT-115; OKX and Binance used to drop the legs). Ten more
+adapters refuse the entry kinds whose legs they would drop; `delegated-order-frames.md` lists them.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add

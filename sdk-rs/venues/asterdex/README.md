@@ -115,3 +115,9 @@ and unsent suffix in the journal, standard Check Open Orders guidance and a
 Unknown is pending an engine hook in a later engine PR; halt, canonical engine
 wording and journal coverage remain pinned. Definite refusals keep the TS
 continuation behavior.
+
+## Stop-entry brackets (AGT-115)
+
+`plan_place_inner` builds stop-loss/take-profit legs only after a limit/market entry, as
+the TS reference does. Any other entry with a non-zero attached leg used to be placed with
+its legs cleared; the whole command now refuses before any write with the engine's shared `stop_entry_legs_refusal` copy.

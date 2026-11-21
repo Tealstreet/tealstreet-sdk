@@ -193,3 +193,11 @@ Historical fills preserve the signed `execFee`: positive is a cost and negative
 is a maker rebate. The transaction-log income row uses the opposite cash-flow
 sign. Missing, empty or invalid execution fees stay absent; an explicitly
 reported zero remains zero. Timestamps, pagination and order identity are unchanged.
+
+## Stop-entry brackets (AGT-115)
+
+A trailing stop, and a stop/take-profit that closes a covering position, go to
+`/v5/position/trading-stop` with only their own price, so attached legs were dropped (both
+live, 2026-11-21). `ordinary_gate` now refuses any stop, take-profit or trailing entry with a
+non-zero leg before any I/O, on every variant, with the engine's shared `stop_entry_legs_refusal` copy (`HyroTrader` names Hyro). A
+`conditional` entry still carries its legs natively in the create body.
