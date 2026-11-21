@@ -1177,7 +1177,7 @@ impl Trading {
                             )
                     });
                 let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
-                message = format!("{lost}: {message}");
+                message = safe_cex_engine::error::with_detail(&lost, &message);
             }
             let native = if half_refused {
                 Some(Native {

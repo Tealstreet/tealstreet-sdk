@@ -1477,7 +1477,7 @@ impl Trading {
                     error.message = if error.message.is_empty() {
                         gone
                     } else {
-                        format!("{gone}: {}", error.message)
+                        safe_cex_engine::error::with_detail(&gone, &error.message)
                     };
                     error.protection =
                         (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);

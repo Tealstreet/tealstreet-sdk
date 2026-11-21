@@ -909,6 +909,30 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// Adds native `detail` after what happened, keeping a trailing action sentence
+/// last: joining after the action would read "…again.: detail".
+pub fn with_detail(text: &str, detail: &str) -> String {
+    let guided = detail.contains("Check your open orders") || detail.contains("Check Open Orders");
+    match text.split_once(". Check ") {
+        // The detail already ends with its own action: one is enough.
+        Some((what, _)) if guided => format!("{what}: {detail}"),
+        Some((what, action)) => format!("{what}: {}. Check {action}", detail.trim_end_matches('.')),
+        None => format!("{text}: {detail}"),
+    }
+}
+
+/// A declined replacement whose put-back of the original is unconfirmed: the
+/// decline is fact, only the restore is uncertain, and the action comes last.
+pub fn restore_unconfirmed_text(declined: &str, unknown: &str, detail: &str) -> String {
+    let action = unknown
+        .split_once(". Check ")
+        .map_or(String::new(), |(_, action)| format!(" Check {action}"));
+    format!(
+        "{declined}; restoring the original wasn’t confirmed: {}.{action}",
+        detail.trim_end_matches('.')
+    )
+}
+
 /// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
 pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
     if unknown {
@@ -1234,5 +1258,42 @@ mod venue_message_tests {
         );
         #[cfg(target_pointer_width = "64")]
         assert!(std::mem::size_of::<(Box<()>, VenueError)>() < 128);
+    }
+}
+
+#[cfg(test)]
+mod gone_detail_tests {
+    use super::*;
+
+    #[test]
+    fn detail_sits_before_the_action_and_never_after_its_full_stop() {
+        let unknown = order_gone_text("BTCUSDT", true);
+        assert_eq!(
+            with_detail(&unknown, "HTTP 502."),
+            "Your BTCUSDT order was cancelled, but its replacement wasn’t confirmed: HTTP 502. Check your open orders before trying again."
+        );
+        let declined = order_gone_text("BTCUSDT", false);
+        assert_eq!(
+            with_detail(&declined, "insufficient margin"),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin"
+        );
+        assert_eq!(
+            restore_unconfirmed_text(
+                &with_detail(&declined, "insufficient margin"),
+                &unknown,
+                "timeout"
+            ),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin; restoring the original wasn’t confirmed: timeout. Check your open orders before trying again."
+        );
+        for text in [&unknown, &declined] {
+            assert!(!with_detail(text, "x").contains(".:"));
+        }
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            with_detail(&unknown, guided)
+                .matches("Check your open orders")
+                .count(),
+            1
+        );
     }
 }

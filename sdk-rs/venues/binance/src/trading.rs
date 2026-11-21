@@ -769,7 +769,10 @@ impl BinanceFutures {
                     Ok(plan) => job.steps.extend(plan.steps),
                     Err(error) => {
                         job.planning_error = Some(match job.gone_text(false) {
-                            Some(gone) => VenueError::new(format!("{gone}: {error}")),
+                            Some(gone) => VenueError::new(safe_cex_engine::error::with_detail(
+                                &gone,
+                                &error.to_string(),
+                            )),
                             None => error.into(),
                         });
                     }
@@ -1393,14 +1396,25 @@ impl BinanceFutures {
                     .get(&command)
                     .and_then(|job| job.restoring.clone());
                 let told = match (&gone, &restoring) {
-                    (Some(gone), Some(refusal)) if refused => {
-                        format!("{gone}: {refusal}; putting it back failed too: {message}")
-                    }
-                    // The put-back itself may have landed: no claim either way.
+                    (Some(gone), Some(refusal)) if refused => safe_cex_engine::error::with_detail(
+                        gone,
+                        &format!("{refusal}; putting it back failed too: {message}"),
+                    ),
+                    // The replacement was declined; only the put-back may have landed.
                     (Some(gone), Some(refusal)) => {
-                        format!("{gone}: {refusal}; restoring the previous order wasn’t confirmed")
+                        let declined = self
+                            .trading
+                            .jobs
+                            .get(&command)
+                            .and_then(|job| job.gone_text(false))
+                            .unwrap_or_default();
+                        safe_cex_engine::error::restore_unconfirmed_text(
+                            &safe_cex_engine::error::with_detail(&declined, refusal),
+                            gone,
+                            &message,
+                        )
                     }
-                    (Some(gone), None) => format!("{gone}: {message}"),
+                    (Some(gone), None) => safe_cex_engine::error::with_detail(gone, &message),
                     _ => message.clone(),
                 };
                 // Only a proven refusal of a stop's replacement puts the old stop back, once;

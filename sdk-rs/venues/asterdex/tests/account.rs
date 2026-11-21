@@ -1838,8 +1838,11 @@ const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
 /// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &H) {
     let error = result(h, 991).as_ref().unwrap_err();
+    // Native detail sits between what happened and the single action (#3726).
     assert!(
-        error.contains("wasn’t confirmed. Check your open orders") || error.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."),
+        (error.contains("wasn’t confirmed")
+            || error.contains("The exchange reply didn’t confirm this change."))
+            && error.matches("Check your open orders").count() == 1,
         "{error}"
     );
     let words = error.to_ascii_lowercase();

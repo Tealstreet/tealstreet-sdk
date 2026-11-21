@@ -2079,7 +2079,7 @@ impl Lighter {
             } else {
                 safe_cex_engine::error::order_gone_text(&old.symbol, unknown)
             };
-            error.message = format!("{gone}: {}", error.message);
+            error.message = safe_cex_engine::error::with_detail(&gone, &error.message);
         }
         error
     }

@@ -907,8 +907,9 @@ fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
 /// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
+    // Native detail sits between what happened and the single action (#3726).
     assert!(
-        error.contains("wasn’t confirmed. Check your open orders"),
+        error.contains("wasn’t confirmed") && error.matches("Check your open orders").count() == 1,
         "{error}"
     );
     let words = error.to_ascii_lowercase();

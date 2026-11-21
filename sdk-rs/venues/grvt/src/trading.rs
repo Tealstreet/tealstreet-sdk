@@ -1676,7 +1676,7 @@ impl Grvt {
             } else {
                 safe_cex_engine::error::order_gone_text(&order.symbol, unknown)
             };
-            format!("{gone}: {message}")
+            safe_cex_engine::error::with_detail(&gone, &message)
         } else {
             message
         };

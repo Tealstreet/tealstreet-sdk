@@ -1572,15 +1572,23 @@ impl BybitLinear {
                             protection: (!unknown)
                                 .then_some(safe_cex_engine::error::Protection::Unprotected),
                             presents: true,
+                            // An unknown put-back still follows a declined replacement.
                             ..VenueError::new(if unknown {
-                                format!(
-                                    "{gone}: {refusal}; restoring the original wasn’t confirmed: {}",
-                                    error.message
+                                let declined = safe_cex_engine::error::stop_gone_text(
+                                    symbol, *side, *kind, false,
+                                );
+                                safe_cex_engine::error::restore_unconfirmed_text(
+                                    &safe_cex_engine::error::with_detail(&declined, refusal),
+                                    &gone,
+                                    &error.message,
                                 )
                             } else {
-                                format!(
-                                    "{gone}: {refusal}; putting it back failed too: {}",
-                                    error.message
+                                safe_cex_engine::error::with_detail(
+                                    &gone,
+                                    &format!(
+                                        "{refusal}; putting it back failed too: {}",
+                                        error.message
+                                    ),
                                 )
                             })
                         };

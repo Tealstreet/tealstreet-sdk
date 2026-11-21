@@ -1214,8 +1214,8 @@ fn trading_failure(mut error: VenueError, partial: bool) -> VenueError {
         && !error.message.contains("Check your open orders")
     {
         error.message = format!(
-            "Kraken didn’t confirm this change. Check your open orders before trying again.: {}",
-            error.message
+            "Kraken didn’t confirm this change: {}. Check your open orders before trying again.",
+            error.message.trim_end_matches('.')
         );
     }
     error
