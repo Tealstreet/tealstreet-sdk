@@ -8155,4 +8155,3 @@ fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
         }
     }
 }
-
