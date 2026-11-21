@@ -121,6 +121,17 @@ export interface OutboxConnection extends OutboxScope {
 }
 
 const MAX_AGE_MS = 10_000;
+/**
+ * How long a handed-off intent may await its router/box receipt: both admit a key until it
+ * is 10 s old by their own clocks (5 s future tolerance), plus transit (AGT-125).
+ */
+export const DELEGATED_RECEIPT_MAX_AGE_MS = 20_000;
+/**
+ * How long a box-ACKed intent may await its outcome: the receipt bound + the engine's 120 s
+ * command wait + one 20 s venue write attempt (AGT-125). Exported for hosts before the outbox
+ * adopts it; `delegatedOutboxBounds.test.ts` pins both to the Rust limits.
+ */
+export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 160_000;
 const MAX_PENDING = 1024;
 const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;

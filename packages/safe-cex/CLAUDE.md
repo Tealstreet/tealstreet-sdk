@@ -221,7 +221,10 @@ encoding compares the exact original intent bits; foreign/numeric IDs and idless
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
 and admission waits), a never-forwarded queued intent becomes `notSent`; an
-in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+in-flight or acknowledged intent becomes `unknown`. `DELEGATED_RECEIPT_MAX_AGE_MS` (20 s) and
+`DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s) are exported for hosts' RPC timers ahead of
+the outbox adopting them for handed-off intents (AGT-125); `delegatedOutboxBounds.test.ts`
+pins them to the box's key-age, future-tolerance and command-wait limits. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
