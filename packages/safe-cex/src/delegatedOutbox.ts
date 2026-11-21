@@ -36,7 +36,16 @@ const delegatedReplayBrand = Symbol('delegatedReplay');
 type ProvenNotSent = 'notSent' & { readonly [delegatedNotSentBrand]: true };
 export type DelegatedReplayableIntent = DelegatedIntent & { readonly [delegatedReplayBrand]: true };
 export type IntentState =
-  'queued' | 'sending' | 'acknowledged' | 'applied' | 'placed' | 'refused' | 'unsupported' | 'unknown' | ProvenNotSent | 'canceled';
+  | 'queued'
+  | 'sending'
+  | 'acknowledged'
+  | 'applied'
+  | 'placed'
+  | 'refused'
+  | 'unsupported'
+  | 'unknown'
+  | ProvenNotSent
+  | 'canceled';
 
 export type DelegatedNotSentEvidence =
   | { kind: 'noHandoff'; source: 'local'; attempted: false }
@@ -87,16 +96,14 @@ export interface OutboxStorage {
   /** Atomically delete the listed IDs and advance (never lower) the checkpoint. */
   compact(scope: Readonly<OutboxScope>, checkpoint: OutboxCompaction): Promise<void>;
 }
-export interface OutboxSnapshot {
-  version: 1;
+export type OutboxSnapshot = {
   sequence: number;
   intents: DelegatedIntent[];
-}
-export interface OutboxCompaction {
-  version: 1;
+} & ({ version: 1 } | { version: 2; retiredIntentBefore: number });
+export type OutboxCompaction = {
   sequence: number;
   retiredIntentIds: string[];
-}
+} & ({ version: 1 } | { version: 2; retiredIntentBefore: number });
 export interface OutboxOptions extends OutboxScope {
   storage: OutboxStorage;
   clock: { epoch: string; now(): number; unix(): number };
@@ -285,15 +292,20 @@ export interface EnqueueOptions {
 }
 
 export class DelegatedIntentError extends Error {
-  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
+  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable' | 'intentRetired') {
     super(
       {
         invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
         intentConflict: 'Intent id is already bound to different parameters',
         intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
+        intentRetired: 'This intent was retired; reconcile its original outcome instead of sending it again',
       }[code],
     );
     this.name = 'DelegatedIntentError';
+  }
+
+  get outcome(): 'unknown' | undefined {
+    return this.code === 'invalidIntentId' ? undefined : 'unknown';
   }
 }
 
@@ -313,6 +325,8 @@ export class DelegatedOutbox {
   private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
+  private checkpointVersion: 1 | 2 = 1;
+  private retiredIntentBefore = 0;
   private readonly outcomeSequences = new Map<string, number>();
   private work: Promise<unknown> = Promise.resolve();
 
@@ -322,9 +336,19 @@ export class DelegatedOutbox {
       const saved = await options.storage.load(box.scope);
       const rows = Array.isArray(saved) ? saved : saved.intents;
       if (!Array.isArray(saved)) {
-        if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
+        if (
+          ![1, 2].includes(saved.version) ||
+          !Number.isSafeInteger(saved.sequence) ||
+          saved.sequence < 0 ||
+          (saved.version === 2 &&
+            (!Number.isSafeInteger(saved.retiredIntentBefore) ||
+              saved.retiredIntentBefore < 0 ||
+              saved.retiredIntentBefore > 0x1000000000000))
+        )
           throw new Error('Invalid outbox checkpoint');
         box.sequence = saved.sequence;
+        box.checkpointVersion = saved.version;
+        if (saved.version === 2) box.retiredIntentBefore = saved.retiredIntentBefore;
       }
       if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
         throw new Error('Outbox capacity exceeded');
@@ -357,7 +381,10 @@ export class DelegatedOutbox {
           (row.version === 1 && (row.action !== undefined || row.state === 'applied'))
         )
           throw new Error('Invalid persisted action');
-        if (row.state === 'applied' && (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action)))
+        if (
+          row.state === 'applied' &&
+          (!row.action || !isDelegatedActionResult(row.result, row.action.kind, row.action))
+        )
           throw new Error('Invalid persisted action result');
         if (
           row.state === 'unsupported' &&
@@ -591,6 +618,8 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Outbox is closed or full'));
     const intentId =
       options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
+    if (delegatedIntentTime(intentId) < this.retiredIntentBefore)
+      return Promise.reject(new DelegatedIntentError('intentRetired'));
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
@@ -843,13 +872,20 @@ export class DelegatedOutbox {
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
-      // Memory first: a failed delete keeps the stored row, which restores as before.
-      this.removeIntent(row);
+      if (this.checkpointVersion === 2 && delegatedIntentTime(intentId) >= this.options.clock.unix()) return false;
+      const floor =
+        this.checkpointVersion === 2
+          ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
+          : this.retiredIntentBefore;
       await this.options.storage.compact(this.scope, {
-        version: 1,
+        ...(this.checkpointVersion === 2
+          ? ({ version: 2, retiredIntentBefore: floor } as const)
+          : ({ version: 1 } as const)),
         sequence: this.sequence,
         retiredIntentIds: [intentId],
       });
+      this.retiredIntentBefore = floor;
+      this.removeIntent(row);
       return true;
     });
   }
@@ -1171,9 +1207,17 @@ export class DelegatedOutbox {
   private async compact(): Promise<void> {
     this.pruneCompletedIntents();
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
-    // Caller keys remain reserved across completed-history retirement.
-    const completed = [...this.completedIntents.values()].filter((row) => !row.callerSuppliedIntentId);
-    if (completed.length <= COMPLETED_HISTORY) return;
+    // Legacy adapters cannot persist a replay fence, so their caller keys stay reserved.
+    const completed = [...this.completedIntents.values()].filter((row) =>
+      this.checkpointVersion === 2
+        ? delegatedIntentTime(row.intentId) < this.options.clock.unix()
+        : !row.callerSuppliedIntentId,
+    );
+    const keep =
+      this.checkpointVersion === 2
+        ? Math.max(0, COMPLETED_HISTORY - (this.completedIntents.size - completed.length))
+        : COMPLETED_HISTORY;
+    if (completed.length <= keep) return;
     let insertionOrder: Map<string, number> | undefined;
     completed.sort((a, b) => {
       if (a.seq !== b.seq) return a.seq - b.seq;
@@ -1181,12 +1225,19 @@ export class DelegatedOutbox {
       insertionOrder ??= new Map([...this.intents.keys()].map((id, index) => [id, index] as const));
       return insertionOrder.get(a.intentId)! - insertionOrder.get(b.intentId)!;
     });
-    const retired = completed.slice(0, completed.length - COMPLETED_HISTORY);
+    const retired = completed.slice(0, completed.length - keep);
+    const floor =
+      this.checkpointVersion === 2
+        ? Math.max(this.retiredIntentBefore, ...retired.map((row) => delegatedIntentTime(row.intentId) + 1))
+        : this.retiredIntentBefore;
     await this.options.storage.compact(this.scope, {
-      version: 1,
+      ...(this.checkpointVersion === 2
+        ? ({ version: 2, retiredIntentBefore: floor } as const)
+        : ({ version: 1 } as const)),
       sequence: this.sequence,
       retiredIntentIds: retired.map((row) => row.intentId),
     });
+    this.retiredIntentBefore = floor;
     for (const row of retired) this.removeIntent(row);
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {

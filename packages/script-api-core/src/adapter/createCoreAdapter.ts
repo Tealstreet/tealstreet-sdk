@@ -1,3 +1,8 @@
+import {
+  capturePlacementIntent,
+  placementLegIntent,
+  runWithPlacementIntent,
+} from '../../../safe-cex/src/placementIntentContext';
 import type {
   Balance,
   Candle,
@@ -413,6 +418,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       }
     },
     closePosition: async (opts: Omit<ClosePositionOpts, 'account'>, account) => {
+      const intent = capturePlacementIntent();
       guardWrites();
       // Fail fast on a disconnected account, but do NOT reuse this handle for
       // the writes: `closePosition` awaits once per leg, and a reconnect in
@@ -450,13 +456,18 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
           const placeOrder = requireMethod(exchange, 'placeOrder', account);
-          const ids = await placeOrder({
-            symbol: opts.symbol,
-            side: position.side === 'long' ? 'sell' : 'buy',
-            type: 'market',
-            amount: closeAmount,
-            reduceOnly: true,
-          } as PlaceOrderOpts);
+          const child = intent
+            ? placementLegIntent(intent, JSON.stringify([position.symbol, position.side]))
+            : undefined;
+          const ids = await runWithPlacementIntent(child?.id, () =>
+            placeOrder({
+              symbol: opts.symbol,
+              side: position.side === 'long' ? 'sell' : 'buy',
+              type: 'market',
+              amount: closeAmount,
+              reduceOnly: true,
+            } as PlaceOrderOpts),
+          );
           for (const id of ids ?? []) orderIds.push(id);
         }
         observe('closePosition', account, summary, true, { orderIds });
