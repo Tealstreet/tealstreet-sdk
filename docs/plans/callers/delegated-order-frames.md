@@ -323,7 +323,9 @@ retention handling after this constructor, including when a local claim is
 refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
 never-forwarded work not sent, even while storage is waiting, and marks in-flight
-or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+work unknown. Acknowledged work is box-admitted and may be queued behind venue
+pacing; it becomes unknown at `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (60 s) from
+creation instead (AGT-125). Physical handoff rechecks the cap. The synchronous
 send adapter must return true only for a physical handoff; only an explicit false
 positively guarantees neither handoff nor buffering for a later connection.
 A throw or any other non-true return is ambiguous and immediately becomes unknown

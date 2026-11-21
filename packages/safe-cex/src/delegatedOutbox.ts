@@ -120,6 +120,11 @@ export interface OutboxConnection extends OutboxScope {
 }
 
 const MAX_AGE_MS = 10_000;
+/**
+ * A box-ACKed intent is admitted and waits in the venue's pacing queue; that wait is
+ * not the admission budget above. It still settles unknown at this bound (AGT-125).
+ */
+export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 60_000;
 const MAX_PENDING = 1024;
 const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;
@@ -889,7 +894,11 @@ export class DelegatedOutbox {
   private expired(row: DelegatedIntent): boolean {
     if (row.clockEpoch !== this.options.clock.epoch) return true;
     const age = this.options.clock.now() - row.createdAt;
-    return !Number.isFinite(age) || age < 0 || age >= MAX_AGE_MS;
+    return !Number.isFinite(age) || age < 0 || age >= this.maxAge(row);
+  }
+
+  private maxAge(row: DelegatedIntent): number {
+    return row.state === 'acknowledged' ? DELEGATED_ACKNOWLEDGED_MAX_AGE_MS : MAX_AGE_MS;
   }
 
   private async sendIntent(row: DelegatedReplayableIntent, connection: Readonly<OutboxConnection>): Promise<void> {
@@ -1051,7 +1060,7 @@ export class DelegatedOutbox {
           if (this.expired(row)) this.expire(row);
           else this.arm(row);
         },
-        Math.max(0, MAX_AGE_MS - (this.options.clock.now() - row.createdAt)),
+        Math.max(0, this.maxAge(row) - (this.options.clock.now() - row.createdAt)),
       ),
     );
   }
