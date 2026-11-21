@@ -212,7 +212,9 @@ describe('a running chase whose engine went away', () => {
     vi.advanceTimersByTime(1);
     expect(told).toHaveLength(1);
     expect(told[0]).toContain('Chase on BTCUSDT was interrupted');
-    expect(told[0]).toContain('Check your open orders and positions for order o1');
+    expect(told[0]).toContain('Its order o1 may still be open or may have filled');
+    // NX unmanagedOrderRisk keeps an error toast sticky only while it says 'may still be open'.
+    expect(told[0]).toContain('may still be open');
     expect(told[0]).toContain('Check your open orders and positions');
   });
 

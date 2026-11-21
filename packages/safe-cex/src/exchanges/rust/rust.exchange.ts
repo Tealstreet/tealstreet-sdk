@@ -3364,7 +3364,7 @@ export class RustEngineExchange extends BaseExchange {
       return read;
     } catch (error) {
       const left = await this.positionsStillOpen().catch(() => []);
-      const named = left.length ? `Positions to check: ${describeOpen(left)}. ` : '';
+      const named = left.length ? `These positions may still be open: ${describeOpen(left)}. ` : '';
       throw Object.assign(new Error(`${NUKE_NOT_CONFIRMED}: ${named}${errorMessage(error)}`), { cause: error });
     }
   };

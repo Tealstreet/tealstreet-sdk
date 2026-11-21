@@ -134,7 +134,7 @@ impl Adapter {
                             let left = if named.is_empty() {
                                 String::new()
                             } else {
-                                format!("Positions to check: {named}. ")
+                                format!("These positions may still be open: {named}. ")
                             };
                             failures.push(
                                 json!({"message":format!("{NUKE_NOT_CONFIRMED}: {left}{cause}")}),

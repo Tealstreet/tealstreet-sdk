@@ -3304,7 +3304,7 @@ impl BitgetFutures {
                     .map(|plan| format!(", planType {plan}"))
                     .unwrap_or_default();
                 error = Some(format!(
-                    "Bitget didn’t confirm cancellation of these orders: {} (confirmed [{}]{plan}). Check your open orders before trying again.",
+                    "Bitget didn’t confirm cancellation of these orders, which may still be open: {} (confirmed [{}]{plan}). Check your open orders before trying again.",
                     rest.join_with(", "),
                     listed.join_with(", ")
                 ));

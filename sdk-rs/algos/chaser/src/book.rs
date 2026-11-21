@@ -1522,7 +1522,7 @@ impl ChaserBook {
                     "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
                 ));
                 self.warn(&format!(
-                    "{RETRYING}{symbol} order {id} is still open: {}. Cancellation is being retried. {CANCEL_WAY_OUT}",
+                    "{RETRYING}{symbol} order {id} is still open: {}. It can still fill until it is cancelled. Cancellation is being retried. {CANCEL_WAY_OUT}",
                     if signer_offline(&error) {
                         "the browser that signs for this account is offline"
                     } else {

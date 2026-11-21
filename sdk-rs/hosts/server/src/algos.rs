@@ -526,7 +526,7 @@ fn stop_notices(
                     })
                 });
             let check = if resting {
-                " Check your open orders."
+                " Its order may still be open. Check your open orders."
             } else {
                 ""
             };
@@ -543,7 +543,7 @@ fn stop_notices(
             .as_str()
             .unwrap_or("this account");
         let check = if may_rest {
-            " Check your open orders."
+            " Its orders may still be open. Check your open orders."
         } else {
             ""
         };
@@ -1663,7 +1663,8 @@ mod tests {
                 end: false,
             }
         };
-        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it from your open orders.";
+        // The chaser's own retry warning (book.rs), so the prefix parser is pinned to real copy.
+        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. It can still fill until it is cancelled. Cancellation is being retried. Cancel it from your open orders.";
         let mut unheard = VecDeque::from([
             kept("warning", retry),
             kept("warning", &retry.replace("71b464ec", "other")),

@@ -84,13 +84,13 @@ PR merge times and branch protection. Validate response shapes, use
 Keep cancelled and incomplete runs separate from failures; `updated_at` alone
 does not establish completion. These are observations, not fixed job counts:
 
-| Evidence | Observed result |
-| --- | --- |
-| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4` | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`. |
-| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417` | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded. |
-| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress. |
-| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures. |
-| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4` | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
+| Evidence                                                                                                                                                                                                   | Observed result                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4`                                                                                     | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`.                                |
+| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417`                                                                                      | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded.                                                  |
+| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress.                                                          |
+| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures.                              |
+| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4`                                                                                     | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
 
 At measurement time, the source condition in [rust.yml](.github/workflows/rust.yml) was
 `always() && needs.selection.outputs.replayRequired == 'true'`.
@@ -148,3 +148,8 @@ Venue display decorators preserve retained and current check-open-orders guidanc
 without adding a second action.
 Summary formatting retains diagnostic context and checks each warning separately
 from the terminal error when omitting repeated guidance.
+**Order-risk notices must keep the phrase "may still be open"** (or another phrase
+in NX `apps/web/src/components/toasts/unmanagedOrderRisk.ts`): NX keeps those
+toasts on screen by matching text, so a calmer rewrite without it lets an
+order-risk warning auto-dismiss. Native detail goes before a trailing "Check …"
+action (`safe_cex_engine::error::with_detail`), never after it.

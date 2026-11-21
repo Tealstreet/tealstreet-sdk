@@ -970,7 +970,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
             assert_eq!(
                 kept.notices,
                 [algos::Notice {
-                    text: "Chase on BTCUSDT stopped: no browser for 60s. Check your open orders."
+                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open. Check your open orders."
                         .into(),
                     algo: Some(algos::AlgoRef {
                         kind: "chase",
