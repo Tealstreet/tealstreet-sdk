@@ -177,7 +177,7 @@ fn a_read_in_flight_is_followed_by_a_new_one() {
         assert!(h.has_request(path), "{name}: a read is out");
         let stale = h.take(path);
         let stale_config = h
-            .has_request("/fapi/v1/symbolConfig")
+            .has_request("symbolConfig")
             .then(|| h.take("symbolConfig"));
         read(&mut h, 41);
         assert!(!h.has_request(path), "{name}: no second read yet");

@@ -56,6 +56,10 @@ if (!spot) {
     { symbol: symbols[1], positionSide: 'BOTH', positionAmt: '0', entryPrice: '0', markPrice: '3000',
       unRealizedProfit: '0', leverage: '10', marginType: 'cross', isolatedMargin: '0', liquidationPrice: '0', notional: '0', updateTime: epoch },
   ]);
+  // Rust PM reads leverage settings here, since positionRisk omits flat symbols (AGT-175).
+  if (!inverse) http('GET', `${prefix}/symbolConfig`, null, symbols.map((symbol, i) => ({
+    symbol, marginType: 'CROSSED', isAutoAddMargin: 'false', leverage: i ? 10 : 20, maxNotionalValue: '1000000',
+  })), { impl: 'rust' });
 }
 const spotBalances = [{asset:'USDT',free:'4000',locked:'10'}, {asset:'BTC',free:'0.01',locked:'0.001'}, {asset:'ETH',free:'1',locked:'0'}];
 if (spot) http('GET', `${prefix}/account`, null, { makerCommission:10, takerCommission:10, balances:spotBalances });
