@@ -30,6 +30,7 @@ fn starting_with(deferred: bool) -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk",200,r#"[{"entryPrice":"100","leverage":"20","markPrice":"100","positionAmt":"0.01","notional":"1","symbol":"BTCUSDT","unRealizedProfit":"0","liquidationPrice":"50","positionSide":"BOTH"}]"#);
+    h.respond("/papi/v1/um/symbolConfig",200,r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#);
     h.respond("/papi/v1/balance",200,r#"[{"asset":"USDT","totalWalletBalance":"1000","crossMarginFree":"900","umUnrealizedPNL":"0"}]"#);
     h
 }
@@ -327,6 +328,9 @@ fn pm_trailing_callback_rate_is_validated_before_cancel_and_can_be_put_back_exac
             h.event(Event::WsOpened { socket });
             if h.has_request("/papi/v1/um/positionRisk") {
                 h.respond("/papi/v1/um/positionRisk", 200, r#"[{"entryPrice":"100","leverage":"20","markPrice":"100","positionAmt":"0.01","notional":"1","symbol":"BTCUSDT","unRealizedProfit":"0","liquidationPrice":"50","positionSide":"BOTH"}]"#);
+            }
+            if h.has_request("/papi/v1/um/symbolConfig") {
+                h.respond("/papi/v1/um/symbolConfig", 200, r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#);
             }
             h.requests.clear();
             h.event(Event::Command(Command::AmendOrder {

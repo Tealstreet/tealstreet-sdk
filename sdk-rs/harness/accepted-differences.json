@@ -11553,7 +11553,7 @@
     {
       "venue": "binancepm",
       "tape": "sdk-rs/harness/tapes/binancepm-private.jsonl",
-      "tapeSha256": "a083f2c3b3f81d1aa7bb868ea4423b1988d003df2685f4eb736d57b7ad3d237d",
+      "tapeSha256": "73e3b11bcd8fdc6c4354d089f80d0974a4d4e720df1daa442e75456959ab1ca9",
       "diagnostics": [
         {
           "failures": [

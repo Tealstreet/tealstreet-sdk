@@ -87,10 +87,18 @@ fn futures_loaded(variant: Variant, mut h: Harness) -> Harness {
         200,
         "[]",
     );
+    h.respond(
+        if pm {
+            "/papi/v1/um/symbolConfig"
+        } else {
+            "/fapi/v1/symbolConfig"
+        },
+        200,
+        "[]",
+    );
     if pm {
         h.respond("/papi/v1/balance", 200, "[]");
     } else {
-        h.respond("/fapi/v1/symbolConfig", 200, "[]");
         h.respond("/fapi/v3/account", 200, r#"{"assets":[]}"#);
     }
     for path in order_reads(variant) {

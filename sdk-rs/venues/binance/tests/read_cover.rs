@@ -360,6 +360,7 @@ fn loaded_variant(variant: &str) -> (Harness, &'static [&'static str]) {
                 r#"{"dualSidePosition":false}"#,
             ),
             ("/papi/v1/um/positionRisk", "[]"),
+            ("/papi/v1/um/symbolConfig", "[]"),
             ("/papi/v1/balance", "[]"),
         ],
         "coinm" => &[

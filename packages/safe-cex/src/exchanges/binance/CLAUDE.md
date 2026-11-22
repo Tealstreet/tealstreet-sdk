@@ -383,9 +383,14 @@ is performed on the WebSocket API as described below.
 | `/papi/v1/um/positionSide/dual`      | GET/POST    | Hedge mode                               |
 | `/papi/v1/um/leverage`               | POST        | Set leverage                             |
 | `/papi/v1/um/positionRisk`           | GET         | Position risk                            |
+| `/papi/v1/um/symbolConfig`          | GET         | Per-symbol leverage (flat symbols too)   |
 | `/papi/v1/um/userTrades`             | GET         | User trades                              |
 | `/papi/v1/listenKey`                 | POST/PUT    | Listen key                               |
 | `/fapi/v1/*`                         | GET         | Public market data (shared with futures) |
+
+**PM leverage settings come from `symbolConfig`, not `positionRisk`.** `positionRisk`
+omits flat symbols, so reading settings from its rows left every flat symbol with no
+leverage and the order form refused it as "Leverage not loaded" (AGT-175).
 
 ## WebSocket Implementation
 

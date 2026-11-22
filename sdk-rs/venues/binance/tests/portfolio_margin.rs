@@ -8,6 +8,7 @@ use safe_cex_engine::{Command, Event, Method};
 use support::Harness;
 
 const POSITION_RISK: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
+const SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#;
 const BALANCE: &str = r#"[{"asset":"USDT","totalWalletBalance":"1000.0","crossMarginAsset":"0","crossMarginBorrowed":"0","crossMarginFree":"900.0","crossMarginInterest":"0","crossMarginLocked":"0","umWalletBalance":"1000.0","umUnrealizedPNL":"10.0","cmWalletBalance":"0","cmUnrealizedPNL":"0","updateTime":0,"negativeBalance":"0"},{"asset":"BNB","totalWalletBalance":"5","crossMarginFree":"5","umUnrealizedPNL":"0"}]"#;
 const OPEN_ORDERS: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpresting","cumQuote":"0","executedQty":"0","orderId":1917641,"origQty":"0.40","origType":"LIMIT","price":"90000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","symbol":"BTCUSDT","time":1579276756075,"timeInForce":"GTC","type":"LIMIT","updateTime":1579276756075,"selfTradePreventionMode":"NONE","goodTillDate":0}]"#;
 const OPEN_CONDITIONAL: &str = r#"[{"clientAlgoId":"abc","algoId":123445,"algoStatus":"NEW","orderType":"TAKE_PROFIT_MARKET","quantity":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","triggerPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
@@ -39,6 +40,7 @@ fn ready_with(open_orders: &str) -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, SYMBOL_CONFIG);
     h.respond("/papi/v1/balance", 200, BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, open_orders);
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, OPEN_CONDITIONAL);
@@ -531,6 +533,7 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, SYMBOL_CONFIG);
     h.respond("/papi/v1/balance", 200, BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, "[]");
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, PM_TRAILING);
@@ -574,4 +577,90 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
     );
     assert_eq!(param(&put_back.url, "activationPrice"), None);
     assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
+}
+
+/// A flat PM account started up to its positions read, which is still out.
+fn flat_pm_started() -> Harness {
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        portfolio_margin: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond(
+        "/papi/v1/um/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+    );
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h
+}
+
+/// Answer the account reads that follow the positions read.
+fn answer_flat_account(h: &mut Harness) {
+    for (path, body) in [
+        ("/papi/v1/balance", BALANCE),
+        ("/papi/v1/um/openOrders", "[]"),
+        ("/papi/v1/um/algo/openAlgoOrders", "[]"),
+    ] {
+        if h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+}
+
+const FLAT_SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":21,"maxNotionalValue":"1000000"}]"#;
+
+/// AGT-175: `/papi/v1/um/positionRisk` lists only symbols with a position, so a flat
+/// symbol's leverage comes from `/papi/v1/um/symbolConfig`; without it the order form
+/// never learns a leverage and refuses every order with "Leverage not loaded".
+#[test]
+fn a_flat_pm_symbol_reads_its_leverage_from_symbol_config() {
+    let mut h = flat_pm_started();
+    h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond("/papi/v1/um/symbolConfig", 200, FLAT_SYMBOL_CONFIG);
+    answer_flat_account(&mut h);
+    let store = h.engine.store();
+    assert!(store.loaded().positions);
+    let setting = store
+        .setting("BTCUSDT")
+        .expect("flat symbol has a leverage setting");
+    assert_eq!(setting.leverage, 21.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+}
+
+/// A refused symbolConfig read is logged and retried, never a silent missing leverage.
+#[test]
+fn a_failed_pm_symbol_config_read_is_logged_and_retried() {
+    let mut h = flat_pm_started();
+    h.expect_startup_failure = true;
+    h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond(
+        "/papi/v1/um/symbolConfig",
+        503,
+        r#"{"code":-1001,"msg":"Internal error; unable to process your request."}"#,
+    );
+    answer_flat_account(&mut h);
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    assert!(
+        h.logs.iter().any(|m| m.starts_with("Binance positions: ")),
+        "{:?}",
+        h.logs
+    );
+    h.advance(10_000.0);
+    assert!(h.has_request("/papi/v1/um/symbolConfig"), "{:?}", h.paths());
+    while h.has_request("/papi/v1/um/positionRisk") {
+        h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    }
+    h.respond("/papi/v1/um/symbolConfig", 200, FLAT_SYMBOL_CONFIG);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 21.0);
 }

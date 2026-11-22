@@ -84,7 +84,20 @@ test('PM migration leaves the Spot tape bytes unchanged', () => {
 test('PM migration preserves every original payload, command and checkpoint boundary', () => {
   const tape = generate('binancepm');
   const records = tape.trim().split('\n').map(JSON.parse);
-  const original = records.map((row) => {
+  // AGT-175 added Rust's PM symbolConfig read; it is not one of the original payloads.
+  const configRows = records.filter((row) => row.type === 'http' &&
+    new URL(row.url).pathname === '/papi/v1/um/symbolConfig');
+  assert.equal(configRows.length, 1, 'Rust PM startup needs the symbolConfig endpoint');
+  const [config] = configRows;
+  assert.equal(config.impl, 'rust');
+  assert.equal(config.method, 'GET');
+  assert.equal(config.url, 'https://papi.binance.com/papi/v1/um/symbolConfig');
+  assert.equal(config.status, 200);
+  assert.deepEqual(JSON.parse(config.body), [
+    { symbol: 'BTCUSDT', marginType: 'CROSSED', isAutoAddMargin: 'false', leverage: 20, maxNotionalValue: '1000000' },
+    { symbol: 'ETHUSDT', marginType: 'CROSSED', isAutoAddMargin: 'false', leverage: 10, maxNotionalValue: '1000000' },
+  ]);
+  const original = records.filter((row) => row !== config).map((row) => {
     if (row.url?.endsWith('/algo/openAlgoOrders'))
       return { ...row, url: row.url.replace('/algo/openAlgoOrders', '/conditional/openOrders') };
     if (row.url?.includes('/algo/allOpenOrders?'))
