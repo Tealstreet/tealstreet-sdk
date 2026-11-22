@@ -1,4 +1,5 @@
-//! Missing public rows wait only for their catalogue, within the original Context.
+//! Missing public rows wait only for their catalogue, within the original Context,
+//! and only while a catalogue read is outstanding or scheduled to retry.
 use super::*;
 
 pub(super) struct CandleQuery {
@@ -48,7 +49,13 @@ impl Hyperliquid {
             .collect();
     }
 
+    /// A missing row is worth waiting for only while discovery can still resolve it.
     fn candle_discovery_pending(&self, symbol: &str) -> bool {
+        self.discovery_active() && self.candle_catalogue_unresolved(symbol)
+    }
+
+    /// The row's catalogue has not resolved, so its absence is not proven.
+    fn candle_catalogue_unresolved(&self, symbol: &str) -> bool {
         if self.spot {
             return self.core_discovery_incomplete && !self.candle_spot_excluded.contains(symbol);
         }
@@ -76,12 +83,26 @@ impl Hyperliquid {
     }
 
     pub(super) fn start_candle_read(&mut self, cx: &mut Cx<'_, Pending>, read: CandleQuery) {
-        if self.coin(cx, &read.symbol).is_none() && self.candle_discovery_pending(&read.symbol) {
+        if self.coin(cx, &read.symbol).is_some() {
+            self.dispatch_candle_read(cx, read);
+        } else if self.candle_discovery_pending(&read.symbol) {
             let timer = cx.set_timer((read.context.deadline() - cx.now).max(0.));
             self.waiting_candles.push(WaitingCandle { read, timer });
+        } else if self.candle_catalogue_unresolved(&read.symbol) {
+            Self::candle_discovery_stalled(cx, &read.context);
         } else {
             self.dispatch_candle_read(cx, read);
         }
+    }
+
+    /// Nothing is reading or retrying this row's catalogue, so waiting cannot help;
+    /// an unresolved catalogue is still not proof that the market is absent.
+    fn candle_discovery_stalled(cx: &mut Cx<'_, Pending>, context: &Context) {
+        let _ = cx.fail_context(
+            context,
+            VenueError::new("Market metadata unavailable")
+                .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
+        );
     }
 
     fn dispatch_candle_read(&mut self, cx: &mut Cx<'_, Pending>, read: CandleQuery) {
@@ -127,6 +148,11 @@ impl Hyperliquid {
                 && self.candle_discovery_pending(&waiting.read.symbol)
             {
                 self.waiting_candles.push(waiting);
+            } else if self.coin(cx, &waiting.read.symbol).is_none()
+                && self.candle_catalogue_unresolved(&waiting.read.symbol)
+            {
+                cx.clear_timer(waiting.timer);
+                Self::candle_discovery_stalled(cx, &waiting.read.context);
             } else {
                 cx.clear_timer(waiting.timer);
                 self.dispatch_candle_read(cx, waiting.read);
@@ -158,5 +184,11 @@ mod tests {
         venue.core_discovery_incomplete = false;
         venue.perps_published = true;
         assert!(!venue.candle_discovery_pending("XYZ|GOLD-PERP"));
+        assert!(
+            venue.candle_catalogue_unresolved("XYZ|GOLD-PERP"),
+            "stalled discovery is still not proof of absence"
+        );
+        venue.discovery_reads = 1;
+        assert!(venue.candle_discovery_pending("XYZ|GOLD-PERP"));
     }
 }
