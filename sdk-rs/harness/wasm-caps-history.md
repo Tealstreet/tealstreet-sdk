@@ -1719,3 +1719,57 @@ at `b402d387537b55d7844e677647f911e43ea929e0`. The authenticated 2,120,375-byte
 module retains 10,569 bytes. This approved ceiling supersedes #2301's intermediate
 restoration to 2,071,552 bytes; routine AGT-23 master-bot reserve restoration
 remains unchanged.
+
+## 2026-11-21 — #3747 running chaser/TWAP amendments raise 22 family caps
+
+The shared chaser and TWAP amend operations link into every family. Rule-17
+raise per `harness/CLAUDE.md` ("A PR that outgrows its cap raises it itself"),
+generated with `update-wasm-caps.mjs` from PR run 44877378708 (sealed source
+`ac4cbf6c027341737dbb3015f2de0167a3743513`, whose tree equals PR head
+`6422af05212da96421e11781f89edbdaad2953cf`). The committed `wasm-caps.json` is
+that script's output filtered to the 22 families whose measurement exceeded the
+ceiling, each raised to measured + 10 KiB rounded up; the raw output also raised
+the three reserve-only families below, which were reverted.
+asterdex, orderly and txflow fit their caps with a reserve warning and are
+left to the master reserve bot. combined, hyperliquid and polymarket are unchanged.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| apexomni | 2241022 | 2234368 | 2251776 |
+| backpack | 2214130 | 2207744 | 2225152 |
+| binance | 2423107 | 2414592 | 2434048 |
+| bingx | 2314445 | 2293760 | 2325504 |
+| bitget | 2938763 | 2932736 | 2949120 |
+| bitrue | 2048204 | 2042880 | 2059264 |
+| bitunix | 2142261 | 2137088 | 2153472 |
+| blofin | 2212773 | 2206720 | 2223104 |
+| bybit | 2729743 | 2705408 | 2740224 |
+| coinbase | 2487032 | 2481152 | 2497536 |
+| cryptocom | 1955034 | 1948672 | 1966080 |
+| grvt | 2180572 | 2173952 | 2191360 |
+| kraken | 2431574 | 2425856 | 2442240 |
+| kucoin | 2005273 | 1999872 | 2016256 |
+| kucoinspot | 2703503 | 2682880 | 2714624 |
+| lighter | 2401794 | 2387968 | 2412544 |
+| mexc | 2098348 | 2087936 | 2109440 |
+| okx | 2211201 | 2196480 | 2222080 |
+| paradex | 2454672 | 2444288 | 2465792 |
+| phemex | 2262919 | 2255872 | 2273280 |
+| weex | 2170718 | 2163712 | 2181120 |
+| woo | 2909489 | 2888704 | 2920448 |
+
+## 2026-11-21 — #3726 notification composition raises 3 family caps
+
+The engine composition helpers (with_detail, join_note, the closed guidance set)
+link into every family. Rule-17 raise per `harness/CLAUDE.md`, generated with
+`update-wasm-caps.mjs` from PR run 44892581584 (sealed source
+`c237795ad9b2d868bda855fc19bfbf27a14fee4a`, whose tree equals PR head
+`6cf734453e210c70117f3e483a980428cbc6b4ac`). The committed `wasm-caps.json` is
+that output filtered to the families measured above their ceiling; the raw output
+also raised 24 reserve-only families, which were reverted for the master bot.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| asterdex | 2398952 | 2397184 | 2409472 |
+| bybit | 2741848 | 2740224 | 2752512 |
+| orderly | 1917499 | 1916928 | 1928192 |

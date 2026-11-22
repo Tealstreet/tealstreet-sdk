@@ -235,9 +235,17 @@ impl Out {
             data["outcome"] = "unknown".into();
             data["result"] = serde_json::Value::Null;
             data["error"] = serde_json::json!({"message":"Action result exceeds receipt limit","outcome":"unknown"});
-            return self.send(crate::envelope::order_frame(kind, name, data));
+            let sent = self.send(crate::envelope::order_frame(kind, name, data));
+            if sent {
+                crate::audit::note_typed_outcome(&"unknown".into());
+            }
+            return sent;
         }
-        self.send(text)
+        let sent = self.send(text);
+        if sent {
+            crate::audit::note_typed_outcome(&data["outcome"]);
+        }
+        sent
     }
 
     pub(crate) fn retire_order_receipts(&self) {

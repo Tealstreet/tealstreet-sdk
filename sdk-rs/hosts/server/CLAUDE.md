@@ -15,6 +15,15 @@ It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
 client echoes or raw responses. This journal field changes no outcome, algo
 ownership, retry or resend authority; it is not forwarded to Sentry.
 
+## Order audit stage timings
+
+Session command audit lines carry `stages_us` (µs offsets for received, admitted,
+queued, sent, responded, replied); `/health` `typedOutcomes` counts settled and
+unknown typed receipts. Contract and the `scripts/audit-latency.sh` report are in
+`DESIGN.md` under "Order audit stage timings". The audit line is written after the
+reply is handed to the socket, so `replied` is real; keep that order. Add only
+numeric stages here, never identifiers, and never estimate a stage not observed.
+
 ## History reply completeness
 
 Command-owned `history.incomplete` notices retain a closed reason and optional
@@ -596,6 +605,12 @@ arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
 
+## User-facing notices
+
+Order/action receipt messages and algo interruption notices use plain wording
+and at most one action; typed outcomes and receipt fields remain unchanged.
+Proof-check details stay in `partial.proof_failed` diagnostics rather than the
+Bybit action message. Cancel-warning cleanup still recognizes retained old text.
 ## Venue rejections in typed action outcomes
 
 `order_actions::settle` treats an engine `rejected` error with no partial
@@ -603,3 +618,17 @@ evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
 `refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
 definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
 "still unconfirmed" toast. Partial or uncertain failures stay `unknown`.
+
+## Running algo amendments (AGT-97)
+
+Typed v1 `kind:algo` carries `chaser:amend` and `twap:amend` to the same shared
+Rust factories as LOCAL. Chaser accepts only limitPrice/offset/maxAttempts;
+TWAP only intervalMs/remainingSlices. Identity and quantity remain immutable.
+Finished/stopping/unknown jobs refuse; no stop-and-replace or in-flight order
+edit. Future TWAP repartition retains every issued child and journal result.
+The original registration/owner/deadline/IO fences remain; amendments also use
+the start admission fence while draining. Synchronous amendment refusals and
+drain refusals settle notSent (a drained start still keeps its pre-existing
+interrupted receipt); accepted edits keep the existing unknown algo receipt and
+reconcile through account events/state. Exact units/limits and mobile event
+names live in docs/plans/callers/delegated-action-frames.md.

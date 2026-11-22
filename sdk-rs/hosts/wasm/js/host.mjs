@@ -218,7 +218,7 @@ function interruptedCommand(error, command, interrupted) {
   error.command = command.op;
   if (interrupted && WRITE_COMMANDS.has(command.op)) {
     error.outcome = 'unknown';
-    error.message += '; command outcome is unknown. Reconcile before retrying';
+    error.message += '. This action wasn’t confirmed. Check your open orders before trying again.';
   }
   if (command.clientOrderId !== undefined) error.clientOrderId = command.clientOrderId;
   if (command.clientOrderIds?.length) error.clientOrderIds = command.clientOrderIds;
@@ -360,7 +360,7 @@ export class ExchangeError extends Error {
 
 export class CommandTimeoutError extends Error {
   constructor(timeoutMs, command) {
-    super(`Engine command timed out after ${timeoutMs} ms`);
+    super(`This action timed out after ${timeoutMs} ms`);
     this.name = 'CommandTimeoutError';
     this.code = 'COMMAND_TIMEOUT';
     this.timeoutMs = timeoutMs;
@@ -370,7 +370,7 @@ export class CommandTimeoutError extends Error {
 
 export class CommandDeadlineError extends Error {
   constructor(cause, command) {
-    super('Unable to establish engine command deadline', { cause });
+    super('This action’s time limit couldn’t be set', { cause });
     this.name = 'CommandDeadlineError';
     this.code = 'COMMAND_DEADLINE_FAILED';
     interruptedCommand(this, command, true);
@@ -379,7 +379,7 @@ export class CommandDeadlineError extends Error {
 
 export class CommandProtocolError extends Error {
   constructor(cause, command) {
-    super('Invalid exchange engine command response', { cause });
+    super('The account reply couldn’t be read', { cause });
     this.name = 'CommandProtocolError';
     this.code = 'ENGINE_PROTOCOL_ERROR';
     interruptedCommand(this, command, true);
@@ -388,7 +388,7 @@ export class CommandProtocolError extends Error {
 
 export class EngineDisposedError extends Error {
   constructor(command, interrupted = false) {
-    super('engine disposed');
+    super('The account was closed');
     this.name = 'EngineDisposedError';
     this.code = 'ENGINE_DISPOSED';
     interruptedCommand(this, command, interrupted);
@@ -398,7 +398,7 @@ export class EngineDisposedError extends Error {
 /** A trapped engine cannot be reused. An interrupted write may already exist at the venue. */
 export class EngineDeadError extends Error {
   constructor(cause, command) {
-    super('Exchange engine stopped unexpectedly', { cause });
+    super('Trading was interrupted for this account', { cause });
     this.name = 'EngineDeadError';
     this.code = 'ENGINE_DEAD';
     // A trap (a Rust panic) is the engine's own fault, never a venue answer.
@@ -407,7 +407,7 @@ export class EngineDeadError extends Error {
       this.command = command.op;
       if (WRITE_COMMANDS.has(command.op)) {
         this.outcome = 'unknown';
-        this.message = 'Exchange engine stopped; command outcome is unknown. Reconcile before retrying';
+        this.message = 'Trading was interrupted before this action was confirmed. Check your open orders before trying again.';
       }
       if (command.clientOrderId !== undefined) this.clientOrderId = command.clientOrderId;
       if (command.clientOrderIds?.length) this.clientOrderIds = command.clientOrderIds;
@@ -800,7 +800,7 @@ export class EngineHost {
   /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
   health() {
     this.assertHttpHandoffIdle();
-    if (this.disposed) throw new Error('engine disposed');
+    if (this.disposed) throw new Error('The account was closed');
     const json = this.engine.health?.();
     return json ? JSON.parse(json) : undefined;
   }
@@ -879,14 +879,14 @@ export class EngineHost {
     if (isOwnerCurrent !== undefined && typeof isOwnerCurrent !== 'function')
       throw new TypeError('Algo owner check must be a function');
     if (typeof this.engine.algoStart !== 'function')
-      throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
+      throw new ExchangeError('Automated orders aren’t available for this account', { kind: 'unsupported', outcome: 'notSent' });
     this.algoOwnerCurrent = isOwnerCurrent;
     if (twapOwner !== undefined) {
       const bound = twapOwner && typeof twapOwner.ownerId === 'string' && twapOwner.ownerId
         && Number.isSafeInteger(twapOwner.generation) && twapOwner.generation >= 0;
       const start = bound ? this.engine.algoStartOwned : this.engine.algoStartUnowned;
       if (typeof start !== 'function')
-        throw new ExchangeError('This engine build predates TWAP ownership; update the engine to run algos', { kind: 'unsupported', outcome: 'notSent' });
+        throw new ExchangeError('TWAP isn’t available in this version. Update Tealstreet to use it.', { kind: 'unsupported', outcome: 'notSent' });
       // An owner hook without a current owner still starts algos; only TWAP restores are refused.
       if (bound) this.invoke(start, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
       else this.invoke(start, accountName, this.transport.now(), Date.now());
@@ -932,7 +932,7 @@ export class EngineHost {
     // A user nuke is execution, so keep the strict fence outside the pure getter.
     if (!this.checkAlgosForExecution()) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
     if (typeof this.engine.algoStopAll !== 'function')
-      throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
+      throw new ExchangeError('The account couldn’t stop automated orders before Nuke', { kind: 'unsupported', outcome: 'notSent' });
     const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
     this.runAlgos(this.invoke(this.engine.algoStopAll, this.transport.now(), Date.now(), reason));
     if (this.deadError) throw this.deadError;

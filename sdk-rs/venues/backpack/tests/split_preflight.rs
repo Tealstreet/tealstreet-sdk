@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
@@ -6,7 +7,8 @@ use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -192,7 +194,15 @@ fn protective_refusal_puts_back_only_after_a_clean_proof() -> Result {
             }
             let error = failed(&out)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(
+                safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                    || safe_cex_engine::error::carries_guidance(
+                        &error.message,
+                        "We couldn’t confirm this change. Check your open orders before trying again."
+                    ),
+                "{}",
+                error.message
+            );
             assert_eq!(error.protection, None);
             assert_eq!(
                 out.iter()

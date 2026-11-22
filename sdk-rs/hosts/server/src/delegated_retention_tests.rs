@@ -1,3 +1,4 @@
+// Rule 5: display text changes; key waiting, notice ordering and owner fences stay pinned.
 use super::*;
 use crate::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_engine::signing::{Algorithm, Capability, KeyRef};
@@ -737,7 +738,7 @@ async fn restart_marker_reports_waiting_for_key_and_keeps_restores_paused() {
             value["d"]["data"][0]
                 .as_str()
                 .unwrap()
-                .contains("waiting for your key")
+                .contains("needs your key again")
         );
         assert_eq!(value["d"].get("instanceId").and_then(Value::as_str), id);
         assert!(!notices.deliver("B", "synthetic-main", &out));

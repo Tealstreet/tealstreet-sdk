@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[allow(dead_code)]
 mod support;
 
@@ -40,7 +41,10 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
         let h = answer(envelope);
         let error = h.failures.last().expect("uncertain batch failed");
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+        assert_eq!(
+            error.message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        );
         assert!(
             error
                 .partial
@@ -53,7 +57,7 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
             rows[..20]
                 .iter()
                 .all(|row| matches!(&row.result, ElementResult::Unknown { error }
-            if error.message == "The outcome is unknown. Check Open Orders"))
+            if error.message == "We couldn’t confirm this change. Check your open orders before trying again."))
         );
         assert!(matches!(
             rows[20].result,
@@ -69,7 +73,7 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
             .filter(|action| {
                 matches!(action,
                     Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
-                        && event.message == "The outcome is unknown. Check Open Orders"
+                        && event.message == "We couldn’t confirm this change. Check your open orders before trying again."
                 && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
                 )
             })

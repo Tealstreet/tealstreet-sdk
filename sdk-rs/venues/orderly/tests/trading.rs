@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 use safe_cex_engine::model::{BybitBbo, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice};
@@ -1245,7 +1246,11 @@ fn lost_place_cancel_and_amend_preserve_optimistic_state_and_reconcile_without_r
         );
         let error = done(out, 71).unwrap_err().to_ascii_lowercase();
         assert!(
-            error.contains("unknown") && error.contains("check open orders"),
+            error.contains("confirm")
+                && error
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error}"
         );
     }
@@ -1845,7 +1850,11 @@ fn aggregation_normalizes_transport_and_native_unknown_warnings() {
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         let text = error.legacy_text().to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(
@@ -1948,7 +1957,11 @@ fn aggregation_keeps_unknown_warning_for_mixed_family_cancellation() {
             assert_eq!(error.outcome, Some(Outcome::Unknown));
             let text = error.legacy_text().to_ascii_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "first ambiguous={ambiguous_first}, response={status}: {error:?}"
             );
             assert!(!text.contains("refused"), "{text}");
@@ -2021,7 +2034,11 @@ fn assert_dispatched_unknown(
     );
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{text}"
     );
     assert!(

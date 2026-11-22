@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original native controls: real Bingx, trusted provider, shared host driver.
 use safe_cex_engine::model::{Market, MinMax, PlaceOrderOpts, Precision};
 use safe_cex_engine::request_context::HttpAction;
@@ -372,12 +373,15 @@ fn ambiguous_http_timestamp_refusal_never_resends_a_released_create() {
         assert_eq!(errors.len(), 1, "HTTP {status}: one terminal failure");
         assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
         assert!(
-            errors[0].message.to_ascii_lowercase().contains("unknown"),
+            errors[0].message.to_ascii_lowercase().contains("confirm"),
             "HTTP {status}: CommandFailed must describe the uncertainty: {:?}",
             errors[0]
         );
         assert!(
-            errors[0].message.contains("Check Open Orders"),
+            errors[0]
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
             "HTTP {status}: CommandFailed must direct reconciliation: {:?}",
             errors[0]
         );
@@ -429,7 +433,7 @@ fn ambiguous_http_timestamp_refusal_fences_writes_until_primary_snapshot() {
                 Action::Notice(Notice::CommandFailed { command, error })
                     if *command == COMMAND + 10
                         && error.outcome == Some(Outcome::NotSent)
-                        && error.message.contains("reconcile before placing or amending")
+                        && error.message.contains("Check your open orders before placing or editing orders")
             )),
             "HTTP {status}: follow-up must be refused by the placement fence: {held:?}"
         );
@@ -722,7 +726,8 @@ fn independent_cancel_unknown_halts_the_sibling_without_retry() {
     assert_eq!(failures(&next).len(), 1);
     let error = &failures(&next)[0];
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    const ENGINE_UNKNOWN_TEXT: &str =
+        "We couldn’t confirm this change. Check your open orders before trying again.";
     assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
     let rows = error.elements.as_ref().expect("complete cancel report");
     assert_eq!(rows.len(), 2);
@@ -979,7 +984,7 @@ fn fenced(actions: &[Action], command: u32) -> bool {
     actions.iter().any(|a| {
         matches!(a, Action::Notice(Notice::CommandFailed { command: id, error })
             if *id == command
-                && error.message == "Placement outcome is uncertain; reconcile before cancel-all")
+                && error.message == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.")
     })
 }
 /// The clearing snapshot is Primary-signed even with a read key configured, and

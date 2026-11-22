@@ -264,7 +264,7 @@ describe('Hyperliquid remote signing over the structured ws-auth wire', () => {
     ];
     for (const [name, statement] of refusals) {
       await expect(call(signer, work(statement, digestOf(cancel, nonce, null, true))), name).rejects.toThrow(
-        'Remote signing request refused',
+        'This request couldn’t be signed',
       );
       await expect(
         keyed.exchange.signWsAuth({
@@ -301,7 +301,7 @@ describe('Hyperliquid remote signing over the structured ws-auth wire', () => {
     const action = ACTIONS.cancel;
     await expect(
       call(signer, work(statementOf(action, 1, null, true), digestOf(action, 1, null, true))),
-    ).rejects.toThrow('Remote signing request refused');
+    ).rejects.toThrow('This request couldn’t be signed');
     await call(signer, bindAddress);
     const other = device('hyperliquid', { secret: `0x${'22'.repeat(32)}` });
     const rebound = createRemoteSignerProvider({
@@ -318,7 +318,7 @@ describe('Hyperliquid remote signing over the structured ws-auth wire', () => {
       identities: { primary: { ...IDENTITY, publicCredential: ACCOUNT } },
     });
     await call(rebound, bindAddress);
-    await expect(call(rebound, bindAddress)).rejects.toThrow('Remote signing request refused');
+    await expect(call(rebound, bindAddress)).rejects.toThrow('This request couldn’t be signed');
   });
 });
 

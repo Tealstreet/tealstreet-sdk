@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Protective amendments use genuine preflight reads and physical signed writes.
 mod support;
 use safe_cex_engine::model::{OrderStatus, OrderType};
@@ -121,8 +122,8 @@ fn unproven_partial_restore_is_not_attempted_and_refusal_is_loudly_unprotected()
             Some(safe_cex_engine::error::Protection::Unprotected)
         );
         assert!(
-            errors[0].message.contains("stop removed")
-                && errors[0].message.contains("please re-place"),
+            errors[0].message.contains("stop was removed")
+                && errors[0].message.contains("Add a new stop"),
             "{}",
             errors[0].message
         );
@@ -341,15 +342,15 @@ fn check_restore_failure(case: &str, retry_after_seconds: Option<f64>) {
             failure.protection,
             Some(safe_cex_engine::error::Protection::Unprotected)
         );
-        assert!(failure.message.contains("UNPROTECTED"));
-        assert!(failure.message.contains("could not be restored"));
+        assert!(failure.message.contains("protection could not be restored"));
+        assert!(failure.message.contains("Add protection for this position"));
     } else {
         assert_eq!(failure.protection, None, "{case}");
         assert_eq!(failure.outcome, Some(Outcome::Unknown));
         assert_eq!(failure.message, ENGINE_UNKNOWN_TEXT);
         assert!(
-            !failure.message.contains("UNPROTECTED")
-                && !failure.message.contains("could not be restored")
+            !failure.message.contains("protection could not be restored")
+                && !failure.message.contains("Add protection for this position")
         );
     }
     assert_eq!(
@@ -1067,9 +1068,9 @@ fn dispatched_ambiguity_replacement_is_uncertain_without_restore_or_resend() {
             assert_eq!(error.outcome, Some(Outcome::Unknown));
             assert_eq!(error.protection, None);
             assert!(
-                error
-                    .message
-                    .contains("outcome is unknown. Check Open Orders"),
+                error.message.contains(
+                    "We couldn’t confirm this change. Check your open orders before trying again."
+                ),
                 "{}",
                 error.message
             );
@@ -1078,7 +1079,7 @@ fn dispatched_ambiguity_replacement_is_uncertain_without_restore_or_resend() {
                 "{}",
                 error.message
             );
-            assert!(!error.message.contains("UNPROTECTED"));
+            assert!(!error.message.contains("could not be restored"));
             assert!(
                 !actions
                     .iter()

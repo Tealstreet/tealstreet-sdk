@@ -11,6 +11,7 @@ import {
   isDelegatedFullWriteAction,
 } from './delegatedActions';
 import { DelegatedActivationError, requireDelegatedAction, requireDelegatedActivation } from './delegatedActivation';
+import { unsupportedAlgoAmendField } from './delegatedAlgoActions';
 import {
   createDelegatedIntentId,
   DELEGATED_ACK_MAX,
@@ -120,6 +121,17 @@ export interface OutboxConnection extends OutboxScope {
 }
 
 const MAX_AGE_MS = 10_000;
+/**
+ * How long a handed-off intent may await its router/box receipt: both admit a key until it
+ * is 10 s old by their own clocks (5 s future tolerance), plus transit (AGT-125).
+ */
+export const DELEGATED_RECEIPT_MAX_AGE_MS = 20_000;
+/**
+ * How long a box-ACKed intent may await its outcome: the receipt bound + the engine's 120 s
+ * command wait + one 20 s venue write attempt (AGT-125). Exported for hosts before the outbox
+ * adopts it; `delegatedOutboxBounds.test.ts` pins both to the Rust limits.
+ */
+export const DELEGATED_ACKNOWLEDGED_MAX_AGE_MS = 160_000;
 const MAX_PENDING = 1024;
 const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;
@@ -429,7 +441,7 @@ export class DelegatedOutbox {
     if (this.connection) this.disconnect(this.connection);
     requireDelegatedActivation(connection.capabilities, flags, connection.venue);
     if (!connection.ready)
-      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'DELEGATED connection is not ready');
+      throw new DelegatedActivationError('delegatedConnectionNotAdmitted', 'The trading connection is still getting ready');
     const captured = this.connect(connection);
     this.activationConnection = captured;
     return captured;
@@ -517,14 +529,14 @@ export class DelegatedOutbox {
       if (!connection || this.activationConnection !== connection || !this.current(connection))
         throw new DelegatedActivationError(
           'delegatedConnectionNotAdmitted',
-          'DELEGATED action requires activation on this connection',
+          'This connection isn’t ready to make changes yet',
         );
       if (action !== 'place' && action !== 'close') requireDelegatedAction(action, {});
       const params = clone(paramsOrOptions as Record<string, unknown>);
       requireDelegatedAction(action, params);
       return this.enqueue(params);
     }
-    if (!isDelegatedAction(action)) throw new Error('Invalid delegated action');
+    if (!isDelegatedAction(action)) throw new Error(unsupportedAlgoAmendField(action) ?? 'Invalid delegated action');
     return this.enqueueIntent({}, clone(action), paramsOrOptions as EnqueueOptions | undefined);
   }
 
@@ -862,7 +874,7 @@ export class DelegatedOutbox {
     row.cancelPending = handedOff;
     row.state = row.cancelPending ? 'unknown' : 'canceled';
     if (row.action && row.cancelPending)
-      row.error = { message: 'Action awaits router confirmation', outcome: 'unknown' };
+      row.error = { message: 'We’re waiting for confirmation. Check your open orders before trying again.', outcome: 'unknown' };
     this.stopTimer(intentId);
     this.changed(row);
     this.arm(row);

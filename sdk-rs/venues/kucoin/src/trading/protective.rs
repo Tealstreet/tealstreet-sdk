@@ -149,7 +149,7 @@ impl State {
         if !observed.is_some_and(|(price, seen)| {
             positive(price) && seen <= now && now - seen <= 5_000.0 && current == Some(price)
         }) {
-            return Err(not_sent("trigger-source receipt is stale or missing"));
+            return Err(not_sent("The trigger source needs a fresh price update"));
         }
         Ok(())
     }
@@ -229,16 +229,16 @@ fn words(run: &Run, at: At) -> String {
     let (side, kind) = protection_name(order);
     match at {
         At::Cancel => format!(
-            "Your {symbol} {side} position's {kind} edit outcome is unknown; check Open Orders before editing again"
+            "The {kind} edit for your {symbol} {side} position wasn’t confirmed. Check your open orders before editing again."
         ),
         At::Proof => format!(
-            "Your {symbol} {side} position's {kind} cancel was sent but could not be confirmed; its outcome is unknown and no replacement was sent. Check Open Orders"
+            "The {kind} cancellation for your {symbol} {side} position wasn’t confirmed, so no replacement was sent. Check your open orders before trying again."
         ),
         At::Place => format!(
-            "Your {symbol} {side} position's {kind} replacement outcome is unknown. Check Open Orders before re-placing protection"
+            "The replacement {kind} for your {symbol} {side} position wasn’t confirmed. Check your open orders before adding protection."
         ),
         At::Restore => format!(
-            "Your {symbol} {side} position's {kind} put-back outcome is unknown. Check Open Orders before re-placing protection"
+            "Restoring the original {kind} for your {symbol} {side} position wasn’t confirmed. Check your open orders before adding protection."
         ),
     }
 }
@@ -286,7 +286,12 @@ impl Kucoin {
             return;
         };
         if cx.frame_fed() {
-            let _ = cx.fail_preflight(&preflight, not_sent("Your KuCoin stop was not changed: frame-fed prices have no local trigger-source receipt"));
+            let _ = cx.fail_preflight(
+                &preflight,
+                not_sent(
+                    "Your KuCoin stop is unchanged because its trigger price couldn’t be checked",
+                ),
+            );
             return;
         }
         let Command::AmendOrder { id, .. } = &input else {

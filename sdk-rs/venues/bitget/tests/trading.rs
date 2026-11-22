@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Event, Method};
@@ -723,7 +724,6 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     let mut o = limit();
     o["side"] = json!("sell");
     o["reduceOnly"] = json!(true);
-    o["takeProfit"] = json!(120);
     place(&mut h, vec![o]);
     let (request, p) = body(&mut h, "/api/v3/trade/place-order");
     assert_eq!(p["category"], "USDT-FUTURES");
@@ -731,8 +731,15 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     assert_eq!(p["posSide"], "long");
     assert_eq!(p["qty"], "0.002");
     assert!(p.get("size").is_none());
-    assert_eq!(p["takeProfit"], "120");
     h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"4"}}"#);
+    // AGT-120: a reduce-only order may not carry legs, so the v3 attached take-profit is
+    // checked on an opening entry.
+    let mut o = limit();
+    o["takeProfit"] = json!(120);
+    place(&mut h, vec![o]);
+    let (request, p) = body(&mut h, "/api/v3/trade/place-order");
+    assert_eq!(p["takeProfit"], "120");
+    h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"5"}}"#);
     place(
         &mut h,
         vec![json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":80})],
@@ -1763,7 +1770,10 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
         r#"{"code":"45110","msg":"less than the minimum amount 5 USDT"}"#,
     );
     let error = h.done[0].1.clone().unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 #[test]

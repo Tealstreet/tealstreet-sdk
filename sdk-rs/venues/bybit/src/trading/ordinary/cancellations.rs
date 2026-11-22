@@ -7,7 +7,8 @@ use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 use safe_cex_engine::{Command, CommandId, Cx, Level, Outcome, Response, VenueError};
 
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const CANCEL_MESSAGE: &str = "Bybit cancel was not confirmed";
 
 pub(super) struct Cancellations {

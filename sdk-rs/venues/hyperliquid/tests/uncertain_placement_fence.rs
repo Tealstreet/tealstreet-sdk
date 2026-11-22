@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -120,7 +121,7 @@ fn refused(actions: &[Action], command: u32) {
         actions.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: id, error })
             if *id == command && error.outcome == Some(Outcome::NotSent)
-                && error.message.contains("Placement outcome is uncertain")
+                && error.message.contains("An earlier order hasn’t been confirmed")
         )),
         "repeat placement must be refused until a fresh complete orders read: {actions:?}"
     );

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Scripted private payload oracles: BingX-API/api-ai-skills swap-account,
 //! swap-ws-account and swap-trade. No credentials or live writes are used.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode, PositionSide};
@@ -362,7 +363,7 @@ fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
         );
         assert!(h.failures.iter().any(|(command, error)| *command == id
             && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-            && error.message.contains("uncertain")));
+            && error.message.contains("confirm")));
     };
     refused(&mut h, 701);
     let fresh = h.take(ORDERS);
@@ -418,7 +419,7 @@ fn a_degraded_open_order_snapshot_does_not_clear_a_placement_fence() {
             h.event(Event::Command(place(id)));
             assert!(h.failures.iter().any(|(command, error)| *command == id
                 && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain")));
+                && error.message.contains("confirm")));
             assert!(h.requests.iter().all(
                 |r| r.method != Method::Post || !r.url.contains("/openApi/swap/v2/trade/order")
             ));

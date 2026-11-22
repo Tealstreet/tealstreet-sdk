@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original callback controls for the complete private dispatch cutover.
 #[path = "../../../engine/tests/support/account_snapshot.rs"]
 mod account_snapshot;
@@ -1447,7 +1448,8 @@ fn fail_released_write(h: &mut Harness, request: &HttpRequest, timeout: bool) {
     }
 }
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 fn assert_unknown_batch_stop(h: &mut Harness, placed: &[&str]) {
     let terminal = terminals(&h.actions);
     assert_eq!(

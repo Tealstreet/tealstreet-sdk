@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::model::{OrderIdentityKind, OrderStatus};
 use safe_cex_engine::{Action, Command, Event, Method, Notice};
@@ -210,9 +211,9 @@ fn limit_bracket_waits_for_entry_and_halts_after_unknown_child()
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     let error = failure(&out);
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
@@ -981,10 +982,12 @@ fn an_unclassified_limit_replacement_failure_warns_its_outcome_is_unknown()
     assert_eq!(error.venue_code.as_deref(), Some("INVALID_ORDER"));
     assert_eq!(error.venue_message.as_deref(), Some("bad"));
     assert!(
-        error
+        error.message.contains(
+            "Your SOL_USDC_PERP order was cancelled, but its replacement wasn’t confirmed"
+        ) && error
             .message
-            .contains("Your SOL_USDC_PERP order may be gone")
-            && error.message.contains("Check Open Orders"),
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
         "{}",
         error.message
     );
@@ -1083,7 +1086,12 @@ fn assert_failed_stop(out: &[Action]) -> Result<(), Box<dyn std::error::Error>> 
             .as_ref()
             .is_none_or(|partial| partial.order_ids.is_empty())
     );
-    assert!(error.message.contains("Check Open Orders"));
+    assert!(
+        error
+            .message
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders")
+    );
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
     Ok(())
 }
@@ -1169,8 +1177,13 @@ fn an_unknown_replacement_is_never_read_or_put_back() {
         let out = actions(&mut e);
         let error = failure(&out);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-        assert!(error.message.contains("outcome is unknown"));
-        assert!(error.message.contains("Check Open Orders"));
+        assert!(error.message.contains("confirm"));
+        assert!(
+            error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders")
+        );
         assert!(!error.message.to_ascii_lowercase().contains("rejected"));
         assert_eq!(error.protection, None, "{status}");
         assert!(
@@ -1309,7 +1322,10 @@ fn write_failures_keep_classification_and_unknown_guidance() {
             "{status} {body}: {}",
             error.message
         );
-        assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+        assert_eq!(
+            error.message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        );
     }
 }
 
@@ -1412,11 +1428,9 @@ fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
-        assert!(
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
     }
     assert_eq!(e.store().order("123").is_some(), stored);
     let late = if stored {
@@ -1635,8 +1649,11 @@ fn a_refused_replacement_still_resting_is_never_put_back() {
     assert!(
         error
             .message
-            .contains("Your SOL_USDC_PERP long position may have no stop")
-            && error.message.contains("Check Open Orders"),
+            .contains("Your SOL_USDC_PERP long position’s stop was cancelled, but its replacement wasn’t confirmed")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{}",
         error.message
     );
@@ -1733,8 +1750,11 @@ fn an_unknown_put_back_says_check_open_orders_never_re_place() {
         let error = failure(&out);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("re-place")
                 && !error.message.contains("INVALID_ORDER"),
             "{case}: {}",

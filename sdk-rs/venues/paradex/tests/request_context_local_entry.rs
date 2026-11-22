@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Genuine entry authority for fixed settings and pre-I/O native refusals.
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::StpMode;
@@ -255,7 +256,7 @@ fn capacity(local: Local) {
             &ask(&mut e, NOW, local),
             local,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         e.handle(
             NOW,
@@ -281,7 +282,7 @@ fn clock(local: Local) {
                 &ask(&mut e, now, local),
                 local,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
             native(&ask(&mut e, NOW, local), local);
         }
@@ -323,7 +324,7 @@ fn expiry(local: Local) {
             &e.drain_actions().collect::<Vec<_>>(),
             local,
             ErrorKind::Timeout,
-            "Request context timed out",
+            "This request timed out",
         );
         native(&ask(&mut e, NOW, local), local);
     }

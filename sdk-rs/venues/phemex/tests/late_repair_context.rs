@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original custody gaps and native controls for Phemex late cancel repair.
 mod support;
 use safe_cex_engine::model::*;
@@ -621,7 +622,7 @@ fn concurrent_lost_placements_share_one_bulk_request_after_repeated_cancel_all()
     assert!(refused.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandFailed { command, error })
             if *command == id && error.outcome == Some(Outcome::NotSent)
-                && error.message.contains("uncertain")
+                && error.message.contains("confirm")
     )));
     let mut a = live_row("native-a");
     a["clOrdID"] = json!("owed-a");
@@ -805,7 +806,7 @@ fn native_incomplete_read_preserves_the_unresolved_generation() {
         terminals(&a, id)[0]
             .as_ref()
             .unwrap_err()
-            .contains("uncertain")
+            .contains("confirm")
     );
     assert_eq!(terminals(&a, id).len(), 1);
     assert!(a.iter().any(|action| matches!(action,
@@ -883,7 +884,10 @@ fn repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers()
                     _ => None,
                 })
                 .expect("the stopping command is explicitly refused for capacity");
-            assert_eq!(error.message, "Engine request capacity reached");
+            assert_eq!(
+                error.message,
+                "The account’s request queue is full. Try again shortly."
+            );
             assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
             assert_eq!(error.outcome, None);
             assert_eq!(command_terminals(&actions), 1);
@@ -1067,7 +1071,7 @@ fn refused_repair_admission_emits_one_manual_cancel_error() {
             }
         }
         if command == 1127 {
-            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:1127,error }) if error.message == "Engine request capacity reached")));
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:1127,error }) if error.message == "The account’s request queue is full. Try again shortly.")));
         }
     }
     assert_eq!(peers.len(), 127);

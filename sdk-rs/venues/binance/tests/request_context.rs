@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native facts enter the shared journal; late replies have no reducer authority.
 mod support;
 use safe_cex_engine::{Command, Event, Outcome};
@@ -992,7 +993,7 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
         if status == 429 {
             assert_eq!(
                 failure.message,
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
                 "{status}",
             );
         } else {
@@ -1053,11 +1054,9 @@ fn a_native_batch_item_rate_limit_stops_lots_while_definite_refusals_continue() 
             "{error:?}"
         );
         if rate_limited {
-            assert!(
-                error
-                    .message
-                    .contains("The outcome is unknown. Check Open Orders")
-            );
+            assert!(error.message.contains(
+                "We couldn’t confirm this change. Check your open orders before trying again."
+            ));
             let rows = error.elements.as_ref().unwrap();
             assert!(
                 matches!(&rows[1].result, safe_cex_engine::write_plan::ElementResult::Unknown { error } if error.venue_code.as_deref() == Some("-1003"))
@@ -1121,7 +1120,7 @@ fn released_rate_limit_statuses_without_a_code_are_unknown() {
         if status == 429 {
             assert_eq!(
                 failure.message,
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
                 "{status}",
             );
         } else {

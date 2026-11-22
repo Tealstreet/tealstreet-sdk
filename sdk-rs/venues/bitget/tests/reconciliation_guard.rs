@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 use safe_cex_engine::{Command, Event};
 use support::*;
@@ -86,12 +87,13 @@ fn place(h: &mut Harness, command: u32) {
 
 /// The command was refused before entry, NotSent, for the uncertain fence.
 fn fenced(h: &Harness, command: u32) -> bool {
-    h.done.iter().any(|(id, result)| {
-        *id == command && result.as_ref().is_err_and(|e| e.contains("uncertain"))
-    }) && h.failures.iter().any(|error| {
-        error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-            && error.legacy_text().contains("uncertain")
-    })
+    h.done
+        .iter()
+        .any(|(id, result)| *id == command && result.as_ref().is_err_and(|e| e.contains("confirm")))
+        && h.failures.iter().any(|error| {
+            error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.legacy_text().contains("confirm")
+        })
 }
 
 #[test]

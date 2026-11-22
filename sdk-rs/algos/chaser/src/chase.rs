@@ -167,6 +167,7 @@ struct State {
 pub struct Chase {
     pub id: String,
     pub options: ChaserOptions,
+    pub amendment: RefCell<crate::ChaserUpdate>,
     pub started_ms: f64,
     pub target_position_contracts: Option<f64>,
     /// The supervisor's tasks. Cleanup never aborts it mid-placement; it exits
@@ -220,6 +221,7 @@ impl Chase {
         });
         let watch_scope = scope.child();
         Self {
+            amendment: RefCell::new(crate::ChaserUpdate::default()),
             id,
             started_ms,
             target_position_contracts,
@@ -279,7 +281,7 @@ impl Chase {
 
     pub fn increment_attempts(&self) {
         let mut state = self.state.borrow_mut();
-        if f64::from(state.attempts) > self.options.max_attempts {
+        if f64::from(state.attempts) > self.max_attempts() {
             state.stopped = true;
             state.stop_reason = "Reached maximum number of attempts".into();
         } else {
@@ -551,7 +553,7 @@ impl Chase {
             symbol: self.options.symbol.clone(),
             size: self.options.size,
             side: self.options.side,
-            max_attempts: self.options.max_attempts,
+            max_attempts: self.max_attempts(),
             reduce_only: self.options.reduce_only(),
             attempts: state.attempts,
             is_stopped: state.stopped,
@@ -560,6 +562,13 @@ impl Chase {
             origin: self.options.origin.clone(),
             twap_id: self.options.twap_id.clone(),
         }
+    }
+
+    pub fn max_attempts(&self) -> f64 {
+        self.amendment
+            .borrow()
+            .max_attempts
+            .unwrap_or(self.options.max_attempts)
     }
 }
 

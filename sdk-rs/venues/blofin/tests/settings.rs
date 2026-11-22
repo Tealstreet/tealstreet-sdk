@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::{Command, Event, HttpRequest, Method, Outcome};
 use support::*;
@@ -53,8 +54,12 @@ fn assert_unknown_setting(command: Command, path: &str, status: u16, response: &
     };
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{path}: {error:?}");
     let text = error.legacy_text();
-    assert!(text.contains("unknown"), "{path}: {text}");
-    assert!(text.contains("Check Open Orders"), "{path}: {text}");
+    assert!(text.contains("confirm"), "{path}: {text}");
+    assert!(
+        text.replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{path}: {text}"
+    );
     assert!(!text.contains("rejected"), "{path}: {text}");
     let after = h.e.store().setting("BTCUSDT").unwrap();
     assert_eq!(after.leverage, before.leverage);
@@ -151,7 +156,7 @@ fn native_setting_refusals_name_the_setting_and_retain_the_actual_code_and_messa
             assert_eq!(error.venue_code.as_deref(), Some(code), "{error:?}");
             assert_eq!(error.venue_message.as_deref(), Some(message), "{error:?}");
             assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
-            assert!(!error.legacy_text().contains("unknown"), "{error:?}");
+            assert!(!error.legacy_text().contains("confirm"), "{error:?}");
             assert!(
                 error
                     .message
@@ -209,15 +214,18 @@ fn http_setting_failures_distinguish_transport_status_from_vendor_evidence() {
                 assert!(error.message.contains("HTTP 400"), "{error:?}");
             } else {
                 assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
-                assert!(error.legacy_text().contains("unknown"), "{error:?}");
+                assert!(error.legacy_text().contains("confirm"), "{error:?}");
                 assert!(
-                    error.legacy_text().contains("Check Open Orders"),
+                    error
+                        .legacy_text()
+                        .replace("Check your open orders", "Check Open Orders")
+                        .contains("Check Open Orders"),
                     "{error:?}"
                 );
                 assert!(matches!(
                     &error.elements.as_ref().unwrap()[0].result,
                     safe_cex_engine::write_plan::ElementResult::Unknown { error }
-                        if error.message == "The outcome is unknown. Check Open Orders"
+                        if error.message == "We couldn’t confirm this change. Check your open orders before trying again."
                 ));
             }
             assert!(!h.pending.iter().any(|r| r.method == Method::Post));

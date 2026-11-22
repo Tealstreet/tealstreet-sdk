@@ -1674,3 +1674,9 @@ still emit their single exchange error event.
 Rust algo actions use `EngineHost.checkAlgosForExecution`, not the observational
 `runsRustAlgos`/`algosRunning` getters. Status reads and disposal do not manufacture
 engine deaths; action admission retains strict ownership retirement.
+
+## Notification wording compatibility
+
+User-visible messages use plain language without changing typed outcomes or retries.
+Signing failures now say that signing is unavailable; the unsent-error recognizer
+still accepts the historical wording documented above during mixed-version rollouts.

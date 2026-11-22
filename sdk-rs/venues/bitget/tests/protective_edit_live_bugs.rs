@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 
 use safe_cex_engine::{Command, Method, Outcome, RequestId, VenueAction};
@@ -75,6 +76,8 @@ fn assert_unknown_without_more_writes(h: &Harness) {
         error
             .legacy_text()
             .to_ascii_lowercase()
+            .to_ascii_lowercase()
+            .replace("check your open orders", "check open orders")
             .contains("check open orders"),
         "{error:?}"
     );

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original synchronous Aster controls; peer roots use genuine engine entries.
 mod support;
 use safe_cex_engine::book::Book;
@@ -252,7 +253,7 @@ fn invalid(local: Local) {
                 &output,
                 OWNER,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
         }
     }
@@ -282,7 +283,7 @@ fn capacity(local: Local) {
             &output,
             OWNER,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         assert_eq!(engine.venue().live_before, 256);
         assert_eq!(engine.venue().live_after, 256);

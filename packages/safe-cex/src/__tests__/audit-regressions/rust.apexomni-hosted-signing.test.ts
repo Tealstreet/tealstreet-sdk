@@ -88,23 +88,23 @@ it('rejects foreign refs, graph substitutions, malformed replies and provider er
     (request: SignRequest) => { const op = request.operations[3]; if (op.kind === 'sign') op.payload = [{ kind: 'result', index: 1, encoding: 'hex' }]; },
   ]) {
     const r = rig(); const request = work(true); mutate(request);
-    await expect(r.provider(request, context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(r.provider(request, context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(r.sign).not.toHaveBeenCalled();
   }
   for (const response of ['{}', JSON.stringify({ credential: 'foreign', contracts: [], signature: hmac('x') }),
     JSON.stringify({ credential: identity.publicCredential, contracts: ['00'], signature: hmac('x') })]) {
     const r = rig(); r.sign.mockImplementationOnce(async (input) => ({ id: input.id, wsAuthSignature: response }));
-    await expect(r.provider(work(true), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(r.provider(work(true), context())).rejects.toThrow(/^This request couldn’t be signed$/);
   }
   const r = rig(); r.sign.mockRejectedValueOnce(new Error('fixture-material fixture-pass'));
-  await expect(r.provider(work(true), context())).rejects.toThrow(/^Remote signing request refused$/);
+  await expect(r.provider(work(true), context())).rejects.toThrow(/^This request couldn’t be signed$/);
 });
 
 it('cancels a delayed remote batch without accepting its late result', async () => {
   const r = rig(); let finish!: (result: Awaited<ReturnType<typeof r.sign>>) => void;
   r.sign.mockImplementationOnce((input) => new Promise((resolve) => { finish = (answer) => resolve({ ...answer, id: input.id }); }));
   const abort = new AbortController(); const pending = r.provider(work(true), { signal: abort.signal });
-  abort.abort(); await expect(pending).rejects.toThrow('Remote signing canceled');
+  abort.abort(); await expect(pending).rejects.toThrow('Signing was cancelled');
   finish({ id: '', wsAuthSignature: '{}' });
 });
 
@@ -139,7 +139,7 @@ it('drops user A\'s deferred batch after disposal while user B signs with its ow
   let b: ReturnType<typeof account> | undefined;
   try {
     const pendingA = a.setup.signer(a.request, context());
-    const canceledA = expect(pendingA).rejects.toThrow('Remote signing canceled');
+    const canceledA = expect(pendingA).rejects.toThrow('Signing was cancelled');
     expect(signA).toHaveBeenCalledOnce();
     a.setup.dispose();
     b = account('user-b', signB);
@@ -152,7 +152,7 @@ it('drops user A\'s deferred batch after disposal while user B signs with its ow
     expect(resultB.values[2]).toEqual(bytes('user-b-pass'));
     expect(signB).toHaveBeenCalledOnce();
     expect(signA).toHaveBeenCalledOnce();
-    await expect(b.setup.signer(a.request, context())).rejects.toThrow('Remote signing request refused');
+    await expect(b.setup.signer(a.request, context())).rejects.toThrow('This request couldn’t be signed');
     await expect(a.setup.signer(a.request, context())).rejects.toMatchObject({ outcome: 'notSent' });
     expect(signB).toHaveBeenCalledOnce();
   } finally {

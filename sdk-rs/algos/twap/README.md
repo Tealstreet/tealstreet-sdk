@@ -91,7 +91,7 @@ A TWAP chaser's Unknown cancel immediately retains that progress signal and
 relinquishes remaining automatic cancels; it never enters the cancel retry loop.
 Standalone chaser cancellation keeps its existing retry policy.
 
-The exact local wording is `The outcome is unknown. Check Open Orders`, matching
+The exact local wording is `We couldn’t confirm this change. Check your open orders before trying again.`, matching
 `engine/src/http_evidence.rs:38` per the lead's literal rule. Shared engine code
 and the engine duplicate-write fence are unchanged by this follow-up.
 

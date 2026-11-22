@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +42,7 @@ describe('Rust-only hosted account selection', () => {
         exchange.dispose();
       } else {
         expect(() => assertBetaAccount(name, options)).toThrow(
-          `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+          `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
         );
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }

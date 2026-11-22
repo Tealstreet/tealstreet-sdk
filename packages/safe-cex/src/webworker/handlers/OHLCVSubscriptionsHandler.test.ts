@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
@@ -121,7 +122,7 @@ describe('OHLCVSubscriptionsHandler', () => {
         expect(mockListenOHLCV).not.toHaveBeenCalled();
       });
 
-      it('should buffer subscription when markets not loaded yet', () => {
+      it('should buffer subscription when Markets are still loading yet', () => {
         mockStore.markets = [];
 
         const payload: StoreWorkerPayload = {

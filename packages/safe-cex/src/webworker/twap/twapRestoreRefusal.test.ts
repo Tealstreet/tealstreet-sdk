@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { TwapOptions } from './TwapOptions';
 import type { TwapState } from './TwapState';
 
@@ -47,10 +48,10 @@ describe('twapRestoreRefusal with a slice in flight', () => {
   it('says a slice may have been in flight when its schedule lapsed', () => {
     const lapsed = state({ nextOrderAt: now - 3_600_000, inFlight: { size: 0.2 } });
     expect(twapRestoreRefusal(options, lapsed, now)).toBe(
-      'its schedule lapsed, so no tab was running it; a slice may have been in flight, check open orders and fills',
+      'its saved schedule expired with a slice still pending; check your open orders and fills before restarting it',
     );
     expect(twapRestoreRefusal(options, state({ nextOrderAt: now - 3_600_000 }), now)).toBe(
-      'its schedule lapsed, so no tab was running it',
+      'its saved schedule has expired',
     );
   });
 });

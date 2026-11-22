@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Variant contracts from documented Bybit V5 payloads and Hyro's readiness contract.
 mod support;
 use safe_cex_engine::{Command, Event};
@@ -1033,7 +1034,7 @@ fn capacity_refusals(h: &mut Harness) -> usize {
             (3_000..3_300).contains(command)
                 && result
                     .as_ref()
-                    .is_err_and(|error| error.contains("capacity"))
+                    .is_err_and(|error| error.contains("request queue is full"))
         })
         .count()
 }

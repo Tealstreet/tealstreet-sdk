@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -162,7 +163,7 @@ it('device refuses unknown/cross-account/network/expired descriptors and raw dig
       wsAuth: { toSign, outputFormat: 'grvt-order' },
     });
     expect(result.wsAuthSignature).toBeUndefined();
-    expect(result.error).toBe('Hosted WS auth signing failed');
+    expect(result.error).toBe('The account connection couldn’t be signed in');
   }
   expect(browser.io).not.toHaveBeenCalled();
   expect(JSON.stringify(browser.logs)).not.toContain(secret);

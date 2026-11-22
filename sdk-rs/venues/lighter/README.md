@@ -10,7 +10,7 @@ behavior. Ordinary non-market lots and native limit batches retain their existin
 minimum checks before submission.
 
 An Unknown placement halts remaining writes for that action. Its failure includes
-"The outcome is unknown. Check Open Orders", accepted order indexes and the
+"We couldn’t confirm this change. Check your open orders before trying again.", accepted order indexes and the
 indexes whose placement is uncertain. The engine's mutation journal retains the
 accepted prefix. For venue-reported uncertainty, `order.outcome_unknown` telemetry
 snapshots placed, unknown and unsent indexes from that journal and the dispatcher

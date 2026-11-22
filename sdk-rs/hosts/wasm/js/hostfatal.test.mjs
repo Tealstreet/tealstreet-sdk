@@ -241,7 +241,8 @@ test('a failure set by one engine call is observed before the next call acts', (
   for (const text of ['a', 'b', 'c']) callbacks.onMessage(text);
   assert.equal(entries, 2);
   assert.equal(r.host.dead, true);
-  assert.match(r.host.deadError.message, /stopped unexpectedly|identities exhausted/);
+  // Rule 5 (#3726): the calmer fatal headline preserves the dead-host and suppressed-entry guards.
+  assert.match(r.host.deadError.message, /Trading was interrupted for this account|identities exhausted/);
 });
 
 test('an engine entry outside invoke and a non-fatal throw both restore the pre-call check', () => {

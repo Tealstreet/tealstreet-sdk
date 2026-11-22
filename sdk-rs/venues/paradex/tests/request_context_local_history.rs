@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Synchronous history results retain genuine Read completion custody.
 mod support;
 
@@ -265,7 +266,7 @@ fn capacity(branch: Local) {
             &local(&mut e, NOW, 810, branch),
             810,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         retire(&mut e, peers[0], 1, "free one slot");
         native(&local(&mut e, NOW, 810, branch), 810, branch);
@@ -274,7 +275,7 @@ fn capacity(branch: Local) {
             &local(&mut e, NOW, 812, branch),
             812,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         for (index, peer) in peers.into_iter().enumerate().skip(1) {
             retire(
@@ -314,7 +315,7 @@ fn invalid_clock_refusal_precedes_each_local_terminal_without_financial_outcome(
                     &local(&mut e, now, 820, branch),
                     820,
                     ErrorKind::InvalidInput,
-                    "Invalid request context",
+                    "This request couldn’t be prepared",
                 );
                 native(&local(&mut e, NOW, 820, branch), 820, branch);
                 no_store_effects(&mut e);

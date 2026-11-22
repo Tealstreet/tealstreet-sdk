@@ -353,8 +353,9 @@ fn spot_currency_valuation_resolves_native_token_id_aliases() {
 fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     let (mut e, _) = ready(true);
     e.drain_plain().for_each(drop);
+    // AGT-120: a reduce-only order may not carry legs (the engine refuses it), so the legs
+    // ride on an opening entry here; spot wires are still never reduce-only.
     let mut o = order("HFUN/USDC");
-    o.reduce_only = Some(true);
     o.stop_loss = Some(0.0008);
     o.take_profit = Some(0.0012);
     o.time_in_force = Some(TimeInForce::PostOnly);
@@ -374,6 +375,22 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     assert_eq!(wires[0]["c"], "0x00000000000000000000000000000001");
     assert_ne!(wires[1]["c"], wires[2]["c"]);
     assert_eq!(wires[0]["t"]["limit"]["tif"], "Alo");
+    // A reduce-only spot entry (no legs) is sent, never as reduce-only.
+    let (mut e, _) = ready(true);
+    e.drain_plain().for_each(drop);
+    let mut o = order("HFUN/USDC");
+    o.reduce_only = Some(true);
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p["action"]["grouping"], "na");
+    assert_eq!(p["action"]["orders"][0]["r"], false);
 }
 // AGT-117: a spot market entry's legs were dropped and the entry placed. They now group with it
 // like a limit entry's, and the venue refuses the whole group: probed live 2026-11-21 on HYPE/USDC
@@ -2088,7 +2105,10 @@ fn spot_unknown_cancel_reply_keeps_fence_before_replacement() {
     spot_cancel_status_trace(serde_json::json!({"mystery":true}), true);
 }
 
-fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, unknown: bool) {
+/// Spot plain rows share one order action since feat/hyperliquid-batched-placements, which
+/// replaced the TS serial pins here: each status row settles its own order, a refused row
+/// fails only itself, an unproven reply is Unknown, and nothing is resent.
+fn spot_batch_status_trace(rows: serde_json::Value, expected: &[&str], partial: &[&str]) {
     let (mut e, _) = ready(true);
     e.drain_plain().for_each(drop);
     let mut first = order("HFUN/USDC");
@@ -2097,23 +2117,18 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
     first.amount = 6000.;
     let mut second = first.clone();
     second.amount = 1.;
-    let orders = if failed {
-        vec![first.clone(), second, first]
-    } else {
-        vec![first, second]
-    };
     e.handle(
         5000.,
         Event::Command(Command::PlaceOrders {
             command: 72,
-            orders,
+            orders: vec![first.clone(), second, first],
         }),
     );
     let mut actions = prepared_now(&mut e);
     let mut writes = Vec::new();
     let mut terminals = Vec::new();
     let mut events = Vec::new();
-    let mut unknown_failure = None;
+    let mut failure = None;
     for _ in 0..8 {
         for action in &actions {
             match action {
@@ -2121,37 +2136,12 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
                     let body: serde_json::Value =
                         serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
                     writes.push(body["action"].clone());
-                    assert!(writes.len() <= 2, "no suffix or resend after failure");
-                    let statuses = if writes.len() == 2 {
-                        second_statuses.clone()
-                    } else {
-                        serde_json::json!([{"resting":{"oid":91}}])
-                    };
-                    support::reply(&mut e, r, 200, &serde_json::json!({"status":"ok","response":{"type":"order","data":{"statuses":statuses}}}).to_string());
+                    assert_eq!(writes.len(), 1, "one batched write; no suffix or resend");
+                    support::reply(&mut e, r, 200, &serde_json::json!({"status":"ok","response":{"type":"order","data":{"statuses":rows}}}).to_string());
                 }
                 Action::Notice(Notice::CommandDone { command: 72, .. }) => terminals.push(false),
                 Action::Notice(Notice::CommandFailed { command: 72, error }) => {
-                    if unknown {
-                        unknown_failure = Some(serde_json::to_value(error).expect("error"));
-                        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-                        assert_eq!(
-                            error.partial.as_ref().expect("accepted prefix").order_ids,
-                            ["91"]
-                        );
-                        let elements = error.elements.as_ref().expect("journal");
-                        assert_eq!(elements.len(), 3);
-                        assert!(
-                            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["91"])
-                        );
-                        assert!(matches!(
-                            &elements[1].result,
-                            safe_cex_engine::write_plan::ElementResult::Unknown { .. }
-                        ));
-                        assert!(matches!(
-                            &elements[2].result,
-                            safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
-                        ));
-                    }
+                    failure = Some(serde_json::to_value(error).expect("error"));
                     terminals.push(true);
                 }
                 Action::Notice(Notice::Event(event)) => events.push(event.clone()),
@@ -2161,30 +2151,54 @@ fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, un
         let next = prepared_now(&mut e);
         actions = support::advance_packet_timers(&mut e, next, 20_000.);
     }
-    if let Some(error) = unknown_failure {
-        support::assert_unknown_publication(&error, &events, 72);
+    assert_eq!(writes.len(), 1);
+    let wire = &writes[0];
+    assert_eq!(wire["type"], "order");
+    assert_eq!(wire["grouping"], "na");
+    let wires = wire["orders"].as_array().unwrap();
+    assert_eq!(wires.len(), 3);
+    for (row, size) in wires.iter().zip(["6000", "1", "6000"]) {
+        assert_eq!(row["a"], 10001);
+        assert_eq!(row["s"], size);
+        assert_eq!(row["p"], "0.002");
     }
-    assert_eq!(writes.len(), 2);
-    assert_eq!(terminals, vec![failed]);
-    for (wire, size) in writes.iter().zip(["6000", "1"]) {
-        assert_eq!(wire["type"], "order");
-        assert_eq!(wire["orders"].as_array().unwrap().len(), 1);
-        assert_eq!(wire["orders"][0]["a"], 10001);
-        assert_eq!(wire["orders"][0]["s"], size);
-        assert_eq!(wire["orders"][0]["p"], "0.002");
+    let whole = expected.iter().all(|status| *status == "placed");
+    assert_eq!(terminals, vec![!whole]);
+    let Some(error) = failure else {
+        return;
+    };
+    let statuses: Vec<_> = error["elements"]
+        .as_array()
+        .expect("journal")
+        .iter()
+        .map(|row| row["status"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(statuses, expected, "{error}");
+    if partial.is_empty() {
+        assert!(error.get("partial").is_none(), "{error}");
+    } else {
+        assert_eq!(error["partial"]["orderIds"], serde_json::json!(partial));
+    }
+    if expected.contains(&"unknown") {
+        support::assert_unknown_publication(&error, &events, 72);
     }
 }
 
 #[test]
 fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
-    // TS spot exchange:1007-1016 posts each row; API:78-95 throws before flatMap.
-    // exchanges/base.ts:1111-1114 stops the serial suffix after that throw.
+    // TS spot exchange:1007-1016 posted each row serially; plain rows now share one action
+    // (feat/hyperliquid-batched-placements), so a refusal fails only its own row.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
-    spot_serial_status_trace(serde_json::json!([{"resting":{"oid":92}}]), false, false);
-    spot_serial_status_trace(
-        serde_json::json!([{"error":"Order must have minimum value of $10."}]),
-        true,
-        false,
+    let resting = |oid: u64| serde_json::json!({"resting":{"oid":oid}});
+    spot_batch_status_trace(
+        serde_json::json!([resting(91), resting(92), resting(93)]),
+        &["placed", "placed", "placed"],
+        &[],
+    );
+    spot_batch_status_trace(
+        serde_json::json!([resting(91), {"error":"Order must have minimum value of $10."}, resting(93)]),
+        &["placed", "notSent", "placed"],
+        &["91", "93"],
     );
 }
 
@@ -2193,7 +2207,18 @@ fn spot_unrecognized_or_empty_statuses_keep_unknown_fence_after_accepted_prefix(
     // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; exchanges/base.ts:1111-1114 continues.
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
-    for statuses in [serde_json::json!([]), serde_json::json!([{"mystery":true}])] {
-        spot_serial_status_trace(statuses, true, true);
+    let resting = |oid: u64| serde_json::json!({"resting":{"oid":oid}});
+    // A short or unparseable batch reply cannot be mapped to rows, so every row is Unknown.
+    for rows in [
+        serde_json::json!([]),
+        serde_json::json!([resting(91)]),
+        serde_json::json!([resting(91), {"mystery":true}, resting(93)]),
+    ] {
+        spot_batch_status_trace(rows, &["unknown", "unknown", "unknown"], &[]);
     }
+    spot_batch_status_trace(
+        serde_json::json!([resting(91), "mystery", resting(93)]),
+        &["placed", "unknown", "placed"],
+        &["91", "93"],
+    );
 }

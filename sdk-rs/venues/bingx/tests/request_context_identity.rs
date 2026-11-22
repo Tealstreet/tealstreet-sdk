@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original identity entry and typed-failure assertions on unchanged BingX.
 #[path = "../../../engine/tests/support/account_snapshot.rs"]
 mod account_snapshot;
@@ -399,13 +400,13 @@ fn capacity(branch: Branch) {
         &control,
         900,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     denied(
         &ask(&mut e, NOW, 800),
         800,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     // Recovery/refill is reached only after the original admission assertion turns green.
     retire(&mut e, 1);
@@ -441,7 +442,7 @@ fn capacity(branch: Branch) {
         &ask(&mut e, NOW, 801),
         801,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     for owner in 2..=256 {
         retire(&mut e, owner);
@@ -482,7 +483,7 @@ fn invalid_clock_denies_before_native_local_or_remote_work() {
                 &ask(&mut e, now, 810),
                 810,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
         }
     }

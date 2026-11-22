@@ -1851,8 +1851,7 @@ impl PhemexPerpetuals {
             Level::Warn,
             code::ORDERS_REPLACED,
             format!(
-                "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
-                 it is canceled if the open-order read after its signed expiry finds it",
+                "Phemex is still checking pending {symbol} orders {} after your cancellation request. Check your open orders.",
                 ids.join_with(", ")
             ),
         );

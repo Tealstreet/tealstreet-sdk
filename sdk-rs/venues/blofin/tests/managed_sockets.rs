@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Production binding with genuine installed-provider signing and captured IDs.
 #![allow(dead_code)]
 mod support;
@@ -1394,7 +1395,7 @@ fn feed_refused_notices(h: &mut Harness) -> usize {
     }
     h.collect_at(20_000.);
     format!("{:?}", h.actions)
-        .matches("Live WebSocket connection failed")
+        .matches("Live market data couldn’t connect")
         .count()
 }
 
@@ -1423,7 +1424,7 @@ fn an_outage_says_so_only_once() {
     h.collect_at(20_001.);
     assert_eq!(
         format!("{:?}", h.actions)
-            .matches("Live WebSocket connection failed")
+            .matches("Live market data couldn’t connect")
             .count(),
         0
     );

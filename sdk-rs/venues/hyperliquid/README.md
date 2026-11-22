@@ -1,7 +1,8 @@
 # Hyperliquid write outcomes
 
-Hyperliquid writes follow the legacy TS serial/grouping behavior. The shared
-WritePlan records outcomes and has no validation or dispatch authority.
+Hyperliquid writes follow the legacy TS serial/grouping behavior, except that
+plain placements within one command are batched (see Batched placements). The
+shared WritePlan records outcomes and has no validation or dispatch authority.
 
 Stop-after-UNKNOWN is a recorded parity exception (Sean/daxx, 2026-11-08;
 doc #3355). A genuine Unknown halts further physical writes for that action,
@@ -18,7 +19,7 @@ The journal records this recovery without controlling dispatch.
 
 Unknown publications retain placed native IDs and indexed Unknown/NotSent rows.
 The terminal error, Unknown elements and `order.outcome_unknown` telemetry carry
-`The outcome is unknown. Check Open Orders`. The literal is intentionally copied
+`We couldn’t confirm this change. Check your open orders before trying again.`. The literal is intentionally copied
 from the engine under the lead's venue-local wording rule. Telemetry identifies the
 command and lists actual placed IDs and unknown indices as comma-separated fields.
 
@@ -30,6 +31,37 @@ Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
 message assertions. Telemetry for that path awaits a later engine hook; its
 telemetry assertion alone is deferred. Other Unknown pins require telemetry.
 
+## Batched placements
+
+TS placed a PlaceOrders command's rows one signed `order` action at a time, so a
+burst of N orders took N paced round trips. Now consecutive plain limit/market rows
+on one DEX (core perps, spot, or one HIP-3 DEX) share one `na` action of at most 40
+rows, the most that still costs one request of weight. Any row with an attached leg
+or a trigger keeps an action of its own, as before, so `normalTpsl` and
+`positionTpsl` grouping never contains another command's or row's order.
+
+Each status row settles its own order, in caller order: a refused row is NotSent
+and fails only itself, and its siblings stay placed and acknowledged. A reply whose
+row count differs from the batch, or that cannot be parsed, proves nothing about
+any row, so every row is Unknown. A `waitingForFill` row in a batch has no parent
+and is Unknown as well. A failed write still halts the command's later writes, and
+nothing is resent. One action takes one nonce, so signing is unchanged.
+
+Separate commands are not batched together: each owns its own engine Plan, and one
+physical request cannot settle several owners (`docs/plans/RUST_EXECUTION_GROUPS.md`).
+
+## Confirmed fill reconciliation
+
+A confirmed perp `filled` reply schedules a `clearinghouseState` read for its
+DEX through the existing 350 ms coalescer and account-read admission. This also
+covers the core DEX, which the periodic HIP-3 poll does not read. A delayed private
+stream must not leave a confirmed fill waiting indefinitely for a position update.
+The reply never creates a position: only a usable account snapshot or live fill
+does. Failed reads preserve state, newer stream evidence wins, and no write is
+retried. Resting replies and quiet accounts gain no position polling.
+Frame-fed page engines leave reconciliation to their account-frame provider;
+they do not arm local position-refresh timers or account reads.
+
 ## Cancellation reporting
 
 Decoded failed cancellation batches retain an indexed logical journal beside
@@ -38,7 +70,7 @@ the engine's native classification and partial metadata. Confirmed rows report
 report `unknown` with the native diagnostic. Cancel targets remain absent from
 created-order IDs; an empty created-ID list does not mean no cancellations applied.
 
-A decoded Unknown row publishes `The outcome is unknown. Check Open Orders`
+A decoded Unknown row publishes `We couldn’t confirm this change. Check your open orders before trying again.`
 and one independent `order.outcome_unknown` event correlated by `commandId`.
 Native error text remains available in `venueMessage`. The journal and diagnostic
 do not authorize dispatch, retries, restoration or store changes.

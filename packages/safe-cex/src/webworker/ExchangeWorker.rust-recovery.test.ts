@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { CommandProgress, OrderIdentityReceipt, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, Market, StoreData } from '../types';
 
@@ -371,7 +372,7 @@ describe('Rust worker engine ownership', () => {
     await panic(sources[1]);
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(2);
-    expect(messages.some((m) => m.op === 'warning' && m.data[0].includes('exhausted'))).toBe(true);
+    expect(messages.some((m) => m.op === 'warning' && m.data[0].includes('Trading couldn’t reconnect. Reload the account.'))).toBe(true);
   });
 
   it.each(['dispose', 'deactivate'] as const)('%s cancels a queued recovery', async (op) => {
@@ -452,7 +453,7 @@ describe('Rust worker engine ownership', () => {
       positions: false,
     });
     expect(messages.slice(boundary).some((message) => message.op === 'store')).toBe(false);
-    expect(messages.some((m) => m.op === 'warning' && m.data[0].includes('fresh provider attachment'))).toBe(true);
+    expect(messages.some((m) => m.op === 'warning' && m.data[0].includes('Market data needs to reconnect. Reload the account.'))).toBe(true);
     worker.handlePayload({ op: 'callMethod', data: { requestId: 'closed', method: 'setLeverage', args: [] } });
     expect(messages).toContainEqual(
       expect.objectContaining({
@@ -473,7 +474,7 @@ describe('Rust worker engine ownership', () => {
     expect(replies).toHaveLength(1);
     expect(replies[0].data).toMatchObject({
       success: false,
-      result: { code: 'ENGINE_DEAD', outcome: 'unknown', message: expect.stringContaining('outcome is unknown') },
+      result: { code: 'ENGINE_DEAD', outcome: 'unknown', message: expect.stringContaining('Trading was interrupted before this action was confirmed') },
     });
   });
 
@@ -513,7 +514,7 @@ describe('Rust worker engine ownership', () => {
     expect(worker.store.loaded.markets).toBe(false);
     expect(messages.slice(boundary).some((message) => message.op === 'ws-reconnected')).toBe(false);
     expect(
-      messages.slice(boundary).some((message) => message.op === 'warning' && message.data[0].includes('exhausted')),
+      messages.slice(boundary).some((message) => message.op === 'warning' && message.data[0].includes('Trading couldn’t reconnect. Reload the account.')),
     ).toBe(true);
   });
 
@@ -524,7 +525,7 @@ describe('Rust worker engine ownership', () => {
     await panic(sources[0]);
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(2);
-    expect(messages.some((message) => message.op === 'warning' && message.data[0].includes('recovery failed'))).toBe(
+    expect(messages.some((message) => message.op === 'warning' && message.data[0].includes('Trading couldn’t reconnect. Reload the account.'))).toBe(
       true,
     );
   });
@@ -756,7 +757,7 @@ describe('Rust worker engine ownership', () => {
     expect(execReplies).toHaveLength(1);
     expect(execReplies[0].data[0]).toMatchObject({
       success: false,
-      error: expect.stringContaining('outcome is unknown'),
+      error: expect.stringContaining('Trading was interrupted before this action was confirmed'),
     });
     expect(sources[1].algoOps).toEqual([]);
   });
@@ -807,7 +808,7 @@ describe('Rust worker engine ownership', () => {
     expect(execReplies).toHaveLength(1);
     expect(execReplies[0].data[0]).toMatchObject({
       success: false,
-      error: expect.stringContaining('engine build has no algos'),
+      error: expect.stringContaining('Running this trading request isn’t available for binance in this version'),
     });
   });
 

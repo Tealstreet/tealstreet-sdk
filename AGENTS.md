@@ -105,4 +105,8 @@ re-review.
 A proof PASS does not waive new-head required CI checks. For write paths,
 `Rust / combined consumers` must actually RUN and conclude SUCCESS at the new
 head; SKIPPED/selected-out jobs and a green aggregate alone are insufficient.
+`sdk-rs/harness/ci-selection.mjs` (`WRITE_PATH`) forces that job for non-doc
+`sdk-rs/venues/**`, `packages/safe-cex/src/exchanges/rust/**`, safe-cex
+`__tests__/**/rust.*` and `*.wasm.test.*` paths. Widen it for a new write path;
+do not rely on a manual dispatch.
 Maintainers still decide whether all existing reviews and other merge gates pass.

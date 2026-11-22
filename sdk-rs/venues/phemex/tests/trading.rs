@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Documented g-API payloads and mutation lifecycle regressions.
 mod support;
 use safe_cex_engine::model::*;
@@ -707,7 +708,10 @@ fn split_definite_refusal_then_unknown_still_stops_suffix() {
     assert!(writes(&actions).is_empty());
     let error = failure(&actions);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let rows = error.elements.as_ref().unwrap();
     assert!(matches!(
         rows[0].result,
@@ -724,7 +728,8 @@ fn split_definite_refusal_then_unknown_still_stops_suffix() {
 
 fn assert_split_unknown(unknown: usize, body: Value) {
     use safe_cex_engine::write_plan::ElementResult;
-    const GUIDANCE: &str = "The outcome is unknown. Check Open Orders";
+    const GUIDANCE: &str =
+        "We couldn’t confirm this change. Check your open orders before trying again.";
     let mut e = engine();
     let mut order = opts("");
     order.amount = 2.123;
@@ -841,8 +846,6 @@ fn stop_brackets_and_hedged_reduce_side() {
     let mut o = opts("");
     o.side = OrderSide::Sell;
     o.reduce_only = Some(true);
-    o.stop_loss = Some(68000.);
-    o.take_profit = Some(71000.);
     o.time_in_force = Some(TimeInForce::PostOnly);
     let a = command(
         &mut e,
@@ -854,6 +857,22 @@ fn stop_brackets_and_hedged_reduce_side() {
     let r = &writes(&a)[0];
     assert_eq!(p(r, "posSide").as_deref(), Some("Long"));
     assert_eq!(p(r, "reduceOnly"), None);
+    assert_eq!(p(r, "timeInForce").as_deref(), Some("PostOnly"));
+    // AGT-120: a reduce-only order may not carry legs, so they are checked on an opening one.
+    let mut o = opts("");
+    o.side = OrderSide::Sell;
+    o.stop_loss = Some(68000.);
+    o.take_profit = Some(71000.);
+    o.time_in_force = Some(TimeInForce::PostOnly);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 3,
+            orders: vec![o],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "posSide").as_deref(), Some("Short"));
     assert_eq!(p(r, "stopLossRp").as_deref(), Some("68000"));
     assert_eq!(p(r, "slTrigger").as_deref(), Some("ByMarkPrice"));
     assert_eq!(p(r, "tpTrigger").as_deref(), Some("ByLastPrice"));
@@ -3589,7 +3608,7 @@ fn lost_client_order_id_cannot_be_reused_until_its_read_settles_it() {
         "a retry would be canceled as the late landing"
     );
     assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
-    assert!(done(&a).unwrap_err().contains("uncertain"), "{a:?}");
+    assert!(done(&a).unwrap_err().contains("confirm"), "{a:?}");
     let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![]));
     assert!(deletes(&a).is_empty());
@@ -3859,7 +3878,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
     );
     let error = done(&a).unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 fn refused_stop_replacement(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
@@ -4414,7 +4436,9 @@ fn an_unknown_stop_replacement_is_never_put_back_or_resent() {
         let error = failure(&a);
         assert_eq!(error.protection, None, "{body}");
         assert!(
-            error.message.contains("may have no stop"),
+            error
+                .message
+                .contains("stop was cancelled, but its replacement wasn’t confirmed"),
             "{body}: {}",
             error.message
         );
@@ -4499,8 +4523,11 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         let a = raw_status(&mut e, restore, status);
         let error = failure(&a);
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("TE_NO_ENOUGH"),
             "{status}: {}",
             error.message
@@ -4584,7 +4611,15 @@ fn protective_post_cancel_rate_pause_is_unknown_and_unprotected() {
         Some(safe_cex_engine::error::ErrorKind::RateLimited)
     );
     assert!(error.retry_after_ms.is_some_and(|ms| ms > 0.0));
-    assert!(error.message.contains("re-place"), "{}", error.message);
+    // An unknown replacement may have landed: check first, never "re-place" (#3726).
+    assert!(!error.message.contains("re-place"), "{}", error.message);
+    assert_eq!(
+        error.message.matches("Check your open orders").count(),
+        1,
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains(".;"), "{}", error.message);
     assert!(
         !error.message.contains("mutation was not sent"),
         "{}",
@@ -4795,9 +4830,9 @@ fn ordinary_replacement_text_matches_master() {
         let a = reply(&mut e, 1002., &writes(&a)[0], status, body);
         let error = failure(&a);
         let expected = if status == 200 {
-            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
+            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order was cancelled and its replacement was declined"
         } else {
-            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
         };
         assert_eq!(error.message, expected);
         assert_eq!(error.legacy_text(), expected);

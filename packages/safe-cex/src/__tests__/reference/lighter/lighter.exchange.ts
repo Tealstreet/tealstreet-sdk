@@ -85,7 +85,13 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
-import { stopEntryLegsRefusal, stopEntryWithAttachedLegs } from '../stopEntryLegs';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createLighterSDKClient } from './lighter.api';
 import { createLighterSignerAdapter } from './lighter.signer';
 import { LighterPrivateWebsocket } from './lighter.ws-private';
@@ -191,15 +197,10 @@ const normalizeLighterStopSlippagePct = (value: unknown): number | undefined => 
   return Math.min(parsed, LIGHTER_MAX_STOP_SLIPPAGE_PCT);
 };
 
-/** AGT-115: legs on a reduce-only entry were dropped; it closes, so they would protect nothing. */
-const LIGHTER_REDUCE_ONLY_LEGS_REFUSAL =
-  "Attaching a stop-loss or take-profit to a reduce-only order isn't supported on Lighter, so nothing was sent. Place the stop-loss as its own order.";
-
-/** AGT-115: as Rust `prepare_orders`, legs attach only to a non-reduce-only limit/market entry. */
+/** AGT-115: as Rust `prepare_orders`, legs attach only to a limit/market entry. A reduce-only
+ * one is refused earlier for every venue (AGT-120, `reduceOnlyWithAttachedLegs`). */
 const refuseDroppedLighterLegs = (orders: PlaceOrderOpts[], reject: (message: string) => never) => {
   if (orders.some(stopEntryWithAttachedLegs)) reject(stopEntryLegsRefusal('Lighter'));
-  const hasLeg = (o: PlaceOrderOpts) => [o.stopLoss, o.takeProfit].some((leg) => leg != null && leg !== 0);
-  if (orders.some((o) => o.reduceOnly && hasLeg(o))) reject(LIGHTER_REDUCE_ONLY_LEGS_REFUSAL);
 };
 
 export class LighterExchange extends BaseExchange {
@@ -2491,6 +2492,8 @@ export class LighterExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     refuseDroppedLighterLegs([opts], (message) => this.rejectPreflight(message));
     const signerAdapter = await this.ensureSignerAdapter();
@@ -2822,6 +2825,8 @@ export class LighterExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     refuseDroppedLighterLegs(orders, (message) => this.rejectPreflight(message));
     if (!this.shouldUseBatchedCreateOrders(orders)) {
@@ -2974,7 +2979,7 @@ export class LighterExchange extends BaseExchange {
     }
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   cancelOrders = async (orders: Order[]) => {

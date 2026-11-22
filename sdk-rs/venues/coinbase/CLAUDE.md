@@ -16,7 +16,7 @@ Native `RESOURCE_EXHAUSTED` / `rate_limit_exceeded` codes also remain unknown;
 only native code fields count, not message substrings. Status uncertainty takes
 precedence over native refusal text. Preserve confirmed siblings in batch cancels.
 
-Unknown writes say "Check Open Orders", retain placement reconciliation state
+Unknown writes say to check open orders before trying again, retain placement reconciliation state
 and never resend automatically. Genuine documented refusals remain `Rejected`.
 Account settings and protective amendments are unsupported before dispatch and
 remain `NotSent`; they have no HTTP failure matrix.

@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 
@@ -74,7 +75,7 @@ describe('trusted local signer setup', () => {
     ])
       expect(
         () => new LocalSignerSetup({ ...withoutSigningCredentials(options()), ...read } as ExchangeOptions),
-      ).toThrow(/nonempty key and secret/);
+      ).toThrow(/The extra API credentials need both a key and secret/);
   });
   it('carries trusted metadata and an empty passphrase only through the one-use setup', () => {
     const input = {
@@ -312,7 +313,7 @@ describe('shared credential setup policy', () => {
     const secondary = () =>
       new LocalSignerSetup({ ...options(), secondary_secret: secret }, deriveSignerSetupPolicy('bitunix'));
     if (present) expect(secondary).not.toThrow();
-    else expect(secondary).toThrow(/nonempty key and secret/);
+    else expect(secondary).toThrow(/The extra API credentials need both a key and secret/);
   });
 
   it('never lets caller metadata request signing-key trimming', () => {
@@ -340,7 +341,7 @@ describe('shared credential setup policy', () => {
 
   it('validates secondary effective presence without trimming secrets or overriding undeclared metadata', () => {
     const input = { ...options(), secondary_key: '\u0085', localSigner: { secondary: { trimCredential: true } } };
-    expect(() => new LocalSignerSetup(input)).toThrow(/nonempty key and secret/);
+    expect(() => new LocalSignerSetup(input)).toThrow(/The extra API credentials need both a key and secret/);
     const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
     expect(setup.hasSecondary).toBe(true);
     let received: unknown;
@@ -429,7 +430,7 @@ describe('shared required passphrase field policy', () => {
         expect(setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase }, venue))).toMatchObject({
           kind: 'invalidInput',
           outcome: 'notSent',
-          message: 'Rust engine primary signing credentials require a passphrase',
+          message: 'The primary API credentials need a passphrase',
         });
         const setup = requiredSetup({ key: 'key', secret: 'secret', passphrase, publicDataOnly: true }, venue);
         expect(setup.primaryComplete).toBe(true);
@@ -482,7 +483,7 @@ describe('shared required passphrase field policy', () => {
       expect(setupFailure(() => requiredSetup({ ...complete, secondary_passphrase: '' }))).toMatchObject({
         kind: 'invalidInput',
         outcome: 'notSent',
-        message: 'Rust engine secondary signing credentials require a passphrase',
+        message: 'The secondary API credentials need a passphrase',
       });
       for (const passphrase of [undefined, '']) {
         // Partial primary material cannot fail a primary-private requirement first.
@@ -499,7 +500,7 @@ describe('shared required passphrase field policy', () => {
         ).toMatchObject({
           kind: 'invalidInput',
           outcome: 'notSent',
-          message: 'Rust engine secondary signing credentials require a passphrase',
+          message: 'The secondary API credentials need a passphrase',
         });
       }
     },
@@ -580,7 +581,7 @@ describe('shared required passphrase field policy', () => {
       expect(secondaryFailure).toMatchObject({
         kind: 'invalidInput',
         outcome: 'notSent',
-        message: 'Rust engine secondary signing credentials require a passphrase',
+        message: 'The secondary API credentials need a passphrase',
       });
     }
   });
@@ -633,7 +634,7 @@ it('keeps a secondary requiredForPrivate field required in public mode, matching
         } as ExchangeOptions,
         { secondary: { passphrase: 'requiredForPrivate' } },
       ),
-  ).toThrow('secondary signing credentials require a passphrase');
+  ).toThrow('The secondary API credentials need a passphrase');
 });
 
 it('preserves JSON null-as-None secondary fallback while explicit empty never inherits', () => {
@@ -649,7 +650,7 @@ it('preserves JSON null-as-None secondary fallback while explicit empty never in
     secondary: { key: 'read', secret: 'read-secret', passphrase: null },
   });
   expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow(
-    'secondary signing credentials require a passphrase',
+    'The secondary API credentials need a passphrase',
   );
 });
 

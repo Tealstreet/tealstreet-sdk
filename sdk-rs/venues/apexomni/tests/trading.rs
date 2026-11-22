@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_crypto::signer::{
     LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret,
@@ -1097,7 +1098,9 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("Your BTCUSDT order is gone"),
+        error
+            .message
+            .contains("Your BTCUSDT order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );
@@ -1939,7 +1942,7 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     fn refused_uncertain(actions: &[Action]) -> bool {
         actions.iter().any(|a| {
             matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
-                if error.message.contains("Placement outcome is uncertain"))
+                if error.message.contains("An earlier order hasn’t been confirmed"))
         })
     }
     fn open_orders_read(actions: Vec<Action>) -> HttpRequest {
@@ -2063,7 +2066,7 @@ fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() 
     let refused = |actions: &[Action]| {
         actions.iter().any(|a| {
             matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
-                if error.message.contains("Placement outcome is uncertain"))
+                if error.message.contains("An earlier order hasn’t been confirmed"))
         })
     };
     let place =
@@ -2216,7 +2219,7 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
     assert!(
         fenced.iter().any(
             |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 43, error })
-            if error.message.contains("reconcile before cancel-all")
+            if error.message.contains("before cancelling all orders")
                 && error.outcome == Some(safe_cex_engine::Outcome::NotSent))
         ),
         "cancel-all is refused NotSent while the placement is uncertain"
@@ -2280,7 +2283,7 @@ fn unlisted_coded_placement_fence_clears_on_the_next_read() {
     assert!(
         fenced.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandFailed { command: 43, error })
-            if error.message.contains("uncertain"))),
+            if error.message.contains("confirm"))),
         "{fenced:?}"
     );
     response(&mut e, &read, NOW + 12.0, r#"{"code":0,"data":[]}"#);
@@ -2501,7 +2504,8 @@ fn a_refused_put_back_is_unprotected_and_never_retried() {
     let out = actions(&mut e);
     let error = failure_of(&out);
     assert!(
-        error.message.contains("both refused") && error.message.contains("re-place"),
+        error.message.contains("the put-back was refused too")
+            && error.message.contains("re-place"),
         "{}",
         error.message
     );
@@ -2534,8 +2538,11 @@ fn an_unknown_stop_replacement_or_put_back_is_never_resent() {
         );
         if unknown_put_back {
             assert!(
-                error.message.contains("put-back's outcome is unknown")
-                    && error.message.contains("Check Open Orders"),
+                error.message.contains("confirm")
+                    && error
+                        .message
+                        .replace("Check your open orders", "Check Open Orders")
+                        .contains("Check Open Orders"),
                 "{}",
                 error.message
             );
@@ -2585,7 +2592,7 @@ fn a_stop_that_filled_during_its_cancel_or_a_partly_filled_entry_leg_is_not_put_
         let out = actions(&mut e);
         let error = failure_of(&out);
         assert!(
-            error.message.contains("was removed") && error.message.contains("please re-place it"),
+            error.message.contains("has no stop") && error.message.contains("please re-place it"),
             "leg {leg}: {}",
             error.message
         );
@@ -2635,9 +2642,12 @@ fn an_unproven_cancel_sends_no_replacement_or_put_back() {
         let out = actions(&mut e);
         let error = failure_of(&out);
         assert!(
-            error.message.contains("could not be confirmed")
-                && error.message.contains("unknown")
-                && error.message.contains("Check Open Orders"),
+            error.message.contains("wasn’t confirmed")
+                && error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "lost {lost}: {}",
             error.message
         );
@@ -2714,7 +2724,11 @@ fn a_put_back_is_one_attempt_on_the_wire() {
     let out = actions(&mut e);
     assert!(placements(&http(out.clone())).is_empty(), "never resent");
     let error = failure_of(&out);
-    assert!(error.message.contains("both refused"), "{}", error.message);
+    assert!(
+        error.message.contains("the put-back was refused too"),
+        "{}",
+        error.message
+    );
     assert_eq!(error.protection, Some(Protection::Unprotected));
 }
 
@@ -2732,8 +2746,11 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         let out = actions(&mut e);
         let error = failure_of(&out);
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("too many requests"),
             "{status}: {}",
             error.message
@@ -2768,9 +2785,9 @@ fn a_put_back_refused_before_sending_says_the_stop_was_removed() {
     let out = actions(&mut e);
     let error = failure_of(&out);
     assert!(
-        error.message.contains("was removed")
+        error.message.contains("has no stop")
             && error.message.contains("please re-place it")
-            && !error.message.contains("both refused"),
+            && !error.message.contains("the put-back was refused too"),
         "{}",
         error.message
     );
@@ -2960,7 +2977,13 @@ fn ambiguous_put_back_cannot_claim_unprotected_or_resend() {
             "{status}/{code}: {error:?}"
         );
         assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
-        assert!(error.message.contains("Check Open Orders"), "{error:?}");
+        assert!(
+            error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{error:?}"
+        );
     }
 }
 

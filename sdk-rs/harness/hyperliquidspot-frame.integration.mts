@@ -54,7 +54,7 @@ test('compiled Hyperliquid Spot failed cancel cannot authorize amend replacement
     await r.command({ op: 'placeOrders', orders: [{ symbol: 'PURR/USDC', type: 'limit', side: 'buy', amount: 0.25, price: 90 }] });
     r.rejectCancel();
     await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), {
-      message: 'The outcome is unknown. Check Open Orders',
+      message: 'We couldn’t confirm this change. Check your open orders before trying again.',
       outcome: 'unknown',
     });
     const actions = r.requests.filter((request) => new URL(request.url).pathname === '/exchange').map((request) => JSON.parse(request.body).action.type);
@@ -79,7 +79,7 @@ test('compiled Hyperliquid Spot accepts the documented native PURR pair in amend
     await r.command({ op: 'placeOrders', orders: [{ symbol: 'PURR/USDC', type: 'limit', side: 'buy', amount: 0.25, price: 90 }] });
     r.rejectCancel();
     await assert.rejects(r.command({ op: 'amendOrder', id: '901', price: 91 }), {
-      message: 'The outcome is unknown. Check Open Orders',
+      message: 'We couldn’t confirm this change. Check your open orders before trying again.',
       outcome: 'unknown',
     });
     const actions = r.requests.filter((request) => new URL(request.url).pathname === '/exchange').map((request) => JSON.parse(request.body).action);

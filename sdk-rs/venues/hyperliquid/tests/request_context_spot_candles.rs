@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Spot and merged-spot candle requests require original Read custody.
 #[path = "../../../engine/tests/support/request_stats_frame.rs"]
 mod request_stats_frame;
@@ -491,7 +492,7 @@ fn invalid_clock_owns_local_refusal_instead_of_native_interval_error() {
             );
             error(
                 &e.drain_actions().collect::<Vec<_>>(),
-                "Invalid request context",
+                "This request couldn’t be prepared",
                 Some(ErrorKind::InvalidInput),
             );
         }
@@ -510,12 +511,12 @@ fn saturation_owns_native_local_and_remote_read_then_reuses_freed_capacity() {
         );
         error(
             &e.drain_actions().collect::<Vec<_>>(),
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
             Some(ErrorKind::Internal),
         );
         error(
             &ask(&mut e, NOW),
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
             Some(ErrorKind::Internal),
         );
         e.handle(

@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import { ethers } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +15,7 @@ const ADDRESS = '0x1111111111111111111111111111111111111111';
 const BUILDER = '0x2222222222222222222222222222222222222222';
 const NONCE = 1_750_000_000_000;
 const SIGNATURE = `0x${'11'.repeat(32)}${'22'.repeat(32)}1b`;
-const CANCELLED = { success: false, message: 'Builder fee approval cancelled-for-owner-change' };
+const CANCELLED = { success: false, message: 'Builder fee approval stopped because the account connection changed' };
 const stages = [
   'switch',
   'switch-failed',

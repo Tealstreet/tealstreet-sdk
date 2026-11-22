@@ -174,9 +174,12 @@ fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<Str
 
 fn unknown_outcome(mut error: VenueError) -> VenueError {
     if error.outcome == Some(Outcome::Unknown) {
-        let canonical = "The outcome is unknown. Check Open Orders";
-        if !error.message.contains(canonical) {
-            error.message = format!("{canonical}. {}", error.message);
+        let canonical =
+            "We couldn’t confirm this change. Check your open orders before trying again.";
+        if !error.message.contains("Check your open orders")
+            && !error.message.contains("Check Open Orders")
+        {
+            error.message = format!("{canonical} {}", error.message);
         }
         error.presents = true;
     }
@@ -544,7 +547,7 @@ impl BybitLinear {
         }
         let Some(run) = self.admit_ordinary(cx, &entry, job) else {
             let error =
-                internal("Bybit trading plan admission was refused").outcome(Outcome::NotSent);
+                internal("Bybit couldn’t prepare this order change").outcome(Outcome::NotSent);
             let _ = cx.fail_preflight(&entry.preflight, error);
             return;
         };
@@ -582,15 +585,28 @@ impl BybitLinear {
                 effects: Vec::new(),
             });
         }
-        let pacing = legs
-            .iter()
-            .any(|leg| {
-                matches!(
-                    leg.planned.path,
-                    "/v5/order/create-batch" | "/v5/order/cancel-batch"
-                )
-            })
-            .then_some(crate::pacing::BATCH_WRITE);
+        // The plan's largest batch sets its share of the batch floor (AGT-124).
+        let mut batch: Option<Option<usize>> = None;
+        for leg in &legs {
+            if !matches!(
+                leg.planned.path,
+                "/v5/order/create-batch" | "/v5/order/cancel-batch"
+            ) {
+                continue;
+            }
+            let orders = match &leg.planned.call {
+                Call::PlaceBatch { fallback } => Some(fallback.len()),
+                Call::Cancel { ids } => Some(ids.len()),
+                Call::CancelPartialStop { .. } => Some(1),
+                _ => None,
+            };
+            batch = Some(match (batch, orders) {
+                (None, orders) => orders,
+                (Some(Some(largest)), Some(orders)) => Some(largest.max(orders)),
+                _ => None,
+            });
+        }
+        let pacing = batch.map(crate::pacing::batch_write_for);
         let writes = match write_plan::build(&mut legs) {
             Ok(writes) => writes,
             Err(error) => {
@@ -893,7 +909,7 @@ impl BybitLinear {
         {
             let _ = cx.present_plan_failure(
                 &plan,
-                "The protective edit has an unknown outcome. Check Open Orders before retrying",
+                "The protection edit wasn’t confirmed. Check your open orders before trying again.",
             );
         }
         let key = entry.hyro.as_ref().map(|call| call.key.clone());
@@ -1436,14 +1452,16 @@ impl BybitLinear {
                     let lineage = run.partial.as_ref().is_some_and(|flow| flow.restorable());
                     let put_back = if lineage {
                         "put back as a new order"
+                    } else if run.error.is_some() {
+                        "put back as a new standalone order"
                     } else {
-                        "put back as a new standalone order; check Open Orders"
+                        "put back as a new standalone order; check your open orders"
                     };
                     // Unconfirmed cancel: the old order may still be live beside its put-back.
                     // The bounded warning leads: the hosted action result keeps 512 chars,
                     // and the venue's refusal text after it is unbounded.
                     let second = if run.error.is_some() {
-                        "Bybit did not confirm the old order was cancelled, so a second stop may exist; check Open Orders. "
+                        "Bybit didn’t confirm the old stop’s cancellation. Check your open orders for a second stop. "
                     } else {
                         ""
                     };
@@ -1554,15 +1572,23 @@ impl BybitLinear {
                             protection: (!unknown)
                                 .then_some(safe_cex_engine::error::Protection::Unprotected),
                             presents: true,
+                            // An unknown put-back still follows a declined replacement.
                             ..VenueError::new(if unknown {
-                                format!(
-                                    "{gone}: {refusal}; putting it back has an unknown outcome: {}",
-                                    error.message
+                                let declined = safe_cex_engine::error::stop_gone_text(
+                                    symbol, *side, *kind, false,
+                                );
+                                safe_cex_engine::error::restore_unconfirmed_text(
+                                    &safe_cex_engine::error::with_detail(&declined, refusal),
+                                    &gone,
+                                    &error.message,
                                 )
                             } else {
-                                format!(
-                                    "{gone}: {refusal}; putting it back failed too: {}",
-                                    error.message
+                                safe_cex_engine::error::with_detail(
+                                    &gone,
+                                    &format!(
+                                        "{refusal}; putting it back failed too: {}",
+                                        error.message
+                                    ),
                                 )
                             })
                         };
@@ -2284,13 +2310,18 @@ impl BybitLinear {
         ) && !(200..300).contains(&response.status)
         {
             return match Self::record_failure(cx, context, &PROTECTIVE, None,
-                "The protective write has an unknown HTTP outcome; check Open Orders before retrying".into(), true, &[], false) {
+                "The protection change wasn’t confirmed. Check your open orders before trying again.".into(), true, &[], false) {
                 Some((_, _, error)) => Decision::Failed(error),
                 None => Decision::Lost,
             };
         }
         match ack::answer(response.body) {
-            Err(_) => Self::unproven(cx, context, "Bybit write acknowledgement is malformed", &[]),
+            Err(_) => Self::unproven(
+                cx,
+                context,
+                "Bybit’s reply didn’t confirm this change. Check your open orders before trying again.",
+                &[],
+            ),
             Ok(Answer::Refused {
                 code,
                 message,
@@ -2843,7 +2874,7 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement",
+                        "Bybit didn’t confirm this stop’s cancellation. Check your open orders before trying again.",
                         &[],
                     );
                 };
@@ -2882,7 +2913,7 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
+                        "Bybit didn’t confirm which orders were cancelled. Check your open orders before trying again.",
                         &[],
                     );
                 };
@@ -2971,7 +3002,7 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "The protective setting acknowledgement is ambiguous; check Open Orders",
+                        "The protection settings weren’t confirmed. Check your open orders before trying again.",
                         &[],
                     );
                 }
@@ -3071,4 +3102,33 @@ fn context_command(context: &Context) -> CommandId {
 
 fn disabled_product() -> VenueError {
     not_sent("Bybit product is not enabled").kind(ErrorKind::InvalidInput)
+}
+
+// Rule 5 (#3726): Hyro order identity and its specific replacement action stay intact.
+#[cfg(test)]
+mod notification_display_tests {
+    use super::*;
+    #[test]
+    fn hyro_guidance_is_not_prefixed_again() {
+        let original = crate::hyro::unknown("retained-link", "lost")
+            .kind(safe_cex_engine::ErrorKind::Network)
+            .venue_code("native-code");
+        let shown = unknown_outcome(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.kind, original.kind);
+        assert_eq!(shown.venue_code, original.venue_code);
+        assert!(shown.presents);
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+    }
+    #[test]
+    fn unguided_unknown_and_ordinary_refusals_keep_their_distinction() {
+        let shown = unknown_outcome(VenueError::new("lost").outcome(Outcome::Unknown));
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        let shown = unknown_outcome(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.presents, original.presents);
+    }
 }

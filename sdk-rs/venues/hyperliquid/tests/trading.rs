@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -606,7 +607,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
         message(
             &mut e,
@@ -624,7 +625,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         );
         assert!(
             e.drain_plain()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -1019,7 +1020,7 @@ fn unlisted_settings_error_fences_the_next_queued_command() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData" || kind(r) == "clearinghouseState")));
 }
 
@@ -1068,7 +1069,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
     );
     assert!(
         e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
     );
     reply_at(
         &mut e,
@@ -1522,7 +1523,8 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
     }
-    // The second order is refused after the first rested: nothing to claim.
+    // The second order is refused beside the first, which rested: nothing to claim. Both
+    // share one action since feat/hyperliquid-batched-placements, so one reply carries both.
     let (mut e, _) = ready("disabled");
     e.handle(
         2000.,
@@ -1536,16 +1538,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         &mut e,
         &r,
         200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}}]}}}"#,
-    );
-    let timer = pace_timer(&mut e);
-    e.handle(3000., Event::TimerFired { timer });
-    let r = write(&mut e);
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}},{"error":"Order price too far"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
@@ -1807,7 +1800,7 @@ fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     reply_at(
         &mut e,
         &reads[0],

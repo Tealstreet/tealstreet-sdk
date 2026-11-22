@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 mod trusted;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -73,8 +74,12 @@ fn unknown_placement_rows_present_uncertainty_instead_of_rejection() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert!(!text.contains("rejected"), "{code}: {text}");
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some(message));
@@ -118,8 +123,12 @@ fn unknown_cancel_rows_present_uncertainty_instead_of_rejection() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert!(!text.contains("rejected"), "{code}: {text}");
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
@@ -148,8 +157,12 @@ fn unknown_top_level_placement_errors_present_uncertainty() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
         assert!(
@@ -190,8 +203,12 @@ fn assert_codeless_write_requires_uncertainty(response: &str) {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{path}: {text}");
-        assert!(text.contains("Check Open Orders"), "{path}: {text}");
+        assert!(text.contains("confirm"), "{path}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{path}: {text}"
+        );
         assert!(!text.contains("rejected"), "{path}: {text}");
         assert!(
             h.pending
@@ -235,7 +252,10 @@ fn assert_combined_leg_cancel_unknown(code: &str) {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     let text = error.legacy_text();
     assert!(
-        text.contains("unknown") && text.contains("Check Open Orders"),
+        text.contains("confirm")
+            && text
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{text}"
     );
     assert!(
@@ -717,17 +737,19 @@ fn assert_dispatched_ambiguity_for<'a>(
             }
             assert_eq!(error.protection, None, "{operation} {failure:?}: {error:?}");
             assert!(
-                error.message.to_lowercase().contains("unknown"),
+                error.message.to_lowercase().contains("confirm"),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(
-                error.message.contains("Check Open Orders"),
+                error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(
                 !error.message.contains("refused")
-                    || (operation == "protective-put-back"
-                        && error.message.contains("put-back's outcome is unknown")),
+                    || (operation == "protective-put-back" && error.message.contains("confirm")),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(!error.message.contains("has no stop"), "{error:?}");
@@ -738,7 +760,10 @@ fn assert_dispatched_ambiguity_for<'a>(
                 }) = action
                 {
                     assert!(
-                        message.contains("unknown") && message.contains("Check Open Orders"),
+                        message.contains("confirm")
+                            && message
+                                .replace("Check your open orders", "Check Open Orders")
+                                .contains("Check Open Orders"),
                         "warning uses final outcome: {operation} {failure:?}: {message}"
                     );
                 }
@@ -1078,7 +1103,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("BTC") && error.message.contains("order is gone"),
+        error.message.contains("BTC")
+            && error
+                .message
+                .contains("order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! A frame-fed Bybit engine: public instrument metadata only, no sockets, no
 //! account reads or polls, and only writes (after markets load) are executed.
 mod support;
@@ -393,7 +394,7 @@ fn a_frame_written_right_after_an_unknown_placement_keeps_its_fence() {
     });
     assert!(h.requests.is_empty(), "fenced: {:?}", h.paths());
     assert!(
-        matches!(h.result(2), Some(Err(message)) if message.contains("uncertain")),
+        matches!(h.result(2), Some(Err(message)) if message.contains("confirm")),
         "{:?}",
         h.result(2)
     );

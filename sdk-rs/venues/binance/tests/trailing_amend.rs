@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! USD-M trailing stops: a dragged level becomes a callback rate inside Binance's range,
 //! one-way trailing stops only reduce, and a refused replacement puts back the native rate.
 use support::Options;
@@ -514,7 +515,7 @@ fn ambiguous_put_back_has_no_protection_claim_or_further_write() {
             "{status}/{code}: {error:?}"
         );
         assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
-        assert!(error.message.contains("unknown"), "{error:?}");
+        assert!(error.message.contains("confirm"), "{error:?}");
     }
 }
 
@@ -645,11 +646,14 @@ fn engine_ambiguity_put_back_replaces_stale_definitive_refusal_words() {
         );
         assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
         assert!(
-            error.message.contains("unknown"),
+            error.message.contains("confirm"),
             "{status}/{code}: {error:?}"
         );
         assert!(
-            error.message.contains("Check Open Orders"),
+            error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
             "{status}/{code}: {error:?}"
         );
     }

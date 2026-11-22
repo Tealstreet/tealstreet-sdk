@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Originals for docs/plans/RUST_BITUNIX_TRADING_FUNNEL.md: trading on
 //! Preflight roots and serial Plans, concurrent under job-scoped order locks.
 mod support;
@@ -688,7 +689,7 @@ fn an_unknown_placement_fences_retries_until_a_fresh_reconcile() {
         let error = failure(&actions, command).expect("a refusal");
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         assert!(
-            error.legacy_text().contains("uncertain"),
+            error.legacy_text().contains("confirm"),
             "{}",
             error.legacy_text()
         );

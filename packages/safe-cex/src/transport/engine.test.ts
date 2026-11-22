@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { BaseExchange } from '../exchanges/base';
@@ -818,9 +819,9 @@ describe('native host policy uses the same resolved routes', () => {
   it('rejects incomplete secondary credentials before producing a native plan or a routed transport', () => {
     const opts = options({ secondary_key: 'read-key' });
     expect(() => resolveEngineRoutingPlan('binance', opts, 'https://fapi.binance.com')).toThrow(
-      'secondary signing keys',
+      'The extra API credentials need both a key and secret',
     );
-    expect(() => createEngineTransport('binance', opts, makeRaw())).toThrow('secondary signing keys');
+    expect(() => createEngineTransport('binance', opts, makeRaw())).toThrow('The extra API credentials need both a key and secret');
     expect(mocks.token).not.toHaveBeenCalled();
   });
   it('is serializable, token-free, and matches the actual CORS/WS destinations', async () => {
@@ -1415,8 +1416,8 @@ describe('Aster secondary signer HTTP routing', () => {
     'rejects partial secondary credentials %o',
     (partial) => {
       const opts = options(partial);
-      expect(() => createEngineTransport('asterdex', opts, makeRaw())).toThrow('secondary signing keys');
-      expect(() => resolveEngineRoutingPlan('asterdex', opts, baseURL)).toThrow('secondary signing keys');
+      expect(() => createEngineTransport('asterdex', opts, makeRaw())).toThrow('The extra API credentials need both a key and secret');
+      expect(() => resolveEngineRoutingPlan('asterdex', opts, baseURL)).toThrow('The extra API credentials need both a key and secret');
     },
   );
 
@@ -1788,7 +1789,7 @@ describe('secondary GET identity egress', () => {
         { secondary_passphrase: 'read' },
       ]) {
         const raw = makeRaw();
-        expect(() => createEngineTransport(venue, options(extra), raw)).toThrow('secondary signing keys');
+        expect(() => createEngineTransport(venue, options(extra), raw)).toThrow('The extra API credentials need both a key and secret');
         expect(raw.request).not.toHaveBeenCalled();
         expect(raw.connect).not.toHaveBeenCalled();
       }
@@ -1833,7 +1834,7 @@ describe('secondary GET identity egress', () => {
   it('does not adopt secondary credentials for an unsupported venue', () => {
     expect(() =>
       createEngineTransport('hyperliquid', options({ secondary_key: 'read', secondary_secret: 'secret' }), makeRaw()),
-    ).toThrow('unsupported');
+    ).toThrow('Extra read-only API keys aren’t supported for this exchange');
   });
 });
 

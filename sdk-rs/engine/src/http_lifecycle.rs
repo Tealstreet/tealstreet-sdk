@@ -3472,6 +3472,7 @@ impl crate::engine::CoreIo<'_> {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6025,7 +6026,7 @@ mod tests {
                 .iter()
                 .filter(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 8, error })
-            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"
+            if error.message == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
                 && error.outcome == Some(crate::Outcome::NotSent)))
                 .count(),
             1

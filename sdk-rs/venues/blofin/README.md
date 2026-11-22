@@ -62,7 +62,7 @@ allowed. Definite refusals retain the TS dispatch rules above.
 Active recording tests in `tests/after_failure.rs` pin each affected path,
 including native lots, grouped batches, protective children, cancellation,
 replacement and sibling compensation. Failures retain placed IDs and indexed
-Unknown/notSent outcomes, show "The outcome is unknown. Check Open Orders",
+Unknown/notSent outcomes, show "We couldn’t confirm this change. Check your open orders before trying again.",
 and emit an Unknown telemetry event. The engine fence remains unchanged.
 Engine-sealed HTTP Unknowns retain the same telemetry through the venue's
 retirement/reconciliation callback, without routing the reply through its decoder.

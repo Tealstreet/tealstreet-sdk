@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original-source contract regressions for managed foreground write adoption.
 mod support;
 use safe_cex_engine::{Action, Command, Event, Method, Notice, Outcome};
@@ -151,9 +152,9 @@ fn p0_write_unknown_child_halts_and_reports_once() -> Result<(), Box<dyn std::er
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
     assert!(
-        failures[0]
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        failures[0].message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     assert_eq!(
         failures[0]

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, StoreData } from '../../types';
@@ -428,7 +429,7 @@ describe('Rust native current-account reads', () => {
       { loaded },
       r.store.markets.map((row) => row.symbol),
     );
-    expect(() => r.exchange.syncAccountState()).toThrow('not started');
+    expect(() => r.exchange.syncAccountState()).toThrow('The account is still loading');
     const starting = r.exchange.start().catch(() => {});
     await vi.advanceTimersByTimeAsync(250);
     expect(() => r.exchange.syncAccountState()).toThrow('catalog is not ready');
@@ -678,7 +679,7 @@ describe('Rust native current-account reads', () => {
     exchange.command = (c) => (c.op === 'cancelAccountOrders' ? Promise.reject(new Error('refused')) : command(c));
     const nuking = r.exchange.nukeOrders().catch((error: Error) => error);
     await vi.advanceTimersByTimeAsync(600);
-    expect(((await nuking) as Error).message).toContain('including triggers and TP/SL, may remain on this venue');
+    expect(((await nuking) as Error).message).toContain('including triggers and TP/SL. Check your open orders.');
   });
 
   it('sends no account-wide cancel from a plain cancel-all, nor on a venue without one', async () => {
@@ -698,7 +699,7 @@ describe('Rust native current-account reads', () => {
   it.each(['nuke', 'nukeOrders'] as const)(
     '%s says unseen orders may rest where no cancel reaches them, in success and in failure',
     async (method) => {
-      const unseen = /Orders placed in the last few seconds may not be cancelled on this venue: check open orders/;
+      const unseen = /Cancellation doesn’t cover every newly placed order on this exchange. Check your open orders./;
       const r = fixture('hyperliquid');
       await r.start();
       r.update({ positions: [position()] });
@@ -748,7 +749,7 @@ describe('Rust native current-account reads', () => {
     const nuking = r.exchange.nukePositions().catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(await nuking).toMatchObject({
-      message: 'Nuke could not confirm the account is flat: positions snapshot unavailable',
+      message: 'Nuke couldn’t confirm all positions were closed: positions snapshot unavailable',
       cause,
     });
     expect(read).toHaveBeenCalledOnce();
@@ -777,7 +778,7 @@ describe('Rust native current-account reads', () => {
     r.exchange.readPositions = () => Promise.resolve(body as never);
     const nuking = r.exchange.nukePositions().catch((thrown: Error) => thrown.message);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(await nuking).toMatch(/could not confirm the account is flat/);
+    expect(await nuking).toMatch(/Nuke couldn’t confirm all positions were closed/);
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
   });
 
@@ -851,7 +852,7 @@ describe('Rust native current-account reads', () => {
     await r.start();
     r.exchange.readPositions = () => Promise.resolve({ skipped: ['DOGEUSD_PERP'], open: [] });
     await expect(r.exchange.nukePositions()).rejects.toThrow(
-      'Nuke could not confirm the account is flat: DOGEUSD_PERP on no listed market',
+      'Nuke couldn’t confirm all positions were closed: DOGEUSD_PERP on no listed market',
     );
   });
 

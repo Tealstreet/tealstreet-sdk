@@ -155,7 +155,7 @@ impl Session {
             return;
         }
         let refused = if !self.order_admitted(&name, submit.instance_id.as_deref()) {
-            Some("not sent: account not admitted for order frames")
+            Some("Order submissions aren’t available on this account connection")
         } else if let Err(error) =
             order_contract::check_key(&submit.intent_id, crate::accounts::now_ms())
         {
@@ -174,12 +174,13 @@ impl Session {
             }
         };
         if let Some(message) = refused {
-            let reason = if message == "not sent: account not admitted for order frames" {
-                self.order_admission_refusal(&name, submit.instance_id.as_deref())
-                    .unwrap_or(message)
-            } else {
-                message
-            };
+            let reason =
+                if message == "Order submissions aren’t available on this account connection" {
+                    self.order_admission_refusal(&name, submit.instance_id.as_deref())
+                        .unwrap_or(message)
+                } else {
+                    message
+                };
             self.audit_order_refusal(&name, "order.submit", reason);
             refuse(&out, &name, &id, submit.seq, message);
             return;
@@ -259,14 +260,14 @@ impl Session {
         if !self.order_admitted(&cancel.account_name, cancel.instance_id.as_deref()) {
             let reason = self
                 .order_admission_refusal(&cancel.account_name, cancel.instance_id.as_deref())
-                .unwrap_or("not sent: account not admitted for order frames");
+                .unwrap_or("Order submissions aren’t available on this account connection");
             self.audit_order_refusal(&cancel.account_name, "order.cancelQueued", reason);
             refuse(
                 &out,
                 &cancel.account_name,
                 &Value::String(cancel.intent_id),
                 cancel.seq,
-                "not sent: account not admitted for order frames",
+                "Order submissions aren’t available on this account connection",
             );
             return;
         }
@@ -297,7 +298,7 @@ impl Session {
             &cancel.account_name,
             json!({"intentId":cancel.intent_id,"seq":cancel.seq,
             "outcome":"unknown","venueOrderId":null,"clientOrderId":null,
-            "error":{"message":"Queue cancellation must be resolved by the router"}}),
+            "error":{"message":"The queued order couldn’t be cancelled here. Cancel it from your pending orders."}}),
         );
     }
 
@@ -360,7 +361,7 @@ pub(super) fn settle_intent(
     seq: u64,
     protective_legs: usize,
     answer: Result<Value, Value>,
-) {
+) -> bool {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
@@ -380,7 +381,7 @@ pub(super) fn settle_intent(
                 data["outcome"] = "placed".into();
                 data["venueOrderId"] = venue_id.into();
             } else {
-                data["error"] = json!({"message":"Order result is not yet known"});
+                data["error"] = json!({"message":"We couldn’t confirm this order. Check your open orders before trying again."});
             }
         }
         Err(error) => {
@@ -407,7 +408,7 @@ pub(super) fn settle_intent(
             data["error"] = json!({"message":message,"outcome":outcome});
         }
     }
-    out.order_outcome(name, data);
+    out.order_outcome(name, data)
 }
 
 /// Native evidence that some part of the command took effect at the venue.
@@ -425,6 +426,7 @@ fn partial_effects(error: &Value) -> bool {
         })
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

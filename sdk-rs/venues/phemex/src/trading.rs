@@ -449,7 +449,7 @@ fn gone_ack(ids: &[String]) -> CancelAck {
 }
 fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     let result: CancelResult =
-        serde_json::from_str(raw).map_err(|_| "Phemex malformed cancel acknowledgement")?;
+        serde_json::from_str(raw).map_err(|_| "Phemex’s cancellation reply couldn’t be read")?;
     let (rows, array) = match result {
         CancelResult::Rows(rows) => (rows, true),
         CancelResult::Row(row) => (vec![row], false),
@@ -658,7 +658,7 @@ impl PhemexPerpetuals {
                 // A late landing of the lost write is canceled by clOrdID alone.
                 if self.account.lost_client(id) {
                     return Err(format!(
-                        "Phemex clientOrderId {id} belongs to a placement with an unknown outcome; use a new clientOrderId"
+                        "Phemex hasn’t confirmed the order with ID {id}. Check your open orders before using a new order ID."
                     ));
                 }
             }
@@ -687,7 +687,7 @@ impl PhemexPerpetuals {
             let mode = self
                 .account
                 .mode(&o.symbol)
-                .ok_or("Phemex position mode is unknown; await account reconciliation")?;
+                .ok_or("Phemex’s position mode hasn’t loaded. Wait for the account to refresh before placing orders.")?;
             let protective = matches!(
                 o.kind,
                 OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
@@ -2004,10 +2004,8 @@ impl PhemexPerpetuals {
         if job.protect.is_some()
             && let Some(gone) = job.gone_note(true)
         {
-            let _ = cx.present_plan_failure(
-                &job.plan,
-                format!("{gone}; check Open Orders and re-place it if missing"),
-            );
+            // The unconfirmed gone text already says to check before adding protection.
+            let _ = cx.present_plan_failure(&job.plan, gone);
         }
     }
 
@@ -2141,7 +2139,7 @@ impl PhemexPerpetuals {
             && let Some((symbol, ..)) = &job.replacing
         {
             let words = format!(
-                "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                "Your {symbol} replacement stop was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
             );
             let _ = cx.present_plan_failure(&plan, words);
         }
@@ -2349,11 +2347,11 @@ impl PhemexPerpetuals {
                 return Err(format!("HTTP {}: {}", response.status, response.body));
             }
             let env: Envelope = serde_json::from_str(response.body)
-                .map_err(|_| "Phemex malformed write acknowledgement")?;
+                .map_err(|_| "Phemex’s reply couldn’t be read")?;
             if env.error.is_some() {
                 return Err(format!("Phemex {} {}", env.code.unwrap_or(-1), env.msg));
             }
-            let code = env.code.ok_or("Phemex malformed write acknowledgement")?;
+            let code = env.code.ok_or("Phemex’s reply couldn’t be read")?;
             if code == ORDER_NOT_FOUND
                 && let Call::Cancel { before, ids } = &request.call
             {
@@ -2434,7 +2432,7 @@ impl PhemexPerpetuals {
                         return Err("Phemex order suspended; likely insufficient margin".into());
                     }
                     let row: crate::account_wire::OrderRow = serde_json::from_str(raw.get())
-                        .map_err(|_| "Phemex malformed create order")?;
+                        .map_err(|_| "Phemex’s new-order reply couldn’t be read")?;
                     if row.symbol.to_ascii_uppercase() != order.symbol
                         || crate::account_wire::order_side(&row.side) != Some(order.side)
                         || row.order_qty.or(row.order_qty_rq).is_none() && order.amount > 0.0
@@ -2820,7 +2818,12 @@ impl PhemexPerpetuals {
         {
             error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
             error.presents = true;
-            error.message = format!("{gone}; please re-place it ({})", error.message);
+            // Only a declined replacement is safe to re-place; an unknown one may have landed.
+            error.message = if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+                safe_cex_engine::error::with_detail(gone, &error.message)
+            } else {
+                format!("{gone}; please re-place it ({})", error.message)
+            };
         }
         if job.effective || !job.ids.is_empty() {
             error.outcome = None;
@@ -3001,7 +3004,9 @@ impl PhemexPerpetuals {
         {
             let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
             if unknown {
-                error.message = "The outcome is unknown. Check Open Orders".into();
+                error.message =
+                    "We couldn’t confirm this change. Check your open orders before trying again."
+                        .into();
                 error.presents = true;
                 cx.event(
                     Level::Warn,
@@ -3117,6 +3122,7 @@ impl PhemexPerpetuals {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

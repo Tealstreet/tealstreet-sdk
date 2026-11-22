@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original public-candle custody controls; the native implementation is unchanged.
 #[path = "../../../engine/tests/support/request_stats_frame.rs"]
 mod request_stats_frame;
@@ -486,7 +487,10 @@ fn genuine_capacity_refuses_command_before_http_and_recovers_after_peer_retireme
     let error = terminal(&actions).unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     no_next_page(&actions);
     assert!(
         !actions

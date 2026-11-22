@@ -663,7 +663,7 @@ impl crate::engine::CoreCx<'_> {
                     None => refusal.into(),
                 })
                 .kind(crate::ErrorKind::InvalidInput),
-                None => VenueError::new("HTTP plan admission failed").kind(
+                None => VenueError::new("This request couldn’t be prepared").kind(
                     if reason == Error::TimedOut {
                         crate::ErrorKind::Timeout
                     } else {
@@ -699,7 +699,7 @@ impl crate::engine::CoreCx<'_> {
             .preflight_state(&handle)
             .expect("owned admission");
         let inherited = self.io.core.request_contexts.inherited_uncertain(&handle);
-        let mut error = VenueError::new("HTTP read admission failed")
+        let mut error = VenueError::new("This data request couldn’t be prepared")
             .kind(match reason {
                 Error::TimedOut => crate::ErrorKind::Timeout,
                 Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {

@@ -208,7 +208,7 @@ export class ChaserOrderManager {
     if (!ticker || !market) {
       this.log('no market or ticker found', instance);
       instance.markComplete('No market or ticker found');
-      exchange.emitter.emit('error', `Chaser no market or ticker found for ${instance.options.symbol}`);
+      exchange.emitter.emit('error', `Market data for ${instance.options.symbol} isn’t available yet`);
       throw new Error(`No market or ticker found for ${instance.options.symbol}`);
     }
 
@@ -251,13 +251,13 @@ export class ChaserOrderManager {
     if (!instance.remainingSize) {
       this.log('size is 0', instance);
       instance.markComplete('No remaining size. User likely cancelled order');
-      exchange.emitter.emit('error', 'Chaser has no remaining size. User likely cancelled order');
+      exchange.emitter.emit('error', 'The chase stopped because no order size remains');
       throw new Error('size is 0');
     }
 
     if (tries >= maxTries) {
       this.log(`failed to place orders after ${maxTries} tries`, instance);
-      exchange.emitter.emit('error', `Chaser failed to place orders after ${maxTries} tries`);
+      exchange.emitter.emit('error', `The chase stopped after ${maxTries} unsuccessful order attempts`);
       instance.markComplete(`Failed to place orders after ${maxTries} tries`);
       this.checkAndMarkIfComplete(instance);
       this.cleanupInstance(instance);
@@ -316,7 +316,7 @@ export class ChaserOrderManager {
         } else if (lost) {
           // Placing again could double it. The order may still land, so say where to look —
           // also when a STOP arrived during the lookups, which is no evidence it did not.
-          const message = `Chaser for ${instance.options.symbol} stopped: could not confirm whether its order was placed — check open orders`;
+          const message = `Chase for ${instance.options.symbol} was interrupted before its order was confirmed. Check your open orders before starting it again.`;
           this.log(message, instance);
           exchange.emitter.emit('error', message);
           if (!instance.isStopped) {
@@ -607,11 +607,11 @@ export class ChaserOrderManager {
                   errorMsg.includes('never placed');
 
                 if (useFillBasedTracking && isAlreadyFilledOrCanceled) {
-                  this.log(`cancel failed (order may be filled): ${errorMsg}`, instance);
+                  this.log(`Cancellation wasn’t confirmed: ${errorMsg}`, instance);
                   // Don't stop - we'll check fills via REST below
                 } else {
                   cleanup();
-                  exchange?.emitter.emit('error', 'Chaser failed to cancel orders, stopping');
+                  exchange?.emitter.emit('error', 'The chase stopped because its orders couldn’t be cancelled. Check your open orders.');
                   instance.markComplete('Failed to cancel orders');
                   this.log('failed to cancel orders', instance);
                   throw new Error('Failed to cancel orders');

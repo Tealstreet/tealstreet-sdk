@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 // Native REST payload and response contracts from Kraken's Futures order docs.
 mod support;
 use safe_cex_engine::model::*;
@@ -381,7 +382,7 @@ fn ambiguous_write_is_not_retried_and_queued_command_is_not_sent() {
     assert!(all.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, error })
                 if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                    && error.message.contains("Check Open Orders"))
+                    && error.message.replace("Check your open orders", "Check Open Orders").contains("Check Open Orders"))
     ));
     assert_eq!(
         all.iter()
@@ -934,19 +935,19 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             503,
             "<html>".to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Kraken write outcome is unknown. Check Open Orders",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             503,
             r#"{"result":"error"}"#.to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Kraken write outcome is unknown. Check Open Orders",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             429,
             r#"{"result":"error"}"#.to_owned(),
             (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
-            "Kraken write outcome is unknown. Check Open Orders",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             400,
@@ -958,7 +959,7 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
             (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
-            "Kraken write outcome is unknown. Check Open Orders",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             200,
@@ -970,13 +971,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"result":"error","error":"Unavailable"}"#.to_owned(),
             unknown,
-            "Kraken write outcome is unknown. Check Open Orders: Unavailable",
+            "Kraken didn’t confirm this change: Unavailable. Check your open orders before trying again.",
         ),
         (
             200,
             r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
             unknown,
-            "Kraken write outcome is unknown. Check Open Orders: somethingNew",
+            "Kraken didn’t confirm this change: somethingNew. Check your open orders before trying again.",
         ),
         (
             200,
@@ -988,13 +989,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             send("partiallyFilled"),
             unknown,
-            "Kraken write outcome is unknown. Check Open Orders: Kraken placement rejected or incomplete: partiallyFilled",
+            "Kraken didn’t confirm this change: Kraken placement rejected or incomplete: partiallyFilled. Check your open orders before trying again.",
         ),
         (
             200,
             r#"{"result":"success"}"#.to_owned(),
             unknown,
-            "Kraken write outcome is unknown. Check Open Orders: Kraken placement missing sendStatus",
+            "Kraken didn’t confirm this change: Kraken placement missing sendStatus. Check your open orders before trying again.",
         ),
     ] {
         let (mut e, _) = ready();
@@ -1007,10 +1008,19 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             assert!(matches!(error.kind, None | Some(ErrorKind::Internal)));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
             assert_eq!(error.legacy_text(), text);
-        } else if classified.1 == Some(Outcome::Unknown) && text.contains("Check Open Orders") {
+        } else if classified.1 == Some(Outcome::Unknown)
+            && text
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders")
+        {
             // Managed custody uses the engine's ambiguity wording.
             assert_eq!((error.kind, error.outcome), classified);
-            assert!(error.legacy_text().contains("Check Open Orders"));
+            assert!(
+                error
+                    .legacy_text()
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
+            );
         } else {
             assert_eq!(
                 ((error.kind, error.outcome), error.legacy_text().as_str()),
@@ -1060,7 +1070,7 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(
         error.legacy_text(),
-        r#"{"message":"Kraken write outcome is unknown. Check Open Orders: insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
+        r#"{"message":"Kraken didn’t confirm this change: insufficientFunds. Check your open orders before trying again.","partialOrderIds":["accepted"],"partialOrderCount":1}"#
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
@@ -1117,7 +1127,7 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.legacy_text(),
-        "Kraken write outcome is unknown. Check Open Orders: Kraken cancellation rejected or identity mismatch: cancelled"
+        "Kraken didn’t confirm this change: Kraken cancellation rejected or identity mismatch: cancelled. Check your open orders before trying again."
     );
 }
 
@@ -1238,7 +1248,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
         },
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:81, error}) if error.message.contains("uncertain") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:81, error}) if error.message.contains("confirm") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     reply(&mut e, &fresh, 200, OPEN);
     command(
@@ -1463,7 +1473,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
             actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command, error })
                 if *command == id && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain"))),
+                && error.message.contains("confirm"))),
             "{actions:?}"
         );
     };
@@ -1590,7 +1600,7 @@ fn slow_reconcile(held_completes_cleanly: bool) {
             actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { error, .. })
                 if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                    && error.message.contains("uncertain"))),
+                    && error.message.contains("confirm"))),
             "{actions:?}"
         );
     };
@@ -2112,7 +2122,11 @@ fn dispatched_write_ambiguity_matrix() {
             );
             let text = error.legacy_text().to_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}"
             );
             assert!(
@@ -2242,7 +2256,7 @@ fn futures_queued_write_after_failure(
             let blocked = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
             assert!(blocked.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 903, error })
-                    if error.outcome == Some(Outcome::NotSent) && error.message.contains("uncertain"))),
+                    if error.outcome == Some(Outcome::NotSent) && error.message.contains("confirm"))),
                 "the original uncertainty fence must remain held");
         }
         assert!(
@@ -2251,7 +2265,7 @@ fn futures_queued_write_after_failure(
         );
         assert!(actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: 902, error })
-                if error.outcome == Some(Outcome::NotSent) && error.message.contains("Check Open Orders"))));
+                if error.outcome == Some(Outcome::NotSent) && error.message.replace("Check your open orders", "Check Open Orders").contains("Check Open Orders"))));
         if first_kind != "cancelorder" {
             let read = actions
                 .iter()
@@ -2497,7 +2511,11 @@ fn postmerge_native_batch_rate_failure_is_actionable() {
     assert!(error.message.contains("apiLimitExceeded"), "{error:?}");
     assert!(!error.message.contains("invalidSize"), "{error:?}");
     assert!(
-        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{error:?}"
     );
 }
@@ -2509,7 +2527,11 @@ fn postmerge_cancel_all_rate_status_is_actionable() {
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
-        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{error:?}"
     );
 }
@@ -2520,7 +2542,11 @@ fn postmerge_envelope_rate_control_is_actionable() {
             postmerge_cancel_failure(r#"{"result":"error","error":"apiLimitExceeded"}"#, batch);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(
-            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "{error:?}"
         );
     }
@@ -2537,8 +2563,11 @@ fn postmerge_documented_server_error_is_actionable_in_batch_and_cancel_all() {
     assert!(
         errors
             .iter()
-            .all(|(_, error)| error.message.contains("unknown")
-                && error.message.contains("Check Open Orders")),
+            .all(|(_, error)| error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")),
         "{errors:?}"
     );
 }

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Read-owner handoff, native financial behavior, expiry and failure recovery.
 #[path = "../../../engine/tests/support/account_snapshot.rs"]
 mod account_snapshot;
@@ -584,7 +585,7 @@ fn an_unknown_placement_stays_fenced_through_expiry_until_fresh_reconciliation()
         assert!(out.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: id, error })
             if *id == command && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain"))));
+                && error.message.contains("confirm"))));
     };
     refused(&mut e, NOW + 2000., 701);
     let mut seen = actions;

@@ -268,7 +268,7 @@ export const signHostedHttp = async (
   const cryptocom = name === 'cryptocom';
   const blofin = name === 'blofin';
   if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !cryptocom && !mexc)
-    return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
+    return { id: request.id, error: 'Server signing isn’t available for this exchange yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
   const unsigned = mexc ? options.publicDataOnly === true || isMexcUnsignedRequest(request.config.url)

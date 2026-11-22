@@ -24,7 +24,7 @@ re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
-Bybit REST mutation release budgets and their conservative batch fallback cost
+Bybit REST mutation release budgets and their per-order batch floor
 are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.
@@ -49,6 +49,11 @@ Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
+
+A reduce-only or `close` order carrying a non-zero stop-loss or take-profit is refused
+`NotSent` by the engine, for every venue, before any lock, fence or venue sees it
+(`PlaceOrderOpts::reduce_only_with_attached_legs`, AGT-120). The TS reference mirrors it in
+every `placeOrder`/`placeOrders` with `reduceOnlyWithAttachedLegs`.
 
 Lighter placements complete only on venue proof (an `accountOrders` row or a
 failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
@@ -84,13 +89,13 @@ PR merge times and branch protection. Validate response shapes, use
 Keep cancelled and incomplete runs separate from failures; `updated_at` alone
 does not establish completion. These are observations, not fixed job counts:
 
-| Evidence | Observed result |
-| --- | --- |
-| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4` | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`. |
-| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417` | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded. |
-| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress. |
-| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures. |
-| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4` | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
+| Evidence                                                                                                                                                                                                   | Observed result                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4`                                                                                     | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`.                                |
+| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417`                                                                                      | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded.                                                  |
+| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress.                                                          |
+| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures.                              |
+| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4`                                                                                     | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
 
 At measurement time, the source condition in [rust.yml](.github/workflows/rust.yml) was
 `always() && needs.selection.outputs.replayRequired == 'true'`.
@@ -135,6 +140,25 @@ not promote the orders axis grade. The projection and limits are documented in
 It imports the master image caches with a read-only automatic token; it never publishes images or caches.
 The existing master-only workflows remain the sole image publishers and signers.
 
-
 The wrapper-owned SDK staging signal and narrow automatic supersession exception
 are documented in `docs/plans/callers/beta-wasm-auto-release.md`.
+
+## User-facing notification wording
+
+Messages shown in the UI use calm, plain language: what happened, then at most
+one short action. Unconfirmed changes still ask users to check before retrying;
+missing protection remains explicit. Keep structured outcomes, retries and
+severity unchanged, including recognition of retained older messages.
+Venue display decorators preserve retained and current check-open-orders guidance
+without adding a second action.
+Summary formatting retains diagnostic context and checks each warning separately
+from the terminal error when omitting repeated guidance.
+**Order-risk notices must keep the phrase "may still be open"** (or another phrase
+in NX `apps/web/src/components/toasts/unmanagedOrderRisk.ts`): NX keeps those
+toasts on screen by matching text, so a calmer rewrite without it lets an
+order-risk warning auto-dismiss. Native detail goes before a trailing "Check …"
+action (`safe_cex_engine::error::with_detail`), never after it.
+**The LOCAL lost-chase notice (`algoControlWatch.ts` `unendedChase`) must start
+"Chase on X ended without a result: "**: NX `isPageEngineLostChaseNotice`
+(`apps/web/src/order/hostedAlgoInterruption.ts`) matches that prefix to drop it on
+Hosted accounts, whose own notice replaces it.
