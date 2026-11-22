@@ -312,6 +312,21 @@ function shouldSuppressLog(args: unknown[]): boolean {
   return isOperational(String(args[0]));
 }
 
+function writeInfoToTerminal(args: unknown[]): void {
+  const terminalArgs = args.map((arg) => (typeof arg === 'string' ? terminalText(arg) : arg));
+  writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...terminalArgs));
+}
+
+// Output a subcommand prints because the user asked for it. Logged like
+// console.log but exempt from the dedup and rate limit meant for exchange noise,
+// which dropped repeated lines and whole entries from `account list`/`tasks list`.
+export function printOutput(...args: unknown[]): void {
+  const message = args.map(formatForLog).join(' ');
+  logger.info(message);
+  consoleTap?.('info', message);
+  writeInfoToTerminal(args);
+}
+
 export function interceptConsole(): void {
   // Prevent double interception
   if (intercepted) return;
@@ -336,8 +351,7 @@ export function interceptConsole(): void {
     if (isDuplicateMessage(message)) return;
     if (shouldRateLimit()) return;
 
-    const terminalArgs = args.map((arg) => (typeof arg === 'string' ? terminalText(arg) : arg));
-    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...terminalArgs));
+    writeInfoToTerminal(args);
   };
   console.log = handleInfoLog;
   console.info = handleInfoLog;
