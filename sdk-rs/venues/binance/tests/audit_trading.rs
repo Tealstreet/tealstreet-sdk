@@ -82,10 +82,18 @@ fn ready_reads(
         200,
         r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"7","entryPrice":"100","markPrice":"100","unRealizedProfit":"0","leverage":"20","marginType":"cross","notional":"700","liquidationPrice":"50"}]"#,
     );
+    h.respond(
+        if variant == Variant::PortfolioMargin {
+            "/papi/v1/um/symbolConfig"
+        } else {
+            "/fapi/v1/symbolConfig"
+        },
+        200,
+        "[]",
+    );
     if variant == Variant::PortfolioMargin {
         h.respond("/papi/v1/balance", 200, "[]");
     } else {
-        h.respond("/fapi/v1/symbolConfig", 200, "[]");
         h.respond("/fapi/v3/account", 200, r#"{"assets":[]}"#);
     }
     h.respond(&format!("{root}/openOrders"), 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED","timeInForce":"GTC"}]"#);

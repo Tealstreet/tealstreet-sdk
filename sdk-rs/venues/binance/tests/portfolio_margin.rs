@@ -8,6 +8,7 @@ use safe_cex_engine::{Command, Event, Method};
 use support::Harness;
 
 const POSITION_RISK: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
+const SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#;
 const BALANCE: &str = r#"[{"asset":"USDT","totalWalletBalance":"1000.0","crossMarginAsset":"0","crossMarginBorrowed":"0","crossMarginFree":"900.0","crossMarginInterest":"0","crossMarginLocked":"0","umWalletBalance":"1000.0","umUnrealizedPNL":"10.0","cmWalletBalance":"0","cmUnrealizedPNL":"0","updateTime":0,"negativeBalance":"0"},{"asset":"BNB","totalWalletBalance":"5","crossMarginFree":"5","umUnrealizedPNL":"0"}]"#;
 const OPEN_ORDERS: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpresting","cumQuote":"0","executedQty":"0","orderId":1917641,"origQty":"0.40","origType":"LIMIT","price":"90000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","symbol":"BTCUSDT","time":1579276756075,"timeInForce":"GTC","type":"LIMIT","updateTime":1579276756075,"selfTradePreventionMode":"NONE","goodTillDate":0}]"#;
 const OPEN_CONDITIONAL: &str = r#"[{"clientAlgoId":"abc","algoId":123445,"algoStatus":"NEW","orderType":"TAKE_PROFIT_MARKET","quantity":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","triggerPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
@@ -39,6 +40,7 @@ fn ready_with(open_orders: &str) -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, SYMBOL_CONFIG);
     h.respond("/papi/v1/balance", 200, BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, open_orders);
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, OPEN_CONDITIONAL);
@@ -531,6 +533,7 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, SYMBOL_CONFIG);
     h.respond("/papi/v1/balance", 200, BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, "[]");
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, PM_TRAILING);

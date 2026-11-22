@@ -71,6 +71,7 @@ fn pm() -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond(PM, 200, USDM_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, CONFIG);
     h.respond("/papi/v1/balance", 200, PM_BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, "[]");
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
@@ -121,8 +122,8 @@ fn answer(h: &mut Harness, risk_path: &str, risk: &str) {
     while h.has_request(risk_path) {
         h.respond(risk_path, 200, risk);
     }
-    while h.has_request("/fapi/v1/symbolConfig") {
-        h.respond("/fapi/v1/symbolConfig", 200, CONFIG);
+    while h.has_request("symbolConfig") {
+        h.respond("symbolConfig", 200, CONFIG);
     }
 }
 
@@ -177,7 +178,7 @@ fn a_read_in_flight_is_followed_by_a_new_one() {
         let stale = h.take(path);
         let stale_config = h
             .has_request("/fapi/v1/symbolConfig")
-            .then(|| h.take("/fapi/v1/symbolConfig"));
+            .then(|| h.take("symbolConfig"));
         read(&mut h, 41);
         assert!(!h.has_request(path), "{name}: no second read yet");
         let risk = if path == COIN { COIN_RISK } else { USDM_RISK };

@@ -25,8 +25,8 @@ pub struct Paths {
     pub leverage_bracket: &'static str,
     pub position_mode: &'static str,
     pub position_risk: &'static str,
-    /// USD-M reads leverage and margin type here; portfolio margin's position
-    /// rows carry leverage and it is cross only.
+    /// Leverage and margin type per symbol. Portfolio margin needs it too: its
+    /// positionRisk omits flat symbols, which then had no leverage (AGT-175).
     pub symbol_config: Option<&'static str>,
     pub balance: &'static str,
     pub open_orders: &'static str,
@@ -94,7 +94,7 @@ pub const PORTFOLIO_MARGIN: Paths = Paths {
     leverage_bracket: "/papi/v1/um/leverageBracket",
     position_mode: "/papi/v1/um/positionSide/dual",
     position_risk: "/papi/v1/um/positionRisk",
-    symbol_config: None,
+    symbol_config: Some("/papi/v1/um/symbolConfig"),
     balance: "/papi/v1/balance",
     open_orders: "/papi/v1/um/openOrders",
     open_conditional_orders: "/papi/v1/um/algo/openAlgoOrders",
