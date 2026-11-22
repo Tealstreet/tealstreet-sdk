@@ -260,7 +260,9 @@ expiry of a restored queued record is also unknown rather than proof of no send.
 Restored ambiguous handoffs are unknown. Rows persist `boxAcknowledged`: true once the box ACKed
 the intent, so after a relaunch hosts still never settle it "not placed" or "did not apply" from age
 or lookup misses (AGT-163). Rows written before the field restore it as true when they were
-`sending`, `acknowledged` or `unknown`, and false otherwise. No row version changes, and older readers ignore it.
+`sending`, `acknowledged` or `unknown`, and false otherwise. A stored `acknowledged` state restores as true
+even beside a stale false. A router ACK refusal clears it. No row version changes, and older readers ignore it.
+The flag only means something on a row that is still non-terminal (`unknown`), so hosts gate `boxHeld` on that state.
 Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
 supplies durable deduplication and queue cancellation;

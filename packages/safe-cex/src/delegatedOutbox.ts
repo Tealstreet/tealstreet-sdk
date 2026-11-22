@@ -398,6 +398,8 @@ export class DelegatedOutbox {
         box.sequence = Math.max(box.sequence, row.seq);
         // An older row may have been ACKed before going unknown; assume the box holds it.
         row.boxAcknowledged ??= ['sending', 'acknowledged', 'unknown'].includes(row.state);
+        // A stored ACKed state is the evidence, even beside a stale false an older build kept.
+        if (row.state === 'acknowledged') row.boxAcknowledged = true;
         // JSON cannot carry the private runtime brand. Validate and reissue it.
         if (row.state === 'notSent' || row.state === 'refused') {
           const proof = storedNotSentEvidence(row);
@@ -719,8 +721,11 @@ export class DelegatedOutbox {
         if (data.received) {
           row.state = 'acknowledged';
           row.boxAcknowledged = true;
+        } else {
+          markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
+          // The router refused the whole intent, so the box holds nothing, whatever a default claimed.
+          row.boxAcknowledged = false;
         }
-        else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
         delete row.retentionExpired;
       } else if (
         parsed.t === 'order.outcome' &&
@@ -789,8 +794,11 @@ export class DelegatedOutbox {
       if (data.received) {
         row.state = 'acknowledged';
         row.boxAcknowledged = true;
+      } else {
+        markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
+        // The router refused the whole intent, so the box holds nothing, whatever a default claimed.
+        row.boxAcknowledged = false;
       }
-      else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
       delete row.retentionExpired;
       return true;
     }
