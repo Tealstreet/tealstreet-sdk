@@ -856,8 +856,7 @@ fn a_refused_sub_step_slice_is_not_carried_into_a_later_slice() {
         step: Some(1.0),
         ..View::default()
     };
-    let (_, _, sent, effects) =
-        run_market_twap(&view, json!({ "size": 2.7, "ordersCount": 3 }));
+    let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 2.7, "ordersCount": 3 }));
     assert!(sent.is_empty(), "{sent:?}");
     assert_eq!(
         logs(&effects)
@@ -875,12 +874,15 @@ fn whole_step_slices_still_carry_their_fraction_and_never_exceed_a_step_over_pla
         step: Some(1.0),
         ..View::default()
     };
-    let (_, _, sent, effects) =
-        run_market_twap(&view, json!({ "size": 3.9, "ordersCount": 3 }));
+    let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 3.9, "ordersCount": 3 }));
     assert_eq!(sent, [1.0, 1.0, 1.0], "{sent:?}");
     assert!(sent.iter().all(|size| *size < 1.3 + 1.0));
     assert!(sent.iter().sum::<f64>() <= 3.9);
-    assert!(!logs(&effects).iter().any(|message| message.contains("not sent")));
+    assert!(
+        !logs(&effects)
+            .iter()
+            .any(|message| message.contains("not sent"))
+    );
 }
 
 #[test]
@@ -1901,9 +1903,13 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
         json!({ "size": 1.5, "ordersCount": 3 }),
     );
     assert!(placements(&first).is_empty());
+    // AGT-144 (fix(twap) after b2cc583e4): a sub-step slice no longer rides on, so the
+    // first 0.5 is a refused slice and the second needs a 0.5 step to place. The test
+    // still pins index alignment after a refused slice, now a refusal not a skip.
+    view.step = Some(0.5);
     env.advance(book.wake_at().unwrap() - env.now);
     let second = book.wake(&mut env, &view);
-    assert_eq!(market_amounts(&second), [1.0]);
+    assert_eq!(market_amounts(&second), [0.5]);
     let settled = settle_all(
         &mut book,
         &mut env,

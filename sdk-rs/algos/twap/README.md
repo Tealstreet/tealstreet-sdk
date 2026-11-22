@@ -74,6 +74,14 @@ journal, IDs and refusal text are retained, even without an aggregate outcome.
 Only actual uncertainty in the aggregate or native journal halts the action.
 There is no new whole-plan admission gate.
 
+A slice is floored to the market's amount step, and the fraction it loses rides
+on the next slice. A slice below one whole step is the exception (AGT-144): it is
+a definite `NotSent` refusal for that slice ("TWAP BATUSDT slice 3 of 10 not sent:
+0.1 is below the market's amount step of 1"), reported like a venue refusal, and
+its size is not carried. Carrying it let every sub-step slice pile into one
+last-slice order, so a 10-slice close of a one-step position sold it all at once.
+Legacy TS sends the raw slice and the venue refuses it; this keeps that outcome.
+
 Genuine Unknown halts the action under Sean/daxx's recorded parity exception
 (2026-11-08, decision #3355; Sam to verify). It clears future child and fallback
 timers and stops owned chasers while retaining their resting orders. It never
