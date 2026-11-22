@@ -1773,3 +1773,19 @@ also raised 24 reserve-only families, which were reverted for the master bot.
 | asterdex | 2398952 | 2397184 | 2409472 |
 | bybit | 2741848 | 2740224 | 2752512 |
 | orderly | 1917499 | 1916928 | 1928192 |
+
+## 2026-11-22 — #3791 HIP-3 discovery retry raises the hyperliquid cap
+
+AGT-168 retries a failed or malformed `perpDexs` read on the startup backoff and
+refuses a candle read with `VenueUnavailable` when no catalogue read is outstanding
+or scheduled. That adds a discovery-read counter, the dex-list merge and the
+stalled-discovery refusal to the hyperliquid venue, 588 B over its ceiling. No
+test-only code or debug string reaches the build; the growth is the retry logic
+itself. Rule-17 raise per `harness/CLAUDE.md`, generated with `update-wasm-caps.mjs`
+from PR run 45011224350 (sealed source `131875374544d677b749bb915a5afe3dee4d48e7`,
+the merge of PR head `fc18ea3212b73b2afdaf139d2889f72b31aeb894` into master
+`54dae466f2191fb006cc977b28df5744939fc140`).
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| hyperliquid | 2448972 | 2448384 | 2459648 |
