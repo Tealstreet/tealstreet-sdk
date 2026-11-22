@@ -117,10 +117,19 @@ unresolved; an existing core row can read immediately. A completed relevant
 catalogue or explicit exclusion refuses with `Market not found`, even if an
 unrelated DEX is still loading. Failed/malformed discovery is not proof of absence.
 Optional spot publication is not completion: every universe row must resolve to
-a usable market or explicit exclusion. A malformed or missing context keeps the
-original read bound; usable siblings publish and explicit exclusions still refuse.
-Standalone spot records the same per-row exclusion facts as merged spot, so an
-excluded row refuses immediately even while a malformed sibling remains unresolved.
+a usable market or explicit exclusion. Usable siblings publish and explicit
+exclusions still refuse. Standalone spot records the same per-row exclusion facts
+as merged spot, so an excluded row refuses immediately even while a malformed
+sibling remains unresolved.
+
+A missing row waits only while discovery can still resolve it: a catalogue read
+is outstanding or a failed one is scheduled to retry. Core, HIP-3 DEX, standalone
+spot and the `perpDexs` list all retry a failed or malformed read on the startup
+backoff until it succeeds. With nothing running, the read refuses at once with
+`Market metadata unavailable` (`VenueUnavailable`), never `Market not found`.
+Merged spot is best effort and is not re-read after a usable answer, so its
+unresolved rows take that refusal. AGT-168: a failed `perpDexs` read was once never
+retried, so every HIP-3 read waited its full bound for the life of the engine.
 
 The wait owns its original command Context and timer, capped at 20 seconds and
 any shorter caller bound. Discovery and HTTP share that deadline; neither arrival
