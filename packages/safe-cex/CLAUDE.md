@@ -189,9 +189,15 @@ queued label. Persisted no-handoff claims still pass the evidence constructors.
 Version-1 storage keeps caller-key rows permanently reserved within the 1,056
 record capacity. Version-2 snapshots opt into an atomic `retiredIntentBefore`
 checkpoint: compaction deletes only durably completed rows and advances that
-UUIDv7 timestamp floor in the same transaction. The floor cannot pass the current protocol clock; future-dated records stay.
-Older forgotten IDs refuse with
-`intentRetired` / Unknown, never another sequence or send. Existing unanswered
+UUIDv7 timestamp floor in the same transaction. **A row raises the floor only once it is
+older than the box's key window** (`order_contract::key_age`: 10 s old, 5 s ahead), so the
+floor never refuses an ID the box could still accept: `placementLegIntent` children share
+their parent's timestamp, and a floor at the newest retired row refused a 34+ leg flatten
+as Unknown (AGT-106). Completed history may exceed 32 rows inside that window. A caller ID
+more than 5 s ahead refuses at ingress as `invalidIntentId`, and a loaded floor more than
+5 s ahead is an invalid checkpoint. Older forgotten caller IDs refuse with
+`intentRetired` / Unknown, never another sequence or send. IDs the outbox mints itself skip
+the floor: they are fresh by construction, so a corrected fast clock cannot lock writes. Existing unanswered
 rows still join below the floor; pending/Unknown retention rules are unchanged.
 An aborted transaction retains memory rows and the previous floor. Storage hosts
 must fence old writers that cannot preserve the checkpoint, keep it monotonic,
@@ -304,9 +310,10 @@ outbox before replacing it with a new writer for the same scope.
 `retire(intentId)` lets a host drop an entry it has settled itself (applied,
 not sent, or venue-rejected per `error.outcome: "rejected"` / reconciled venue
 state) instead of keeping it as completed history or 24 h unknown work. It
-removes the row from memory, then deletes it through `compact` with the current
-sequence, so its seq is never reused; a failed delete leaves the stored row
-to restore as before. It refuses (resolves false) queued, sending, acknowledged
+deletes the row through `compact` with the current sequence, then removes it from
+memory, so its seq is never reused; a failed delete leaves the stored and in-memory
+row as before. On version-2 storage a row still inside the key window resolves false
+and stays as completed history for compaction to retire later. It refuses (resolves false) queued, sending, acknowledged
 and cancel-pending intents, and caller-supplied keys, whose reservation must
 survive. Retirement is the host's assertion, never evidence: the SDK still
 never resends, and a later receipt for that ID finds no entry.

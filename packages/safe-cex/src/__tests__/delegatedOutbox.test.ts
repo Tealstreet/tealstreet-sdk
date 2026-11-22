@@ -2256,7 +2256,9 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
     expect(await box.retire(queued)).toBe(false);
   });
 
-  it('keeps the stored entry when the delete fails, so it restores as before', async () => {
+  // Storage first since AGT-106 (#3759): memory and the retirement floor change only after the
+  // compaction commits, so a failed delete leaves both the stored and the in-memory entry.
+  it('keeps the stored and in-memory entry when the delete fails, so it restores as before', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     const ticket = box.connect(f.connection());
@@ -2266,7 +2268,7 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
       throw new Error('storage unavailable');
     };
     await expect(box.retire(id)).rejects.toThrow('storage unavailable');
-    expect(box.entries()).toEqual([]);
+    expect(box.entries()).toMatchObject([{ intentId: id }]);
     box.close();
     const restored = await DelegatedOutbox.open(fixture('alice', f.rows).options);
     expect(restored.entries()).toMatchObject([{ intentId: id, state: 'unknown' }]);

@@ -9,6 +9,7 @@ function fixture(version: 1 | 2 = 2) {
   let sequence = 0;
   let floor = 0;
   let now = 1_764_000_000_000;
+  let skew = 0; // Wall-clock error only: the monotonic clock never steps.
   let failCompaction = false;
   const rows = new Map<string, DelegatedIntent>();
   const options: OutboxOptions = {
@@ -16,7 +17,7 @@ function fixture(version: 1 | 2 = 2) {
     accountName: 'main',
     accountId: 'account-A',
     venue: 'bybit',
-    clock: { epoch: 'boot-A', now: () => now - 1_764_000_000_000, unix: () => now },
+    clock: { epoch: 'boot-A', now: () => now - 1_764_000_000_000, unix: () => now + skew },
     random: (bytes) => {
       bytes.fill(1);
     },
@@ -46,7 +47,7 @@ function fixture(version: 1 | 2 = 2) {
     setFloor: (value: number) => {
       floor = value;
     },
-    id: () => createDelegatedIntentId(now++, options.random),
+    id: () => createDelegatedIntentId(now++ + skew, options.random),
     /** Distinct UUIDs that share one timestamp, as `placementLegIntent` children do. */
     legId: (time: number, leg: number) =>
       createDelegatedIntentId(time, (bytes) => {
@@ -56,6 +57,9 @@ function fixture(version: 1 | 2 = 2) {
     now: () => now,
     advance: (ms: number) => {
       now += ms;
+    },
+    skew: (ms: number) => {
+      skew = ms;
     },
     abort: () => {
       failCompaction = true;
@@ -75,8 +79,12 @@ describe('durable caller-intent retirement', () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     try {
-      for (let i = 0; i < 1060; i++) await completed(box, f.id());
-      expect(box.entries().length).toBeLessThanOrEqual(32);
+      for (let i = 0; i < 1060; i++) {
+        await completed(box, f.id());
+        f.advance(1_000);
+      }
+      // 32 completed rows, plus those still inside the 15 s key window.
+      expect(box.entries().length).toBeLessThanOrEqual(32 + 16);
       expect(f.floor()).toBeGreaterThan(0);
     } finally {
       box.close();
@@ -88,7 +96,10 @@ describe('durable caller-intent retirement', () => {
     const first = f.id();
     let box = await DelegatedOutbox.open(f.options);
     await completed(box, first);
-    for (let i = 0; i < 33; i++) await completed(box, f.id());
+    for (let i = 0; i < 50; i++) {
+      f.advance(1_000);
+      await completed(box, f.id());
+    }
     expect(f.rows.has(first)).toBe(false);
     box.close();
     box = await DelegatedOutbox.open(f.options);
@@ -108,7 +119,10 @@ describe('durable caller-intent retirement', () => {
     const box = await DelegatedOutbox.open(f.options);
     const pending = f.id();
     await box.enqueue(params, { intentId: pending });
-    for (let i = 0; i < 34; i++) await completed(box, f.id());
+    for (let i = 0; i < 50; i++) {
+      f.advance(1_000);
+      await completed(box, f.id());
+    }
     try {
       expect(f.floor()).toBeGreaterThan(0);
       expect(await box.enqueue(params, { intentId: pending })).toBe(pending);
@@ -122,6 +136,7 @@ describe('durable caller-intent retirement', () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     for (let i = 0; i < 32; i++) await completed(box, f.id());
+    f.advance(20_000); // Past the key window, so the next completion compacts.
     const before = [...f.rows.keys()];
     f.abort();
     await expect(completed(box, f.id())).rejects.toThrow('transaction aborted');
@@ -132,16 +147,16 @@ describe('durable caller-intent retirement', () => {
     box.close();
   });
 
-  it('never advances a durable retirement floor past the current protocol clock', async () => {
+  // Was "never advances ... past the current protocol clock", which admitted a 0xffffffffffff
+  // id: such an id is now refused at ingress (see the key-window block below), and the floor
+  // stays a full key window behind the clock rather than just behind it.
+  it('never advances a durable retirement floor into the key window', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
-    const future = createDelegatedIntentId(0xffffffffffff, f.options.random);
-    await completed(box, future);
     try {
-      for (let i = 0; i < 34; i++) await completed(box, f.id());
-      expect(f.floor()).toBeLessThan(1_764_000_000_100);
-      expect(f.rows.has(future)).toBe(true);
-      expect(box.entries().length).toBeLessThanOrEqual(32);
+      for (let i = 0; i < 40; i++) await completed(box, f.id());
+      expect(f.floor()).toBe(0);
+      expect(box.entries()).toHaveLength(40);
     } finally {
       box.close();
     }
@@ -256,13 +271,13 @@ describe('retirement floor against the box key window', () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
     const day = 86_400_000;
-    f.advance(day);
+    f.skew(day);
     for (let i = 0; i < 40; i++) {
       await completed(box, f.id());
       f.advance(1_000);
     }
-    expect(f.floor()).toBeGreaterThan(f.now() - day);
-    f.advance(-day);
+    expect(f.floor()).toBeGreaterThan(f.now());
+    f.skew(0);
     try {
       const id = await box.enqueue(params);
       expect(box.entries().find((row) => row.intentId === id)?.state).toBe('queued');
@@ -278,7 +293,7 @@ describe('retirement floor against the box key window', () => {
       await completed(box, f.id());
       f.advance(1_000);
     }
-    f.advance(-60_000);
+    f.skew(-60_000);
     try {
       const id = await box.enqueue(params);
       expect(box.entries().find((row) => row.intentId === id)?.state).toBe('queued');
@@ -310,4 +325,3 @@ describe('retirement floor against the box key window', () => {
     }
   });
 });
-

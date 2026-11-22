@@ -127,6 +127,13 @@ export interface OutboxConnection extends OutboxScope {
 }
 
 const MAX_AGE_MS = 10_000;
+/** The box refuses a key more than 5 s ahead of its clock (`order_contract::key_age`). */
+const KEY_FUTURE_MS = 5_000;
+/**
+ * A row raises the retirement floor only once the box would refuse its key anyway, so the
+ * floor never refuses an id the box could still accept (sibling legs share a timestamp).
+ */
+const RETIREMENT_MARGIN_MS = MAX_AGE_MS + KEY_FUTURE_MS;
 const MAX_PENDING = 1024;
 const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;
@@ -343,7 +350,7 @@ export class DelegatedOutbox {
           (saved.version === 2 &&
             (!Number.isSafeInteger(saved.retiredIntentBefore) ||
               saved.retiredIntentBefore < 0 ||
-              saved.retiredIntentBefore > 0x1000000000000))
+              saved.retiredIntentBefore > options.clock.unix() + KEY_FUTURE_MS))
         )
           throw new Error('Invalid outbox checkpoint');
         box.sequence = saved.sequence;
@@ -618,8 +625,13 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Outbox is closed or full'));
     const intentId =
       options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
-    if (delegatedIntentTime(intentId) < this.retiredIntentBefore)
-      return Promise.reject(new DelegatedIntentError('intentRetired'));
+    if (options) {
+      const time = delegatedIntentTime(intentId);
+      if (time > this.options.clock.unix() + KEY_FUTURE_MS)
+        return Promise.reject(new DelegatedIntentError('invalidIntentId'));
+      // Only a caller's id can be a replay; one minted here is fresh whatever the clock did.
+      if (time < this.retiredIntentBefore) return Promise.reject(new DelegatedIntentError('intentRetired'));
+    }
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
@@ -872,7 +884,8 @@ export class DelegatedOutbox {
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
-      if (this.checkpointVersion === 2 && delegatedIntentTime(intentId) >= this.options.clock.unix()) return false;
+      // Inside the key window it stays as completed history; compaction retires it later.
+      if (this.checkpointVersion === 2 && !this.pastKeyWindow(intentId)) return false;
       const floor =
         this.checkpointVersion === 2
           ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
@@ -920,6 +933,10 @@ export class DelegatedOutbox {
       connection.capabilities.delegatedOrderFramesV1 === true &&
       connection.capabilities.delegatedOrderLedgerV1 === true
     );
+  }
+
+  private pastKeyWindow(intentId: string): boolean {
+    return delegatedIntentTime(intentId) < this.options.clock.unix() - RETIREMENT_MARGIN_MS;
   }
 
   private expired(row: DelegatedIntent): boolean {
@@ -1209,9 +1226,7 @@ export class DelegatedOutbox {
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
     // Legacy adapters cannot persist a replay fence, so their caller keys stay reserved.
     const completed = [...this.completedIntents.values()].filter((row) =>
-      this.checkpointVersion === 2
-        ? delegatedIntentTime(row.intentId) < this.options.clock.unix()
-        : !row.callerSuppliedIntentId,
+      this.checkpointVersion === 2 ? this.pastKeyWindow(row.intentId) : !row.callerSuppliedIntentId,
     );
     const keep =
       this.checkpointVersion === 2
