@@ -2500,6 +2500,43 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
       },
     );
 
+    // Review h5h59b: an older build that restored a newer row keeps its stale false while it
+    // persists the ACKed state, so the stored state is the ACK evidence.
+    it('a stored acknowledged row with a stale false flag restores as box-acknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      await box.receive(c, response(id, 'order.ack', { received: true }));
+      const entry = box.entries()[0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify({ ...entry, boxAcknowledged: false })));
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    });
+
+    it('a router ACK refusal clears the defaulted flag on an older unknown row', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
+      await box.flush(c);
+      const { boxAcknowledged: _, ...legacy } = box.entries()[0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+      const restored = await DelegatedOutbox.open(f.options);
+      const rc = restored.connect(f.connection());
+      expect(restored.entries()[0]).toMatchObject({ state: 'unknown', boxAcknowledged: true });
+      await restored.receive(rc, response(id, 'order.ack', { received: false }));
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent', boxAcknowledged: false });
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'notSent', boxAcknowledged: false });
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
     it('an older queued row without the field restores replayable and is sent exactly once', async () => {
       const f = fixture();
       const box = await DelegatedOutbox.open(f.options);
