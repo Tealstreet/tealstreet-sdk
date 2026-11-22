@@ -75,7 +75,7 @@ Stop-after-Unknown is a recorded parity exception (Sean/daxx, 2026-11-08).
 When a native response leaves a write unproven, the rest of that action stays
 unsent, including signature-looking replies and protective replacements. The
 terminal preserves accepted IDs and indexed placement facts, identifies the
-unconfirmed request, and says `The outcome is unknown. Check Open Orders`.
+unconfirmed request, and says `We couldn’t confirm this change. Check your open orders before trying again.`.
 The venue emits one `order.outcome_unknown` event with the command, accepted
 count and unconfirmed request. Late acknowledgements cannot restart the action
 or emit another terminal/event. Proven signature refusals and definite native
@@ -94,6 +94,14 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 408/429/5xx pins still assert the stop, Unknown outcome and the engine's canonical
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
+
+## Stop-entry brackets (AGT-115)
+
+`plan_place` derives stop-loss/take-profit legs only after a limit/market entry, as
+the TS reference does. Any algo entry (`conditional`, `stop_market`,
+`take_profit_market`, `trailing_stop_market`) with a non-zero attached leg used to
+be placed without it; the whole command now refuses before any write with the
+engine's shared `stop_entry_legs_refusal` copy. A zero leg still means "none".
 
 ## Entire-position TP/SL (AGT-68, AGT-98)
 

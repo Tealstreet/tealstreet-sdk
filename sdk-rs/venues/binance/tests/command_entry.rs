@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Real native command planners encounter registry refusal under engine custody.
 mod support;
 use safe_cex_engine::model::Interval;
@@ -87,7 +88,10 @@ fn native_command_entry_refusal_is_one_typed_result_before_any_transport() {
             .collect::<Vec<_>>();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
-        assert_eq!(errors[0].message, "Engine request capacity reached");
+        assert_eq!(
+            errors[0].message,
+            "The account’s request queue is full. Try again shortly."
+        );
         assert_eq!(errors[0].outcome, write.then_some(Outcome::NotSent));
         assert!(!actions.iter().any(|a| matches!(
             a,
@@ -116,7 +120,10 @@ fn assert_identity_preflight_requires_admission(options: support::Options) {
         })
         .collect::<Vec<_>>();
     assert_eq!(errors.len(), 1, "one correlated terminal: {actions:?}");
-    assert_eq!(errors[0].message, "Engine request capacity reached");
+    assert_eq!(
+        errors[0].message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
     assert_eq!(errors[0].outcome, None, "identity is a Read");
     assert!(!actions.iter().any(|action| matches!(

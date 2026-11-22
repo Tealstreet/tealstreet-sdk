@@ -726,6 +726,10 @@ type WatchTableType = 'positions' | 'orders' | 'margin';
  */
 function getAllConnectedAccounts(): AccountExchange[] {
   const connectedAccounts = exchangeManager.getConnectedAccounts();
+  if (connectedAccounts.length === 0 && session.currentExchange && session.currentAccountName) {
+    // One-shot runs connect a single account through the session, not the manager.
+    return [{ accountName: session.currentAccountName, exchange: session.currentExchange as Exchange }];
+  }
   return connectedAccounts.map(({ name, exchange }) => ({
     accountName: name,
     exchange: exchange as Exchange,

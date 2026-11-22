@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original actual-venue controls for caller-root closed-position adoption.
 #![allow(dead_code)]
 #[path = "../../../engine/tests/support/request_stats_frame.rs"]
@@ -244,7 +245,10 @@ fn unknown_symbol_empty_result_cannot_bypass_full_genuine_capacity() {
         "local[] must obtain genuine Read authority"
     );
     assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
-    assert_eq!(errors[0].message, "Engine request capacity reached");
+    assert_eq!(
+        errors[0].message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(errors[0].outcome.is_none());
     assert!(done(&output).is_none());
     no_dispatch(&output);

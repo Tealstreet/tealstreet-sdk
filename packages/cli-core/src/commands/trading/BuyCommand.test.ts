@@ -195,6 +195,25 @@ describe('BuyCommand', () => {
       );
     });
 
+    // AGT-135: the engine refuses a reduce-only order carrying a stop-loss or take-profit
+    // (AGT-120), so `reduce` with `stop`/`tp` is refused up front with the engine's copy.
+    it('refuses reduce with an attached stop or take-profit before placing anything', async () => {
+      for (const args of [
+        ['buy', '$100', 'reduce', 'stop', '49000'],
+        ['buy', '$100', 'at', '49500', 'tp', '51000', 'reduce'],
+        ['buy', '$100', 'best', 'reduce', 'stop', '49000'],
+        ['buy', 'BTCUSDT,ETHUSDT', '$100', 'reduce', 'stop', '49000'],
+      ]) {
+        const exchange = createMockExchange();
+        const result = await command.execute(createMockContext(args, exchange, 'BTCUSDT'));
+        expect(result.success, args.join(' ')).toBe(false);
+        expect(result.error, args.join(' ')).toContain(
+          "A stop-loss or take-profit can't be attached to a reduce-only order. Place it as its own order.",
+        );
+        expect(exchange.placeOrder).not.toHaveBeenCalled();
+      }
+    });
+
     it('places orders for multiple symbols', async () => {
       const exchange = createMockExchange();
       const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$100'], exchange);

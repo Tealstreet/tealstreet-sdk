@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use safe_cex_exchange_server::accounts::{engine_options, prepare, refuse_unhosted};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
@@ -83,7 +84,7 @@ fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
         assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
         assert!(matches!(
             prepare_delegated(&init(venue), pair()),
-            Err(ref error) if error == "DELEGATED is not enabled for this venue"
+            Err(ref error) if error == "Server trading isn’t available for this exchange"
         ));
     }
     let mut testnet = init("hyrotrader");
@@ -219,7 +220,9 @@ fn delegated_pair_binding_and_empty_material_refuse_with_fixed_errors() {
             &init("bybit"),
             DelegatedPair::new(key.into(), material.into(), None),
         );
-        assert!(matches!(result, Err(ref e) if e == "Invalid DELEGATED account setup"));
+        assert!(
+            matches!(result, Err(ref e) if e == "The server couldn’t set up this trading account")
+        );
     }
 }
 

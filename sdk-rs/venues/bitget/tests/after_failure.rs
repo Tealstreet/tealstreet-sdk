@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -602,8 +603,9 @@ fn below_minimum_protective_quantity_is_sent_at_its_rounded_trigger() {
     }
 }
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
-const ENGINE_SEALED_UNKNOWN_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
+const ENGINE_SEALED_UNKNOWN_TEXT: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 const UNKNOWN_REPLY: &str = r#"{"code":"40010","msg":"Request timeout","data":null}"#;
 
 fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
@@ -615,9 +617,10 @@ fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
         "{}",
         error.message
     );
+    // Composition may put detail between the statement and its single final action (#3726).
     assert!(
-        error.message.contains(ENGINE_UNKNOWN_TEXT)
-            || error.message.contains(ENGINE_SEALED_UNKNOWN_TEXT),
+        safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+            || safe_cex_engine::error::carries_guidance(&error.message, ENGINE_SEALED_UNKNOWN_TEXT),
         "{}",
         error.message
     );
@@ -684,7 +687,10 @@ fn classic_batch_row_timeout_emits_unknown_once_without_suffix_writes() {
             1
         );
         unknown_pin(&h, &placed, unknown);
-        assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
+        assert!(safe_cex_engine::error::carries_guidance(
+            &h.failures[0].message,
+            ENGINE_UNKNOWN_TEXT
+        ));
         let event = h
             .events
             .iter()

@@ -1,9 +1,11 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::model::{BybitBbo, OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 fn assert_unknown(h: &Harness, command: u32, placed: &[&str]) {
     let errors: Vec<_> = h
         .actions

@@ -1,7 +1,9 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use std::rc::Rc;
 use std::time::Duration;
 
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 struct Clock {
     start: tokio::time::Instant,

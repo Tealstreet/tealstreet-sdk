@@ -13,7 +13,7 @@ import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
  * once. All three bybit variants carry the same helpers.
  */
 
-const signerDown = new Error('Remote signer unavailable — WebSocket disconnected (gone <5s)');
+const signerDown = new Error('Signing isn’t available for this account — WebSocket disconnected (gone <5s)');
 
 const VARIANTS = [
   {

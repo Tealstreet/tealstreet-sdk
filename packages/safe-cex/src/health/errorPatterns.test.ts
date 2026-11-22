@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { ErrorCategory, ErrorPattern } from './errorPatterns';
 
 import { describe, expect, it } from 'vitest';
@@ -346,7 +347,7 @@ describe('engine capacity refusals are not venue rate limits', () => {
   };
 
   it('leaves the Rust engine capacity message unclassified', () => {
-    expect(match('Engine request capacity reached')).toBeNull();
+    expect(match('The account’s request queue is full. Try again shortly.')).toBeNull();
   });
 
   it('documents why the former engine text was replaced', () => {

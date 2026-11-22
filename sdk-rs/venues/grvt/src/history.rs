@@ -817,7 +817,7 @@ impl Grvt {
             }
             let result = (|| {
                 let lookup: Lookup<'_> = serde_json::from_str(response.body)
-                    .map_err(|_| "Malformed GRVT order lookup")?;
+                    .map_err(|_| "GRVT’s order details couldn’t be read")?;
                 let raw = lookup.result;
                 if raw.get() == "null" {
                     return Ok("{\"found\":false,\"definitive\":false}".into());

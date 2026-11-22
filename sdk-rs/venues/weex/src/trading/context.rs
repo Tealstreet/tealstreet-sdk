@@ -210,7 +210,7 @@ pub(super) struct Recorded {
 }
 
 pub(super) fn unknown_message(message: &str) -> String {
-    if message.contains(UNKNOWN_OUTCOME_TEXT) {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
         message.to_owned()
     } else {
         format!("{message}. {UNKNOWN_OUTCOME_TEXT}")
@@ -506,7 +506,7 @@ fn record_rows(
 
 fn amend_row(before: &Order, body: &str) -> Result<ResultRow, VenueError> {
     let row: ResultRow = serde_json::from_str(body)
-        .map_err(|_| unknown("WEEX malformed TP/SL amendment response"))?;
+        .map_err(|_| unknown("WEEX’s TP/SL edit reply couldn’t be read"))?;
     if contradictory(&row) {
         return Err(unknown("WEEX contradictory amendment acknowledgement"));
     }
@@ -622,4 +622,25 @@ pub(super) fn capture_ids(
 pub(super) fn rate_limited(cx: &Cx<'_, Pending>, context: &Context) -> bool {
     cx.classify_write(context, &TABLE, None, "WEEX write rate deferral")
         .is_ok_and(|fact| fact.error().kind == Some(ErrorKind::RateLimited))
+}
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(unknown_message(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = unknown_message("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
+    }
 }

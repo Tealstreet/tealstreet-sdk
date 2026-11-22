@@ -68,7 +68,7 @@ fn reference(source: Option<f64>) -> Result<StopTriggerType, String> {
         Some(1.) => Ok(StopTriggerType::LastPrice),
         Some(2.) => Ok(StopTriggerType::MarkPrice),
         Some(3.) => Ok(StopTriggerType::IndexPrice),
-        _ => Err("MEXC reference stale: native trigger source is unknown; stop not changed".into()),
+        _ => Err("MEXC’s trigger source isn’t available; your stop is unchanged".into()),
     }
 }
 struct GuardView<'a> {
@@ -176,8 +176,8 @@ fn guard_send(
     if original.filled != 0. || original.status != OrderStatus::Open {
         return Err("MEXC original order changed or filled; stop not changed".into());
     }
-    let raw: OrderRow<'_> =
-        serde_json::from_str(&edit.native).map_err(|_| "MEXC native stop provenance missing")?;
+    let raw: OrderRow<'_> = serde_json::from_str(&edit.native)
+        .map_err(|_| "The MEXC stop’s original details aren’t available")?;
     let new = if restore { None } else { edit.price };
     if edit.scope == Scope::Plan && edit.leg.is_none() {
         view.check(
@@ -293,7 +293,7 @@ fn source(n: Option<f64>, price: f64) -> Result<u8, String> {
     if price <= 0. {
         Ok(1)
     } else {
-        Err("MEXC reference stale: native trigger source is unknown; stop not changed".into())
+        Err("MEXC’s trigger source isn’t available; your stop is unchanged".into())
     }
 }
 
@@ -359,7 +359,10 @@ pub fn native_edit(edit: &Edit) -> Result<Option<Step>, String> {
         )
     } else {
         if raw.stop_loss_price.is_none() || raw.take_profit_price.is_none() {
-            return Err("MEXC TP/SL pair provenance missing; stop not changed".into());
+            return Err(
+                "The MEXC TP/SL pair’s original details aren’t available; your stop is unchanged"
+                    .into(),
+            );
         }
         let take = edit
             .leg
@@ -455,7 +458,9 @@ struct Stop<'a> {
     stop_loss_order_price: f64,
 }
 fn required(n: Option<f64>) -> Result<f64, String> {
-    n.ok_or_else(|| "MEXC exact native restore provenance missing; re-place protection".into())
+    n.ok_or_else(|| {
+        "MEXC’s original stop details aren’t available. Add protection directly on MEXC.".into()
+    })
 }
 pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), String> {
     let raw: OrderRow<'_> = serde_json::from_str(&edit.native).map_err(|e| e.to_string())?;
@@ -580,7 +585,7 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
             })?,
         ))
     } else {
-        Err("MEXC exact standalone protection provenance unavailable".into())
+        Err("The MEXC protection order’s original details aren’t available".into())
     }
 }
 
@@ -847,7 +852,7 @@ impl MexcFutures {
                 let (path, body) = edit
                     .replacement
                     .clone()
-                    .ok_or("MEXC replacement provenance unavailable")?;
+                    .ok_or("The MEXC replacement order’s details aren’t available")?;
                 Ok(Some(Step {
                     receipts: vec![],
                     path: if path == PLAN { PLAN } else { STOP },
@@ -1046,6 +1051,7 @@ impl MexcFutures {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

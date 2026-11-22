@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Exchange } from '../exchanges/base';
 import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
@@ -277,7 +278,7 @@ describe('frame-fed main-thread mirror', () => {
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(errors).toHaveLength(1);
-      expect(String(errors[0])).toContain('manual-write engine');
+      expect(String(errors[0])).toContain('this account makes changes through its server connection');
       expect(mirror.calls).toEqual([]);
     });
 
@@ -429,7 +430,7 @@ describe('frame-fed main-thread mirror', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       expect(bridged).toEqual(['c1', 'c1']);
       await vi.advanceTimersByTimeAsync(55_000);
-      expect(errors.at(-1)).toContain('NOT confirmed');
+      expect(errors.at(-1)).toContain('couldn’t confirm that');
 
       errors.length = 0;
       bridged.length = 0;
@@ -443,9 +444,9 @@ describe('frame-fed main-thread mirror', () => {
       );
       await vi.advanceTimersByTimeAsync(120_000);
       expect(bridged).toHaveLength(2);
-      // The user was told NOT confirmed, so the late confirmation says what is known.
+      // The user was told couldn’t confirm that, so the late confirmation says what is known.
       expect(errors).toEqual([
-        'Chase stop is confirmed, but whether it filled is not known: check Positions and Open Orders.',
+        'The chase has stopped. Check your open orders and positions for fills.',
       ]);
     } finally {
       vi.useRealTimers();
@@ -873,7 +874,7 @@ describe('frame-fed main-thread mirror', () => {
     it('names an unavailable proof RPC and retains its typed cause', async () => {
       const { mirror } = await proofWorker();
       await expect(mirror.nukePositions()).rejects.toMatchObject({
-        message: 'Nuke could not confirm the account is flat: bybitdemo does not support readPositions',
+        message: 'Nuke couldn’t confirm all positions were closed: bybitdemo does not support readPositions',
         cause: { kind: 'unsupported', outcome: 'notSent' },
       });
     });
@@ -889,7 +890,7 @@ describe('frame-fed main-thread mirror', () => {
       );
       const { mirror, fake } = await proofWorker(read);
       await expect(mirror.nukePositions()).rejects.toMatchObject({
-        message: 'Nuke could not confirm the account is flat: Bybit positions request timed out',
+        message: 'Nuke couldn’t confirm all positions were closed: Bybit positions request timed out',
         cause: { kind: 'timeout', venueCode: 'READ_TIMEOUT', outcome: 'notSent' },
       });
       expect(read).toHaveBeenCalledOnce();
@@ -902,7 +903,7 @@ describe('frame-fed main-thread mirror', () => {
     ])('refuses incomplete or malformed worker proof %j', async (proof, reason) => {
       const read = vi.fn().mockResolvedValue(proof);
       const { mirror } = await proofWorker(read);
-      await expect(mirror.nukePositions()).rejects.toThrow(`Nuke could not confirm the account is flat: ${reason}`);
+      await expect(mirror.nukePositions()).rejects.toThrow(`Nuke couldn’t confirm all positions were closed: ${reason}`);
       expect(read).toHaveBeenCalledOnce();
     });
   });

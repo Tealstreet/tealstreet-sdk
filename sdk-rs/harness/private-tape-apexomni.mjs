@@ -131,7 +131,7 @@ const anonymous = (offset) => ({ orderId: 'anonymous-order', symbol: 'BTC-USDT',
 http('GET', '/v3/fills', { symbol: 'BTC-USDT', limit: 4 }, ok({ fills: [anonymous(1200), anonymous(1600), anonymous(1200)] }));
 command(9700, 'fetchFills', { symbol: 'BTCUSDT', limit: 5, from: 0, to: EPOCH });
 const boundParams = { symbol: 'BTC-USDT', limit: 5, beginTimeInclusive: 0, endTimeExclusive: EPOCH + 1 };
-http('GET', '/v3/fills', boundParams, { code: 20016, msg: 'sign check failed' });
+// ApeX verifies the zero bound it receives, so the first signature is accepted (AGT-75, checked live).
 http('GET', '/v3/fills', boundParams, ok({ fills: [{ tradeId: 'zero-bound', orderId: 'old-order', symbol: 'BTC-USDT', side: 'BUY', price: '59000', size: '0.001', createdAt: EPOCH - 1000, fee: '0.0295' }] }));
 command(9800, 'fetchFills', { symbol: 'BTCUSDT', limit: 6, from: EPOCH + 1200, to: EPOCH + 1600 });
 http('GET', '/v3/fills', { symbol: 'BTC-USDT', limit: 6, beginTimeInclusive: EPOCH + 1200, endTimeExclusive: EPOCH + 1601 },

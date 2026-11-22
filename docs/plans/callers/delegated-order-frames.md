@@ -183,6 +183,7 @@ admitted account, after checking the original payload fingerprint and any caller
 | Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
 | WOO | No caller venue ID: its positive JS-safe integer rule cannot carry the UUID losslessly, and router and outbox accept only lossless forms |
 | Backpack; GRVT; HyroTrader | No caller venue ID: numeric-only fields cannot carry the UUID losslessly, or the native codec supports no caller IDs (AGT-50) |
+| Bybit protection; shape-refusing adapters: BloFin, Phemex, OKX (all four), Bitget (all three), KuCoin Futures, Bitunix, ApeX Omni, Crypto.com, Binance USD-M/Spot/PM, BingX, Paradex, Coinbase (futures and spot) | No caller venue ID for that order: the native adapter refuses one on a trigger type or an order carrying `triggerPrice`, `stopLoss` or `takeProfit`; BingX and Paradex also on `close: true`; Coinbase only on `stop_market` or `close: true` (AGT-46, #3758, AGT-110; OKX, KuCoin, Bitget, Bitunix and Binance verified live, the rest by adapter source). Plain orders keep the row above. WEEX and Bitrue share the rule but have no native hosted origin, so they are not hosted; hosting Bitrue also needs a caller-ID form of at most 31 characters, or omission |
 
 Text/hex encodings preserve all 128 intent bits. They do not change the intent,
 request ID, fingerprint, age or durable router claim. SDK receipts retain the
@@ -194,7 +195,26 @@ supported; replay and conflicting payloads never create another forward.
 
 Native order-shape, quantity/split, ownership and command guards remain unchanged.
 A venue ID is never discarded and retried after a native refusal. Multiple or
-missing native result IDs retain the existing unknown outcome, never a resend.
+missing native result IDs retain the existing unknown outcome, never a resend. The one
+exception is a single bracket on a venue that places its stop-loss/take-profit as
+separate orders after the entry (OKX limit/market entries, Binance limit/market and
+`stop_market`/`take_profit_market` entries, Kraken limit entries): exactly one entry ID
+followed by one ID per requested leg is `placed` with the entry as `venueOrderId`
+(AGT-111, AGT-112). On those, a split entry, a lone entry ID or any other count stays unknown.
+OKX refuses any non-limit/market entry with an attached stop-loss/take-profit, and Binance
+USD-M/PM a `conditional` or trailing one, before any write (AGT-115: they used to place the
+entry without its legs). Kraken, Binance Spot and COIN-M also refuse those brackets, except
+a COIN-M trailing entry, which places its legs uncounted and so stays unknown.
+The same refusal covers every adapter that dropped those legs (AGT-115 follow-up): any
+non-limit/market entry on AsterDEX, Bitget, Bitunix, Hyperliquid, Lighter, MEXC and WOO;
+trailing entries, and stops closing a covering position, on Bybit and HyroTrader; stop and take-profit on WEEX;
+trailing on Phemex. An order that can only reduce (`reduceOnly` or `close`) never carries
+legs on any venue: the engine refuses it `notSent` before the venue sees it, because the legs
+would outlive the position as stray reduce-only triggers (AGT-120; Lighter did this alone first).
+Hyperliquid perps group a limit or market entry's legs into the entry's own `normalTpsl` write
+(market entries dropped them until AGT-117) and the reply names only the entry, so one ID is
+the whole bracket there and a refused leg stays unknown as partial evidence. Hyperliquid spot
+has no trigger orders; the venue refuses a spot bracket whole, which reads as `refused`.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives
@@ -304,8 +324,13 @@ cannot enable a replay. Callers must retain the existing changed/persist and
 retention handling after this constructor, including when a local claim is
 refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
-never-forwarded work not sent, even while storage is waiting, and marks in-flight
-or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+never-forwarded work not sent, even while storage is waiting. Handed-off work
+waits longer (AGT-125): in-flight work awaits its receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s), since the router and box admit a key by
+their own clocks; acknowledged work is box-admitted and may be queued behind the
+venue's writes, so it becomes unknown at `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS`
+(160 s, which covers the engine's 120 s command wait plus a venue write). Physical
+handoff rechecks the 10 s cap. The synchronous
 send adapter must return true only for a physical handoff; only an explicit false
 positively guarantees neither handoff nor buffering for a later connection.
 A throw or any other non-true return is ambiguous and immediately becomes unknown

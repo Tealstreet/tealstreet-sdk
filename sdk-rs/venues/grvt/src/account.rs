@@ -1855,7 +1855,7 @@ impl Grvt {
                         sell_leverage: f64,
                     }
                     let result: Result<String, String> = if failed {
-                        Err("Malformed GRVT leverage response".into())
+                        Err("GRVT’s leverage reply couldn’t be read".into())
                     } else if revision != self.account.settings_revision {
                         Err("GRVT leverage settings changed during read; retry query".into())
                     } else {
@@ -2292,7 +2292,7 @@ impl Grvt {
                                 .map_or_else(|| fill.native_id.to_string(), |(id, _)| id.clone())
                         };
                         cx.fill(Fill {
-                            id: None,
+                            id: Some(fill.trade_id.to_string()),
                             order_id: id,
                             symbol: market.symbol.clone(),
                             side: if fill.buyer {

@@ -5,6 +5,11 @@ use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Event, Query};
 use support::*;
 
+// AGT-113: candle reservations follow the sent span, so `limit: Some(5000)` at this
+// suite's 2 s clock no longer reserves the maximum. These saturating reads now ask
+// an explicit span of more than 6,000 one-minute candles (120 each) instead.
+const MAXIMAL_SPAN_MS: f64 = 400_000_000.;
+
 #[test]
 fn native_bulk_candles_are_bounded_before_the_shared_host_budget() {
     let (mut e, _) = ready("disabled");
@@ -15,9 +20,9 @@ fn native_bulk_candles_are_bounded_before_the_shared_host_budget() {
                 command,
                 symbol: "BTC-PERP".into(),
                 interval: Interval::M1,
-                limit: Some(5000),
-                from_ms: None,
-                to_ms: None,
+                limit: None,
+                from_ms: Some(0.),
+                to_ms: Some(MAXIMAL_SPAN_MS),
             }),
         );
     }
@@ -29,6 +34,49 @@ fn native_bulk_candles_are_bounded_before_the_shared_host_budget() {
     assert!(
         count > 0 && count <= 7,
         "native bulk must leave a critical reserve, got {count}"
+    );
+}
+
+fn candle_requests(actions: &[Action]) -> Vec<serde_json::Value> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if kind(r) == "candleSnapshot" => {
+                Some(serde_json::from_str(r.body.as_deref().unwrap()).unwrap())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+// AGT-113 (Sentry E6Z): every candle read reserved the 5,000-candle maximum (104), so a
+// chart's 330-bar first reads took ~15 s each behind each other at a 0.1-0.3 s venue.
+#[test]
+fn chart_sized_candle_reads_reserve_their_span_not_the_venue_maximum() {
+    let (mut e, _) = ready("disabled");
+    // Ten 330-bar reads are 260 weight; at 104 each only seven fitted the 800 ceiling.
+    let to = 1_800_000_000_000.;
+    for command in 100..110 {
+        e.handle(
+            2000.,
+            Event::Command(Command::FetchCandles {
+                command,
+                symbol: "BTC-PERP".into(),
+                interval: Interval::M1,
+                limit: None,
+                from_ms: Some(to - 330. * 60_000.),
+                to_ms: Some(to),
+            }),
+        );
+    }
+    let sent = candle_requests(&prepared_now(&mut e));
+    assert_eq!(sent.len(), 10, "every chart-sized read dispatches at once");
+    let req = &sent[0]["req"];
+    let span = req["endTime"].as_u64().unwrap() - req["startTime"].as_u64().unwrap();
+    assert_eq!(
+        span,
+        330 * 60_000,
+        "the reservation is derived from the sent span"
     );
 }
 
@@ -79,9 +127,9 @@ fn a_genuine_amend_sizing_read_uses_the_reserve_after_bulk_saturates() {
                 command,
                 symbol: "BTC-PERP".into(),
                 interval: Interval::M1,
-                limit: Some(5000),
-                from_ms: None,
-                to_ms: None,
+                limit: None,
+                from_ms: Some(0.),
+                to_ms: Some(MAXIMAL_SPAN_MS),
             }),
         );
     }
@@ -178,9 +226,9 @@ fn queued_candles_expire_at_their_original_caller_deadline_without_a_late_send()
                 command,
                 symbol: "BTC-PERP".into(),
                 interval: Interval::M1,
-                limit: Some(5000),
-                from_ms: None,
-                to_ms: None,
+                limit: None,
+                from_ms: Some(0.),
+                to_ms: Some(MAXIMAL_SPAN_MS),
             }),
         );
     }
@@ -242,9 +290,9 @@ fn bulk_refills_continuously_instead_of_waiting_for_a_minute_reset() {
                 command,
                 symbol: "BTC-PERP".into(),
                 interval: Interval::M1,
-                limit: Some(5000),
-                from_ms: None,
-                to_ms: None,
+                limit: None,
+                from_ms: Some(0.),
+                to_ms: Some(MAXIMAL_SPAN_MS),
             }),
         );
     }

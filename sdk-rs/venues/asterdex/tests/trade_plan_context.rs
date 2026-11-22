@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Managed custody of Aster's trade plans (RUST_ASTERDEX_REQUEST_CONTEXT.md,
 //! remaining funnel slice 3). Each independent case is its own test.
 mod support;
@@ -712,7 +713,7 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     );
     let error = terminal(&refused).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
-    assert!(error.legacy_text().contains("uncertain"), "{error:?}");
+    assert!(error.legacy_text().contains("confirm"), "{error:?}");
     // The read started before the seal completes: still fenced.
     let after_stale = answer(&mut e, &stale, 200, "[]");
     let still = retry(&mut e);
@@ -810,7 +811,7 @@ fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
     assert_eq!(
         error.legacy_text(),
-        "Placement outcome is uncertain; reconcile before cancel-all"
+        "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
     );
     // Cancel by ID cannot place, so it is admitted.
     let by_id = command(&mut e, cancel());

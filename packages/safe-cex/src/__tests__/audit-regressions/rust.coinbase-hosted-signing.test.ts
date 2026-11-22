@@ -116,7 +116,7 @@ it('does not invoke a delegate for foreign key, algorithm, extra operations or m
   ];
   for (const value of invalid)
     await expect(provider(value as SignRequest, { signal: new AbortController().signal })).rejects.toThrow(
-      'Remote signing request refused',
+      'This request couldn’t be signed',
     );
   expect(delegate.sign).not.toHaveBeenCalled();
 });
@@ -133,7 +133,7 @@ it('remote errors are redacted and never fall back to PayloadSigner', async () =
     payloadSigner: fallback,
   });
   await expect(provider(request(input()), { signal: new AbortController().signal })).rejects.toThrow(
-    'Remote signing request refused',
+    'This request couldn’t be signed',
   );
   expect(fallback).not.toHaveBeenCalled();
 });
@@ -152,7 +152,7 @@ it('PayloadSigner signs canonical REST JWS and refuses WS auth without invoking 
   expect(result.values[1]).toEqual(Array.from(sign(null, Buffer.from(payload), privateKey)));
   expect(callback).toHaveBeenCalledExactlyOnceWith({ exchangeName: 'coinbase', key, payload, scheme: 'coinbase-jws', encoding: 'base64url', algorithm: 'ed25519' });
   await expect(provider(request(input()), { signal: new AbortController().signal })).rejects.toThrow(
-    'Remote signing request refused',
+    'This request couldn’t be signed',
   );
   expect(callback).toHaveBeenCalledOnce();
 });

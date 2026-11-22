@@ -2,6 +2,7 @@
 //! (`packages/safe-cex/src/webworker/chaserOrder`): post-only orders that
 //! follow the touch, re-placing on adverse moves until filled or stopped.
 
+mod amend;
 mod book;
 mod chase;
 mod client_id;
@@ -10,6 +11,7 @@ use std::rc::Rc;
 
 use safe_cex_algos::{AlgoCx, AlgoFactory};
 
+pub use amend::{ChaserAmendment, ChaserUpdate};
 pub use book::{
     ANSWER_BOUND_MS, ChaserBook, KEPT_ORDER_STOP_REASON, MAX_CHASES_PER_ACCOUNT, Progress,
     SIGNER_OFFLINE_STOP_REASON, UNCONFIRMED_ORDER_STOP_REASON, retrying_order, settled_orders,
@@ -45,12 +47,22 @@ impl ChaserFactory {
 
 impl AlgoFactory for ChaserFactory {
     fn ops(&self) -> &'static [&'static str] {
-        &["chaser:start", "chaser:terminate", "chaser:terminateAll"]
+        &[
+            "chaser:start",
+            "chaser:amend",
+            "chaser:terminate",
+            "chaser:terminateAll",
+        ]
     }
 
     fn handle(&self, op: &str, data: &str, _cx: &AlgoCx) -> Result<(), String> {
         let book = &self.book;
         match op {
+            "chaser:amend" => {
+                let data = serde_json::from_str(data).map_err(|_| "Invalid chaser amendment")?;
+                let amendment = ChaserAmendment::parse(&data)?;
+                book.amend(amendment)
+            }
             "chaser:start" => {
                 let options: ChaserOptions = serde_json::from_str(data)
                     .map_err(|error| format!("Chase was not started: {error}"))?;

@@ -1261,7 +1261,7 @@ impl Kraken {
                                 }
                             }
                             cx.fill(Fill {
-                                id: None,
+                                id: Some(e.fill_id.to_string()),
                                 order_id: e.order_id.to_string(),
                                 symbol: e.instrument.to_string(),
                                 side: if e.buy {

@@ -178,7 +178,8 @@ test('an owner hook without a current owner starts algos unowned, never legacy',
   for (const owner of [null, { ownerId: 'A', generation: 7 }]) {
     const calls = [];
     const { host } = rig({}, { algoStart: () => calls.push('legacy') });
-    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && /predates TWAP ownership/.test(error.message));
+    // Rule 5 (Sam, 2026-11-20): keep the unsupported/no-start control with plain wording.
+    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && error.message === 'TWAP isn’t available in this version. Update Tealstreet to use it.');
     assert.deepEqual(calls, []);
     host.dispose();
   }

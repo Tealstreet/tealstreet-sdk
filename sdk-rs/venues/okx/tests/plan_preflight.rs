@@ -1,3 +1,4 @@
+// Rule 5 (#3726): HTTP sealing and venue-authored uncertainty have distinct display pins.
 #[allow(dead_code)]
 mod support;
 use safe_cex_engine::{
@@ -428,7 +429,14 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
     };
     assert!(matches!(error.outcome, None | Some(Outcome::Unknown)));
     if expected == Outcome::Unknown {
-        assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+        assert_unknown_message(
+            error,
+            if status >= 500 {
+                ENGINE_HTTP_UNKNOWN_TEXT
+            } else {
+                ENGINE_UNKNOWN_TEXT
+            },
+        );
     }
     let elements = error.elements.as_ref().expect("complete shared journal");
     assert_eq!(elements.len(), 5);
@@ -459,7 +467,14 @@ fn runtime_failure(status: u16, code: &str, expected: Outcome) {
             assert_eq!(error.venue_code.as_deref(), Some(code));
         }
         (ElementResult::Unknown { error }, Outcome::Unknown) => {
-            assert_unknown_message(error, ENGINE_UNKNOWN_TEXT);
+            assert_unknown_message(
+                error,
+                if status >= 500 {
+                    ENGINE_HTTP_UNKNOWN_TEXT
+                } else {
+                    ENGINE_UNKNOWN_TEXT
+                },
+            );
         }
         _ => panic!("native failure classification must survive"),
     }

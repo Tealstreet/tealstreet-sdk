@@ -75,11 +75,11 @@ export class DelegatedSignerSetup {
     const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     const apexomni = name === 'apexomni';
     if (apexomni && this.usesPayloadSigner) {
-      const message = 'ApeX Omni requires RemoteSigner HMAC and zkLink contract custody';
+      const message = 'This signing connection doesn’t support ApeX Omni’s account keys';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (name === 'kraken' && this.usesPayloadSigner) {
-      const message = 'Kraken Futures requires RemoteSigner SHA256/HMAC-SHA512 custody; PayloadSigner is unsupported';
+      const message = 'This signing connection doesn’t support Kraken Futures account keys';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (name === 'grvt' && this.usesPayloadSigner) {
@@ -94,7 +94,7 @@ export class DelegatedSignerSetup {
     }
     const kucoin = name === 'kucoin' || name === 'kucoinspot';
     if (kucoin && this.usesPayloadSigner) {
-      const message = 'KuCoin requires RemoteSigner batch custody for request, passphrase and optional broker MACs';
+      const message = 'This signing connection doesn’t support KuCoin’s key and passphrase checks';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     const callbacks = capturedDelegatedCallbacks(options) ?? invalid();
@@ -110,24 +110,24 @@ export class DelegatedSignerSetup {
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (coinbase && secondaryRequested) {
-      const message = 'Coinbase Hosted secondary signing is unsupported; remove the secondary credentials';
+      const message = 'Coinbase doesn’t support extra signing keys for server trading. Remove the extra credentials.';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     // Raw HMAC callbacks have no slot selector; never install unusable read refs.
     if ((name === 'woo' || name === 'bitrue' || name === 'cryptocom' || name === 'mexc') && remoteSigner && secondaryRequested) {
       const venue = name === 'woo' ? 'WOO X' : name === 'bitrue' ? 'Bitrue' : name === 'mexc' ? 'MEXC' : 'Crypto.com';
-      const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
+      const message = `${venue} doesn’t support extra read-only keys for server trading. Remove the extra credentials.`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
+    if (secondaryRequested && !secondary) invalid('The extra signing key’s public key is missing');
     const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
     const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
     if (name === 'asterdex' && this.usesPayloadSigner && !publicDataOnly && resolveAsterDEXSignerVersion(options) === 'v3') {
-      const message = 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only';
+      const message = 'This signing connection supports AsterDEX V1 but not V3 account keys';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (name === 'backpack' && this.usesPayloadSigner && !publicDataOnly) {
-      const message = 'Backpack requires RemoteSigner Ed25519 custody';
+      const message = 'This signing connection doesn’t support Backpack account keys';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     const primaryDropped = setupPolicy.readCredentials === 'publicRead' && publicDataOnly;

@@ -126,6 +126,36 @@ fn fills_emit_once_and_never_increment_cumulative_order_fills() {
     assert!(!e.has_actions() || e.drain_actions().all(|a| !matches!(a, Action::Http(_))));
 }
 
+// AGT-83: the deal's trade id (else its deal id) is the fill identity.
+#[test]
+fn deal_trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket, _, _) = private_started();
+    e.take_frame(150.0);
+    for identity in [
+        r#""tradeId":"t1","#,
+        r#""tradeId":"t2","#,
+        r#""id":"d3","#,
+        "",
+    ] {
+        let text = format!(
+            r#"{{"channel":"push.personal.order.deal","data":{{{identity}"orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10}}}}"#
+        );
+        ws(&mut e, socket, &text);
+    }
+    let frame = e.take_frame(200.0).unwrap();
+    let identities: Vec<_> = safe_cex_engine::wire::fills(frame)
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    let order = "739113577038255617";
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["t1", "t2", "d3", order].map(|id| (Some(id.to_owned()), order.to_owned(), 0.001))
+    );
+}
+
 #[test]
 fn trigger_state_two_is_canceled_and_stale_open_frame_is_shielded() {
     let (mut e, socket, _, _) = private_started();

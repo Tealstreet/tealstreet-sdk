@@ -42,6 +42,13 @@ import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './mexc.api';
 import {
   ENDPOINTS,
@@ -779,7 +786,11 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: stop bodies carry only their own trigger; refuse rather than drop the legs.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
     if (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) {
       const message = 'MEXC opening conditional and trailing-stop placement is not implemented';
       this.emitAndLogError(message);
@@ -1278,7 +1289,10 @@ export class MexcExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('MEXC'));
     if (orders.some((order) => order.type === OrderType.Conditional || order.type === OrderType.TrailingStopLoss)) {
       throw new Error('MEXC opening conditional and trailing-stop placement is not implemented');
     }
@@ -1443,7 +1457,7 @@ export class MexcExchange extends BaseExchange {
         throw new Error('MEXC replacement requires positive remaining native volume');
       }
     }
-    return await this.placeOrder(nextOrder);
+    return await replacing(this, () => this.placeOrder(nextOrder));
   };
 
   private readCanceledOrder = async (original: Order): Promise<Order> => {

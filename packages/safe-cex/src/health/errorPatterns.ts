@@ -159,6 +159,7 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
       'socket closed',
       /connect.*refused/i,
       /connection.*failed/i,
+      'live market data couldn’t connect',
     ],
   },
   // Exchange down/maintenance

@@ -15,6 +15,15 @@ It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
 client echoes or raw responses. This journal field changes no outcome, algo
 ownership, retry or resend authority; it is not forwarded to Sentry.
 
+## Order audit stage timings
+
+Session command audit lines carry `stages_us` (µs offsets for received, admitted,
+queued, sent, responded, replied); `/health` `typedOutcomes` counts settled and
+unknown typed receipts. Contract and the `scripts/audit-latency.sh` report are in
+`DESIGN.md` under "Order audit stage timings". The audit line is written after the
+reply is handed to the socket, so `replied` is real; keep that order. Add only
+numeric stages here, never identifiers, and never estimate a stage not observed.
+
 ## History reply completeness
 
 Command-owned `history.incomplete` notices retain a closed reason and optional
@@ -32,6 +41,11 @@ The optional `publishIntervalMs` init field and `set-publish-interval` account o
 are documented in `DESIGN.md` under Connection-local publication interval.
 Keep cadence in the socket/account pump, never in shared engine identity or
 configuration. Private financial sections and outcomes bypass the public coalescer.
+
+The optional `activeTickerSymbols` init field and `set-active-ticker-symbols` op
+(AGT-107) select this connection's ticker rows the same way; see DESIGN.md under
+Connection-local ticker selection. A selected table renumbers rows, so every
+selection change must re-send a full `TICKERS`, never deltas against old rows.
 
 ## Sentry owner identity
 
@@ -254,6 +268,8 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+A refused proof read fails the join without a second signature: the venue crate
+no longer sends ApeX's whole-second legacy read resend (AGT-75).
 
 Exact `binanceoptions` mainnet proves possession through its existing signed
 EAPI margin-account, position and open-order startup reads. Public exchange-info,
@@ -369,7 +385,12 @@ remains primary dedupe in every case. Backpack and GRVT also omit the caller ID:
 the UUID losslessly. HyroTrader omits it because the native codec supports no
 caller IDs. Those native validators are unchanged; explicit unsupported caller
 IDs still refuse. Bybit protection also omits its unsupported caller ID and
-reports null. Other modes keep `callMethod` unchanged. Pending joins
+reports null, as do orders whose adapter refuses a caller ID by shape
+(`trigger_refuses_caller_id`: BloFin, Phemex, OKX, Bitget, KuCoin, Bitunix, ApeX Omni,
+Crypto.com, Binance (USD-M/Spot/PM), BingX, Paradex, Coinbase/Coinbase Spot; AGT-46/#3758/AGT-110). Adding a newly hosted
+venue means auditing its adapter's caller-ID guard first. A pre-dispatch refusal of
+such a submit also reports null, since no ID was sent (`OrderReceipt::Placement`'s
+`caller_id`). Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
@@ -383,6 +404,15 @@ Placement completions (`settle_intent`) send `refused` with `error.outcome:
 `protection`. Every other failure without `notSent` proof, including a partially
 accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
 as the venue's refusal; the SDK still keeps the intent unknown and never resends.
+A successful completion is `placed` only with one native ID, or (a single bracket on a
+venue that places its legs after the entry: OKX limit/market, Binance limit/market and
+stop-type, Kraken limit; `order_contract::bracket_protective_legs`) one entry ID followed by
+exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live: OKX and
+Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
+Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
+entry (and an OKX stop-type one) with legs counts none: OKX, Binance USD-M/PM and Kraken
+refuse it before any write (AGT-115; OKX and Binance used to drop the legs). Ten more
+adapters refuse the entry kinds whose legs they would drop; `delegated-order-frames.md` lists them.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
@@ -538,7 +568,12 @@ timer. Retention arms `delegated.shutdownWarning` in its own task and emits
 `delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
 emits `fill`, `orderRejected` (chase/TWAP placements only, through
 `RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
-the key owner's life. Build notifications only through
+the key owner's life. The gateway only logs the drain's `serverRestart`
+shutdown, so a box stop (drain, SIGTERM, forced user drain) marks its
+`AlgoInput::Dispose` with `server_stopped`, and the host sends one
+`algoStopped`/`serverRestart` per chase and TWAP it cuts short (AGT-119); the
+drain waits for those before its bounded flush. Never re-promote the
+resident-level shutdown to cover them. Build notifications only through
 `HostNotification::build` and the typed `Fields` setters: never add a free-text
 field, and never log the token. Contract, env vars and delivery semantics:
 `DELEGATED_RETENTION.md` "Host notification lane".
@@ -570,6 +605,12 @@ arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
 
+## User-facing notices
+
+Order/action receipt messages and algo interruption notices use plain wording
+and at most one action; typed outcomes and receipt fields remain unchanged.
+Proof-check details stay in `partial.proof_failed` diagnostics rather than the
+Bybit action message. Cancel-warning cleanup still recognizes retained old text.
 ## Venue rejections in typed action outcomes
 
 `order_actions::settle` treats an engine `rejected` error with no partial
@@ -577,3 +618,17 @@ evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
 `refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
 definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
 "still unconfirmed" toast. Partial or uncertain failures stay `unknown`.
+
+## Running algo amendments (AGT-97)
+
+Typed v1 `kind:algo` carries `chaser:amend` and `twap:amend` to the same shared
+Rust factories as LOCAL. Chaser accepts only limitPrice/offset/maxAttempts;
+TWAP only intervalMs/remainingSlices. Identity and quantity remain immutable.
+Finished/stopping/unknown jobs refuse; no stop-and-replace or in-flight order
+edit. Future TWAP repartition retains every issued child and journal result.
+The original registration/owner/deadline/IO fences remain; amendments also use
+the start admission fence while draining. Synchronous amendment refusals and
+drain refusals settle notSent (a drained start still keeps its pre-existing
+interrupted receipt); accepted edits keep the existing unknown algo receipt and
+reconcile through account events/state. Exact units/limits and mobile event
+names live in docs/plans/callers/delegated-action-frames.md.

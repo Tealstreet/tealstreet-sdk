@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Exercise genuine signed dispatch and journal settlement, including an accepted cancel prefix.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -122,7 +123,11 @@ fn probe(status: u16, code: u64, unknown: bool) {
         if unknown {
             let message = error.message.to_ascii_lowercase();
             assert!(
-                message.contains("unknown") && message.contains("check open orders"),
+                message.contains("confirm")
+                    && message
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}/{status}/{code}: {error:?}"
             );
             assert!(
@@ -251,7 +256,11 @@ fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool) {
     if unknown {
         let text = error.message.to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(!text.contains("invalid nonce"), "stale refusal: {error:?}");

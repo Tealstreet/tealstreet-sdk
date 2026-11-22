@@ -7,6 +7,7 @@ import { BaseHandler, rustAlgoExchange } from './BaseHandler';
 
 const TWAP_OPS = new Set<StoreWorkerPayload['op']>([
   'twap:start',
+  'twap:amend',
   'twap:resume',
   'twap:cleanup',
   'twap:pause',

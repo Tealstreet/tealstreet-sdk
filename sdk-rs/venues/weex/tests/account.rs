@@ -1200,6 +1200,16 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     assert!(value(184).is_nan());
     assert_eq!([value(192), value(200)], [2., 0.]);
     assert!(value(208).is_nan());
+    // AGT-83: equal executions of one order carry their own fill ids.
+    let identities: Vec<_> = safe_cex_engine::wire::fills(frame)
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id))
+        .collect();
+    assert_eq!(
+        identities,
+        ["f1", "f2", "f3", "f4"].map(|id| (Some(id.to_owned()), "42".to_owned()))
+    );
     assert!(e.take_market_frame(NOW).is_none());
 }
 fn logs(actions: &[Action], level: Level) -> Vec<String> {

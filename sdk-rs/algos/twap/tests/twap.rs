@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Ports of the TS TWAP suites: TwapInstance, TwapInstance.timeout,
 //! TwapInstance.termination-race, TwapManager and TwapHandler.
 
@@ -23,6 +24,9 @@ fn owned_book() -> TwapBook {
 #[path = "twap/identity.rs"]
 #[cfg(not(target_arch = "wasm32"))]
 mod identity;
+
+#[path = "twap/amend.rs"]
+mod amend;
 
 struct Env {
     now: f64,
@@ -755,7 +759,7 @@ fn a_timed_out_slice_sends_no_market_if_its_order_may_still_be_open() {
     assert!(market_amounts(&effects).is_empty());
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        TwapEffect::Log { message } if message == "The outcome is unknown. Check Open Orders"
+        TwapEffect::Log { message } if message == "We couldn’t confirm this change. Check your open orders before trying again."
     )));
 }
 
@@ -794,6 +798,90 @@ fn slices_stay_on_the_market_step_and_sum_to_the_size() {
         sent.iter()
             .all(|size| ((size / 0.001).round() - size / 0.001).abs() < 1e-9),
         "{sent:?}"
+    );
+}
+
+/// Every slice and wake of a market TWAP with no chaser, settling each placement as placed.
+fn run_market_twap(view: &View, overrides: Value) -> (TwapBook, String, Vec<f64>, Vec<TwapEffect>) {
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, mut effects) = start(&mut book, &mut env, view, overrides);
+    let (mut sent, mut all) = (Vec::new(), Vec::new());
+    for _ in 0..20 {
+        sent.extend(market_amounts(&effects));
+        let settled = settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["o".into()]));
+        all.extend(effects);
+        all.extend(settled);
+        let Some(at) = book.wake_at() else { break };
+        env.advance(at - env.now);
+        effects = book.wake(&mut env, view);
+    }
+    (book, id, sent, all)
+}
+
+#[test]
+fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice() {
+    // AGT-144: 1 contract over 10 slices on a 1-contract market. Each 0.1 slice used to
+    // floor to 0 and ride on the next, so the 10th slice sold the whole position at once.
+    // As in legacy TS (the venue refuses each raw slice), every slice is a visible refusal.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) = run_market_twap(
+        &view,
+        json!({ "size": 1.0, "ordersCount": 10, "side": "sell", "reduceOnly": true }),
+    );
+    assert!(sent.is_empty(), "a sub-step TWAP placed {sent:?}");
+    let refusals: Vec<_> = logs(&effects)
+        .into_iter()
+        .filter(|message| message.contains("not sent"))
+        .collect();
+    assert_eq!(refusals.len(), 10, "{:?}", logs(&effects));
+    assert_eq!(
+        refusals[0],
+        "TWAP BTCUSDT slice 1 of 10 not sent: 0.1 is below the market's amount step of 1"
+    );
+    assert!(
+        logs(&effects).contains(&"TWAP BTCUSDT ended with 0 of 10 slices placed"),
+        "{:?}",
+        logs(&effects)
+    );
+}
+
+#[test]
+fn a_refused_sub_step_slice_is_not_carried_into_a_later_slice() {
+    // 2.7 over 3 slices of 0.9 on a 1-unit step: carrying each refusal would have sent 1 + 1.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 2.7, "ordersCount": 3 }));
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        logs(&effects)
+            .iter()
+            .filter(|message| message.contains("not sent"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn whole_step_slices_still_carry_their_fraction_and_never_exceed_a_step_over_plan() {
+    // 3.9 over 3 slices of 1.3: each places 1 and its 0.3 rides on; no slice grows by a step.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 3.9, "ordersCount": 3 }));
+    assert_eq!(sent, [1.0, 1.0, 1.0], "{sent:?}");
+    assert!(sent.iter().all(|size| *size < 1.3 + 1.0));
+    assert!(sent.iter().sum::<f64>() <= 3.9);
+    assert!(
+        !logs(&effects)
+            .iter()
+            .any(|message| message.contains("not sent"))
     );
 }
 
@@ -1323,7 +1411,7 @@ fn an_unknown_placement_outcome_halts_the_action() {
     );
     assert_eq!(
         logs(&settled),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     assert!(book.get(&id).is_none());
     assert!(book.wake_at().is_none());
@@ -1457,7 +1545,7 @@ fn restore_refuses_a_running_twap_whose_schedule_lapsed() {
     let effects = book.handle("twap:state", &restore, &mut env, &view);
     assert_eq!(
         logs(&effects),
-        ["TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it"]
+        ["TWAP BTCUSDT not restored: its saved schedule has expired"]
     );
     assert_eq!(book.ids().collect::<Vec<_>>(), ["fresh", "paused"]);
 }
@@ -1665,7 +1753,7 @@ fn an_unreconciled_in_flight_slice_is_counted_and_never_placed_again() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310.
     assert_eq!(
         logs(&effects),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     assert!(book.get("restored").is_none());
     assert!(placements(&book.wake(&mut env, &view)).is_empty());
@@ -1727,7 +1815,7 @@ fn an_in_flight_slice_counts_toward_the_restore_bounds() {
     lapsed[0]["state"]["nextOrderAt"] = json!(env.now - 600_000.0);
     let effects = book.handle("twap:state", &lapsed, &mut env, &view);
     assert!(effects.contains(&TwapEffect::Log {
-        message: "TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it; a slice may have been in flight, check open orders and fills".into()
+        message: "TWAP BTCUSDT not restored: its saved schedule expired with a slice still pending; check your open orders and fills before restarting it".into()
     }));
     assert!(book.get("restored").is_none());
 }
@@ -1773,7 +1861,7 @@ fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
     );
     assert_eq!(
         logs(&unknown),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     let late = book.remainder_settled(&id, 1, Ok(vec!["late-native".to_owned()]));
     let error = late
@@ -1783,7 +1871,10 @@ fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["late-native"]);
     let rows = error.elements.as_ref().unwrap();
     assert!(
@@ -1812,9 +1903,13 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
         json!({ "size": 1.5, "ordersCount": 3 }),
     );
     assert!(placements(&first).is_empty());
+    // AGT-144 (fix(twap) after b2cc583e4): a sub-step slice no longer rides on, so the
+    // first 0.5 is a refused slice and the second needs a 0.5 step to place. The test
+    // still pins index alignment after a refused slice, now a refusal not a skip.
+    view.step = Some(0.5);
     env.advance(book.wake_at().unwrap() - env.now);
     let second = book.wake(&mut env, &view);
-    assert_eq!(market_amounts(&second), [1.0]);
+    assert_eq!(market_amounts(&second), [0.5]);
     let settled = settle_all(
         &mut book,
         &mut env,
@@ -1829,7 +1924,10 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let rows = error.elements.as_ref().unwrap();
     assert!(matches!(
         &rows[0].result,

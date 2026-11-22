@@ -11,7 +11,7 @@ import {
   isDelegatedActionResult,
   isDelegatedFullWriteAction,
 } from '../delegatedActions';
-import { DelegatedOutbox } from '../delegatedOutbox';
+import { DELEGATED_RECEIPT_MAX_AGE_MS, DelegatedOutbox } from '../delegatedOutbox';
 import { OrderSide, OrderType } from '../types';
 
 const actions: DelegatedAction[] = [
@@ -91,6 +91,19 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
 });
 
 describe('DELEGATED versioned actions', () => {
+  it('names unsupported algo amendment fields before durable enqueue or transmission', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection);
+    for (const op of ['chaser:amend', 'twap:amend']) {
+      await expect(
+        Reflect.apply(box.enqueueAction, box, [{ kind: 'algo', op, data: { id: 'job', update: { size: 2 } } }]),
+      ).rejects.toThrow('unsupported amend field');
+    }
+    expect(f.rows.size).toBe(0);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
   it('preserves a typed unsupported v1 outcome across restore without replay or a fabricated notSent proof', async () => {
     const f = setup();
     const box = await DelegatedOutbox.open(f.options);
@@ -262,7 +275,8 @@ describe('DELEGATED versioned actions', () => {
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect(f.connection);
     await box.enqueueAction(actions[1]);
-    f.options.clock.now = () => 10_000;
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.options.clock.now = () => DELEGATED_RECEIPT_MAX_AGE_MS;
     f.timers[0]();
     await box.flush(c);
     expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: false });

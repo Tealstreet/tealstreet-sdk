@@ -98,9 +98,9 @@ pub fn restored(options: &TwapOptions, state: &TwapState, now_ms: f64) -> Result
             + SCHEDULE_GRACE_MS;
         if now_ms > latest_ms {
             return Err(if in_flight.is_some() {
-                "its schedule lapsed, so no client was running it; a slice may have been in flight, check open orders and fills"
+                "its saved schedule expired with a slice still pending; check your open orders and fills before restarting it"
             } else {
-                "its schedule lapsed, so no client was running it"
+                "its saved schedule has expired"
             }
             .to_owned());
         }

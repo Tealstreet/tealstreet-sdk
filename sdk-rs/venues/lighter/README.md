@@ -10,7 +10,7 @@ behavior. Ordinary non-market lots and native limit batches retain their existin
 minimum checks before submission.
 
 An Unknown placement halts remaining writes for that action. Its failure includes
-"The outcome is unknown. Check Open Orders", accepted order indexes and the
+"We couldn’t confirm this change. Check your open orders before trying again.", accepted order indexes and the
 indexes whose placement is uncertain. The engine's mutation journal retains the
 accepted prefix. For venue-reported uncertainty, `order.outcome_unknown` telemetry
 snapshots placed, unknown and unsent indexes from that journal and the dispatcher
@@ -81,3 +81,10 @@ take its nonce, so continuing the local sequence made the next write fail
 that expires invalidate the counter, so the next write reads `nextNonce` first.
 An order-status refusal (`canceled-margin-not-allowed`) executed its transaction
 and keeps the sequence.
+
+## Stop-entry brackets (AGT-115)
+
+Legs attach only to a limit/market entry that is not reduce-only: grouped OTO/OTOCO for a
+limit, separate trigger steps after a market. Any other entry with a non-zero leg, and a
+reduce-only limit/market with one, used to be placed without them; `prepare_orders` now
+refuses the whole command before any signing with the engine's shared `stop_entry_legs_refusal` copy, or its own reduce-only copy.

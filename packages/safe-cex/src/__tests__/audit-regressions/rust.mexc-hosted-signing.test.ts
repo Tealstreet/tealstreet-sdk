@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 import { createHmac } from 'node:crypto';
@@ -56,7 +57,7 @@ it.each([{ secondary_key: 'read-key' }, { secondary_secret: 'fixture-read-materi
     const sign = vi.fn();
     expect(() => new DelegatedSignerSetup('mexc', { key: 'replay-key', secret: '', ...secondary,
       remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} } } as ExchangeOptions))
-      .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('MEXC secondary read keys') }));
+      .toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('MEXC doesn’t support extra read-only keys for server trading') }));
     expect(sign).not.toHaveBeenCalled();
   });
 

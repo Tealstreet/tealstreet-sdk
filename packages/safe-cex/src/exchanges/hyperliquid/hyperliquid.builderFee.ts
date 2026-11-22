@@ -357,7 +357,7 @@ export type BuilderFeeApprovalGuard = {
   signal?: AbortSignal;
 };
 
-const BUILDER_FEE_OWNER_CHANGED = 'Builder fee approval cancelled-for-owner-change';
+const BUILDER_FEE_OWNER_CHANGED = 'Builder fee approval stopped because the account connection changed';
 
 /**
  * Full flow to approve builder fee (for use in browser with wallet connection)

@@ -77,6 +77,13 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { AsterDEXPrivateWebsocket } from './asterdex.ws-private';
 import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
@@ -808,7 +815,11 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: AsterDEXPlaceOrderOpts, skipAlgoCapacityCheck = false): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: brackets are built only for limit/market; a stop entry would drop its legs.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     // Aster requires callbackRate for TRAILING_STOP_MARKET, but shared order
     // inputs do not expose it. Reject this before any capacity checks or REST
     // calls so programmatic callers cannot submit an invalid order.
@@ -1036,7 +1047,10 @@ export class AsterDEXExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[], skipAlgoCapacityCheck = false): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('AsterDEX'));
     const orderIds: string[] = [];
     let errMsg = '';
 
@@ -1105,7 +1119,7 @@ export class AsterDEXExchange extends BaseExchange {
 
     // Cancel the old order and place the new one
     await this.cancelOrders([opts.order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   cancelOrders = async (orders: Order[]): Promise<void> => {

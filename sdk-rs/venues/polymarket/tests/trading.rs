@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use safe_cex_engine::Engine;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
@@ -537,11 +538,16 @@ fn dispatched_ambiguous_writes_are_unknown_without_resend_or_replacement() {
             );
             let text = error.legacy_text().to_ascii_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{text}"
             );
             assert!(
-                !text.contains("refused") && !text.contains("order is gone"),
+                !text.contains("refused")
+                    && !text.contains("order was cancelled and its replacement was declined"),
                 "{text}"
             );
             assert!(
@@ -805,7 +811,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 4.0));
     h.response("/order", 400, r#"{"error":"not enough balance"}"#);
     let error = h.done.last().unwrap().1.clone().unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1028,7 +1037,7 @@ fn partial_batch_errors_return_every_acknowledged_id_for_network_and_venue_failu
         assert_eq!(result["totalOrderCount"], 2);
         assert_eq!(result["failedOrderIndex"], 1);
         assert!(result["message"].as_str().unwrap().contains(if network {
-            "outcome is unknown. Check Open Orders"
+            "We couldn’t confirm this change. Check your open orders before trying again."
         } else {
             "insufficient"
         }));
@@ -1620,7 +1629,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         if matches!(status, 408 | 429 | 500..) {
             assert_eq!(
                 h.done,
-                [(9, Err("The outcome is unknown. Check Open Orders".into()))]
+                [(9, Err("We couldn’t confirm this change. Check your open orders before trying again.".into()))]
             );
             assert_eq!(error.venue_message.as_deref(), Some(text.as_str()));
         } else if status != 200 || text.starts_with("Polymarket placement") {
@@ -1643,7 +1652,7 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     );
     assert_eq!(
         h.failures[0].message,
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(
         h.failures[0].venue_message.as_deref(),
@@ -1710,7 +1719,11 @@ fn aggregation_normalizes_transport_unknown_warning() {
     );
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{error:?}"
     );
     assert!(!text.contains("connection reset"), "{text}");
@@ -1752,7 +1765,11 @@ fn aggregation_keeps_unknown_warning_and_stops_after_a_refusal() {
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
         let text = error.legacy_text().to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(!text.contains("refused"), "{text}");

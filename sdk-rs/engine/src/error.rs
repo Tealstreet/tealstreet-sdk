@@ -779,14 +779,14 @@ impl fmt::Display for crate::request_context::Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::request_context::Error;
         f.write_str(match self {
-            Error::Invalid => "Invalid request context",
-            Error::Capacity => "Engine request capacity reached",
+            Error::Invalid => "This request couldn’t be prepared",
+            Error::Capacity => "The account’s request queue is full. Try again shortly.",
             Error::Duplicate => "Request is already in flight",
-            Error::State => "Request is not in a sendable state",
-            Error::TimedOut => "Request context timed out",
-            Error::Stale => "Request context is stale",
-            Error::Revoked => "Request context was revoked",
-            Error::RetryForbidden => "Request may not be retried",
+            Error::State => "This request isn’t ready to send",
+            Error::TimedOut => "This request timed out",
+            Error::Stale => "This request is out of date",
+            Error::Revoked => "This request was interrupted",
+            Error::RetryForbidden => "This request can’t be sent again",
         })
     }
 }
@@ -909,14 +909,192 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// The action sentences this SDK (and its callers' retained copy) ends user text
+/// with. Only these are actions: any other venue text is detail and is kept.
+const GUIDANCE_ACTIONS: &[&str] = &[
+    "Check your open orders before trying again",
+    "Check your open orders before adding protection",
+    "Check your open orders and position before adding protection",
+    "Check your open orders before adding another stop",
+    "Check your open orders before cancelling all orders",
+    "Check your open orders before placing or editing orders",
+    "Check your open orders before placing a replacement",
+    "Check your open orders before making another change",
+    "Check your open orders before editing it",
+    "Check your open orders before editing again",
+    "Check your open orders before restarting it",
+    "Check your open orders before restarting them",
+    "Check your open orders before restarting automated orders",
+    "Check your open orders before starting it again",
+    "Check your open orders before using a new order ID",
+    "Check your open orders for a second stop",
+    "Check your open orders for a duplicate",
+    "Check your open orders and positions before trying again",
+    "Check your open orders and positions for fills",
+    "Check your open orders and positions",
+    "Check your open orders",
+    "Check your orders and positions before trying again",
+    "Check your orders",
+    "Check Open Orders and Positions before trying again",
+    "Check Open Orders before retrying",
+    "Check Open Orders",
+    "Check it before stopping it again",
+];
+
+fn is_guidance(sentence: &str) -> bool {
+    let sentence = sentence.trim().trim_end_matches('.');
+    GUIDANCE_ACTIONS.iter().any(|action| {
+        sentence.len() == action.len()
+            && sentence.get(1..) == action.get(1..)
+            && sentence[..1].eq_ignore_ascii_case(&action[..1])
+    })
+}
+
+/// Splits one of our trailing action sentences off user text. Anything else,
+/// including venue text that starts with "Check", is returned whole.
+pub fn split_action(text: &str) -> (&str, Option<&str>) {
+    let text = text.trim();
+    if is_guidance(text) {
+        return ("", Some(text));
+    }
+    let mut from = text.len();
+    while let Some(at) = text[..from].rfind(". ") {
+        if is_guidance(&text[at + 2..]) {
+            return (&text[..at], Some(&text[at + 2..]));
+        }
+        from = at;
+    }
+    (text, None)
+}
+
+/// One action for a composed text: protection advice wins, then the earliest.
+fn pick_action<'a>(actions: impl IntoIterator<Item = Option<&'a str>>) -> Option<&'a str> {
+    let actions: Vec<&str> = actions.into_iter().flatten().collect();
+    actions
+        .iter()
+        .find(|action| action.contains("protection"))
+        .or(actions.first())
+        .copied()
+}
+
+fn finish(body: &str, action: Option<&str>) -> String {
+    let body = body.trim().trim_end_matches(['.', ';', ':', ' ']);
+    let Some(action) = action else {
+        return body.to_owned();
+    };
+    let mut action = action.trim().trim_end_matches('.').to_owned();
+    if let Some(first) = action.get(..1) {
+        action.replace_range(..1, &first.to_uppercase());
+    }
+    if body.is_empty() {
+        format!("{action}.")
+    } else {
+        format!("{body}. {action}.")
+    }
+}
+
+/// Adds native `detail` after what happened. A composed text keeps one action
+/// sentence, last; joining after an action would read "…again.: detail".
+pub fn with_detail(text: &str, detail: &str) -> String {
+    let (what, text_action) = split_action(text);
+    let (detail, detail_action) = split_action(detail);
+    if text_action.is_none() && detail_action.is_none() {
+        // No action to keep last: the detail stays verbatim.
+        return if detail.trim().is_empty() {
+            text.to_owned()
+        } else {
+            format!("{}: {}", text.trim_end_matches('.'), detail.trim())
+        };
+    }
+    let detail = detail.trim().trim_end_matches('.');
+    let what = what.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        what.to_owned()
+    } else {
+        format!("{what}: {detail}")
+    };
+    finish(&body, pick_action([text_action, detail_action]))
+}
+
+/// A declined replacement whose put-back of the original is unconfirmed: the
+/// decline is fact, only the restore is uncertain, and one action comes last.
+pub fn restore_unconfirmed_text(declined: &str, unknown: &str, detail: &str) -> String {
+    let (declined, declined_action) = split_action(declined);
+    let (_, unknown_action) = split_action(unknown);
+    let (detail, detail_action) = split_action(detail);
+    let detail = detail.trim().trim_end_matches('.');
+    let declined = declined.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        format!("{declined}; restoring the original wasn’t confirmed")
+    } else {
+        format!("{declined}; restoring the original wasn’t confirmed: {detail}")
+    };
+    finish(
+        &body,
+        pick_action([unknown_action, declined_action, detail_action]),
+    )
+}
+
+/// Whether `message` says what `text` says, ends with exactly one action (a
+/// protection action may outrank `text`'s) and has no ".;" or ".:" join.
+pub fn carries_guidance(message: &str, text: &str) -> bool {
+    let (body, action) = split_action(text);
+    let body = body.trim_end_matches('.');
+    let lower = message.to_lowercase();
+    let actions = lower.matches("check your open orders").count()
+        + lower.matches("check open orders").count();
+    message.contains(body)
+        && !message.contains(".;")
+        && !message.contains(".:")
+        && (action.is_none() || (split_action(message).1.is_some() && actions == 1))
+}
+
+/// Appends a venue's terminal note to the presented message. A part the message
+/// already carries is not repeated, and the result keeps one action, last.
+pub fn join_note(message: &str, note: &str) -> String {
+    let (body, message_action) = split_action(message);
+    let body = body.trim_end_matches('.');
+    let present: Vec<&str> = body
+        .split("; ")
+        .map(|part| part.trim_end_matches('.'))
+        .collect();
+    let mut actions = vec![message_action];
+    let mut added: Vec<&str> = Vec::new();
+    for part in note.split("; ") {
+        let (part, action) = split_action(part);
+        actions.push(action);
+        let part = part.trim().trim_end_matches('.');
+        if part.is_empty()
+            || present.contains(&part)
+            || body.ends_with(part)
+            || added.contains(&part)
+        {
+            continue;
+        }
+        added.push(part);
+    }
+    let body = if added.is_empty() {
+        body.to_owned()
+    } else if body.is_empty() {
+        added.join("; ")
+    } else {
+        format!("{body}; {}", added.join("; "))
+    };
+    match pick_action(actions) {
+        Some(action) => finish(&body, Some(action)),
+        None if added.is_empty() => message.to_owned(),
+        None => body,
+    }
+}
+
 /// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
 pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
     if unknown {
         format!(
-            "Your {symbol} order may be gone: it was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} order was cancelled, but its replacement wasn’t confirmed. Check your open orders before trying again."
         )
     } else {
-        format!("Your {symbol} order is gone: it was canceled and its replacement refused")
+        format!("Your {symbol} order was cancelled and its replacement was declined")
     }
 }
 
@@ -940,15 +1118,16 @@ pub fn stop_gone_text(
     };
     if unknown {
         format!(
-            "Your {symbol} {position} position may have no {order}: the old {order} was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} {position} position’s {order} was cancelled, but its replacement wasn’t confirmed. Check your open orders before adding protection."
         )
     } else {
         format!(
-            "Your {symbol} {position} position has no {order}: the old {order} was canceled and its replacement refused"
+            "Your {symbol} {position} position has no {order}: the previous {order} was cancelled and its replacement was declined"
         )
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1118,7 +1297,7 @@ mod tests {
     fn request_context_refusals_are_typed_not_sent_failures() {
         use crate::request_context::Error;
         let error = Error::TimedOut.venue_error();
-        assert_eq!(error.message, "Request context timed out");
+        assert_eq!(error.message, "This request timed out");
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         for (reason, kind) in [
@@ -1189,9 +1368,12 @@ mod tests {
     fn a_vanished_order_names_its_symbol() {
         assert_eq!(
             super::order_gone_text("BTCUSDT", false),
-            "Your BTCUSDT order is gone: it was canceled and its replacement refused"
+            "Your BTCUSDT order was cancelled and its replacement was declined"
         );
-        assert!(super::order_gone_text("ETHUSDT", true).contains("Your ETHUSDT order may be gone"));
+        assert!(
+            super::order_gone_text("ETHUSDT", true)
+                .contains("Your ETHUSDT order was cancelled, but its replacement wasn’t confirmed")
+        );
     }
 
     #[test]
@@ -1199,11 +1381,11 @@ mod tests {
         use crate::model::{OrderSide, OrderType};
         assert_eq!(
             super::stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, false),
-            "Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused"
+            "Your BTCUSDT long position has no stop: the previous stop was cancelled and its replacement was declined"
         );
         assert!(
             super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
-                .starts_with("Your ETHUSDT short position may have no take profit")
+                .starts_with("Your ETHUSDT short position’s take profit was cancelled, but its replacement wasn’t confirmed")
         );
     }
 }
@@ -1230,5 +1412,182 @@ mod venue_message_tests {
         );
         #[cfg(target_pointer_width = "64")]
         assert!(std::mem::size_of::<(Box<()>, VenueError)>() < 128);
+    }
+}
+
+#[cfg(test)]
+mod gone_detail_tests {
+    use super::*;
+
+    fn actions(text: &str) -> usize {
+        let lower = text.to_lowercase();
+        lower.matches("check your open orders").count() + lower.matches("check open orders").count()
+    }
+
+    /// Every composer, over the gone texts all venues share and the engine's own
+    /// guided and unguided messages: no ".;" or ".:", and at most one action.
+    #[test]
+    fn composed_user_text_keeps_one_action_and_clean_joins() {
+        use crate::model::{OrderSide, OrderType};
+        let mut texts = vec![
+            String::new(),
+            "No reply arrived".into(),
+            "lost write response.".into(),
+            "We couldn’t confirm this change. Check your open orders before trying again.".into(),
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.".into(),
+            "Too many new orders. check Open Orders before retrying".into(),
+        ];
+        for unknown in [true, false] {
+            texts.push(order_gone_text("BTCUSDT", unknown));
+            for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+                texts.push(stop_gone_text("BTCUSDT", OrderSide::Sell, kind, unknown));
+            }
+        }
+        for a in &texts {
+            for b in &texts {
+                let composed = [
+                    with_detail(a, b),
+                    join_note(a, b),
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), a, b),
+                ];
+                for text in composed {
+                    assert!(
+                        !text.contains(".;") && !text.contains(".:"),
+                        "{a:?} + {b:?}: {text}"
+                    );
+                    assert!(actions(&text) <= 1, "{a:?} + {b:?}: {text}");
+                    if actions(a) + actions(b) > 0 && !text.contains("restoring") {
+                        assert_eq!(actions(&text), 1, "{a:?} + {b:?}: {text}");
+                    }
+                }
+            }
+        }
+        // Venue text that merely starts with "Check" is detail, never dropped.
+        for detail in [
+            "check sum mismatch",
+            "Check failed: insufficient margin",
+            "Leverage too high. Check your leverage settings",
+        ] {
+            for text in [
+                with_detail(&order_gone_text("BTCUSDT", true), detail),
+                join_note(&order_gone_text("BTCUSDT", true), detail),
+                join_note(detail, &order_gone_text("BTCUSDT", true)),
+                restore_unconfirmed_text(
+                    &order_gone_text("BTCUSDT", false),
+                    &order_gone_text("BTCUSDT", true),
+                    detail,
+                ),
+            ] {
+                assert!(
+                    text.contains(detail.trim_end_matches('.')),
+                    "{detail}: {text}"
+                );
+                assert_eq!(actions(&text), 1, "{detail}: {text}");
+            }
+        }
+        // Deterministic fuzz: venue-like detail built from non-guidance fragments
+        // (some start with "Check") survives every composer verbatim.
+        let fragments = [
+            "Check failed",
+            "check sum mismatch",
+            "Check your leverage settings",
+            "check the margin mode",
+            "Margin is insufficient",
+            "HTTP 502",
+            "order 12",
+            "Checking position",
+            "check",
+            "Check",
+            "Leverage too high",
+        ];
+        let separators = [". ", ": ", "; ", " ", ", "];
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        for _ in 0..20_000 {
+            let mut detail = fragments[next(fragments.len())].to_owned();
+            for _ in 0..next(3) {
+                detail.push_str(separators[next(separators.len())]);
+                detail.push_str(fragments[next(fragments.len())]);
+            }
+            if next(2) == 0 {
+                detail.push('.');
+            }
+            let kept = detail.trim_end_matches('.');
+            let base = [
+                order_gone_text("BTCUSDT", true),
+                stop_gone_text("BTCUSDT", OrderSide::Buy, OrderType::TakeProfit, true),
+            ][next(2)]
+            .clone();
+            let composed = [
+                (with_detail(&base, &detail), false),
+                (join_note(&base, &detail), true),
+                (
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), &base, &detail),
+                    false,
+                ),
+            ];
+            for (text, parts) in composed {
+                // The note join folds a repeated identical part; every distinct part stays.
+                if parts {
+                    for part in kept.split("; ") {
+                        assert!(
+                            text.contains(part.trim_end_matches('.')),
+                            "{detail:?}: {text}"
+                        );
+                    }
+                } else {
+                    assert!(text.contains(kept), "{detail:?}: {text}");
+                }
+                assert_eq!(actions(&text), 1, "{detail:?}: {text}");
+                assert!(
+                    !text.contains(".;") && !text.contains(".:"),
+                    "{detail:?}: {text}"
+                );
+            }
+        }
+        let stop = stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, true);
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert!(with_detail(&stop, guided).ends_with("before adding protection."));
+        assert!(join_note(guided, &stop).ends_with("before adding protection."));
+    }
+
+    #[test]
+    fn detail_sits_before_the_action_and_never_after_its_full_stop() {
+        let unknown = order_gone_text("BTCUSDT", true);
+        assert_eq!(
+            with_detail(&unknown, "HTTP 502."),
+            "Your BTCUSDT order was cancelled, but its replacement wasn’t confirmed: HTTP 502. Check your open orders before trying again."
+        );
+        let declined = order_gone_text("BTCUSDT", false);
+        assert_eq!(
+            with_detail(&declined, "insufficient margin"),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin"
+        );
+        assert_eq!(
+            restore_unconfirmed_text(
+                &with_detail(&declined, "insufficient margin"),
+                &unknown,
+                "timeout"
+            ),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin; restoring the original wasn’t confirmed: timeout. Check your open orders before trying again."
+        );
+        for text in [&unknown, &declined] {
+            assert!(!with_detail(text, "x").contains(".:"));
+        }
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            with_detail(&unknown, guided)
+                .matches("Check your open orders")
+                .count(),
+            1
+        );
+        let restored = restore_unconfirmed_text(&declined, &unknown, guided);
+        assert_eq!(restored.matches("Check your open orders").count(), 1);
+        assert!(restored.ends_with(guided), "{restored}");
     }
 }

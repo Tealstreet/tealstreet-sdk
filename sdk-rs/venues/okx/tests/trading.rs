@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 mod support;
 #[path = "support/unknown_exceptions.rs"]
@@ -2065,7 +2066,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
-                    if error.legacy_text().contains("uncertain")
+                    if error.legacy_text().contains("confirm")
             )
         });
         assert_eq!(refused, malformed);
@@ -2627,7 +2628,7 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
-                    if error.legacy_text().contains("uncertain")
+                    if error.legacy_text().contains("confirm")
             )
         });
         // A row the store already holds is older than the uncertain write.
@@ -2967,9 +2968,10 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
         .expect_err("an unconfirmed cancellation stays Unknown");
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders"),
+        safe_cex_engine::error::carries_guidance(
+            &error.message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ),
         "Unknown cancellation must explain reconciliation: {error:?}"
     );
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
@@ -2992,10 +2994,9 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
     assert_eq!(elements[1]["error"]["outcome"], "unknown");
     assert_eq!(elements[1]["error"]["venueCode"], "51412");
     assert!(
-        elements[1]["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("The outcome is unknown. Check Open Orders")
+        elements[1]["error"]["message"].as_str().unwrap().contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     assert!(
         elements[1]["error"]["message"]
@@ -3071,11 +3072,10 @@ fn cancel_batch_unknown_reporting_distinguishes_satisfied_and_refused_rows() {
         let terminal = terminals(&out, 2);
         let error = terminal[0].as_ref().unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(safe_cex_engine::error::carries_guidance(
+            &error.message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
         assert!(
             error
                 .partial
@@ -3165,11 +3165,10 @@ fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
     assert_eq!(error.kind, Some(ErrorKind::RateLimited));
     assert_eq!(error.venue_code.as_deref(), Some(code));
     assert_eq!(error.venue_message.as_deref(), Some("Rate limit"));
-    assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
-    );
+    assert!(safe_cex_engine::error::carries_guidance(
+        &error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    ));
     let partial = error.partial.as_ref().expect("indexed applied batch");
     assert!(partial.order_ids.is_empty());
     assert_eq!(partial.total, Some(2));
@@ -3189,10 +3188,9 @@ fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
     assert_eq!(elements[1]["error"]["kind"], "rateLimited");
     assert_eq!(elements[1]["error"]["venueCode"], code);
     assert!(
-        elements[1]["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("The outcome is unknown. Check Open Orders")
+        elements[1]["error"]["message"].as_str().unwrap().contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     let events: Vec<_> = after
         .iter()
@@ -3247,4 +3245,59 @@ fn algo_rate_limited_cancel_50011_keeps_engine_and_row_unknown() {
 #[test]
 fn algo_rate_limited_cancel_50061_keeps_engine_and_row_unknown() {
     rate_limited_cancel_row_uses_released_write_outcome(true, "50061");
+}
+
+// AGT-115, live on okx-t 2026-11-21: a conditional or stop_market entry with an attached
+// stopLoss was placed without its leg. Every algo entry with a non-zero leg now refuses
+// the whole command before any write; a zero leg means "none" and still places.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    use safe_cex_engine::Outcome;
+    let refusal = "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills.";
+    for entry in [
+        r#""type":"conditional","triggerPrice":41000"#,
+        r#""type":"stop_market","price":41000"#,
+        r#""type":"take_profit_market","price":41000"#,
+        r#""type":"trailing_stop_market","price":100"#,
+    ] {
+        for legs in [
+            r#""stopLoss":35000"#,
+            r#""takeProfit":45000"#,
+            r#""stopLoss":0,"takeProfit":45000"#,
+        ] {
+            let mut e = trading_engine();
+            let plain = order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            );
+            let bracket = order(&format!(
+                r#"{{"symbol":"BTCUSDT","side":"buy","amount":1,{entry},{legs}}}"#
+            ));
+            // One refused order refuses the whole command, including a plain order beside it.
+            let out = place(&mut e, vec![plain, bracket]);
+            assert!(
+                !out.iter().any(
+                    |a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
+                ),
+                "{entry} {legs}"
+            );
+            assert!(
+                out.iter().any(
+                    |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error })
+                    if error.legacy_text() == refusal && error.outcome == Some(Outcome::NotSent))
+                ),
+                "{entry} {legs}: {out:?}"
+            );
+        }
+    }
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":41000,"stopLoss":0,"takeProfit":0}"#,
+        )],
+    );
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("order-algo")))
+    );
 }

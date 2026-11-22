@@ -486,8 +486,10 @@ fn candle(k: &Kline, rest: bool) -> Candle {
 }
 impl Venue for BitunixFutures {
     fn command_failure_summary(error: &VenueError) -> Option<String> {
-        (error.outcome == Some(safe_cex_engine::Outcome::Unknown))
-            .then(|| "The outcome of this Bitunix write is unknown. Check Open Orders".to_owned())
+        (error.outcome == Some(safe_cex_engine::Outcome::Unknown)).then(|| {
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again."
+                .to_owned()
+        })
     }
 
     fn guard_pending_placements(&self) -> bool {
@@ -1232,5 +1234,30 @@ mod startup_cause_tests {
                 S::NONE
             );
         }
+    }
+}
+
+// Rule 5 (#3726): the summary changes display text, never known/unknown classification.
+#[cfg(test)]
+mod notification_summary_tests {
+    use super::*;
+    #[test]
+    fn only_unknown_errors_receive_the_closed_summary() {
+        let mut error = VenueError::new("detail");
+        for outcome in [
+            None,
+            Some(safe_cex_engine::Outcome::NotSent),
+            Some(safe_cex_engine::Outcome::Rejected),
+        ] {
+            error.outcome = outcome;
+            assert_eq!(BitunixFutures::command_failure_summary(&error), None);
+        }
+        error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+        assert_eq!(
+            BitunixFutures::command_failure_summary(&error).as_deref(),
+            Some(
+                "Bitunix couldn’t confirm this change. Check your open orders before trying again."
+            )
+        );
     }
 }

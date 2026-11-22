@@ -25,7 +25,7 @@ const diagnosticEvents = [
   'grafana-http-response',
   'ws-diagnostic',
 ];
-const liveEvents = ['exec-result', 'chaser:complete'];
+const liveEvents = ['exec-result', 'chaser:complete', 'chaser:amended'];
 const material = 'synthetic-exec-diagnostic-material';
 const cleanup: (() => void)[] = [];
 afterEach(() => {

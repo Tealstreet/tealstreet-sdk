@@ -88,8 +88,8 @@ export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeO
   if (delegated && disabled) {
     const prettyName = exchangeMetadata[name].prettyName;
     const message = options.remoteSigner !== undefined
-      ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
-      : `${prettyName} delegated signing is unsupported in this build`;
+      ? `${prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`
+      : `Server trading for ${prettyName} isn’t available in this version`;
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   }
 };

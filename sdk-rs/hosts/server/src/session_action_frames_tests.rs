@@ -4,6 +4,71 @@ fn action_key() -> String {
     let hex = format!("{:012x}", crate::accounts::now_ms());
     format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..])
 }
+
+#[tokio::test]
+async fn typed_algo_amend_updates_the_existing_job_without_a_new_order() {
+    tokio::task::LocalSet::new().run_until(async {
+        for family in ["chaser", "twap"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            action(&mut session, json!({"kind":"algo","op":format!("{family}:start"),"data":j6b_options(family)}), 1, false).await;
+            assert_eq!(action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
+            j6b_wait_writes(&tape, 1).await;
+            let jobs = account.running.jobs().0;
+            assert_eq!(jobs.len(), 1);
+            let update = if family == "chaser" {json!({"maxAttempts":20})} else {json!({"intervalMs":60000,"remainingSlices":2})};
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":update}}), 0).await;
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], "unknown", "{family}: {outcome}");
+            assert_eq!(account.running.jobs().0, jobs, "same resident job, never stop-and-replace");
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":"missing","update":update}}), 0).await;
+            let refused = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(refused["d"]["outcome"], "refused", "{refused}");
+            assert!(refused["d"]["error"]["message"].as_str().unwrap().contains("not amendable"));
+            for field in ["size", "side", "symbol"] {
+                j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":{field:2}}}), 0).await;
+                let unsupported = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(unsupported["d"]["outcome"], "unsupported", "{unsupported}");
+                assert!(unsupported["d"]["error"]["message"].as_str().unwrap().contains("unsupported amend field"));
+            }
+            assert_eq!(account.running.jobs().0, jobs);
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            let stop = if family == "chaser" { "chaser:terminate" } else { "twap:stop" };
+            action(&mut session, json!({"kind":"algo","op":stop,"data":jobs[0].id}), 1, false).await;
+            assert_eq!(action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
+            j6b_wait_idle(&account).await;
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":update}}), 0).await;
+            let ended = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(ended["d"]["outcome"], "refused", "{ended}");
+            assert!(ended["d"]["error"]["message"].as_str().unwrap().contains("not amendable"));
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn delegated_algo_amend_never_bypasses_the_typed_ledger_with_a_legacy_message() {
+    tokio::task::LocalSet::new().run_until(async {
+        for op in ["chaser:amend", "twap:amend"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            session.handle(&json!({"t":"msg","d":{"accountName":"synthetic-main","op":op,"data":{"id":"missing","update":{"size":2}}}}).to_string()).await.unwrap();
+            let error = msg_error_frame(&mut sent).await;
+            assert!(error.to_string().contains("DelegatedActionUnavailable"), "{error}");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert!(account.running.jobs().0.is_empty());
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
 async fn action(session: &mut Session, action: Value, version: u8, corrupt: bool) -> String {
     let id = action_key();
     let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &action, 1).unwrap();
@@ -23,6 +88,21 @@ async fn action_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
     })
     .await
     .expect("bounded native action receipt")
+}
+
+// Session refusals are `{t:"msg",d:{op:"error"}}`, not a top-level frame kind.
+async fn msg_error_frame(sent: &mut crate::out::Receiver) -> Value {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            if frame["t"] == "msg" && frame["d"]["op"] == "error" {
+                return frame;
+            }
+        }
+        panic!("missing session error")
+    })
+    .await
+    .expect("bounded session error")
 }
 
 fn native_request_rows(tape: &Tape, suffix: &str) -> Vec<Value> {
@@ -220,7 +300,7 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                     a.clone(),
                     out.with_instance_id(None),
                     envelope::AccountSigningMode::Delegated,
-                    0,
+                    Preferences::default(),
                 )
                 .await;
             let capture = crate::state::log_capture::capture();
@@ -481,7 +561,7 @@ async fn action_fix_registered_replies_carry_the_captured_binding() {
             let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
             let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-A"));
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated, 0).await;
+            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated, Preferences::default()).await;
             let id = action_key();
             let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
             session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-A","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
@@ -524,7 +604,7 @@ async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
             session.order_frames_enabled = crate::order_contract::enabled();
             crate::accounts::tests::hold_live(&account,session.socket,out.outbox());
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated, 0).await;
+            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated, Preferences::default()).await;
             tokio::time::timeout(Duration::from_secs(3),async {
                 while tape.held_positions.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
             }).await.unwrap();
@@ -692,7 +772,7 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         account.clone(),
                         out.with_instance_id(None),
                         envelope::AccountSigningMode::Delegated,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                 tokio::time::timeout(Duration::from_secs(3), async {
@@ -1247,6 +1327,7 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
                 &json!({"op":"setLeverage","symbol":"BTCUSDT","leverage":2}),
             )
             .unwrap(),
+            stages: crate::audit::Stages::default(),
         }),
     };
     let capture = crate::state::log_capture::capture();
@@ -1444,7 +1525,7 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
         let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
         let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-v1"));
         // Preserve this fixture's existing DELEGATED account admission.
-        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated, 0).await;
+        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated, Preferences::default()).await;
         for case in ["kind", "duplicateKind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
             let mut payload = match case {
                 "kind" => json!({"kind":"futureWrite"}),
@@ -2086,7 +2167,7 @@ async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
                             account.clone(),
                             out,
                             envelope::AccountSigningMode::Delegated,
-                            0,
+                            Preferences::default(),
                         )
                         .await;
                     assert!(Arc::ptr_eq(
@@ -2608,7 +2689,7 @@ async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit(
             let outcome = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(outcome["d"]["outcome"], if kind == "nuke" {"refused"} else {"unknown"});
             if stage == "pre_actor" {
-                assert_eq!(outcome["d"]["error"]["message"], "Action registration retired before dispatch");
+                assert_eq!(outcome["d"]["error"]["message"], "This action couldn’t start because the account connection changed");
             }
             assert_eq!(outcome["d"]["error"]["outcome"], if kind == "nuke" {"notSent"} else {"unknown"});
             assert!(tape.writes.lock().unwrap().is_empty());
@@ -2685,7 +2766,7 @@ async fn nuke_post_store_lease_fence_audits_io_without_changing_receipt() {
             assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
             assert_eq!(
                 outcome["d"]["error"]["message"],
-                "Action registration retired before dispatch"
+                "This action couldn’t start because the account connection changed"
             );
             assert!(tape.writes.lock().unwrap().is_empty());
             let audits = actor_refusal_audits(capture.finish(), "nuke");

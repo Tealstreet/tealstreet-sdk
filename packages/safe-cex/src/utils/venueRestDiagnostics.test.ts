@@ -137,12 +137,12 @@ describe('venueRestDiagnostics', () => {
   // length rule ate the words that tell them apart.
   it('keeps ordinary long words that are not secrets', () => {
     noteRestFailure('bybit', new Error('WebSocket disconnected — signing aborted'));
-    noteRestFailure('bybit', new Error('Remote signer unavailable — WebSocket disconnected'));
+    noteRestFailure('bybit', new Error('Signing isn’t available for this account — WebSocket disconnected'));
 
     const samples = drainVenueRestFailureSamples();
     expect(samples[0].errorMessage).toBe('WebSocket disconnected — signing aborted');
     expect(Object.keys(requireRecord(statsFor('bybit').errorCounts)).sort()).toEqual([
-      'Remote signer unavailable — WebSocket disconnected',
+      'Signing isn’t available for this account — WebSocket disconnected',
       'WebSocket disconnected — signing aborted',
     ]);
   });
@@ -152,11 +152,11 @@ describe('venueRestDiagnostics', () => {
   it('keeps the discriminator when it falls late in a prefixed message', () => {
     noteRestFailure(
       'bybit',
-      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone <5s)'),
+      new Error('[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone <5s)'),
     );
     noteRestFailure(
       'bybit',
-      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone >10m)'),
+      new Error('[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone >10m)'),
     );
 
     expect(Object.keys(requireRecord(statsFor('bybit').errorCounts))).toHaveLength(2);
@@ -381,7 +381,7 @@ describe('venueRestDiagnostics through the remote signing adapter', () => {
   // A backgrounded phone's signer is gone for minutes at a time, and every poll in
   // that window used to file a "venue REST failure" the venue never saw.
   it.each([
-    '[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone <5s)',
+    '[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone <5s)',
     'WebSocket disconnected — signing aborted',
     'Signing request abc timed out after 15000ms',
   ])('does not count an unsent signing failure as a venue failure: %s', (message) => {

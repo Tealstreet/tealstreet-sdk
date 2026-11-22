@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 mod support;
 
@@ -1015,7 +1016,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         .collect();
     assert_eq!(
         cancel_all(&mut engine, 50, 7.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all")
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        )
     );
     let (later, _) = release(&mut engine, 8.);
     reads.extend(
@@ -1047,7 +1050,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
     }
     assert_ne!(
         cancel_all(&mut engine, 51, 10.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all"),
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        ),
         "the fresh snapshot clears the fence"
     );
 }
@@ -1115,7 +1120,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
     assert!(
         failures(&retry).iter().any(|error| {
             error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.legacy_text().contains("uncertain")
+                && error.legacy_text().contains("confirm")
         }),
         "the retry is refused NotSent with the reason"
     );
@@ -1385,7 +1390,7 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     );
     let failed = failures(&output);
     assert_eq!(failed.len(), 1);
-    support::assert_unknown_message(failed[0], support::ENGINE_UNKNOWN_TEXT);
+    support::assert_unknown_message(failed[0], support::ENGINE_HTTP_UNKNOWN_TEXT);
     assert!(
         failed
             .iter()
@@ -1414,7 +1419,7 @@ fn unknown_after_a_signature_refusal_keeps_the_engine_http_sealing_text() {
     assert_eq!(elements.len(), 1);
     assert!(matches!(&elements[0].result,
         safe_cex_engine::write_plan::ElementResult::Unknown { error }
-            if error.message.contains(support::ENGINE_UNKNOWN_TEXT)
+            if error.message.contains(support::ENGINE_HTTP_UNKNOWN_TEXT)
     ));
 }
 

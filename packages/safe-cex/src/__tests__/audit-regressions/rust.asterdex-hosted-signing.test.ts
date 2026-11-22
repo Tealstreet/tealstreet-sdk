@@ -64,7 +64,7 @@ it('V1 remote batches bind the selected device slot and public credential', asyn
     wsAuthSignature: JSON.stringify({ credential: 'foreign', signature: 'ab'.repeat(32) }),
   }));
   await expect(provider(work, { signal: new AbortController().signal })).rejects.toThrow(
-    'Remote signing request refused',
+    'This request couldn’t be signed',
   );
   expect(JSON.stringify(sign.mock.calls)).not.toContain('origin/');
 });
@@ -104,7 +104,7 @@ it.each([undefined, false])(
       expect.objectContaining({
         kind: 'unsupported',
         outcome: 'notSent',
-        message: 'AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only',
+        message: 'This signing connection supports AsterDEX V1 but not V3 account keys',
       }),
     );
     expect(payloadSigner).not.toHaveBeenCalled();
@@ -160,19 +160,19 @@ it('refuses foreign graphs and raw wallet digests before callback, and cancels l
   ];
   for (const operations of foreignGraphs) {
     await expect(provider({ ...work, operations }, { signal: new AbortController().signal })).rejects.toThrow(
-      'Remote signing request refused',
+      'This request couldn’t be signed',
     );
   }
   expect(sign).not.toHaveBeenCalled();
   sign.mockRejectedValueOnce(new Error('fixture-sensitive-error'));
   await expect(provider(work, { signal: new AbortController().signal })).rejects.toThrow(
-    /^Remote signing request refused$/,
+    /^This request couldn’t be signed$/,
   );
   const late = Promise.withResolvers<unknown>();
   sign.mockImplementationOnce(() => late.promise);
   const controller = new AbortController();
   const pending = provider(work, { signal: controller.signal });
   controller.abort();
-  await expect(pending).rejects.toThrow('Remote signing canceled');
+  await expect(pending).rejects.toThrow('Signing was cancelled');
   late.resolve({ id: 'late', wsAuthSignature: 'late' });
 });

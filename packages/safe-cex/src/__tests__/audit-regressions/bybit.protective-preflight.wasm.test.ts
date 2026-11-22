@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { RemoteSigner } from '../../types';
 
@@ -187,13 +188,13 @@ async function account(
           result = list([position]);
           break;
         case '/v5/order/realtime':
-          result = list(
-            parsed.searchParams.has('orderId')
-              ? [{ ...original, orderStatus: cancelled ? 'Cancelled' : 'Untriggered' }]
-              : cancelled
-                ? []
-                : [original],
-          );
+          result = parsed.searchParams.has('orderId')
+            ? // AGT-108: live Bybit returns a page cursor beside an orderId read's single row.
+              {
+                ...list([{ ...original, orderStatus: cancelled ? 'Cancelled' : 'Untriggered' }]),
+                nextPageCursor: `${original.orderId}%3A${original.createdTime}%2C${original.orderId}%3A${original.createdTime}`,
+              }
+            : list(cancelled ? [] : [original]);
           break;
         case '/v5/order/history':
           result = list([]);
@@ -482,7 +483,7 @@ describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () =>
           amount: 1,
           price: 100,
         }),
-      ).rejects.toThrow('uncertain');
+      ).rejects.toThrow('An earlier order hasn’t been confirmed');
     }, 15_000);
   }
   for (const kind of ['StopLoss', 'TakeProfit'] as const) {
@@ -564,7 +565,7 @@ describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () =>
   it('places the replacement after a final read when proof is unreadable after cancellation', async () => {
     const fixture = await account('StopLoss');
     fixture.fault('afterCancel');
-    await expect(fixture.edit()).rejects.toThrow(/a second stop may exist; check Open Orders/);
+    await expect(fixture.edit()).rejects.toThrow(/Check your open orders for a second stop/);
     expect(fixture.writes().map((call) => call.path)).toEqual([
       '/v5/order/cancel-batch',
       '/v5/position/trading-stop',

@@ -30,7 +30,10 @@ const FAILURE_MUTE_MS = 30_000;
 const UNCERTAIN_HOLD_MS = 15_000;
 const UNCERTAIN_HOLD_MAX_MS = 5 * 60_000;
 const isUncertainRefusal = (error: unknown) =>
-  error instanceof Error && error.message.includes('Placement outcome is uncertain');
+  error instanceof Error &&
+  // Older server/WASM messages must keep the same hold during the wording rollout.
+  (error.message.includes('Placement outcome is uncertain') ||
+    error.message.includes('An earlier order hasn’t been confirmed'));
 
 export type CrossTradePlaceOrderFn = (
   copier: CrossTradeCopier,

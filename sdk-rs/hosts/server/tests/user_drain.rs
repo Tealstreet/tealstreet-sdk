@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer connection-expiry notice; drain and retained-owner checks stay intact.
 //! On-box user drain and its authenticated proof; no exchange I/O.
 mod support;
 
@@ -336,7 +337,7 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         let mut returned = Page::open(&address, &token("target"), None).await;
         returned.init(&init).await;
         returned.until("error", |d| d["data"][1]["forceToast"] == true).await;
-        assert!(returned.ops("error").iter().any(|d| d["data"][0].as_str().is_some_and(|text| text.contains("Router ownership expired"))));
+        assert!(returned.ops("error").iter().any(|d| d["data"][0].as_str().is_some_and(|text| text.contains("The server connection expired"))));
         let market = json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,
             "precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
         let options = json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":10,

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::model::{BybitBbo, OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice, Response};
@@ -2086,10 +2087,11 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
     );
     let refused = failures(&mut e);
     assert!(
-        refused
-            .iter()
-            .any(|f| f.message.contains("Your BTC_USDT order is gone")
-                || f.message.contains("Your BTCUSDT order is gone")),
+        refused.iter().any(|f| f
+            .message
+            .contains("Your BTC_USDT order was cancelled and its replacement was declined")
+            || f.message
+                .contains("Your BTCUSDT order was cancelled and its replacement was declined")),
         "{refused:?}"
     );
 }
@@ -2650,7 +2652,7 @@ fn protective_terminal_read_never_treats_absence_or_triggered_as_cancel_proof() 
         inspect_reply(&mut e, &terminal, 330., &row);
         let actions = drained(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("status is unknown"))),"{actions:?}");
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("confirm"))),"{actions:?}");
     }
 }
 
@@ -2864,7 +2866,7 @@ fn protective_terminal_inspection_is_bounded_without_resending_cancel() {
                 .unwrap();
             e.handle(at, Event::TimerFired { timer });
         } else {
-            assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("status is unknown"))));
+            assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("confirm"))));
         }
     }
 }
@@ -3092,8 +3094,11 @@ fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protectio
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
-            assert!(error.message.contains("is unknown"), "{error:?}");
-            assert!(error.message.contains("Open Orders") && error.message.contains("position"));
+            assert!(error.message.contains("confirm"), "{error:?}");
+            assert!(
+                error.message.to_ascii_lowercase().contains("open orders")
+                    && error.message.contains("position")
+            );
             assert!(!error.message.contains("both refused"));
         }
     }
@@ -3138,9 +3143,10 @@ fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
             .unwrap();
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(error.protection.is_none());
-        assert!(error.message.contains("is unknown"), "{error:?}");
+        assert!(error.message.contains("confirm"), "{error:?}");
         assert!(
-            error.message.contains("Open Orders") && error.message.contains("position"),
+            error.message.to_ascii_lowercase().contains("open orders")
+                && error.message.contains("position"),
             "{error:?}"
         );
         assert!(!error.message.contains("not changed"));
@@ -3317,13 +3323,12 @@ fn protective_ambiguous_envelope_codes_never_restore_or_report_not_sent() {
                     "mode={mode}, status={status}, code={code}"
                 );
                 assert!(errors[0].protection.is_none());
+                assert!(errors[0].message.contains("confirm"), "{:?}", errors[0]);
                 assert!(
-                    errors[0].message.contains("status is unknown"),
-                    "{:?}",
                     errors[0]
-                );
-                assert!(
-                    errors[0].message.contains("Open Orders")
+                        .message
+                        .to_ascii_lowercase()
+                        .contains("open orders")
                         && errors[0].message.contains("position")
                 );
                 assert!(!errors[0].message.contains("restored"));
@@ -4186,7 +4191,7 @@ fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
             assert!(error.protection.is_none(), "{leg}/{status}: {error:?}");
             assert_eq!(
                 error.message,
-                "The outcome of your BTCUSDT protection update is unknown. Check Open Orders and your position before replacing protection.",
+                "Your BTCUSDT protection update wasn’t confirmed. Check your open orders and position before adding protection.",
                 "{leg}/{status}"
             );
             assert!(!actions.iter().any(|a| match a {
@@ -4306,5 +4311,56 @@ fn protective_replacement_rechecks_after_the_signed_bind() {
             errors[0].protection,
             Some(safe_cex_engine::error::Protection::Unprotected)
         );
+    }
+}
+
+// AGT-115: a stop or take-profit body carries only its own trigger, so attached legs
+// were dropped. Any non-limit/market entry with a non-zero leg, sized or whole-position,
+// now refuses the whole command before any write, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    use safe_cex_engine::model::OrderType;
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("MEXC");
+    for kind in [
+        OrderType::StopLoss,
+        OrderType::TakeProfit,
+        OrderType::Conditional,
+        OrderType::TrailingStopLoss,
+    ] {
+        for amount in [60.0, 0.0] {
+            for (stop_loss, take_profit) in [
+                (Some(50000.0), None),
+                (None, Some(70000.0)),
+                (Some(0.0), Some(70000.0)),
+            ] {
+                let mut e = ready();
+                let mut stop = order();
+                stop.kind = kind;
+                stop.amount = amount;
+                stop.trigger_price = Some(61000.0);
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                e.handle(
+                    200.0,
+                    Event::Command(Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![order(), stop],
+                    }),
+                );
+                let actions = drained(&mut e);
+                assert!(
+                    !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                    "{kind:?} {amount}"
+                );
+                assert!(e.store().orders().is_empty());
+                assert!(
+                    actions.iter().any(|a| matches!(a,
+                        Action::Notice(Notice::CommandFailed { error, .. })
+                        if error.legacy_text() == refusal
+                            && error.outcome == Some(safe_cex_engine::Outcome::NotSent))),
+                    "{kind:?} {amount}: {actions:?}"
+                );
+            }
+        }
     }
 }

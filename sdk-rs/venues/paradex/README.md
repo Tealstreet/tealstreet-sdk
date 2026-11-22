@@ -37,7 +37,7 @@ in the failure's partial outcome. Refused entries skip their attached children;
 a refused TP skips its SL, while the next independent entry can still be sent.
 An Unknown placement halts all remaining writes for that action, the approved
 stop-after-UNKNOWN parity exception. Its failure includes
-"The outcome is unknown. Check Open Orders", accepted IDs and uncertain placements.
+"We couldn’t confirm this change. Check your open orders before trying again.", accepted IDs and uncertain placements.
 The `order.outcome_unknown` event records the existing outcome journal and
 withheld writes; native diagnostics remain separate. No uncertain write is
 replayed. Leverage requests carry a JSON integer.

@@ -35,11 +35,18 @@ fn pin(
     };
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains(if telemetry {
-            ENGINE_UNKNOWN_TEXT
-        } else {
-            ENGINE_HTTP_UNKNOWN_TEXT
-        }) || (!telemetry && error.message.contains(ENGINE_UNKNOWN_AFTER_REFUSAL)),
+        safe_cex_engine::error::carries_guidance(
+            &error.message,
+            if telemetry {
+                ENGINE_UNKNOWN_TEXT
+            } else {
+                ENGINE_HTTP_UNKNOWN_TEXT
+            }
+        ) || (!telemetry
+            && safe_cex_engine::error::carries_guidance(
+                &error.message,
+                ENGINE_UNKNOWN_AFTER_REFUSAL
+            )),
         "{}",
         error.message
     );
@@ -307,7 +314,8 @@ fn native_50004_emits_one_diagnostic_and_companion_without_changing_its_journal(
         assert_eq!(
             error.message,
             format!(
-                "{ENGINE_UNKNOWN_TEXT}; {ENGINE_UNKNOWN_TEXT}; unconfirmed request {}",
+                // One statement and one action, the request detail between (#3726).
+                "We couldn’t confirm this change; unconfirmed request {}. Check your open orders before trying again.",
                 request.body.as_deref().unwrap()
             )
         );

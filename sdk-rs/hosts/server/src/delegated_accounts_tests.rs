@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::*;
 use crate::delegated::{DelegatedPair, prepare_delegated};
 
@@ -194,7 +195,7 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
                 let expected = if venue == "hyrotrader" {
                     "hyrotrader cannot run on the Hosted server. Turn Hosted off to use this account."
                 } else {
-                    "DELEGATED is not enabled for this venue"
+                    "Server trading isn’t available for this exchange"
                 };
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())
@@ -309,7 +310,7 @@ async fn handed_over_key_is_checked_before_matching_delegated_reuse() {
             let result = registry
                 .obtain_delegated("A", &init(), 8, None, Arc::new(|_| true), wrong)
                 .await;
-            assert!(matches!(result, Err(ref e) if e == "Invalid DELEGATED account setup"));
+            assert!(matches!(result, Err(ref e) if e == "The server couldn’t set up this trading account"));
             assert!(!registry.holds(&account, 8));
             assert!(account.handle.disposal_cause().is_none());
             registry.dispose(&account, Disposal::PageDisposed);

@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
@@ -273,7 +274,7 @@ it.each(['remote', 'payload'] as const)(
     placementStatus = 503;
     await expect(exchange.placeOrder({ ...order, clientOrderId: 'metadata-unknown' })).rejects.toMatchObject({
       outcome: 'unknown',
-      message: expect.stringContaining('unknown'),
+      message: expect.stringContaining('The exchange reply didn’t confirm this change. Check your open orders before trying again.'),
     });
     expect(requests.filter((r) => r.url.endsWith('/private/create-order'))).toHaveLength(2);
     for (const request of requests.filter((r) => r.url.includes('/private/'))) {

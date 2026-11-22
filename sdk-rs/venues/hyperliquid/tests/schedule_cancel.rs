@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Absolute account-wide deadlines are signed controls, never local cancels.
 mod support;
 use safe_cex_engine::{
@@ -418,10 +419,16 @@ fn dispatched_ambiguity_schedule_cancel_never_retries_or_claims_refusal() {
                 })
                 .unwrap();
             assert!(
-                error.message.to_lowercase().contains("unknown"),
+                error.message.to_lowercase().contains("confirm"),
                 "{error:?}"
             );
-            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(
+                error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
+                "{error:?}"
+            );
             assert!(!error.message.contains("refused"), "{error:?}");
             assert!(!error.message.contains("rejected"), "{error:?}");
             assert_eq!(error.protection, None);

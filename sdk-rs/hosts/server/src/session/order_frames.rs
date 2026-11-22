@@ -155,7 +155,7 @@ impl Session {
             return;
         }
         let refused = if !self.order_admitted(&name, submit.instance_id.as_deref()) {
-            Some("not sent: account not admitted for order frames")
+            Some("Order submissions aren’t available on this account connection")
         } else if let Err(error) =
             order_contract::check_key(&submit.intent_id, crate::accounts::now_ms())
         {
@@ -174,12 +174,13 @@ impl Session {
             }
         };
         if let Some(message) = refused {
-            let reason = if message == "not sent: account not admitted for order frames" {
-                self.order_admission_refusal(&name, submit.instance_id.as_deref())
-                    .unwrap_or(message)
-            } else {
-                message
-            };
+            let reason =
+                if message == "Order submissions aren’t available on this account connection" {
+                    self.order_admission_refusal(&name, submit.instance_id.as_deref())
+                        .unwrap_or(message)
+                } else {
+                    message
+                };
             self.audit_order_refusal(&name, "order.submit", reason);
             refuse(&out, &name, &id, submit.seq, message);
             return;
@@ -204,13 +205,16 @@ impl Session {
             return;
         }
         let venue = &self.joined[&name].account.venue;
-        // Native Bybit protection omits caller IDs; other orders retain the admitted
-        // venue's lossless UUID representation, or omit it (no lossless native form).
-        let client_id = if order_contract::bybit_protection(venue, params) {
+        // Bybit protection and shape-refusing adapters (`trigger_refuses_caller_id`) omit
+        // caller IDs; other orders keep the venue's lossless UUID form, or omit it.
+        let client_id = if order_contract::bybit_protection(venue, params)
+            || order_contract::trigger_refuses_caller_id(venue, params)
+        {
             None
         } else {
             order_contract::client_order_id(venue, &submit.intent_id)
         };
+        let caller_id = client_id.is_some();
         let method = if let Some(id) = client_id {
             params.insert("clientOrderId".into(), id.into());
             "placeOrderWithClientOrderId"
@@ -227,7 +231,10 @@ impl Session {
             &name,
             json!({"requestId":submit.intent_id,
             "method":method,"args":[submit.params],"intentSeq":submit.seq}),
-            Some(OrderReceipt::Placement(submit.seq)),
+            Some(OrderReceipt::Placement {
+                seq: submit.seq,
+                caller_id,
+            }),
         )
         .await;
     }
@@ -253,14 +260,14 @@ impl Session {
         if !self.order_admitted(&cancel.account_name, cancel.instance_id.as_deref()) {
             let reason = self
                 .order_admission_refusal(&cancel.account_name, cancel.instance_id.as_deref())
-                .unwrap_or("not sent: account not admitted for order frames");
+                .unwrap_or("Order submissions aren’t available on this account connection");
             self.audit_order_refusal(&cancel.account_name, "order.cancelQueued", reason);
             refuse(
                 &out,
                 &cancel.account_name,
                 &Value::String(cancel.intent_id),
                 cancel.seq,
-                "not sent: account not admitted for order frames",
+                "Order submissions aren’t available on this account connection",
             );
             return;
         }
@@ -291,7 +298,7 @@ impl Session {
             &cancel.account_name,
             json!({"intentId":cancel.intent_id,"seq":cancel.seq,
             "outcome":"unknown","venueOrderId":null,"clientOrderId":null,
-            "error":{"message":"Queue cancellation must be resolved by the router"}}),
+            "error":{"message":"The queued order couldn’t be cancelled here. Cancel it from your pending orders."}}),
         );
     }
 
@@ -308,20 +315,22 @@ impl Session {
         if let Some(receipt) = order_frame {
             let op = match receipt {
                 OrderReceipt::Action { kind, .. } => kind,
-                OrderReceipt::Placement(_) => "order.submit",
+                OrderReceipt::Placement { .. } => "order.submit",
             };
             self.audit_order_refusal(name, op, message);
         }
         if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
             crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
-        } else if let Some(OrderReceipt::Placement(seq)) = order_frame {
+        } else if let Some(OrderReceipt::Placement { seq, caller_id }) = order_frame {
             let message: String = message.chars().take(512).collect();
             let venue = self
                 .joined
                 .get(name)
                 .map_or("", |joined| joined.account.venue.as_str());
+            // An omitted caller ID was never sent, so the refusal names none (AGT-110).
             let client_id = request_id
                 .as_str()
+                .filter(|_| caller_id)
                 .and_then(|id| order_contract::client_order_id(venue, id));
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
                 "venueOrderId":null,"clientOrderId":client_id,"error":{"message":message,"outcome":"notSent"}}));
@@ -350,21 +359,29 @@ pub(super) fn settle_intent(
     id: &Value,
     client_id: Option<&str>,
     seq: u64,
+    protective_legs: usize,
     answer: Result<Value, Value>,
-) {
+) -> bool {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
+            // One native order, or one entry followed by exactly its separately placed
+            // bracket legs (AGT-111). Any other count, such as a split entry, stays unknown;
+            // so does a lone ID where legs were expected (AGT-112: a missing leg).
+            let valid = |id: &Value| {
+                id.as_str()
+                    .is_some_and(|id| !id.is_empty() && id.len() <= 256)
+            };
             if let Some(venue_id) = value
                 .as_array()
-                .filter(|ids| ids.len() == 1)
+                .filter(|ids| ids.len() == 1 + protective_legs)
+                .filter(|ids| ids.iter().all(valid))
                 .and_then(|ids| ids[0].as_str())
-                .filter(|id| !id.is_empty() && id.len() <= 256)
             {
                 data["outcome"] = "placed".into();
                 data["venueOrderId"] = venue_id.into();
             } else {
-                data["error"] = json!({"message":"Order result is not yet known"});
+                data["error"] = json!({"message":"We couldn’t confirm this order. Check your open orders before trying again."});
             }
         }
         Err(error) => {
@@ -391,7 +408,7 @@ pub(super) fn settle_intent(
             data["error"] = json!({"message":message,"outcome":outcome});
         }
     }
-    out.order_outcome(name, data);
+    out.order_outcome(name, data)
 }
 
 /// Native evidence that some part of the command took effect at the venue.
@@ -409,6 +426,7 @@ fn partial_effects(error: &Value) -> bool {
         })
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,9 +434,52 @@ mod tests {
     async fn settled(error: Value) -> Value {
         let (out, mut sent, _) = Out::channel(1);
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
-        settle_intent(&out, "a", &id, None, 1, Err(error));
+        settle_intent(&out, "a", &id, None, 1, 0, Err(error));
         let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         frame["d"].clone()
+    }
+
+    async fn settled_ok(ids: Value, protective_legs: usize) -> Value {
+        let (out, mut sent, _) = Out::channel(1);
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        settle_intent(&out, "a", &id, None, 1, protective_legs, Ok(ids));
+        let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        frame["d"].clone()
+    }
+
+    // AGT-111 live, okx-t: a limit with an attached stopLoss completed with
+    // `[entry, stop-loss algo]` and was reported unknown although both were placed.
+    #[tokio::test]
+    async fn a_bracket_entry_followed_by_exactly_its_legs_is_placed_as_the_entry() {
+        for (ids, legs) in [
+            (json!(["entry", "sl"]), 1),
+            (json!(["entry", "sl", "tp"]), 2),
+        ] {
+            let placed = settled_ok(ids, legs).await;
+            assert_eq!(placed["outcome"], "placed", "{placed}");
+            assert_eq!(placed["venueOrderId"], "entry");
+            assert_eq!(placed["error"], Value::Null);
+        }
+        for (ids, legs) in [
+            (json!(["a", "b"]), 0),
+            (json!(["lot-1", "lot-2", "sl"]), 1),
+            (json!(["entry", "sl", "tp"]), 1),
+            // AGT-112: an entry without the leg it requested is not a whole placement.
+            (json!(["entry"]), 1),
+            (json!(["entry"]), 2),
+            (json!(["entry", "sl"]), 2),
+            (json!(["entry", ""]), 1),
+            (json!([]), 1),
+            (json!([]), 0),
+        ] {
+            let unknown = settled_ok(ids.clone(), legs).await;
+            assert_eq!(
+                unknown["outcome"], "unknown",
+                "{ids} legs {legs}: {unknown}"
+            );
+            assert_eq!(unknown["venueOrderId"], Value::Null);
+        }
+        assert_eq!(settled_ok(json!(["only"]), 0).await["outcome"], "placed");
     }
 
     #[tokio::test]
@@ -482,6 +543,7 @@ mod tests {
                 &id,
                 Some(id.as_str().unwrap()),
                 1,
+                0,
                 Err(
                     json!({"message":"𐐀".repeat(20_000),"outcome":"unknown","unused":"large".repeat(20_000)}),
                 ),

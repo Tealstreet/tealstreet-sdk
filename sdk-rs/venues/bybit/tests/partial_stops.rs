@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Owner-decided Partial TP/SL drag semantics against the shared and inverse TS contracts.
 //! Payloads follow Bybit V5 order, position and trading-stop wire records.
 mod support;
@@ -2211,7 +2212,7 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
         } else {
             let result = h.result(91).unwrap().as_ref().unwrap_err();
             assert!(
-                result.contains("a second stop may exist"),
+                result.contains("Check your open orders for a second stop"),
                 "{refusal}: {result}"
             );
         }
@@ -2589,7 +2590,7 @@ fn partial_initial_cancel_prearms_open_orders_words_for_engine_owned_failures() 
             if failure == "refused" {
                 assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
                 assert!(error.message.contains("cancel refused"), "{error:?}");
-                assert!(!error.message.contains("unknown outcome"), "{error:?}");
+                assert!(!error.message.contains("confirm"), "{error:?}");
             } else {
                 assert_eq!(
                     error.outcome,
@@ -2597,8 +2598,7 @@ fn partial_initial_cancel_prearms_open_orders_words_for_engine_owned_failures() 
                     "{error:?}"
                 );
                 assert!(
-                    error.message.contains("unknown outcome")
-                        && error.message.contains("Open Orders"),
+                    error.message.contains("confirm") && error.message.contains("open orders"),
                     "{profile:?}/{failure}: {error:?}"
                 );
             }
@@ -2683,7 +2683,7 @@ fn partial_initial_cancel_preparation_timeout_does_not_claim_an_unknown_write() 
         "{error:?}"
     );
     assert!(error.message.contains("timed out"), "{error:?}");
-    assert!(!error.message.contains("unknown outcome"), "{error:?}");
+    assert!(!error.message.contains("confirm"), "{error:?}");
     assert_eq!(error.protection, None);
     assert_eq!(
         h.engine.store().order("partial").unwrap().status,
@@ -2863,7 +2863,7 @@ fn partial_unknown_replacement_or_put_back_never_restores_or_resends() {
                 "{leg}/{status}/{reply}: {error:?}"
             );
             assert_eq!(error.protection, None, "{error:?}");
-            assert!(error.message.contains("Open Orders"), "{error:?}");
+            assert!(error.message.contains("open orders"), "{error:?}");
         }
     }
 }

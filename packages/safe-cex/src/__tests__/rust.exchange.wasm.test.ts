@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { StoreData } from '../generated/StoreData';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
@@ -689,7 +690,7 @@ describe('RustEngineExchange', () => {
           { key: 'primary-key', secret: 'primary-secret', ...secondary },
           new FrameStore(),
         ),
-    ).toThrow('secondary signing keys require a nonempty key and secret');
+    ).toThrow('The extra API credentials need both a key and secret');
     expect(transports).toBe(0);
   });
 

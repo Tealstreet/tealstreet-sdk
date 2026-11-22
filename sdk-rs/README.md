@@ -339,6 +339,11 @@ also accepts legacy revision 0/1, including revision 1 with or without financial
 tails. SDK event `id` uses execution identity when present, while `orderId`
 retains attribution. Account snapshots never consume these events. Synthetic or
 cumulative-order fills do not invent execution IDs or financial values.
+A venue whose live row is one execution passes that row's native trade/execution
+ID as `Fill.id` (AGT-83), so equal partial fills of one order stay distinct from
+a replay; host and algo consumers attribute fills by `order_id` only. Where the
+TypeScript reference emits the order ID instead, the replay gate's
+`executionId` divergence is declared in `harness/accepted-differences.json`.
 
 Financial conventions remain those of each live venue event. Hyperliquid close
 events report net realized PnL (`closedPnl - fee`) and the execution fee; opening

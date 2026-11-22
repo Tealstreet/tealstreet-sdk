@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 #![cfg(not(target_arch = "wasm32"))]
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
 use safe_cex_engine::engine::{Command, CommandId};
@@ -1098,7 +1099,7 @@ async fn nuke_sends_no_second_close_when_the_read_fails_and_names_the_position()
             assert_eq!(result["success"], false);
             let error = result["error"].as_str().unwrap();
             assert!(
-                error.contains("could not confirm the account is flat"),
+                error.contains("couldn’t confirm all positions were closed"),
                 "{error}"
             );
             assert!(error.contains("BTCUSDT"), "{error}");
@@ -1129,7 +1130,7 @@ async fn nuke_reports_not_confirmed_when_the_read_skipped_a_row() {
             assert_eq!(result["success"], false);
             let error = result["error"].as_str().unwrap();
             assert!(
-                error.contains("could not confirm the account is flat"),
+                error.contains("couldn’t confirm all positions were closed"),
                 "{error}"
             );
             assert!(error.contains("DOGEUSD_PERP"), "{error}");
@@ -1275,7 +1276,7 @@ async fn an_old_array_answer_is_not_confirmed_flat() {
                 assert_eq!(result["success"], false, "{body}");
                 let error = result["error"].as_str().unwrap();
                 assert!(
-                    error.contains("could not confirm the account is flat"),
+                    error.contains("couldn’t confirm all positions were closed"),
                     "{body}: {error}"
                 );
                 assert_eq!(port.commands.borrow().len(), 2, "no further close: {body}");
@@ -1486,10 +1487,18 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
             let result = nuke_answered(&port, "all").await.unwrap();
             let summary = result["summary"].as_str().unwrap();
             assert!(
-                summary.contains("Orders placed in the last few seconds may not be cancelled"),
+                summary.contains(
+                    "Cancellation doesn’t cover every newly placed order on this exchange."
+                ),
                 "{summary}"
             );
-            assert!(summary.contains("check open orders"), "{summary}");
+            assert!(
+                summary
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
+                "{summary}"
+            );
             assert_eq!(
                 result["warning"].as_str().map(|w| summary.ends_with(w)),
                 Some(true)
@@ -1501,7 +1510,12 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
             let error = nuke_answered(&failing, "all").await.unwrap_err();
             let message = error["message"].as_str().unwrap();
             assert!(
-                message.contains("may not be cancelled") && message.contains("check open orders"),
+                message.contains(
+                    "Cancellation doesn’t cover every newly placed order on this exchange."
+                ) && message
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
                 "{message}"
             );
 
@@ -1528,7 +1542,9 @@ async fn a_failed_account_wide_cancel_says_orders_may_remain() {
             let error = nuke_answered(&port, "all").await.unwrap_err();
             let message = error["message"].as_str().unwrap();
             assert!(
-                message.contains("including triggers and TP/SL, may remain on this venue"),
+                message.contains(
+                    "Not all orders were confirmed cancelled, including triggers and TP/SL."
+                ),
                 "{message}"
             );
         })

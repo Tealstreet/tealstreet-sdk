@@ -69,11 +69,18 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 
 Ordinary writes share the engine's mutation release domain across commands.
 Single writes have a 200ms floor, restoring the legacy transport's five-request
-budget. A plan using create-batch or cancel-batch also shares a 1200ms floor:
+budget. A plan using create-batch or cancel-batch also shares a batch floor of
+120ms per order in its largest batch, so a full ten-order batch keeps 1200ms:
 Bybit counts orders within a batch, so two commands cannot each release ten
-orders in the same second. Smaller batches and single-order fallbacks in such
-a plan conservatively use that same batch floor. Existing per-plan batch waits
-remain; unrelated reads and history's separate pacing remain unchanged.
+orders in the same second. Charging every batch the whole 1200ms paced a burst
+of one-order placements (each a one-order create-batch) at one per 1.2s, which
+users saw as DELEGATED capping their clicks (AGT-124); they now run at the 200ms
+single-write floor. A floor is set by the batch just released, so small batches
+followed at once by a full batch can briefly exceed a 10/s budget; Bybit then
+refuses only the excess orders with native `10006`, a known rejection. Single-order
+fallbacks in a batch plan share that plan's floor; an unrecognised batch leg is
+charged the full 1200ms. Existing per-plan batch waits remain; unrelated reads
+and history's separate pacing remain unchanged.
 
 The floors advance only on actual engine Claim release, not queueing or a
 response. Held work retains its original owner, credential, deadline and
@@ -193,3 +200,13 @@ Historical fills preserve the signed `execFee`: positive is a cost and negative
 is a maker rebate. The transaction-log income row uses the opposite cash-flow
 sign. Missing, empty or invalid execution fees stay absent; an explicitly
 reported zero remains zero. Timestamps, pagination and order identity are unchanged.
+
+## Stop-entry brackets (AGT-115)
+
+A trailing stop, and a stop/take-profit that closes a covering position, go to
+`/v5/position/trading-stop` with only their own price, so attached legs were dropped (both
+live, 2026-11-21). `plan_place` (and `hyro_stop`) now refuse those routes when the order
+carries a non-zero leg, failing the whole command before any write with the engine's shared
+`stop_entry_legs_refusal` copy (`HyroTrader` names Hyro). The check sits at the routing point,
+so it sees the same position the route does. A stop with no covering position goes through
+order create and keeps its legs (live: a `__stop_loss` row came back), as does `conditional`.

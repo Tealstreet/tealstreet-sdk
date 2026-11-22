@@ -291,6 +291,8 @@ order: **operational-noise suppression** (operational lines go to `cli.log`
 only — see [Output kinds](#output-kinds)), then a **5 messages / second** rate
 limit with a **10 s dedup window** on whatever remains, then readline-aware
 printing above the prompt. `print()` and the unwrapped `originalConsoleLog()`
-bypass all of this and are what command handlers use for primary output. The
+bypass all of this and are what command handlers use for primary output;
+one-shot subcommands such as `account list` and `tasks list` print through an
+equivalent path that also writes `cli.log`, so none of their lines are dropped. The
 interceptor is the main defense against runaway third-party / WebSocket
 logging shredding the prompt.

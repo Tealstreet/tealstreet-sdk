@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook } from '../../types';
 
@@ -357,7 +358,7 @@ it('returns partial batch identity through the actual Wasm host SDK Error after 
   );
   expect(failure).toBeInstanceOf(Error);
   expect(failure).toMatchObject({
-    message: 'The outcome is unknown. Check Open Orders',
+    message: 'We couldn’t confirm this change. Check your open orders before trying again.',
     partialOrderIds: ['first-accepted'],
     partialOrderCount: 1,
     totalOrderCount: 2,

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[allow(dead_code)]
 mod support;
 
@@ -5,7 +6,8 @@ use safe_cex_engine::{Action, Command, Event, Method, Outcome};
 use serde_json::{Value, json};
 use support::*;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 const TS: &str = "packages/safe-cex/src/__tests__/reference/blofin/blofin.exchange.ts";
 
@@ -386,7 +388,10 @@ fn assert_unknown_halt(h: &mut Harness, expected_writes: &[&str], index: usize, 
             .all(|row| matches!(row.result, ElementResult::NotSent { error: None }))
     );
     let guidance = ENGINE_UNKNOWN_TEXT;
-    let message_ok = error.message.contains(guidance)
+    // The composed message keeps one action, last, and no ".;" join (#3726).
+    let message_ok = error.message.contains("couldn’t confirm this change")
+        && error.message.matches("Check your open orders").count() == 1
+        && !error.message.contains(".;")
         && !error.message.to_ascii_lowercase().contains("reject")
         && !error.message.to_ascii_lowercase().contains("refused")
         && unknown.message.contains(guidance);
@@ -694,8 +699,8 @@ fn engine_sealed_unknown_batch(grouped: bool) {
         assert_eq!(h.failures.len(), 1);
         let error = &h.failures[0];
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT)
-            || error.message.contains("outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"));
+        assert!(error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
+            || error.message.contains("This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."));
         let rows = error
             .elements
             .as_ref()
@@ -705,7 +710,7 @@ fn engine_sealed_unknown_batch(grouped: bool) {
             rows[..20]
                 .iter()
                 .all(|row| matches!(&row.result, ElementResult::Unknown { error }
-            if error.message.contains(ENGINE_UNKNOWN_TEXT)))
+            if error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")))
         );
         assert!(matches!(
             rows[20].result,
@@ -715,7 +720,7 @@ fn engine_sealed_unknown_batch(grouped: bool) {
             h.actions.iter().filter(|action| matches!(action,
             Action::Notice(safe_cex_engine::Notice::Event(event))
             if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
-                && event.message.contains(ENGINE_UNKNOWN_TEXT)
+                && event.message == "We couldn’t confirm this change. Check your open orders before trying again."
                 && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
         )).count()
         };

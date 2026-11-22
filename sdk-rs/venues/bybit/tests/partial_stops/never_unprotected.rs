@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! AGT-34: an edit of a partial reduce-only TP/SL (price or size) must never end
 //! with neither the old order nor its replacement. Live Bybit answers the orderId
 //! proof read with its single row AND a non-empty `nextPageCursor`.
@@ -212,15 +213,16 @@ fn any_proof_failure_after_a_landed_cancel_still_places_the_replacement() {
         // The command's own result (what a client shows) says a second stop may exist.
         let result = h.result(91).unwrap().as_ref().unwrap_err();
         assert!(
-            result.contains("a second stop may exist") && result.contains("Open Orders"),
+            result.contains("Check your open orders for a second stop")
+                && result.contains("open orders"),
             "{shape}: {result}"
         );
         assert!(
             h.command_errors
                 .iter()
                 .any(|(command, message)| *command == 91
-                    && message.contains("Open Orders")
-                    && message.contains("[proof: axis=")),
+                    && message.contains("open orders")
+                    && message.contains("cancellation was confirmed")),
             "{shape}: the unconfirmed cancel is named: {:?}",
             h.command_errors
         );
@@ -690,7 +692,7 @@ fn the_second_stop_warning_survives_a_long_venue_refusal() {
     );
     let shown: String = message.chars().take(512).collect();
     assert!(
-        shown.contains("a second stop may exist") && shown.contains("Open Orders"),
+        shown.contains("Check your open orders for a second stop") && shown.contains("open orders"),
         "{shown}"
     );
     assert!(
@@ -701,7 +703,7 @@ fn the_second_stop_warning_survives_a_long_venue_refusal() {
             .chars()
             .take(512)
             .collect::<String>()
-            .contains("a second stop may exist")
+            .contains("Check your open orders for a second stop")
     );
 }
 

@@ -174,7 +174,7 @@ blocks or fails a trading path.
 
 ## HTTP routes
 
-- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner}`. The last field carries aggregates only: no account, symbol or key ever appears here.
+- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner, typedOutcomes}`. `remoteSigner` and `typedOutcomes` carry aggregates only: no account, symbol or key ever appears here. `typedOutcomes` is described under "Order audit stage timings".
 - **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` added.
 - **`OPTIONS`** on the three routes above returns 204 with the existing public CORS headers.
 - **WebSocket upgrade:** accepted on `/` and on `/account`.
@@ -590,6 +590,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `subscribeOHLCV`, `unsubscribeOHLCV` | `data: {symbol, interval}`. Becomes the engine candle subscription |
 | `sendSnapshot` | Sends a full `snapshot: true` frame to this socket |
 | `set-publish-interval` | `data: {publishIntervalMs}`. Changes public output cadence for this connection’s admitted `accountName` only |
+| `set-active-ticker-symbols` | `data: {activeTickerSymbols}`. Changes which ticker rows this connection’s admitted `accountName` receives; `null` is the full table |
 | `updatePositions` | Answered `updatePositions:done`. Positions are already engine-owned |
 | `exec`, `chaser:*`, `twap:*` | v1 replies `error` "not supported on the Rust exchange server". These are TS worker features; the post-cutover work is listed below |
 
@@ -621,6 +622,33 @@ Re-snapshots and settings rebuilds retain this connection's interval; retired
 pumps only finish pending replies and cannot publish cached public state.
 A resumed socket starts at the absent/default rate until its own init or live
 update reapplies a preference. No preference is inherited from a shared account.
+
+### Connection-local ticker selection
+
+`init.d.activeTickerSymbols` is optional (AGT-107). Absent or `null` keeps the
+venue's full ticker table; a list of 0–1024 strings of 1–128 bytes sends only the
+rows whose `symbol` is listed (unknown symbols match nothing). Anything else
+refuses the init before attaching, with closed `kind`
+`invalid_active_ticker_symbols` and `activeTickerSymbolsRefused:true` (plus
+`initRefused`/`forceToast`). The live form is `{t:"msg",d:{op:
+"set-active-ticker-symbols",accountName,data:{activeTickerSymbols}}}`; it refuses
+with that kind, `not_admitted` or `auth_expired` and keeps the current selection.
+It is unrelated to the engine's `tuning.activeTickerSymbols` venue-subscription
+hint: like the interval it is never an engine setting, fingerprint field or
+another holder's preference, and the public pseudo-account may set it too.
+
+The pump's `Publisher` keeps the selected source rows, in source order, as their
+own small ticker table. Its `TICKERS` replaces the client's whole table whenever
+the source table is replaced or the selection changes; per-row diffs become
+`TICKER_DELTAS` on output rows and observations are remapped to them. Books,
+private sections and every unpaced frame without ticker sections keep their
+original bytes. An unpaced frame with ticker sections is split into its other
+sections, then the selected tickers, then any `STATUS`, so readiness still follows
+public rows. A changed selection publishes at once rather than at the pacing
+deadline; clearing it sends the full table once, after which source frames pass
+through again. Before the snapshot nothing publishes. Resumed sockets and
+re-snapshots follow the interval's rules. An older server ignores the init field
+and logs the live op as an ignored account op, so clients need no capability gate.
 
 ### Server to client
 
@@ -1040,6 +1068,45 @@ shared typed decoder (`HostInput`). Module: `hosts/server/src/methods.rs`
 - **Cutover set:** `placeOrder(s)`, `placeOrderWithClientOrderId`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`, `cancelAllOrders`, `findOrderByClientOrderId`, `setLeverage`, `fetchLeverage`, `setMarginType`, `setPositionMode`, `fetchPositionMode`, `nuke*`, `fetchOHLCV`, `fetchPublicTrades`, the `fetchHistorical*` reads and `fetchIncomeHistory*`.
 - **Unknown methods:** they fail with `callMethod:done` `{error: {name:'UnsupportedMethod'}}`. They never get a guessed command.
 - **No retries:** the server never retries a trading command. A disconnect never cancels or replays a write, which is FrameServer's orphan rule.
+
+### Order audit stage timings
+
+Every `order audit` line for a Session command (`callMethod` writes and each
+`order.submit`/`order.action` leg) carries `stages_us`: integer microseconds
+from the first stamp, keyed by stage name. Stamps are monotonic `Instant`s taken
+on this box; a stage that was never observed is omitted, never estimated.
+
+| Stage | Stamped when |
+|---|---|
+| `received` | `Session::handle` starts on the socket frame |
+| `admitted` | the command passed Session checks and holds its command ID |
+| `queued` | the account engine's command queue accepted it, after any load wait; a busy or refused handoff has no `queued` |
+| `sent` | its native write identity arrives (`commandProgress`); the engine releases it immediately before that write's I/O, so only placements carry it |
+| `responded` | the native `done` completion arrives |
+| `replied` | the outcome frame is accepted by the socket's output queue |
+
+The origin is `received`, or `admitted` when no frame preceded the command.
+Non-final cancel-all legs have no `replied`: the group answers once. Algo
+(`origin: "algo"`), nuke and preflight refusal lines carry no stages. Stamps
+add only numbers to the existing allowlisted line; no new identifier is logged.
+
+`scripts/audit-latency.sh` (read-only, needs `jq`) reports per-venue
+p50/p95/p99 in milliseconds for `admit` (received to admitted), `queue`
+(admitted to queued), `release` (queued to sent), `venue` (sent to responded),
+`dispatch` (queued to responded, for every write), `reply` and `total`, plus
+each venue's count of all audit lines, stamped or not, and of those whose
+result outcome is `unknown`:
+
+```bash
+journalctl CONTAINER_NAME=exchange-server -o cat --since '1 hour ago' \
+  | sdk-rs/hosts/server/scripts/audit-latency.sh
+```
+
+Router time is not on this line: the box sees a frame only once the router has
+forwarded it. `/health` `typedOutcomes` counts every typed `order.outcome` and
+`order.actionOutcome` this process handed to a live output (`settled`) and
+those that were `unknown`; the box-wide unknown rate is their ratio since
+`bootId` changed. Box Slack alerting stays deferred, so nothing alerts on it yet.
 
 ## Accounts and runtime (fe7lgm)
 

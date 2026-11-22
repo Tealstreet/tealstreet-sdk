@@ -253,8 +253,21 @@ encoding compares the exact original intent bits; foreign/numeric IDs and idless
 `placed` remain rejected. Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
-and admission waits), a never-forwarded queued intent becomes `notSent`; an
-in-flight or acknowledged intent becomes `unknown`. Direct close also changes
+and admission waits), a never-forwarded queued intent becomes `notSent`. Handed-off
+intents wait longer, because ten seconds is admission's budget, not a delivery
+bound (AGT-125: bursts reported unknown at 10 s and were then placed). An in-flight
+(`sending`) intent waits for its router/box receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s): both admit a key until it is 10 s old by
+their own clocks, with 5 s future tolerance, so an ACK can land after 10 s. An
+`acknowledged` intent is admitted and may be waiting in the venue's write queue,
+so it waits for its outcome until `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS` (160 s): the
+receipt bound + the engine's 120 s `DEFAULT_COMMAND_WAIT_MS` + a 20 s venue write.
+That age never proves the box is done: a write plan's own span can exceed the command
+wait (a 32-target Bybit cancel), so hosts must not infer "not placed" from it (NX gates
+those verdicts on the outcome or a disconnect). Each then becomes
+`unknown`; a late ACK returns an `unknown` intent to `acknowledged`. These windows
+never resend or extend admission. `delegatedOutboxBounds.test.ts` pins them to the
+Rust limits. Direct close also changes
 those retained entries to unknown immediately while fencing later work and callbacks.
 Disconnect/replacement makes
 in-flight and acknowledged intents unknown immediately. The synchronous send
@@ -382,10 +395,14 @@ continuations keep their captured registration/deadline fences. The complete
 closed payload/outcome contract is in `docs/plans/callers/delegated-action-frames.md`.
 LOCAL and COSIGNED method forwarding is unchanged.
 
-Algo parameter amendment is deferred: `chaser:amend` and `twap:amend` remain
-unsupported, including before durable SDK enqueue. Existing TWAP pause/resume
-keeps the same job and schedule; never emulate amendment with automatic
-stop-and-replace.
+AGT-97 uses shared Rust `chaser:amend`/`twap:amend` with typed v1 `{id,update}`.
+Chaser permits limitPrice/offset/maxAttempts; TWAP permits intervalMs/remainingSlices.
+Side, symbol and quantity stay immutable and unsupported fields refuse by name
+before enqueue. Finished/stopping/unknown jobs refuse. A LOCAL amendment the
+worker cannot dispatch reports an error like a start (`USER_ALGORITHM_REQUESTS`). Edits affect the next
+attempt/slice, preserve in-flight children and never stop-and-replace; receipts
+retain conservative algo uncertainty. See the caller contract for exact units,
+future-quantity repartition, restore semantics and mobile enablement.
 
 The hosted typed v1 action decoder rejects duplicate object keys recursively in
 placement orders, close orders, scheduling values and algo payloads before they
@@ -2689,3 +2706,11 @@ contains only the events that could be uniquely assigned (possibly zero).
 Source rows outside all reconstructed intervals remain in that separate list.
 This is an in-memory result, not a new durable income-ingestion axis or a repair
 of previously persisted rows. Reported-position PnL/fee conventions are unchanged.
+
+## Notification wording
+
+SDK error and warning text is shown verbatim by web/mobile. Use calm wording
+without transport/runtime jargon; unconfirmed orders still say to check open
+orders before trying again. Locale summary fragments retain check-before-retry guidance for consumers
+that show them directly. Presenters with a shared footer avoid repeating it. Cross Trade holds recognize both the previous and current wording
+while server, WASM and retained notices move through the rollout.

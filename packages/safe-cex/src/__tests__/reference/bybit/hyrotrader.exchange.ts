@@ -13,6 +13,7 @@ import {
 } from '../../../exchanges/bybit/bybit.types';
 import { PositionMode } from '../../../types';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, stopEntryLegsRefusal } from '../stopEntryLegs';
 import { BybitExchange } from './bybit.exchange';
 import { getBybitResponseMeta } from './bybit.response';
 import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recovery';
@@ -351,9 +352,13 @@ export class HyrotraderExchange extends BybitExchange {
     if ('bybitBbo' in opts || 'bybitSlippageToleranceTicks' in opts) {
       this.fail('HyroTrader does not support Bybit BBO or TickSize slippage controls');
     }
+    // AGT-115: runs for single and batch placement before any write.
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('HyroTrader'));
   }
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     orders.forEach((order) => this.validateOrderCapabilities(order));
     const key = hyroSubmissionKey(orders);

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Signed request/acknowledgement behavior, independent of a live account.
 use account_support::signer;
 use safe_cex_engine::model::*;
@@ -670,7 +671,7 @@ fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
-        if error.message.contains("uncertain") && error.outcome == Some(Outcome::Unknown))
+        if error.message.contains("confirm") && error.outcome == Some(Outcome::Unknown))
     ));
     assert!(
         !actions
@@ -691,7 +692,7 @@ fn unconfirmed_consensus_success_is_not_executed_success() {
     );
     assert!(e.drain_actions().any(
         |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
-        if error.message.contains("uncertain") && error.outcome == Some(Outcome::Unknown))
+        if error.message.contains("confirm") && error.outcome == Some(Outcome::Unknown))
     ));
 }
 #[test]

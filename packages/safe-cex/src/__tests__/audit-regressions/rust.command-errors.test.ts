@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 // @vitest-environment node
 import type { Transport, VenueErrorDetail, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -188,7 +189,7 @@ it.each(['placement', 'cancellation'] as const)(
   'retains BloFin %s facts and attempted counts at the JS boundary after Unknown',
   async (intent) => {
     const r = await fixture('blofin');
-    const message = 'The outcome is unknown. Check Open Orders';
+    const message = 'We couldn’t confirm this change. Check your open orders before trying again.';
     const orderIds = intent === 'placement' ? ['accepted'] : [];
     const detail: VenueErrorDetail = {
       message,
@@ -283,7 +284,7 @@ it.each([false, true])(
     const r = await fixture('bitunix');
     const detail: VenueErrorDetail = {
       message:
-        'Bitunix cancellation not acknowledged for every order; replacement was not placed; The outcome is unknown. Check Open Orders',
+        'Bitunix cancellation not acknowledged for every order; replacement was not placed; We couldn’t confirm this change. Check your open orders before trying again.',
       kind: 'network',
       outcome: 'unknown',
       venueCode: '10001',
@@ -350,7 +351,7 @@ it.each([false, true])(
 it('preserves Bybit applied cancel counts when one target is canceled and the other is unknown', async () => {
   const r = await fixture('bybit');
   const detail: VenueErrorDetail = {
-    message: 'The outcome is unknown. Check Open Orders',
+    message: 'We couldn’t confirm this change. Check your open orders before trying again.',
     kind: 'venueUnavailable',
     outcome: 'unknown',
     venueCode: '10016',
@@ -362,7 +363,7 @@ it('preserves Bybit applied cancel counts when one target is canceled and the ot
         index: 1,
         status: 'unknown',
         error: {
-          message: 'The outcome is unknown. Check Open Orders',
+          message: 'We couldn’t confirm this change. Check your open orders before trying again.',
           kind: 'venueUnavailable',
           outcome: 'unknown',
           venueCode: '10016',
@@ -713,9 +714,9 @@ it.each([false, true])('OKX applied cancel keeps Unknown counts without created 
   const events = vi.fn();
   r.exchange.on('engine-event', events);
   const nativeIds = algo ? ['91', '92'] : ['1', '2'];
-  const unknownMessage = `OKX cancellation target ${nativeIds[1]}: Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders`;
+  const unknownMessage = `OKX cancellation target ${nativeIds[1]}: Cancellation timed out (code 51412). We couldn’t confirm this change. Check your open orders before trying again.`;
   const detail: VenueErrorDetail = {
-    message: 'Cancellation timed out (code 51412). The outcome is unknown. Check Open Orders',
+    message: 'Cancellation timed out (code 51412). We couldn’t confirm this change. Check your open orders before trying again.',
     kind: 'timeout',
     outcome: 'unknown',
     venueCode: '51412',

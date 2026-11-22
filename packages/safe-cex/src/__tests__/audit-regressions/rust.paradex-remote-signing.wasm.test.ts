@@ -229,7 +229,7 @@ describe('Paradex remote signing over the structured ws-auth wire', () => {
         tagged('orderCreate', { target: 'ordersBatchSingle', order: projected(vector, vector.orders[1], 'c1') }),
       ],
     ]) {
-      await expect(call(signer, work(statement, 1)), name).rejects.toThrow('Remote signing request refused');
+      await expect(call(signer, work(statement, 1)), name).rejects.toThrow('This request couldn’t be signed');
       await expect(
         keyed.exchange.signWsAuth({
           id: name,
@@ -265,7 +265,7 @@ describe('Paradex remote signing over the structured ws-auth wire', () => {
     const vector = vectors.cases[0];
     const keyed = device(vector);
     const { signer } = server(vector, keyed);
-    await expect(call(signer, work(auth(vector), 1))).rejects.toThrow('Remote signing request refused');
+    await expect(call(signer, work(auth(vector), 1))).rejects.toThrow('This request couldn’t be signed');
     const other = device(vector, { key: `0x${'0'.repeat(63)}2` });
     const rebound = createRemoteSignerProvider({
       exchangeName: 'paradex',
@@ -281,7 +281,7 @@ describe('Paradex remote signing over the structured ws-auth wire', () => {
       identities: { primary: { ...IDENTITY, publicCredential: vector.address } },
     });
     await call(rebound, bindKey);
-    await expect(call(rebound, bindKey)).rejects.toThrow('Remote signing request refused');
+    await expect(call(rebound, bindKey)).rejects.toThrow('This request couldn’t be signed');
   });
 });
 

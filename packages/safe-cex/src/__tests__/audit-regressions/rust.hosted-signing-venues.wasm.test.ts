@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { ExchangeName, ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
@@ -56,7 +57,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       expect(() => new RustEngineExchange(name, options, new FrameStore())).toThrow(
-        `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+        `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
       );
     }
     expect(clock).not.toHaveBeenCalled();
@@ -166,7 +167,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
         engine.signHttpRequest(request('krakenspot', 'https://api.kraken.com', '/0/private/Balance')),
       ).resolves.toEqual({
         id: 'sign-1',
-        error: 'Hosted HTTP signing is unsupported in this build',
+        error: 'This version doesn’t support signing requests on the server',
       });
       await expect(
         engine.signWsAuth({
@@ -175,7 +176,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
           exchangeName: 'krakenspot',
           wsAuth: { toSign: 'x', outputFormat: 'hex' },
         }),
-      ).resolves.toEqual({ id: 'ws-1', error: 'Hosted WS auth signing is unsupported in this build' });
+      ).resolves.toEqual({ id: 'ws-1', error: 'This version doesn’t support signing in to the account on the server' });
     } finally {
       engine.dispose();
     }

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Local order lookup results require genuine shared entry custody.
 mod support;
 use safe_cex_engine::model::{Interval, Order, OrderSide, OrderStatus, OrderType, TimeInForce};
@@ -172,7 +173,7 @@ fn invalid_clocks(read: Local) {
                     &local(&mut engine, now, 501, read),
                     501,
                     ErrorKind::InvalidInput,
-                    "Invalid request context",
+                    "This request couldn’t be prepared",
                 );
                 native(&local(&mut engine, NOW, 501, read), 501, read);
                 assert_eq!(engine.store().orders(), &[order()]);
@@ -265,7 +266,7 @@ fn capacity(read: Local) {
             &local(&mut engine, NOW, 600, read),
             600,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         engine.http_preparation_failed(
             NOW + 1.,
@@ -320,7 +321,10 @@ fn public_only_uncached_refusal_requires_caller_root_capacity() {
         assert_eq!(error.outcome, None);
         if full {
             assert_eq!(actions.len(), 1);
-            assert_eq!(error.message, "Engine request capacity reached");
+            assert_eq!(
+                error.message,
+                "The account’s request queue is full. Try again shortly."
+            );
             assert_eq!(error.kind, Some(ErrorKind::Internal));
         } else {
             assert_eq!(error.message, "Hyperliquid account identity is missing");

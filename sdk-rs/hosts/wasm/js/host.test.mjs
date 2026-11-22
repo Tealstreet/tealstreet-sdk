@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
@@ -14,7 +15,7 @@ test('capabilities are read from the engine once and outlive disposal', () => {
   assert.equal(reads, 1);
   const disposed = new EngineHost({ capabilities: () => '{}' }, {});
   disposed.dispose();
-  assert.throws(() => disposed.capabilities(), /disposed/);
+  assert.throws(() => disposed.capabilities(), /The account was closed/);
 });
 
 for (const entry of ['legacy', 'actions', 'bytes']) {
@@ -480,7 +481,7 @@ test('already queued timers cannot enter the engine after disposal', () => {
   for (const callback of callbacks) callback();
   host.start();
   host.flush();
-  assert.throws(() => host.snapshot(), /disposed/);
+  assert.throws(() => host.snapshot(), /The account was closed/);
   assert.equal(calls, 0);
 });
 
@@ -535,7 +536,7 @@ test('health counters are parsed from the engine and unavailable after disposal'
   assert.deepEqual(host.health(), { wsOpened: 2, httpFailures: 1 });
   assert.equal(new EngineHost({}, {}).health(), undefined);
   host.dispose();
-  assert.throws(() => host.health(), /engine disposed/);
+  assert.throws(() => host.health(), /The account was closed/);
 });
 
 test('a terminal startup failure reaches the host with its structured detail', () => {

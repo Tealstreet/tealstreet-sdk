@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Cached reads still require genuine command admission, without transport work.
 mod support;
 use safe_cex_engine::model::Interval;
@@ -171,7 +172,10 @@ fn capacity_refusal(read: Cached) {
                 .expect_err("cached reads require bounded admission");
             assert_eq!(error.kind, Some(ErrorKind::Internal));
             assert_eq!(error.outcome, None);
-            assert_eq!(error.message, "Engine request capacity reached");
+            assert_eq!(
+                error.message,
+                "The account’s request queue is full. Try again shortly."
+            );
             engine.http_preparation_failed(
                 NOW + 1.,
                 peers[0],
@@ -219,7 +223,7 @@ fn cached_leverage_invalid_clocks_refuse_then_allow_finite_id_reuse() {
             .expect_err("cached leverage must admit the genuine entry clock");
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, None);
-        assert_eq!(error.message, "Invalid request context");
+        assert_eq!(error.message, "This request couldn’t be prepared");
         native_result(
             &cached(&mut engine, NOW, 700, Cached::Leverage),
             700,
@@ -240,7 +244,7 @@ fn cached_tier_invalid_clocks_refuse_then_allow_finite_id_reuse() {
             .expect_err("cached tier must admit the genuine entry clock");
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, None);
-        assert_eq!(error.message, "Invalid request context");
+        assert_eq!(error.message, "This request couldn’t be prepared");
         native_result(
             &cached(&mut engine, NOW, 701, Cached::Tier),
             701,

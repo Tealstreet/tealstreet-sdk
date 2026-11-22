@@ -484,16 +484,25 @@ fn two_spot_rows(contexts: serde_json::Value) -> String {
     .to_string()
 }
 
-fn partial_spot_read_keeps_its_bound(contexts: serde_json::Value) {
+fn assert_unavailable(actions: &[Action], command: u32) {
+    let terminal = results(actions, command);
+    assert_eq!(terminal.len(), 1, "one immediate stalled-discovery refusal");
+    let error = terminal[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "Market metadata unavailable");
+    assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
+    no_candles(actions);
+}
+
+// AGT-168: this used to wait out the 2100 bound and time out. Merged spot is best
+// effort and is never re-read after a usable answer, so nothing can resolve the row;
+// it now refuses at once as unavailable, still never as `Market not found`.
+fn partial_spot_read_is_unavailable_not_missing(contexts: serde_json::Value) {
     let (mut e, spot) = merged_spot_read();
     let actions = ask(&mut e, 1100., 116, "UBTC/USDC", Some(1000));
-    let timer = actions
-        .iter()
-        .find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms == 2100. => Some(*timer),
-            _ => None,
-        })
-        .expect("original candle discovery deadline");
+    assert!(
+        results(&actions, 116).is_empty(),
+        "waits while spot is read"
+    );
     reply(&mut e, 1200., &spot, &two_spot_rows(contexts));
     let actions = prepared_now(&mut e);
     assert!(
@@ -501,11 +510,7 @@ fn partial_spot_read_keeps_its_bound(contexts: serde_json::Value) {
         "valid sibling publishes"
     );
     assert!(e.store().market("UBTC/USDC").is_none());
-    assert!(
-        results(&actions, 116).is_empty(),
-        "publication does not establish the requested row's absence"
-    );
-    no_candles(&actions);
+    assert_unavailable(&actions, 116);
 
     let known = request(
         &ask(&mut e, 1201., 117, "UETH/USDC", None),
@@ -514,20 +519,11 @@ fn partial_spot_read_keeps_its_bound(contexts: serde_json::Value) {
     assert!(known.body.as_deref().unwrap().contains(r#""coin":"@22""#));
     reply(&mut e, 1202., &known, "[]");
     assert_eq!(results(&prepared_now(&mut e), 117), vec![Ok("[]".into())]);
-    e.handle(2100., Event::TimerFired { timer });
-    let actions = prepared_now(&mut e);
-    let terminal = results(&actions, 116);
-    assert_eq!(terminal.len(), 1);
-    assert_eq!(
-        terminal[0].as_ref().unwrap_err().kind,
-        Some(ErrorKind::Timeout)
-    );
-    no_candles(&actions);
 }
 
 #[test]
 fn merged_spot_publication_does_not_settle_a_malformed_requested_context() {
-    partial_spot_read_keeps_its_bound(serde_json::json!([
+    partial_spot_read_is_unavailable_not_missing(serde_json::json!([
         {"coin":"@11", "midPx":"malformed"},
         {"coin":"@22", "midPx":"3000", "markPx":"3001"}
     ]));
@@ -535,7 +531,7 @@ fn merged_spot_publication_does_not_settle_a_malformed_requested_context() {
 
 #[test]
 fn merged_spot_publication_does_not_settle_a_missing_requested_context() {
-    partial_spot_read_keeps_its_bound(serde_json::json!([
+    partial_spot_read_is_unavailable_not_missing(serde_json::json!([
         {"coin":"@22", "midPx":"3000", "markPx":"3001"}
     ]));
 }
@@ -584,7 +580,8 @@ fn an_excluded_merged_spot_row_refuses_while_its_sibling_is_unresolved() {
     );
     assert_missing(&prepared_now(&mut e), 121);
     assert_missing(&ask(&mut e, 1201., 122, "UBTC/USDC", None), 122);
-    assert!(results(&ask(&mut e, 1202., 123, "UETH/USDC", Some(1000)), 123).is_empty());
+    // AGT-168: the unresolved sibling used to wait; nothing re-reads merged spot.
+    assert_unavailable(&ask(&mut e, 1202., 123, "UETH/USDC", Some(1000)), 123);
 }
 
 fn standalone_spot_read(eth_price: &str) -> Engine<Hyperliquid> {
@@ -657,4 +654,83 @@ fn standalone_spot_usable_sibling_reads_while_unresolved_row_keeps_its_deadline(
         Some(ErrorKind::Timeout)
     );
     no_candles(&actions);
+}
+
+fn fire_timers_until(e: &mut Engine<Hyperliquid>, actions: &[Action], until: f64) -> Vec<Action> {
+    let mut fired = Vec::new();
+    for action in actions {
+        if let Action::SetTimer { timer, at_ms } = action
+            && *at_ms <= until
+        {
+            e.handle(*at_ms, Event::TimerFired { timer: *timer });
+            fired.extend(prepared_now(e));
+        }
+    }
+    fired
+}
+
+/// AGT-168: one failed `perpDexs` read left every HIP-3 row pending for the life
+/// of the engine, so each HIP-3 read waited its full bound and timed out.
+#[test]
+fn a_transient_dex_list_failure_retries_until_hip3_rows_load() {
+    let (mut e, dexes) = partial();
+    assert!(results(&ask(&mut e, 1100., 130, "XYZ|GOLD-PERP", None), 130).is_empty());
+    e.handle(
+        1150.,
+        Event::HttpFailed {
+            request: dexes.id,
+            error: "synthetic network loss",
+        },
+    );
+    let actions = prepared_now(&mut e);
+    assert!(
+        results(&actions, 130).is_empty(),
+        "a failure is not absence"
+    );
+    no_candles(&actions);
+    let retried = request(
+        &fire_timers_until(&mut e, &actions, 1150. + 1000.),
+        "perpDexs",
+    );
+    reply(&mut e, 2200., &retried, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    assert!(dex.body.as_deref().unwrap().contains("xyz"));
+    reply(&mut e, 2300., &dex, DEX);
+    let actions = prepared_now(&mut e);
+    let waited = request(&actions, "candleSnapshot");
+    reply(&mut e, 2400., &waited, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 130), vec![Ok("[]".into())]);
+
+    let later = request(
+        &ask(&mut e, 2500., 131, "XYZ|GOLD-PERP", None),
+        "candleSnapshot",
+    );
+    reply(&mut e, 2501., &later, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 131), vec![Ok("[]".into())]);
+}
+
+#[test]
+fn a_malformed_dex_list_retries_until_it_parses() {
+    let (mut e, dexes) = partial();
+    reply(&mut e, 1150., &dexes, r#"[null,{"unexpected":"fixture"}]"#);
+    let actions = prepared_now(&mut e);
+    let retried = request(
+        &fire_timers_until(&mut e, &actions, 1150. + 1000.),
+        "perpDexs",
+    );
+    reply(&mut e, 2200., &retried, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    reply(&mut e, 2300., &dex, DEX);
+    prepared_now(&mut e);
+    let candles = request(
+        &ask(&mut e, 2400., 132, "XYZ|GOLD-PERP", None),
+        "candleSnapshot",
+    );
+    assert!(
+        candles
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""coin":"xyz:GOLD""#)
+    );
 }

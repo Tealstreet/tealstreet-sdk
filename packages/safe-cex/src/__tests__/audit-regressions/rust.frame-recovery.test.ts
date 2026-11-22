@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type {
   CallableMethodsInWorker,
   EngineSnapshot,
@@ -707,7 +708,7 @@ describe('Rust frame recovery callers', () => {
       data: { requestId: expect.any(String), result, success: true },
     });
     expect(postMessage.mock.calls[0][0].data.result).toBe(result);
-    await expect(main.fetchEngineSnapshot()).rejects.toThrow('Engine snapshots are unavailable');
+    await expect(main.fetchEngineSnapshot()).rejects.toThrow('Account snapshots aren’t available for this exchange');
     handler.dispose();
     worker.dispose();
     main.dispose();

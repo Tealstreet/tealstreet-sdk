@@ -26,6 +26,9 @@ does not validate every lot against native minimum quantities or notionals.
 A venue refusal can therefore follow an accepted order. USD-M/PM attached algo
 orders retain their whole intent quantity, and derivatives can continue later batches
 after a definite per-row refusal. These are known legacy partial-placement paths.
+One former path is closed: a USD-M/PM `conditional` or trailing entry with an attached
+stop-loss/take-profit used to be placed without its legs, and now refuses before any
+write with the engine's shared `stop_entry_legs_refusal` copy (AGT-115).
 
 | Audit path | Legacy reference evidence | Verdict |
 | --- | --- | --- |
@@ -86,7 +89,7 @@ attribution is kept separately from the engine's aggregate physical classificati
 The journal adds no filter validation, reallocation, retries or dispatch decisions.
 It also reaches engine-owned unproven HTTP seals through the existing read-only
 capture hook. Venue-authored Unknown failures and warnings include exactly
-`The outcome is unknown. Check Open Orders`; engine-owned seals retain their
+`We couldn’t confirm this change. Check your open orders before trying again.`; engine-owned seals retain their
 existing canonical wording. Existing cancellation and amendment paths continue
 to use their physical lifecycle journal.
 

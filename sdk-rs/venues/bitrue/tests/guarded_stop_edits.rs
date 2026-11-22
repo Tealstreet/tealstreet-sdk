@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Stop and take-profit edits Bitrue makes by cancel and replace: the cancel
 //! is checked again at its final claim, proven terminal before the
 //! replacement, and a definitely refused replacement puts the original back once.
@@ -225,8 +226,11 @@ fn a_cancel_never_proven_is_unknown_with_no_replacement() {
         }
         let error = failure(&h);
         assert!(
-            error.message.contains("could not be confirmed")
-                && error.message.contains("Check Open Orders"),
+            error.message.contains("wasn’t confirmed")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "lost {lost}: {}",
             error.message
         );
@@ -336,8 +340,11 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         h.reply_status(restore, status, "");
         let error = failure(&h);
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("re-place"),
             "{status}: {}",
             error.message
@@ -511,10 +518,10 @@ fn ordinary_amend_refusal_wire_and_outcome_match_master() {
     for case in expected["cases"].as_array_mut().unwrap() {
         if let Some(message) = case["error"]["message"].as_str()
             && message
-                == "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                == "HTTP response does not prove the write outcome. We couldn’t confirm this change. Check your open orders before trying again."
         {
             case["error"]["message"] = serde_json::json!(
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
         }
     }

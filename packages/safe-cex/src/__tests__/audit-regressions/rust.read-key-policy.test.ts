@@ -123,7 +123,7 @@ describe('the unchanged default', () => {
     expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
     expect(JSON.parse(optionsJson)).not.toHaveProperty('readCredentialsValid');
     expect(() => new LocalSignerSetup({ ...base, secondary_key: 'read' }, {}))
-      .toThrow('Rust engine secondary signing keys require a nonempty key and secret');
+      .toThrow('The extra API credentials need both a key and secret');
   });
 
   it('keeps bridge records and setup policy unchanged for undeclared families', () => {

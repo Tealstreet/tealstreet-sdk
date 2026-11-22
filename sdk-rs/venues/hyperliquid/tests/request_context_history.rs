@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original caller-root controls; venue history is still native on this stack.
 mod support;
 use safe_cex_engine::request_context::{HttpAction, RoutingIntent};
@@ -603,7 +604,7 @@ fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
         if output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command: owner, ..}) if *owner == command)) {
             assert_eq!(
                 failure(&output, command).message,
-                "Engine request capacity reached"
+                "The account’s request queue is full. Try again shortly."
             );
             break;
         }
@@ -638,7 +639,10 @@ fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
     }
     let error = failure(&output, OWNER);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(error.outcome.is_none());
     assert_eq!(
         markers(&output, OWNER),

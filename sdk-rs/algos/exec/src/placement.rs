@@ -94,6 +94,11 @@ pub(crate) fn parse(
     };
     let price = operand("at")?;
     let stop = operand("stop")?;
+    let reduce = args.iter().any(|a| a == "reduce");
+    // AGT-135: the engine refuses a reduce-only order with a stop-loss (AGT-120); say so here.
+    if reduce && stop.is_some() {
+        return Err(safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.into());
+    }
     let best = args.iter().any(|a| a.eq_ignore_ascii_case("best"));
     if price.is_none() && !best && stop.is_none() {
         for tok in args.iter().skip(size_index + 1) {
@@ -111,7 +116,7 @@ pub(crate) fn parse(
             price: price.clone(),
             best,
             stop: stop.clone(),
-            reduce: args.iter().any(|a| a == "reduce"),
+            reduce,
             post_only: args.iter().any(|a| a == "po"),
         })
         .collect())

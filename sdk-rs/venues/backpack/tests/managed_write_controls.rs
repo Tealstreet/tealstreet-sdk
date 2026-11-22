@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{Action, Command, ErrorKind, Event, Notice, Outcome, VenueError};
@@ -128,11 +129,9 @@ fn hosted_unknown_child_halts_and_keeps_native_metadata_and_ids()
         );
         let out = actions(&mut e);
         let error = failure(&out, 722);
-        assert!(
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(error.venue_code.as_deref(), Some("NATIVE_UNAVAILABLE"));
         assert_eq!(error.venue_message.as_deref(), Some("native detail"));

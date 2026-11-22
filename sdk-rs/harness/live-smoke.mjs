@@ -187,7 +187,10 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
       for (;;) {
         try { await command({ op: 'cancelSymbolOrders', symbol }); break; }
         catch (error) {
-          if (error?.outcome !== 'notSent' || !String(error?.message).includes('reconcile before cancel-all') ||
+          // Rule 5: retain the old/new display aliases for this existing NotSent wait.
+          const waitingForRead = String(error?.message).includes('reconcile before cancel-all') ||
+            String(error?.message) === 'An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.';
+          if (error?.outcome !== 'notSent' || !waitingForRead ||
               performance.now() >= end) { failed = true; break; }
           await sleep(25);
         }

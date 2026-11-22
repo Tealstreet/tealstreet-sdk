@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original unsigned public-trade history controls on unchanged native source.
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
@@ -610,7 +611,10 @@ fn genuine_capacity_then_exact_two_slot_recovery_preserves_peers() {
     no_next(&a);
     let error = terminal(&a).unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::NotSent));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(e.venue().peers.len(), 255);
     retire(&mut e);
     assert_eq!(e.venue().peers.len(), 254);

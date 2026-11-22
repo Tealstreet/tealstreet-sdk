@@ -1,0 +1,135 @@
+name: NX caller integration
+
+on:
+  workflow_call:
+    secrets:
+      NX_INTEGRATION_DEPLOY_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nx-integration-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  nx:
+    name: NX / SDK PR callers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HUSKY: '0'
+      TURBO_TELEMETRY_DISABLED: '1'
+      TURBO_CACHE: 'local:rw'
+      DISABLE_SENTRY_SOURCEMAP_UPLOAD: 'true'
+    steps:
+      - name: Require a maintainer branch and read-only NX credential
+        env:
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          NX_KEY: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
+        run: |
+          test "$SAME_REPO" = true || { printf '%s\n' 'NX integration requires a maintainer branch'; exit 1; }
+          test -n "$NX_KEY" || { printf '%s\n' 'NX_INTEGRATION_DEPLOY_KEY is not configured'; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      # Gate scripts come from the merge ref this workflow file came from: a PR
+      # branch cut before they existed has none at its head.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: gate
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      # NX master is resolved once, by this checkout; every later step uses this tree.
+      - uses: actions/checkout@v7
+        with:
+          repository: Tealstreet/tealstreet-next
+          ref: master
+          path: nx
+          ssh-key: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
+          persist-credentials: false
+      - name: Record the resolved NX baseline
+        id: baseline
+        run: |
+          sha=$(git -C nx rev-parse HEAD)
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          printf 'NX baseline: %s\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply the exact SDK PR delta with conflict refusal
+        env:
+          SDK_BASE: ${{ github.event.pull_request.base.sha }}
+          SDK_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node gate/.github/scripts/nx-overlay.mjs "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/nx" "$SDK_BASE" "$SDK_HEAD"
+      - name: Check NX reader and release-runbook contracts
+        run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" readers node --test --test-concurrency=1 infra/tofu/exchange-services/scripts/unrolled-server-changes.test.mjs scripts/rust-release-runbook.test.mjs scripts/fetch-rust-beta-wasm.test.mjs
+      - name: Install frozen NX dependencies
+        run: |
+          corepack enable
+          node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" install corepack yarn install --frozen-lockfile --non-interactive --network-timeout 600000 --cache-folder "$RUNNER_TEMP/nx-yarn"
+          corepack yarn global add bun@1.4.3
+          corepack yarn global bin >> "$GITHUB_PATH"
+      - name: Check NX SDK diagnostic consumers
+        run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" consumers node --test scripts/sdk-diagnostic-observability.test.cjs
+      - name: Select strict published assets or fresh candidate builds
+        id: wasm
+        run: node gate/.github/scripts/nx-integration.mjs plan "$GITHUB_WORKSPACE/nx"
+      - name: Install pinned candidate WASM tools
+        if: ${{ steps.wasm.outputs.mode == 'candidate' }}
+        env:
+          WASM_BINDGEN_VERSION: ${{ steps.wasm.outputs.bindgen }}
+        working-directory: nx/sdk-rs
+        run: |
+          rustup show
+          cargo install --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --root "$RUNNER_TEMP/nx-tools"
+          printf '%s\n' "$RUNNER_TEMP/nx-tools/bin" >> "$GITHUB_PATH"
+          bash harness/install-binaryen.sh
+      - name: Prepare all beta families from verified candidate inputs
+        id: prepared
+        run: node gate/.github/scripts/nx-integration.mjs prepare "$GITHUB_WORKSPACE/nx" "$RUNNER_TEMP/nx-prepared.json"
+      - name: Prepare NX internal packages and Next types
+        id: types
+        run: |
+          node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" internal corepack yarn turbo run build --filter='@tealstreet/ui-tokens' --filter='@tealstreet/theme' --filter='@tealstreet/ui'
+          node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" typegen corepack yarn workspace tealstreet-next typegen
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" typecheck corepack yarn typecheck:ci
+      - name: Lint
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" lint corepack yarn lint:ci
+      # NX's own PR selector over the overlay commit: workspace-only deltas test
+      # their affected graph, and any shared input keeps the full suite. The
+      # full run took most of this job's ~42 minutes on every SDK PR push.
+      - name: Select the NX test scope
+        id: scope
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        env:
+          NX_BASELINE: ${{ steps.baseline.outputs.sha }}
+        # GITHUB_* defaults cannot be overridden through `env:`; set them on the command.
+        run: |
+          GITHUB_EVENT_NAME=pull_request TURBO_SCM_BASE="$NX_BASELINE" \
+            node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" scope node scripts/ci-affected.mjs
+          grep -q '^suffix=' "$GITHUB_OUTPUT"
+      - name: Test
+        if: ${{ !cancelled() && steps.scope.outcome == 'success' }}
+        env:
+          TURBO_SCM_BASE: ${{ steps.baseline.outputs.sha }}
+          NX_TEST_SUFFIX: ${{ steps.scope.outputs.suffix }}
+        # Mirrors NX ci.yaml: affected mode always adds script-api-core's registry gates.
+        run: |
+          echo "NX test scope: ${NX_TEST_SUFFIX:-full}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$NX_TEST_SUFFIX" = :affected ]; then
+            node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" script-api-core corepack yarn workspace @tealstreet/script-api-core test-ci
+          fi
+          node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" test corepack yarn "test:ci${NX_TEST_SUFFIX}"
+      - name: Build
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node gate/.github/scripts/nx-integration.mjs build "$GITHUB_WORKSPACE/nx" "$RUNNER_TEMP/nx-prepared.json"

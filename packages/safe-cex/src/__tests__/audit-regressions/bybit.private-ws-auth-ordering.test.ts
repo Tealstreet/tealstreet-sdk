@@ -81,7 +81,7 @@ const makeSigner = (mode: 'ok' | 'resolves-error' | 'throws') => ({
     (_request: Record<string, any>) =>
       new Promise<{ wsAuthSignature?: string; error?: string }>((resolve, reject) => {
         setTimeout(() => {
-          if (mode === 'throws') reject(new Error('Remote signer unavailable — WebSocket disconnected (gone <5s)'));
+          if (mode === 'throws') reject(new Error('Signing isn’t available for this account — WebSocket disconnected (gone <5s)'));
           else if (mode === 'resolves-error') resolve({ error: 'browser closed mid-signature' });
           else resolve({ wsAuthSignature: 'deadbeef' });
         }, 5);
@@ -198,7 +198,7 @@ describe('bybit private sockets authenticate before they subscribe', () => {
         const reported = String((parent.emitAndLogError as any).mock.calls[0][0]);
         expect((parent.emitAndLogError as any).mock.calls[0][1]).toBeUndefined();
         expect(reported.toLowerCase()).not.toContain('auth failed');
-        expect(reported).toMatch(mode === 'throws' ? /Remote signer unavailable/ : /signing unavailable/);
+        expect(reported).toMatch(mode === 'throws' ? /Signing isn’t available for this account/ : /signing unavailable/);
       },
     );
 

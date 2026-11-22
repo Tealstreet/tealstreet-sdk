@@ -58,6 +58,13 @@ import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
 import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { markBinanceOrdersCanceled } from './binance.utils';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import { BinancePMPrivateWebsocket } from './binancepm.ws-private';
@@ -883,21 +890,33 @@ export class BinancePMExchange extends BaseExchange {
     if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const payloads = this.formatCreateOrder(opts);
     return await this.placeOrderBatch(payloads);
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     return await this.placeOrderBatch(requests);
   };
 
   private formatCreateOrder = (opts: PlaceOrderOpts) => {
+    // AGT-115: as Rust's shared Binance `format_order`, refuse a trailing or conditional
+    // entry with attached legs. Both placement paths format every order before writing.
+    if (
+      (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) &&
+      stopEntryWithAttachedLegs(opts)
+    ) {
+      this.rejectPreflight(stopEntryLegsRefusal('Binance'));
+    }
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.TrailingStopLoss) {
       return this.formatCreateTrailingStopLossOrder(opts);
