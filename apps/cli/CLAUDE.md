@@ -95,7 +95,7 @@ local `build.sh disrupt` of the tagged commit.
 
 `src/rust-engine.ts` initializes the Rust browser artifact from a Bun embedded
 asset; standalone binaries need no workspace or extracted WASM file. Build
-`corepack yarn -s rust:build-wasm` from the repository root before source runs
+`corepack yarn -s rust:build-wasm (on the tealstreet-sdk mirror; in tealstreet-next run `bash sdk-rs/harness/build.sh`)` from the repository root before source runs
 or CLI compilation. The `*.wasm.test.ts` consumer tests (selected with
 `SAFE_CEX_WASM_TESTS=1`) prove saved-account native state and an isolated
 compiled binary. They do not prove live routing or authenticated connectivity.
