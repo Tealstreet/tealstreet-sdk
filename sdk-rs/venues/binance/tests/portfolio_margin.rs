@@ -575,3 +575,45 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
     assert_eq!(param(&put_back.url, "activationPrice"), None);
     assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
 }
+
+/// AGT-175: `/papi/v1/um/positionRisk` lists only symbols with a position, so a flat
+/// symbol's leverage comes from `/papi/v1/um/symbolConfig`; without it the order form
+/// never learns a leverage and refuses every order with "Leverage not loaded".
+#[test]
+fn a_flat_pm_symbol_reads_its_leverage_from_symbol_config() {
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        portfolio_margin: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond(
+        "/papi/v1/um/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+    );
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond(
+        "/papi/v1/um/symbolConfig",
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":21,"maxNotionalValue":"1000000"}]"#,
+    );
+    h.respond("/papi/v1/balance", 200, BALANCE);
+    h.respond("/papi/v1/um/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
+    let store = h.engine.store();
+    assert!(store.loaded().positions);
+    let setting = store.setting("BTCUSDT").expect("flat symbol has a leverage setting");
+    assert_eq!(setting.leverage, 21.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+}
