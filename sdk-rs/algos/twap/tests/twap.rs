@@ -801,6 +801,88 @@ fn slices_stay_on_the_market_step_and_sum_to_the_size() {
     );
 }
 
+/// Every slice and wake of a market TWAP with no chaser, settling each placement as placed.
+fn run_market_twap(view: &View, overrides: Value) -> (TwapBook, String, Vec<f64>, Vec<TwapEffect>) {
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, mut effects) = start(&mut book, &mut env, view, overrides);
+    let (mut sent, mut all) = (Vec::new(), Vec::new());
+    for _ in 0..20 {
+        sent.extend(market_amounts(&effects));
+        let settled = settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["o".into()]));
+        all.extend(effects);
+        all.extend(settled);
+        let Some(at) = book.wake_at() else { break };
+        env.advance(at - env.now);
+        effects = book.wake(&mut env, view);
+    }
+    (book, id, sent, all)
+}
+
+#[test]
+fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice() {
+    // AGT-144: 1 contract over 10 slices on a 1-contract market. Each 0.1 slice used to
+    // floor to 0 and ride on the next, so the 10th slice sold the whole position at once.
+    // As in legacy TS (the venue refuses each raw slice), every slice is a visible refusal.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) = run_market_twap(
+        &view,
+        json!({ "size": 1.0, "ordersCount": 10, "side": "sell", "reduceOnly": true }),
+    );
+    assert!(sent.is_empty(), "a sub-step TWAP placed {sent:?}");
+    let refusals: Vec<_> = logs(&effects)
+        .into_iter()
+        .filter(|message| message.contains("not sent"))
+        .collect();
+    assert_eq!(refusals.len(), 10, "{:?}", logs(&effects));
+    assert_eq!(
+        refusals[0],
+        "TWAP BTCUSDT slice 1 of 10 not sent: 0.1 is below the market's amount step of 1"
+    );
+    assert!(
+        logs(&effects).contains(&"TWAP BTCUSDT ended with 0 of 10 slices placed"),
+        "{:?}",
+        logs(&effects)
+    );
+}
+
+#[test]
+fn a_refused_sub_step_slice_is_not_carried_into_a_later_slice() {
+    // 2.7 over 3 slices of 0.9 on a 1-unit step: carrying each refusal would have sent 1 + 1.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) =
+        run_market_twap(&view, json!({ "size": 2.7, "ordersCount": 3 }));
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        logs(&effects)
+            .iter()
+            .filter(|message| message.contains("not sent"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn whole_step_slices_still_carry_their_fraction_and_never_exceed_a_step_over_plan() {
+    // 3.9 over 3 slices of 1.3: each places 1 and its 0.3 rides on; no slice grows by a step.
+    let view = View {
+        step: Some(1.0),
+        ..View::default()
+    };
+    let (_, _, sent, effects) =
+        run_market_twap(&view, json!({ "size": 3.9, "ordersCount": 3 }));
+    assert_eq!(sent, [1.0, 1.0, 1.0], "{sent:?}");
+    assert!(sent.iter().all(|size| *size < 1.3 + 1.0));
+    assert!(sent.iter().sum::<f64>() <= 3.9);
+    assert!(!logs(&effects).iter().any(|message| message.contains("not sent")));
+}
+
 #[test]
 fn timeout_next_cancels_without_market() {
     let (mut book, mut env, view, _, chaser) =
