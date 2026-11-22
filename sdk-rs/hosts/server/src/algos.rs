@@ -43,6 +43,10 @@ pub enum AlgoInput {
     Dispose {
         reason: String,
         stopped: Option<StopNotice>,
+        /// Set when the box itself stops the account (drain, SIGTERM, a forced
+        /// user drain): each running chase and TWAP gets an `algoStopped`, and
+        /// this is sent once they are queued.
+        server_stopped: Option<oneshot::Sender<()>>,
     },
 }
 
@@ -1424,8 +1428,10 @@ pub(crate) async fn run_with_identity(
                         (port.emit)(frame);
                     }
                 }
-                Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
-                None => break Some(("account disposed".to_owned(), None)),
+                Some(AlgoInput::Dispose { reason, stopped, server_stopped }) => {
+                    break Some((reason, stopped, server_stopped));
+                }
+                None => break Some(("account disposed".to_owned(), None, None)),
             },
         }
     };
@@ -1433,12 +1439,18 @@ pub(crate) async fn run_with_identity(
         tap.end();
     }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
-    let (disposing, reason, stopped) = match ended {
-        Some((reason, stopped)) => (true, reason, stopped),
-        None => (false, "algo feed ended".to_owned(), None),
+    let (disposing, reason, stopped, server_stopped) = match ended {
+        Some((reason, stopped, server_stopped)) => (true, reason, stopped, server_stopped),
+        None => (false, "algo feed ended".to_owned(), None, None),
     };
     let reason = reason.as_str();
     let (chasers, twaps) = (book.active_chasers(), twap.active_twaps(&name));
+    if let Some(queued) = server_stopped {
+        if let Some(tap) = &tap {
+            tap.server_stopped(&chasers, &twaps);
+        }
+        let _ = queued.send(());
+    }
     let stop_notices = |may_rest| stop_notices(&chasers, &twaps, &port.store(), reason, may_rest);
     let (stopped_notices, unsettled_notices) = (stop_notices(false), stop_notices(true));
     // Kept for the next init only when no browser is there to be sent them.

@@ -568,7 +568,12 @@ timer. Retention arms `delegated.shutdownWarning` in its own task and emits
 `delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
 emits `fill`, `orderRejected` (chase/TWAP placements only, through
 `RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
-the key owner's life. Build notifications only through
+the key owner's life. The gateway only logs the drain's `serverRestart`
+shutdown, so a box stop (drain, SIGTERM, forced user drain) marks its
+`AlgoInput::Dispose` with `server_stopped`, and the host sends one
+`algoStopped`/`serverRestart` per chase and TWAP it cuts short (AGT-119); the
+drain waits for those before its bounded flush. Never re-promote the
+resident-level shutdown to cover them. Build notifications only through
 `HostNotification::build` and the typed `Fields` setters: never add a free-text
 field, and never log the token. Contract, env vars and delivery semantics:
 `DELEGATED_RETENTION.md` "Host notification lane".

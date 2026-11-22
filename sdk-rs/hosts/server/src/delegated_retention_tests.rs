@@ -147,7 +147,9 @@ async fn delegated_retention_outlives_resume_grace_then_stops_and_revokes_existi
             assert!(inbox.try_recv().is_err());
             advance(Duration::from_secs(1)).await;
             match inbox.try_recv() {
-                Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                Ok(crate::algos::AlgoInput::Dispose {
+                    reason, stopped, ..
+                }) => {
                     assert_eq!(reason, "no client for 48 h");
                     assert!(stopped.is_some());
                 }
@@ -800,6 +802,7 @@ async fn delegated_stopped_accounts_retire_without_rearming_retention() {
                     "the server is restarting",
                     None,
                     DisposalCause::Stopped,
+                    None,
                 );
                 if live {
                     assert_eq!(
@@ -828,7 +831,7 @@ async fn stopped_delegated_resumable_holders_release_only_their_own_incarnation(
             let registry = tests::registry();
             let (account, _inbox) = resident(&registry, "A");
             hold(&account, 8);
-            registry.stop(&account, "stopped", None, DisposalCause::Stopped);
+            registry.stop(&account, "stopped", None, DisposalCause::Stopped, None);
 
             registry.park("wrong-owner".into(), "B", vec![(account.clone(), 7)]);
             assert!(registry.holds(&account, 7));
@@ -1099,7 +1102,9 @@ async fn retained_proxy_expiry_stops_and_erases_with_a_recorded_reason() {
             registry.release(&account, 7, Disposal::SocketClosed);
             advance(Duration::from_secs(11)).await;
             match inbox.try_recv() {
-                Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                Ok(crate::algos::AlgoInput::Dispose {
+                    reason, stopped, ..
+                }) => {
                     assert_eq!(reason, "proxy-token-expired");
                     assert!(stopped.is_some());
                 }
@@ -1167,7 +1172,9 @@ async fn admitted_proxy_reconnect_replaces_the_old_expiry_without_affecting_anot
             registry.release(&account, 9, Disposal::SocketClosed);
             advance(Duration::from_secs(61)).await;
             match inbox.try_recv() {
-                Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                Ok(crate::algos::AlgoInput::Dispose {
+                    reason, stopped, ..
+                }) => {
                     assert_eq!(reason, "proxy-token-expired");
                     assert!(stopped.is_some());
                 }
@@ -1366,6 +1373,10 @@ fn keyless_resident(
 
 fn notifying_registry() -> (Arc<Registry>, crate::host_notify::HostNotifier) {
     let notifier = crate::host_notify::HostNotifier::unstarted();
+    (registry_notifying(&notifier), notifier)
+}
+
+fn registry_notifying(notifier: &crate::host_notify::HostNotifier) -> Arc<Registry> {
     let mut registry = Registry::new(
         EngineThreads::start(1).unwrap(),
         Duration::from_millis(1),
@@ -1373,7 +1384,7 @@ fn notifying_registry() -> (Arc<Registry>, crate::host_notify::HostNotifier) {
     )
     .with_host_notify(Some(notifier.clone()));
     testing::set_join_admission(&mut registry, false);
-    (Arc::new(registry), notifier)
+    Arc::new(registry)
 }
 
 fn notified(notifier: &crate::host_notify::HostNotifier) -> Vec<serde_json::Value> {
@@ -1512,6 +1523,122 @@ async fn drain_reports_server_restart_for_delegated_residents_with_client_presen
                 1
             );
             drop(held);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn drain_flushes_the_algo_stops_each_host_queues_after_its_dispose() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let delivered = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let transport: crate::host_notify::Transport = {
+                let delivered = delivered.clone();
+                Arc::new(move |body: Vec<u8>| {
+                    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    delivered
+                        .lock()
+                        .unwrap()
+                        .extend(body["notifications"].as_array().unwrap().iter().cloned());
+                    Box::pin(std::future::ready(crate::host_notify::Delivery::Accepted))
+                })
+            };
+            let notifier = crate::host_notify::HostNotifier::with_transport(transport);
+            let registry = registry_notifying(&notifier);
+            let (account, mut inbox) = keyless_resident(&registry, "running-user", false);
+            // Stands in for the algo host, which queues its stops after the Dispose
+            // arrives, by when the resident-level notice may already be delivered.
+            let host = {
+                let (notifier, scope) = (notifier.clone(), account.notify_scope());
+                tokio::task::spawn_local(async move {
+                    let Some(crate::algos::AlgoInput::Dispose {
+                        server_stopped: Some(queued),
+                        ..
+                    }) = inbox.recv().await
+                    else {
+                        panic!("a drain marks its Dispose as a box stop");
+                    };
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    use crate::host_notify::*;
+                    notifier.push(HostNotification::build(
+                        &scope,
+                        Draft {
+                            kind: Kind::AlgoStopped,
+                            severity: Severity::Warning,
+                            natural_key: "chase\0c1".into(),
+                            fields: Fields::default()
+                                .algo(Algo::Chase)
+                                .verb(Verb::Stopped)
+                                .cause(Cause::ServerRestart),
+                            deadline: None,
+                            collapse: None,
+                        },
+                        false,
+                        now_ms(),
+                    ));
+                    queued.send(()).unwrap();
+                })
+            };
+            registry.drain(Duration::from_millis(100)).await;
+            let kinds: Vec<_> = delivered
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|notification| notification["kind"].clone())
+                .collect();
+            assert_eq!(
+                kinds,
+                [
+                    serde_json::json!("delegated.shutdown"),
+                    serde_json::json!("algoStopped")
+                ],
+                "the drain returns only once the host's stops are delivered"
+            );
+            host.await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn only_box_stops_mark_their_dispose_for_algo_stop_notices() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, _notifier) = notifying_registry();
+            let (forced, mut forced_inbox) = keyless_resident(&registry, "forced-user", false);
+            // Absent: nothing but the forced drain owns the account and its signer,
+            // which the host's DELEGATED check reads weakly.
+            registry.release(&forced, 7, Disposal::SocketClosed);
+            let signer = Arc::downgrade(&forced.signing);
+            drop(forced);
+            let started = registry.start_user_drain("forced-user", 1);
+            let _force = registry
+                .force_user_drain("forced-user", started["drainId"].as_str().unwrap())
+                .unwrap();
+            let Some(crate::algos::AlgoInput::Dispose {
+                server_stopped: Some(queued),
+                ..
+            }) = forced_inbox.recv().await
+            else {
+                panic!("a forced user drain marks its Dispose as a box stop");
+            };
+            advance(Duration::from_millis(100)).await;
+            assert!(
+                signer.upgrade().is_some(),
+                "the signer outlives the Dispose until the host has queued its stops"
+            );
+            queued.send(()).unwrap();
+            advance(Duration::from_millis(100)).await;
+            assert!(signer.upgrade().is_none(), "then the account is released");
+            let (expired, mut expired_inbox) = keyless_resident(&registry, "away-user", false);
+            registry.release(&expired, 7, Disposal::SocketClosed);
+            advance(RETAIN).await;
+            assert!(matches!(
+                expired_inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose {
+                    server_stopped: None,
+                    ..
+                })
+            ));
         })
         .await;
 }
