@@ -54,10 +54,12 @@ jobs:
           ssh-key: ${{ secrets.NX_INTEGRATION_DEPLOY_KEY }}
           persist-credentials: false
       - name: Record the resolved NX baseline
+        id: baseline
         run: |
           sha=$(git -C nx rev-parse HEAD)
           [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
           printf 'NX baseline: %s\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -103,9 +105,31 @@ jobs:
       - name: Lint
         if: ${{ !cancelled() && steps.types.outcome == 'success' }}
         run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" lint corepack yarn lint:ci
-      - name: Test
+      # NX's own PR selector over the overlay commit: workspace-only deltas test
+      # their affected graph, and any shared input keeps the full suite. The
+      # full run took most of this job's ~42 minutes on every SDK PR push.
+      - name: Select the NX test scope
+        id: scope
         if: ${{ !cancelled() && steps.types.outcome == 'success' }}
-        run: node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" test corepack yarn test:ci
+        env:
+          NX_BASELINE: ${{ steps.baseline.outputs.sha }}
+        # GITHUB_* defaults cannot be overridden through `env:`; set them on the command.
+        run: |
+          GITHUB_EVENT_NAME=pull_request TURBO_SCM_BASE="$NX_BASELINE" \
+            node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" scope node scripts/ci-affected.mjs
+          grep -q '^suffix=' "$GITHUB_OUTPUT"
+      - name: Test
+        if: ${{ !cancelled() && steps.scope.outcome == 'success' }}
+        env:
+          TURBO_SCM_BASE: ${{ steps.baseline.outputs.sha }}
+          NX_TEST_SUFFIX: ${{ steps.scope.outputs.suffix }}
+        # Mirrors NX ci.yaml: affected mode always adds script-api-core's registry gates.
+        run: |
+          echo "NX test scope: ${NX_TEST_SUFFIX:-full}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$NX_TEST_SUFFIX" = :affected ]; then
+            node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" script-api-core corepack yarn workspace @tealstreet/script-api-core test-ci
+          fi
+          node gate/.github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" test corepack yarn "test:ci${NX_TEST_SUFFIX}"
       - name: Build
         if: ${{ !cancelled() && steps.types.outcome == 'success' }}
         run: node gate/.github/scripts/nx-integration.mjs build "$GITHUB_WORKSPACE/nx" "$RUNNER_TEMP/nx-prepared.json"

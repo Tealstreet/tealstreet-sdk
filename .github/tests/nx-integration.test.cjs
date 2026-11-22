@@ -30,9 +30,17 @@ test('NX master is resolved by one checkout and no credential persists', () => {
 
 test('caller validation includes reader/runbook checks and actual NX gates', () => {
   for (const command of ['unrolled-server-changes.test.mjs', 'rust-release-runbook.test.mjs',
-    'yarn typecheck:ci', 'yarn lint:ci', 'yarn test:ci', 'nx-integration.mjs build']) {
+    'yarn typecheck:ci', 'yarn lint:ci', 'yarn "test:ci${NX_TEST_SUFFIX}"', 'nx-integration.mjs build']) {
     assert.ok(workflow.includes(command), `missing actual gate: ${command}`);
   }
+});
+
+test('the NX test scope comes only from NX\'s own selector, and a missing suffix fails the step', () => {
+  assert.ok(workflow.includes('GITHUB_EVENT_NAME=pull_request TURBO_SCM_BASE="$NX_BASELINE"'));
+  assert.ok(workflow.includes('scope node scripts/ci-affected.mjs'));
+  assert.ok(workflow.includes(`grep -q '^suffix=' "$GITHUB_OUTPUT"`));
+  assert.ok(workflow.includes('NX_TEST_SUFFIX: ${{ steps.scope.outputs.suffix }}'));
+  assert.ok(workflow.includes('if [ "$NX_TEST_SUFFIX" = :affected ]; then'));
 });
 
 test('the NX diagnostic consumer runs only after its TypeScript/Jotai dependencies are installed', () => {
@@ -197,8 +205,9 @@ test('private checkout credential is restricted to admission and the NX checkout
   assert.doesNotMatch(workflow, /upload-artifact|cache\/save|--push\b|id-token:/);
   assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.match(workflow, /--cache-folder "\$RUNNER_TEMP\/nx-yarn"/);
-  for (const name of ['Typecheck', 'Lint', 'Test', 'Build']) {
-    assert.match(workflow, new RegExp(`- name: ${name}\\n        if: \\$\\{\\{ !cancelled\\(\\) && steps\\.types\\.outcome == 'success' \\}\\}`));
+  // Test runs after the scope step, which itself runs only after a successful types step.
+  for (const [name, step] of [['Typecheck', 'types'], ['Lint', 'types'], ['Select the NX test scope', 'types'], ['Test', 'scope'], ['Build', 'types']]) {
+    assert.match(workflow, new RegExp(`- name: ${name}\\n(?:        id: \\w+\\n)?        if: \\$\\{\\{ !cancelled\\(\\) && steps\\.${step}\\.outcome == 'success' \\}\\}`));
   }
 });
 
