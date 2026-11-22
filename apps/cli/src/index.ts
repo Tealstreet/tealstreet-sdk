@@ -331,14 +331,16 @@ accountCmd
   .command('exchanges')
   .description('List supported exchanges')
   .action(() => {
-    console.log(chalk.cyan('\nSupported Exchanges:\n'));
+    // One write: the logger rate-limits console calls to 5/s and hid most of this list.
+    const lines = [chalk.cyan('\nSupported Exchanges:\n')];
     for (const info of getSupportedExchangeAccountCredentialSchemas()) {
-      console.log(chalk.bold(`  ${info.exchange.padEnd(15)} ${info.displayName}`));
-      console.log(chalk.gray(`                 Required: ${info.requiredFields.join(', ')}`));
+      lines.push(chalk.bold(`  ${info.exchange.padEnd(15)} ${info.displayName}`));
+      lines.push(chalk.gray(`                 Required: ${info.requiredFields.join(', ')}`));
       if (info.optionalFields.length > 0) {
-        console.log(chalk.gray(`                 Optional: ${info.optionalFields.join(', ')}`));
+        lines.push(chalk.gray(`                 Optional: ${info.optionalFields.join(', ')}`));
       }
     }
+    console.log(lines.join('\n'));
   });
 
 // Import accounts from file
