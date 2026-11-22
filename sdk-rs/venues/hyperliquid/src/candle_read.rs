@@ -142,3 +142,21 @@ impl Hyperliquid {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AGT-168: a catalogue that nothing is reading or retrying never resolves,
+    /// so a read for one of its missing rows must not wait out its bound.
+    #[test]
+    fn a_catalogue_with_no_discovery_running_holds_no_read() {
+        let mut venue = Hyperliquid::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        });
+        venue.core_discovery_incomplete = false;
+        venue.perps_published = true;
+        assert!(!venue.candle_discovery_pending("XYZ|GOLD-PERP"));
+    }
+}

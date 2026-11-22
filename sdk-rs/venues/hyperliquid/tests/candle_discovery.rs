@@ -658,3 +658,61 @@ fn standalone_spot_usable_sibling_reads_while_unresolved_row_keeps_its_deadline(
     );
     no_candles(&actions);
 }
+
+fn fire_timers_until(e: &mut Engine<Hyperliquid>, actions: &[Action], until: f64) -> Vec<Action> {
+    let mut fired = Vec::new();
+    for action in actions {
+        if let Action::SetTimer { timer, at_ms } = action
+            && *at_ms <= until
+        {
+            e.handle(*at_ms, Event::TimerFired { timer: *timer });
+            fired.extend(prepared_now(e));
+        }
+    }
+    fired
+}
+
+/// AGT-168: one failed `perpDexs` read left every HIP-3 row pending for the life
+/// of the engine, so each HIP-3 read waited its full bound and timed out.
+#[test]
+fn a_transient_dex_list_failure_retries_until_hip3_rows_load() {
+    let (mut e, dexes) = partial();
+    assert!(results(&ask(&mut e, 1100., 130, "XYZ|GOLD-PERP", None), 130).is_empty());
+    e.handle(
+        1150.,
+        Event::HttpFailed {
+            request: dexes.id,
+            error: "synthetic network loss",
+        },
+    );
+    let actions = prepared_now(&mut e);
+    assert!(results(&actions, 130).is_empty(), "a failure is not absence");
+    no_candles(&actions);
+    let retried = request(&fire_timers_until(&mut e, &actions, 1150. + 1000.), "perpDexs");
+    reply(&mut e, 2200., &retried, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    assert!(dex.body.as_deref().unwrap().contains("xyz"));
+    reply(&mut e, 2300., &dex, DEX);
+    let actions = prepared_now(&mut e);
+    let waited = request(&actions, "candleSnapshot");
+    reply(&mut e, 2400., &waited, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 130), vec![Ok("[]".into())]);
+
+    let later = request(&ask(&mut e, 2500., 131, "XYZ|GOLD-PERP", None), "candleSnapshot");
+    reply(&mut e, 2501., &later, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 131), vec![Ok("[]".into())]);
+}
+
+#[test]
+fn a_malformed_dex_list_retries_until_it_parses() {
+    let (mut e, dexes) = partial();
+    reply(&mut e, 1150., &dexes, r#"[null,{"unexpected":"fixture"}]"#);
+    let actions = prepared_now(&mut e);
+    let retried = request(&fire_timers_until(&mut e, &actions, 1150. + 1000.), "perpDexs");
+    reply(&mut e, 2200., &retried, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    reply(&mut e, 2300., &dex, DEX);
+    prepared_now(&mut e);
+    let candles = request(&ask(&mut e, 2400., 132, "XYZ|GOLD-PERP", None), "candleSnapshot");
+    assert!(candles.body.as_deref().unwrap().contains(r#""coin":"xyz:GOLD""#));
+}
