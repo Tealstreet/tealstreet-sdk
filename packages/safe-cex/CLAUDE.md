@@ -257,7 +257,11 @@ intent ID, sequence and fingerprint binding. Restore validates that evidence and
 reissues the runtime brand; legacy or mismatched `notSent` claims become unknown,
 including their unsupported error outcome. No-evidence clock-epoch/deadline
 expiry of a restored queued record is also unknown rather than proof of no send.
-Restored ambiguous handoffs are unknown. Once enqueue persistence succeeds, temporary unavailability while
+Restored ambiguous handoffs are unknown. Rows persist `boxAcknowledged`: true once the box ACKed
+the intent, so after a relaunch hosts still never settle it "not placed" or "did not apply" from age
+or lookup misses (AGT-163). Rows written before the field restore it as true when they were
+`sending`, `acknowledged` or `unknown`, and false otherwise. No row version changes, and older readers ignore it.
+Once enqueue persistence succeeds, temporary unavailability while
 preparing handoff retains that queued intent and its ID for retry. The NX router
 supplies durable deduplication and queue cancellation;
 see `docs/plans/callers/delegated-order-frames.md`. This module does not select a

@@ -77,6 +77,11 @@ export interface DelegatedIntent extends OutboxScope {
   notSentEvidence?: StoredDelegatedNotSentEvidence;
   noHandoffEvidence?: StoredDelegatedNoHandoffEvidence;
   cancelPending: boolean;
+  /**
+   * The box ACKed this intent and may still execute it after a relaunch (AGT-163), so hosts never
+   * settle it "not placed" from age or lookup misses. Absent only on rows written before this field.
+   */
+  boxAcknowledged?: boolean;
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
   venueOrderId?: string;
@@ -361,6 +366,7 @@ export class DelegatedOutbox {
           typeof row.params !== 'object' ||
           Array.isArray(row.params) ||
           typeof row.cancelPending !== 'boolean' ||
+          (row.boxAcknowledged !== undefined && typeof row.boxAcknowledged !== 'boolean') ||
           (row.callerSuppliedIntentId !== undefined && row.callerSuppliedIntentId !== true) ||
           (row.retentionExpired !== undefined && (row.retentionExpired !== true || row.state !== 'unknown')) ||
           box.intents.has(row.intentId)
@@ -390,6 +396,8 @@ export class DelegatedOutbox {
           : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
         if (row.fingerprint !== fingerprint) throw new Error('Persisted fingerprint differs');
         box.sequence = Math.max(box.sequence, row.seq);
+        // An older row may have been ACKed before going unknown; assume the box holds it.
+        row.boxAcknowledged ??= ['sending', 'acknowledged', 'unknown'].includes(row.state);
         // JSON cannot carry the private runtime brand. Validate and reissue it.
         if (row.state === 'notSent' || row.state === 'refused') {
           const proof = storedNotSentEvidence(row);
@@ -623,6 +631,7 @@ export class DelegatedOutbox {
       createdAt,
       state: 'queued',
       cancelPending: false,
+      boxAcknowledged: false,
     };
     if (!Number.isFinite(row.createdAt) || row.createdAt < 0)
       return Promise.reject(new Error('Invalid monotonic clock'));
@@ -707,7 +716,10 @@ export class DelegatedOutbox {
       } else if (parsed.t === 'order.ack' && typeof data.received === 'boolean') {
         if (!['queued', 'sending', 'unknown', 'notSent', 'canceled'].includes(row.state)) return;
         if (row.retentionExpired && data.received) return;
-        if (data.received) row.state = 'acknowledged';
+        if (data.received) {
+          row.state = 'acknowledged';
+          row.boxAcknowledged = true;
+        }
         else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
         delete row.retentionExpired;
       } else if (
@@ -774,7 +786,10 @@ export class DelegatedOutbox {
       // whole-intent refusal, including evidence revalidated after restore.
       if (data.received && row.state === 'notSent' && storedNotSentEvidence(row)) return false;
       if (row.retentionExpired && data.received) return false;
-      if (data.received) row.state = 'acknowledged';
+      if (data.received) {
+        row.state = 'acknowledged';
+        row.boxAcknowledged = true;
+      }
       else markDelegatedNotSent(row, { kind: 'routerRefusal', receipt: 'ack', received: false });
       delete row.retentionExpired;
       return true;

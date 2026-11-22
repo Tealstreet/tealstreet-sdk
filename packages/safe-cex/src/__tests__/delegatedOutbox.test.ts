@@ -2429,6 +2429,28 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
       },
     );
 
+    it('a restored box-ACKed action stays unknown and keeps boxAcknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect({
+        ...f.connection(),
+        capabilities: {
+          delegatedOrderFramesV1: true,
+          delegatedOrderLedgerV1: true,
+          delegatedOrderActionsV1: true,
+          delegatedOrderActionLedgerV1: true,
+        },
+      });
+      const id = await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-1', symbol: 'BTCUSDT' } });
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'sending', boxAcknowledged: false });
+      await box.receive(c, response(id, 'order.actionAck', { version: 1, received: true }));
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    });
+
     it('a restored never-ACKed handoff stays unknown without boxAcknowledged', async () => {
       const f = fixture();
       const box = await DelegatedOutbox.open(f.options);
