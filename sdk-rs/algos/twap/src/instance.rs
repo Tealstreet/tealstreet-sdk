@@ -18,6 +18,16 @@ const SLICE_CHASER_MAX_ATTEMPTS: u32 = 1000;
 /// How often a timed-out slice looks whether its chase has settled.
 const SLICE_SETTLE_POLL_MS: f64 = 250.0;
 
+/// A slice's size on the market's step.
+enum SliceSize {
+    Whole(f64),
+    /// Below one amount step: the venue would refuse it.
+    BelowStep {
+        size: f64,
+        step: f64,
+    },
+}
+
 /// A slice placement awaiting [`TwapInstance::placement_settled`].
 #[derive(Clone, Debug)]
 struct PendingSlice {
@@ -256,19 +266,24 @@ impl TwapInstance {
     }
 
     /// `size` floored to the market's step; the rest rides on the next slice.
-    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> f64 {
+    /// A slice below one step is a [`SliceSize::BelowStep`] and carries nothing:
+    /// riding it on let sub-step slices pile into one last-slice order (AGT-144).
+    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> SliceSize {
         let Some(step) = view
             .amount_step(self.options.symbol())
             .filter(|step| step.is_finite() && *step > 0.0)
         else {
-            return size;
+            return SliceSize::Whole(size);
         };
         let steps = (size / step + 1e-9).floor();
+        if steps < 1.0 && size > 0.0 {
+            return SliceSize::BelowStep { size, step };
+        }
         let whole = multiply(steps, step);
         if let Some(next) = self.state.orders_sizes.first_mut() {
             *next = add(*next, subtract(size, whole));
         }
-        whole
+        SliceSize::Whole(whole)
     }
 
     fn set_status(&mut self, status: TwapStatus) {
@@ -391,6 +406,7 @@ impl TwapInstance {
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
         let order_size = order_size.map(|size| self.whole_steps(size, view));
+        let slice_number = self.state.orders_count as usize - self.state.orders_sizes.len();
         let randomness = self.options.randomness_percentage;
         let rand = multiply(
             lodash_random(-randomness, randomness, env.random_unit()),
@@ -411,6 +427,32 @@ impl TwapInstance {
         let executed_before = self.state.orders_executed;
         let element_index = self.next_element_index;
         self.next_element_index += self.elements_per_slice;
+        // Legacy TS sends a sub-step slice and the venue refuses it: a definite
+        // refusal for this slice that leaves later slices scheduled.
+        if let Some(SliceSize::BelowStep { size, step }) = order_size {
+            let message = format!(
+                "TWAP {} slice {slice_number} of {} not sent: {size} is below the market's amount step of {step}",
+                self.options.symbol(),
+                self.state.orders_count,
+            );
+            self.record(
+                element_index,
+                ElementResult::NotSent {
+                    error: Some(Box::new(
+                        VenueError::new(message.clone()).outcome(Outcome::NotSent),
+                    )),
+                },
+                effects,
+            );
+            effects.push(TwapEffect::Log { message });
+            self.finish_slice(executed_before, next_order_at, wait_ms, now);
+            self.report_shortfall(effects);
+            return;
+        }
+        let order_size = order_size.and_then(|size| match size {
+            SliceSize::Whole(size) => Some(size),
+            SliceSize::BelowStep { .. } => None,
+        });
         // TS tests `if (orderSize)`: a zero or NaN slice places nothing.
         let Some(order_size) = order_size.filter(|size| *size != 0.0 && !size.is_nan()) else {
             self.finish_slice(executed_before, next_order_at, wait_ms, now);
