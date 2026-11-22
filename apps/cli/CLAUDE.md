@@ -441,6 +441,7 @@ The storage inventory below is relative to the user directory described in
 | `console.warn/error()`             | Above prompt + mirrored on the top status bar²                        | Yes                                |
 | `console.debug()`                  | No                                                                    | Only when `DEBUG=1`/`true`³        |
 | `print()` / `originalConsoleLog()` | Yes (no rate limit, no suppression)                                   | No                                 |
+| `printOutput()` (subcommands)      | Above prompt (no rate limit, no dedup, no suppression)                | Yes                                |
 
 ¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[ReconnectingWebSocket]`, `RWS>`, `[HOWWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
 
@@ -544,7 +545,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   arrive unresolved). The CLI doesn't run the rule engine, so read a flag with a strict
   `flags?.FOO === true` (NOT `Boolean(flags?.FOO)` — a residual object is truthy).
   Engine: `@tealstreet/feature-flags-core/src/rules.ts`.
-- Logger rate-limits to 5 msg/sec with 10s dedup window
+- Logger rate-limits to 5 msg/sec with 10s dedup window. Subcommand output in `src/index.ts` uses `printOutput()`, never `console.log`: the limit silently dropped every venue past the second from `account exchanges` and the second task from `tasks list` (AGT-172)
 - Exchange integration delegates to `@tealstreet/safe-cex`
 - Build inlines env vars via `--define` (TEALSTREET_CLI_VERSION, URLs)
 - **Preprocess pipeline.** `processCommand` in `repl.ts` runs every input

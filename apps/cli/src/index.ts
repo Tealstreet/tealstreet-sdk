@@ -24,7 +24,7 @@ import {
   getConfigDir,
   type AccountConfig,
 } from './config';
-import { interceptConsole, logger } from './logger';
+import { interceptConsole, logger, printOutput } from './logger';
 
 import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
@@ -183,27 +183,27 @@ accountCmd
     const accounts = listAccounts();
 
     if (accounts.length === 0) {
-      console.log(chalk.yellow('No accounts configured.'));
-      console.log(chalk.gray(`Run: ${BRAND.binName} account add`));
+      printOutput(chalk.yellow('No accounts configured.'));
+      printOutput(chalk.gray(`Run: ${BRAND.binName} account add`));
       return;
     }
 
-    console.log(chalk.cyan('\nConfigured Accounts:\n'));
+    printOutput(chalk.cyan('\nConfigured Accounts:\n'));
     accounts.forEach((account) => {
       const isDefault = account.name === config.defaultAccount;
       const prefix = isDefault ? chalk.green('* ') : '  ';
       const suffix = isDefault ? chalk.gray(' (default)') : '';
-      console.log(`${prefix}${chalk.bold(account.name)} - ${account.exchange}${suffix}`);
-      console.log(chalk.gray(`    API Key: ${maskSecret(account.apiKey || '')}`));
+      printOutput(`${prefix}${chalk.bold(account.name)} - ${account.exchange}${suffix}`);
+      printOutput(chalk.gray(`    API Key: ${maskSecret(account.apiKey || '')}`));
       if (account.testnet) {
-        console.log(chalk.yellow('    [testnet]'));
+        printOutput(chalk.yellow('    [testnet]'));
       }
     });
 
     if (config.defaultSymbol) {
-      console.log(chalk.gray(`\nDefault Symbol: ${config.defaultSymbol}`));
+      printOutput(chalk.gray(`\nDefault Symbol: ${config.defaultSymbol}`));
     }
-    console.log(chalk.gray(`\nConfig location: ${getConfigDir()}`));
+    printOutput(chalk.gray(`\nConfig location: ${getConfigDir()}`));
   });
 
 // Add account
@@ -243,8 +243,8 @@ accountCmd
   .action((options) => {
     const exchangeInfo = getExchangeAccountCredentialSchema(options.exchange);
     if (!exchangeInfo) {
-      console.log(chalk.red(`Unknown exchange: ${options.exchange}`));
-      console.log(chalk.gray(`Supported exchanges: ${getSupportedExchangeAccountNames().join(', ')}`));
+      printOutput(chalk.red(`Unknown exchange: ${options.exchange}`));
+      printOutput(chalk.gray(`Supported exchanges: ${getSupportedExchangeAccountNames().join(', ')}`));
       return;
     }
 
@@ -276,19 +276,19 @@ accountCmd
       });
     } catch (error) {
       if (error instanceof ExchangeAccountConfigError) {
-        console.log(chalk.red(error.message));
+        printOutput(chalk.red(error.message));
       } else {
-        console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+        printOutput(chalk.red(error instanceof Error ? error.message : String(error)));
       }
       return;
     }
 
     addAccount(account);
-    console.log(chalk.green(`Account "${options.name}" added successfully`));
+    printOutput(chalk.green(`Account "${options.name}" added successfully`));
 
     if (options.default) {
       setDefaultAccount(options.name);
-      console.log(chalk.gray(`Set as default account`));
+      printOutput(chalk.gray(`Set as default account`));
     }
   });
 
@@ -299,9 +299,9 @@ accountCmd
   .description('Remove an account')
   .action((name) => {
     if (removeAccount(name)) {
-      console.log(chalk.green(`Account "${name}" removed`));
+      printOutput(chalk.green(`Account "${name}" removed`));
     } else {
-      console.log(chalk.red(`Account "${name}" not found`));
+      printOutput(chalk.red(`Account "${name}" not found`));
     }
   });
 
@@ -311,9 +311,9 @@ accountCmd
   .description('Set the default account')
   .action((name) => {
     if (setDefaultAccount(name)) {
-      console.log(chalk.green(`Default account set to "${name}"`));
+      printOutput(chalk.green(`Default account set to "${name}"`));
     } else {
-      console.log(chalk.red(`Account "${name}" not found`));
+      printOutput(chalk.red(`Account "${name}" not found`));
     }
   });
 
@@ -323,7 +323,7 @@ accountCmd
   .description('Set the default trading symbol')
   .action((symbol) => {
     setDefaultSymbol(symbol.toUpperCase());
-    console.log(chalk.green(`Default symbol set to "${symbol.toUpperCase()}"`));
+    printOutput(chalk.green(`Default symbol set to "${symbol.toUpperCase()}"`));
   });
 
 // Show supported exchanges
@@ -340,7 +340,7 @@ accountCmd
         lines.push(chalk.gray(`                 Optional: ${info.optionalFields.join(', ')}`));
       }
     }
-    console.log(lines.join('\n'));
+    printOutput(lines.join('\n'));
   });
 
 // Import accounts from file
@@ -354,7 +354,7 @@ accountCmd
 
     const filePath = resolve(file);
     if (!existsSync(filePath)) {
-      console.log(chalk.red(`File not found: ${filePath}`));
+      printOutput(chalk.red(`File not found: ${filePath}`));
       return;
     }
 
@@ -362,13 +362,13 @@ accountCmd
     try {
       content = readFileSync(filePath, 'utf-8');
     } catch (error) {
-      console.log(chalk.red(`Failed to read file: ${error instanceof Error ? error.message : String(error)}`));
+      printOutput(chalk.red(`Failed to read file: ${error instanceof Error ? error.message : String(error)}`));
       return;
     }
 
     const result = parseImportAccountData(content);
     if (!result.isValid) {
-      console.log(chalk.red(`Invalid import file: ${result.error}`));
+      printOutput(chalk.red(`Invalid import file: ${result.error}`));
       return;
     }
 
@@ -382,32 +382,32 @@ accountCmd
       // Check if account with same name already exists
       const existing = config.accounts.find((a) => a.name === account.name);
       if (existing) {
-        console.log(chalk.yellow(`  Skipping "${account.name}" - already exists`));
+        printOutput(chalk.yellow(`  Skipping "${account.name}" - already exists`));
         skipped++;
         continue;
       }
 
       // Validate exchange is supported
       if (!getExchangeAccountCredentialSchema(account.exchange)) {
-        console.log(chalk.yellow(`  Skipping "${account.name}" - unsupported exchange: ${account.exchange}`));
+        printOutput(chalk.yellow(`  Skipping "${account.name}" - unsupported exchange: ${account.exchange}`));
         skipped++;
         continue;
       }
 
       addAccount(account);
-      console.log(chalk.green(`  Imported "${account.name}" (${account.exchange})`));
+      printOutput(chalk.green(`  Imported "${account.name}" (${account.exchange})`));
       imported++;
     }
 
-    console.log('');
+    printOutput('');
     if (imported > 0) {
-      console.log(chalk.green(`Successfully imported ${imported} account(s)`));
+      printOutput(chalk.green(`Successfully imported ${imported} account(s)`));
     }
     if (skipped > 0) {
-      console.log(chalk.yellow(`Skipped ${skipped} account(s)`));
+      printOutput(chalk.yellow(`Skipped ${skipped} account(s)`));
     }
     if (imported === 0 && skipped === 0) {
-      console.log(chalk.yellow('No accounts to import'));
+      printOutput(chalk.yellow('No accounts to import'));
     }
   });
 
@@ -421,7 +421,7 @@ accountCmd
 
     const accounts = listAccounts();
     if (accounts.length === 0) {
-      console.log(chalk.yellow('No accounts to export'));
+      printOutput(chalk.yellow('No accounts to export'));
       return;
     }
 
@@ -430,9 +430,9 @@ accountCmd
       // The export carries API keys; chmod covers overwriting an older export.
       writeFileSync(outputFile, JSON.stringify(accounts, null, 2), { mode: 0o600 });
       chmodSync(outputFile, 0o600);
-      console.log(chalk.green(`Exported ${accounts.length} account(s) to ${outputFile}`));
+      printOutput(chalk.green(`Exported ${accounts.length} account(s) to ${outputFile}`));
     } catch (error) {
-      console.log(chalk.red(`Failed to write file: ${error instanceof Error ? error.message : String(error)}`));
+      printOutput(chalk.red(`Failed to write file: ${error instanceof Error ? error.message : String(error)}`));
     }
   });
 
@@ -454,11 +454,11 @@ tasksCmd
     const tasks = loadTasks();
 
     if (tasks.length === 0) {
-      console.log(chalk.yellow('No tasks'));
+      printOutput(chalk.yellow('No tasks'));
       return;
     }
 
-    console.log(chalk.cyan('\nTasks:\n'));
+    printOutput(chalk.cyan('\nTasks:\n'));
     for (const task of tasks) {
       const statusColor =
         task.status === 'running'
@@ -469,14 +469,14 @@ tasksCmd
               ? chalk.blue
               : chalk.red;
 
-      console.log(`  ${chalk.bold(task.id.slice(0, 12))}...`);
-      console.log(`    Type: ${task.type}`);
-      console.log(`    Status: ${statusColor(task.status)}`);
-      console.log(`    Created: ${new Date(task.createdAt).toLocaleString()}`);
+      printOutput(`  ${chalk.bold(task.id.slice(0, 12))}...`);
+      printOutput(`    Type: ${task.type}`);
+      printOutput(`    Status: ${statusColor(task.status)}`);
+      printOutput(`    Created: ${new Date(task.createdAt).toLocaleString()}`);
       if (task.progress && Object.keys(task.progress).length > 0) {
-        console.log(`    Progress: ${JSON.stringify(task.progress)}`);
+        printOutput(`    Progress: ${JSON.stringify(task.progress)}`);
       }
-      console.log('');
+      printOutput('');
     }
   });
 
@@ -489,7 +489,7 @@ tasksCmd
     const active = tasks.filter((t) => t.status === 'running' || t.status === 'paused');
     const removed = tasks.length - active.length;
     saveTasks(active);
-    console.log(chalk.green(`Cleared ${removed} task(s)`));
+    printOutput(chalk.green(`Cleared ${removed} task(s)`));
   });
 
 // Make tasks list the default action
@@ -498,11 +498,11 @@ tasksCmd.action(async () => {
   const tasks = loadTasks();
 
   if (tasks.length === 0) {
-    console.log(chalk.yellow('No tasks'));
+    printOutput(chalk.yellow('No tasks'));
     return;
   }
 
-  console.log(chalk.cyan('\nTasks:\n'));
+  printOutput(chalk.cyan('\nTasks:\n'));
   for (const task of tasks) {
     const statusColor =
       task.status === 'running'
@@ -513,9 +513,9 @@ tasksCmd.action(async () => {
             ? chalk.blue
             : chalk.red;
 
-    console.log(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
+    printOutput(`  ${chalk.bold(task.id.slice(0, 12))}...  ${task.type}  ${statusColor(task.status)}`);
   }
-  console.log('');
+  printOutput('');
 });
 
 // ============ Record Commands ============
@@ -542,13 +542,13 @@ recordCmd
     const retentionDays = parseRetention(options.retention);
     const levels = parseInt(options.levels, 10);
 
-    console.log(chalk.cyan(`\nStarting ${dataType} recorder for ${exchange}:${options.symbol}`));
-    console.log(chalk.gray(`  Interval: ${options.interval} (${intervalMs}ms)`));
-    console.log(chalk.gray(`  Retention: ${options.retention} (${retentionDays} days)`));
+    printOutput(chalk.cyan(`\nStarting ${dataType} recorder for ${exchange}:${options.symbol}`));
+    printOutput(chalk.gray(`  Interval: ${options.interval} (${intervalMs}ms)`));
+    printOutput(chalk.gray(`  Retention: ${options.retention} (${retentionDays} days)`));
     if (dataType === 'orderbook') {
-      console.log(chalk.gray(`  Levels: ${levels}`));
+      printOutput(chalk.gray(`  Levels: ${levels}`));
     }
-    console.log('');
+    printOutput('');
 
     try {
       const { recorder, replaced } = await startRecorder({
@@ -561,17 +561,17 @@ recordCmd
       });
 
       if (replaced) {
-        console.log(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
+        printOutput(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
       }
-      console.log(chalk.green(`${G.ok} Recorder started successfully`));
-      console.log(chalk.gray('  Press Ctrl+C to stop recording\n'));
+      printOutput(chalk.green(`${G.ok} Recorder started successfully`));
+      printOutput(chalk.gray('  Press Ctrl+C to stop recording\n'));
 
       // Keep running until interrupted
       await new Promise<void>((resolve) => {
         const shutdown = async () => {
-          console.log(chalk.yellow('\nStopping recorder...'));
+          printOutput(chalk.yellow('\nStopping recorder...'));
           await recorder.stop();
-          console.log(chalk.green(`${G.ok} Recorder stopped`));
+          printOutput(chalk.green(`${G.ok} Recorder stopped`));
           resolve();
         };
 
@@ -598,12 +598,12 @@ recordCmd
     const activeRecorders = getActiveRecorders();
 
     if (configs.length === 0 && activeRecorders.length === 0) {
-      console.log(chalk.yellow('No recordings configured'));
+      printOutput(chalk.yellow('No recordings configured'));
       return;
     }
 
     // Print table header
-    console.log(chalk.cyan('\nRecordings:\n'));
+    printOutput(chalk.cyan('\nRecordings:\n'));
     const headers = ['Status', 'Type', 'Exchange', 'Symbol', 'Interval', 'Retention', 'Snapshots'];
     const colWidths = [12, 10, 10, 10, 10, 10, 12];
 
@@ -611,13 +611,13 @@ recordCmd
       return cells.map((cell, i) => cell.padEnd(colWidths[i])).join('  ');
     };
 
-    console.log(formatRow(headers));
-    console.log(colWidths.map((w) => '-'.repeat(w)).join('  '));
+    printOutput(formatRow(headers));
+    printOutput(colWidths.map((w) => '-'.repeat(w)).join('  '));
 
     // Active recorders
     for (const recorder of activeRecorders) {
       const status = recorder.getStatus();
-      console.log(
+      printOutput(
         formatRow([
           `${G.running} Running`,
           status.dataType,
@@ -640,7 +640,7 @@ recordCmd
       );
 
       if (!isRunning) {
-        console.log(
+        printOutput(
           formatRow([
             config.active ? `${G.paused}  Paused` : `${G.inactive} Inactive`,
             config.dataType,
@@ -653,7 +653,7 @@ recordCmd
         );
       }
     }
-    console.log('');
+    printOutput('');
   });
 
 recordCmd
@@ -673,9 +673,9 @@ recordCmd
     );
 
     if (stopped) {
-      console.log(chalk.green(`${G.ok} Stopped recording ${options.type}:${exchange}:${options.symbol}`));
+      printOutput(chalk.green(`${G.ok} Stopped recording ${options.type}:${exchange}:${options.symbol}`));
     } else {
-      console.log(chalk.yellow(`No active recorder found for ${options.type}:${exchange}:${options.symbol}`));
+      printOutput(chalk.yellow(`No active recorder found for ${options.type}:${exchange}:${options.symbol}`));
     }
   });
 
@@ -690,12 +690,12 @@ recordCmd
     const stats = getDatabaseStats();
     const activeRecorders = getActiveRecorders();
 
-    console.log(chalk.cyan('\nRecording Statistics:\n'));
-    console.log(`  Database: ${getDatabasePath()}`);
-    console.log(`  Size: ${stats.databaseSize}`);
-    console.log(`  Active Recorders: ${activeRecorders.length}`);
-    console.log(`  Total Snapshots: ${stats.totalSnapshots.toLocaleString()}`);
-    console.log('');
+    printOutput(chalk.cyan('\nRecording Statistics:\n'));
+    printOutput(`  Database: ${getDatabasePath()}`);
+    printOutput(`  Size: ${stats.databaseSize}`);
+    printOutput(`  Active Recorders: ${activeRecorders.length}`);
+    printOutput(`  Total Snapshots: ${stats.totalSnapshots.toLocaleString()}`);
+    printOutput('');
 
     for (const [type, typeStats] of Object.entries(stats.byType)) {
       // Filter by exchange if specified
@@ -707,11 +707,11 @@ recordCmd
         continue;
       }
 
-      console.log(`  ${chalk.bold(type)}:`);
-      console.log(`    Count: ${typeStats.count.toLocaleString()}`);
-      console.log(`    Exchanges: ${exchanges.join(', ') || 'none'}`);
+      printOutput(`  ${chalk.bold(type)}:`);
+      printOutput(`    Count: ${typeStats.count.toLocaleString()}`);
+      printOutput(`    Exchanges: ${exchanges.join(', ') || 'none'}`);
     }
-    console.log('');
+    printOutput('');
   });
 
 // Default action: if exchange provided, start recording; otherwise show help
@@ -738,13 +738,13 @@ recordCmd
     const retentionDays = parseRetention(options.retention);
     const levels = parseInt(options.levels, 10);
 
-    console.log(chalk.cyan(`\nStarting ${dataType} recorder for ${exchange}:${options.symbol}`));
-    console.log(chalk.gray(`  Interval: ${options.interval} (${intervalMs}ms)`));
-    console.log(chalk.gray(`  Retention: ${options.retention} (${retentionDays} days)`));
+    printOutput(chalk.cyan(`\nStarting ${dataType} recorder for ${exchange}:${options.symbol}`));
+    printOutput(chalk.gray(`  Interval: ${options.interval} (${intervalMs}ms)`));
+    printOutput(chalk.gray(`  Retention: ${options.retention} (${retentionDays} days)`));
     if (dataType === 'orderbook') {
-      console.log(chalk.gray(`  Levels: ${levels}`));
+      printOutput(chalk.gray(`  Levels: ${levels}`));
     }
-    console.log('');
+    printOutput('');
 
     try {
       const { recorder, replaced } = await startRecorder({
@@ -757,16 +757,16 @@ recordCmd
       });
 
       if (replaced) {
-        console.log(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
+        printOutput(chalk.yellow(`Replaced existing ${dataType}:${exchange}:${options.symbol} recorder`));
       }
-      console.log(chalk.green(`${G.ok} Recorder started successfully`));
-      console.log(chalk.gray('  Press Ctrl+C to stop recording\n'));
+      printOutput(chalk.green(`${G.ok} Recorder started successfully`));
+      printOutput(chalk.gray('  Press Ctrl+C to stop recording\n'));
 
       await new Promise<void>((resolve) => {
         const shutdown = async () => {
-          console.log(chalk.yellow('\nStopping recorder...'));
+          printOutput(chalk.yellow('\nStopping recorder...'));
           await recorder.stop();
-          console.log(chalk.green(`${G.ok} Recorder stopped`));
+          printOutput(chalk.green(`${G.ok} Recorder stopped`));
           resolve();
         };
 
@@ -811,21 +811,21 @@ program
     if (options.clear) {
       if (existsSync(logFile)) {
         writeFileSync(logFile, '');
-        console.log(chalk.green('Logs cleared'));
+        printOutput(chalk.green('Logs cleared'));
       } else {
-        console.log(chalk.yellow('Log file does not exist'));
+        printOutput(chalk.yellow('Log file does not exist'));
       }
       return;
     }
 
     if (!existsSync(logFile)) {
-      console.log(chalk.yellow('Log file does not exist yet'));
-      console.log(chalk.gray(`Expected at: ${logFile}`));
+      printOutput(chalk.yellow('Log file does not exist yet'));
+      printOutput(chalk.gray(`Expected at: ${logFile}`));
       return;
     }
 
-    console.log(chalk.cyan(`Tailing logs from: ${logFile}`));
-    console.log(chalk.gray('Press Ctrl+C to exit\n'));
+    printOutput(chalk.cyan(`Tailing logs from: ${logFile}`));
+    printOutput(chalk.gray('Press Ctrl+C to exit\n'));
 
     // Use tail -f to follow the log file
     const tail = spawn('tail', ['-n', options.lines, '-f', logFile], {
@@ -833,7 +833,7 @@ program
     });
 
     tail.on('error', (err) => {
-      console.log(chalk.red(`Failed to tail logs: ${err.message}`));
+      printOutput(chalk.red(`Failed to tail logs: ${err.message}`));
     });
   });
 
@@ -914,11 +914,11 @@ program
     const shell = program.commands.map(describe);
     const repl = buildCommandCatalog();
     if (options.json) await emitJsonOrCrash(() => ({ version: getCurrentVersion(), shell, repl }));
-    console.log(chalk.cyan(`\nShell commands (${BRAND.binName} <command>):\n`));
-    for (const command of shell) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
-    console.log(chalk.cyan(`\nTrading commands (at the prompt, or ${BRAND.binName} exec '<command>'):\n`));
-    for (const command of repl) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
-    console.log(chalk.gray(`\nDetails: ${BRAND.docsUrl}/reference/commands`));
+    printOutput(chalk.cyan(`\nShell commands (${BRAND.binName} <command>):\n`));
+    for (const command of shell) printOutput(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
+    printOutput(chalk.cyan(`\nTrading commands (at the prompt, or ${BRAND.binName} exec '<command>'):\n`));
+    for (const command of repl) printOutput(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
+    printOutput(chalk.gray(`\nDetails: ${BRAND.docsUrl}/reference/commands`));
   });
 
 // ============ Default Action ============
