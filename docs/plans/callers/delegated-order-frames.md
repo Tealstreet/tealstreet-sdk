@@ -324,8 +324,13 @@ cannot enable a replay. Callers must retain the existing changed/persist and
 retention handling after this constructor, including when a local claim is
 refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
-never-forwarded work not sent, even while storage is waiting, and marks in-flight
-or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+never-forwarded work not sent, even while storage is waiting. Handed-off work
+waits longer (AGT-125): in-flight work awaits its receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s), since the router and box admit a key by
+their own clocks; acknowledged work is box-admitted and may be queued behind the
+venue's writes, so it becomes unknown at `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS`
+(160 s, which covers the engine's 120 s command wait plus a venue write). Physical
+handoff rechecks the 10 s cap. The synchronous
 send adapter must return true only for a physical handoff; only an explicit false
 positively guarantees neither handoff nor buffering for a later connection.
 A throw or any other non-true return is ambiguous and immediately becomes unknown
