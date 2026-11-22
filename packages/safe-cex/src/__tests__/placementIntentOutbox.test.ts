@@ -43,7 +43,20 @@ function fixture(version: 1 | 2 = 2) {
     options,
     rows,
     floor: () => floor,
+    setFloor: (value: number) => {
+      floor = value;
+    },
     id: () => createDelegatedIntentId(now++, options.random),
+    /** Distinct UUIDs that share one timestamp, as `placementLegIntent` children do. */
+    legId: (time: number, leg: number) =>
+      createDelegatedIntentId(time, (bytes) => {
+        bytes.fill(2);
+        bytes[bytes.length - 1] = leg;
+      }),
+    now: () => now,
+    advance: (ms: number) => {
+      now += ms;
+    },
     abort: () => {
       failCompaction = true;
     },
@@ -204,3 +217,97 @@ describe('durable caller-intent retirement', () => {
     expect(f.rows.size).toBe(0);
   });
 });
+
+// AGT-106 review (rvJ F1/F2, rvK 2-5): the floor must never refuse an ID the box could still
+// accept (key window: 10 s old, 5 s ahead), and a clock step must not lock out DELEGATED writes.
+describe('retirement floor against the box key window', () => {
+  it('admits every sequential leg of one parent action, past 33 completions', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const parent = f.now();
+    try {
+      for (let leg = 0; leg < 40; leg++) {
+        await completed(box, f.legId(parent, leg));
+        f.advance(50);
+      }
+      expect(f.floor()).toBe(0);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('keeps every row inside the key window and retires only older ones', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    try {
+      for (let i = 0; i < 1060; i++) {
+        await completed(box, f.id());
+        f.advance(1_000);
+      }
+      expect(box.entries().length).toBeLessThanOrEqual(32 + 16);
+      expect(f.floor()).toBeGreaterThan(0);
+      expect(f.floor()).toBeLessThanOrEqual(f.now() - 15_000);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('still mints and sends its own ids after a fast clock is corrected', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const day = 86_400_000;
+    f.advance(day);
+    for (let i = 0; i < 40; i++) {
+      await completed(box, f.id());
+      f.advance(1_000);
+    }
+    expect(f.floor()).toBeGreaterThan(f.now() - day);
+    f.advance(-day);
+    try {
+      const id = await box.enqueue(params);
+      expect(box.entries().find((row) => row.intentId === id)?.state).toBe('queued');
+    } finally {
+      box.close();
+    }
+  });
+
+  it('does not refuse an id it minted itself after the clock steps back', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    for (let i = 0; i < 40; i++) {
+      await completed(box, f.id());
+      f.advance(1_000);
+    }
+    f.advance(-60_000);
+    try {
+      const id = await box.enqueue(params);
+      expect(box.entries().find((row) => row.intentId === id)?.state).toBe('queued');
+    } finally {
+      box.close();
+    }
+  });
+
+  it('refuses a checkpoint whose floor is ahead of the clock as invalid', async () => {
+    const f = fixture();
+    f.setFloor(f.now() + 5_001);
+    await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Invalid outbox checkpoint');
+    f.setFloor(f.now() + 5_000);
+    (await DelegatedOutbox.open(f.options)).close();
+  });
+
+  it('refuses a caller id more than 5 s ahead as invalid and not sent', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    try {
+      await expect(
+        box.enqueue(params, { intentId: createDelegatedIntentId(f.now() + 5_001, f.options.random) }),
+      ).rejects.toMatchObject({ code: 'invalidIntentId' });
+      expect(f.rows.size).toBe(0);
+      const edge = createDelegatedIntentId(f.now() + 5_000, f.options.random);
+      expect(await box.enqueue(params, { intentId: edge })).toBe(edge);
+    } finally {
+      box.close();
+    }
+  });
+});
+
