@@ -579,11 +579,8 @@ fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_pr
     assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
 }
 
-/// AGT-175: `/papi/v1/um/positionRisk` lists only symbols with a position, so a flat
-/// symbol's leverage comes from `/papi/v1/um/symbolConfig`; without it the order form
-/// never learns a leverage and refuses every order with "Leverage not loaded".
-#[test]
-fn a_flat_pm_symbol_reads_its_leverage_from_symbol_config() {
+/// A flat PM account started up to its positions read, which is still out.
+fn flat_pm_started() -> Harness {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
         secret: Some("secret".into()),
@@ -605,18 +602,65 @@ fn a_flat_pm_symbol_reads_its_leverage_from_symbol_config() {
         200,
         r#"{"dualSidePosition":false}"#,
     );
+    h
+}
+
+/// Answer the account reads that follow the positions read.
+fn answer_flat_account(h: &mut Harness) {
+    for (path, body) in [
+        ("/papi/v1/balance", BALANCE),
+        ("/papi/v1/um/openOrders", "[]"),
+        ("/papi/v1/um/algo/openAlgoOrders", "[]"),
+    ] {
+        if h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+}
+
+const FLAT_SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":21,"maxNotionalValue":"1000000"}]"#;
+
+/// AGT-175: `/papi/v1/um/positionRisk` lists only symbols with a position, so a flat
+/// symbol's leverage comes from `/papi/v1/um/symbolConfig`; without it the order form
+/// never learns a leverage and refuses every order with "Leverage not loaded".
+#[test]
+fn a_flat_pm_symbol_reads_its_leverage_from_symbol_config() {
+    let mut h = flat_pm_started();
+    h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond("/papi/v1/um/symbolConfig", 200, FLAT_SYMBOL_CONFIG);
+    answer_flat_account(&mut h);
+    let store = h.engine.store();
+    assert!(store.loaded().positions);
+    let setting = store
+        .setting("BTCUSDT")
+        .expect("flat symbol has a leverage setting");
+    assert_eq!(setting.leverage, 21.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+}
+
+/// A refused symbolConfig read is logged and retried, never a silent missing leverage.
+#[test]
+fn a_failed_pm_symbol_config_read_is_logged_and_retried() {
+    let mut h = flat_pm_started();
+    h.expect_startup_failure = true;
     h.respond("/papi/v1/um/positionRisk", 200, "[]");
     h.respond(
         "/papi/v1/um/symbolConfig",
-        200,
-        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":21,"maxNotionalValue":"1000000"}]"#,
+        503,
+        r#"{"code":-1001,"msg":"Internal error; unable to process your request."}"#,
     );
-    h.respond("/papi/v1/balance", 200, BALANCE);
-    h.respond("/papi/v1/um/openOrders", 200, "[]");
-    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
-    let store = h.engine.store();
-    assert!(store.loaded().positions);
-    let setting = store.setting("BTCUSDT").expect("flat symbol has a leverage setting");
-    assert_eq!(setting.leverage, 21.0);
-    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+    answer_flat_account(&mut h);
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    assert!(
+        h.logs.iter().any(|m| m.starts_with("Binance positions: ")),
+        "{:?}",
+        h.logs
+    );
+    h.advance(10_000.0);
+    assert!(h.has_request("/papi/v1/um/symbolConfig"), "{:?}", h.paths());
+    while h.has_request("/papi/v1/um/positionRisk") {
+        h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    }
+    h.respond("/papi/v1/um/symbolConfig", 200, FLAT_SYMBOL_CONFIG);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 21.0);
 }
