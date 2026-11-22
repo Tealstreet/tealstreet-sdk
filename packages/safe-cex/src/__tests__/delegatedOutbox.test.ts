@@ -2399,4 +2399,107 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
     expect(restored.entries()).toMatchObject([{ intentId: id, state: 'unknown' }]);
     restored.close();
   });
+
+  // AGT-163: the box may still execute an ACKed write after a relaunch, so hosts must keep it
+  // out of age- and miss-based "not placed" verdicts. The ACK fact survives restore.
+  describe('durable box acknowledgement', () => {
+    const submits = (writes: string[]) => writes.filter((frame) => JSON.parse(frame).t === 'order.submit');
+
+    it.each(['close', 'disconnect'] as const)(
+      'a restored box-ACKed intent stays unknown and keeps boxAcknowledged (%s)',
+      async (ending) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const c = box.connect(f.connection());
+        const id = await box.enqueue(params);
+        await box.receive(c, response(id, 'order.ack', { received: true }));
+        expect(box.entries()[0]).toMatchObject({ state: 'acknowledged', boxAcknowledged: true });
+        if (ending === 'disconnect') {
+          box.disconnect(c);
+          await box.flush(c);
+        }
+        box.close();
+        f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS + 1);
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+        expect([...f.rows.values()][0]).toMatchObject({ boxAcknowledged: true });
+        expect(submits(f.writes)).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    it('a restored never-ACKed handoff stays unknown without boxAcknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      const id = await box.enqueue(params);
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'sending', boxAcknowledged: false });
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection('restored')));
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: false });
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
+    it('a router ACK refusal stays notSent without boxAcknowledged after restore', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      await box.receive(c, response(id, 'order.ack', { received: false }));
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent', boxAcknowledged: false });
+      restored.close();
+    });
+
+    it.each(['sending', 'acknowledged', 'unknown'] as const)(
+      'an older %s row without the field restores as box-acknowledged',
+      async (state) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const c = box.connect(f.connection());
+        const id = await box.enqueue(params);
+        if (state === 'acknowledged') await box.receive(c, response(id, 'order.ack', { received: true }));
+        if (state === 'unknown') f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
+        await box.flush(c);
+        const { boxAcknowledged: _, ...legacy } = box.entries()[0];
+        box.close();
+        expect(legacy.state).toBe(state);
+        await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+        expect([...f.rows.values()][0]).toMatchObject({ boxAcknowledged: true });
+        expect(submits(f.writes)).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    it('an older queued row without the field restores replayable and is sent exactly once', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const id = await box.enqueue(params);
+      const { boxAcknowledged: _, ...legacy } = [...f.rows.values()][0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'queued', boxAcknowledged: false });
+      await restored.flush(restored.connect(f.connection()));
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
+    it.each([null, 'true', 1])('refuses a malformed boxAcknowledged (%s)', async (value) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      await box.enqueue(params);
+      const row = [...f.rows.values()][0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify({ ...row, boxAcknowledged: value })));
+      await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Invalid persisted intent');
+    });
+  });
 });
