@@ -302,11 +302,34 @@ describe('retirement floor against the box key window', () => {
     }
   });
 
-  it('refuses a checkpoint whose floor is ahead of the clock as invalid', async () => {
+  // bjfpyh: a floor ahead of the clock is what a corrected fast clock leaves behind. It only
+  // gates caller ids (Unknown, fail-safe), so it must reopen; only a floor past UUIDv7 is corrupt.
+  it('reopens after a fast clock is corrected and still sends its own ids', async () => {
     const f = fixture();
-    f.setFloor(f.now() + 5_001);
+    const box = await DelegatedOutbox.open(f.options);
+    f.skew(86_400_000);
+    for (let i = 0; i < 40; i++) {
+      await completed(box, f.id());
+      f.advance(1_000);
+    }
+    box.close();
+    f.skew(0);
+    expect(f.floor()).toBeGreaterThan(f.now());
+    const reopened = await DelegatedOutbox.open(f.options);
+    try {
+      const id = await reopened.enqueue(params);
+      expect(reopened.entries().find((row) => row.intentId === id)?.state).toBe('queued');
+      await expect(reopened.enqueue(params, { intentId: f.id() })).rejects.toMatchObject({ code: 'intentRetired' });
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it('refuses a checkpoint whose floor is beyond the UUIDv7 time range as invalid', async () => {
+    const f = fixture();
+    f.setFloor(2 ** 48 + 1);
     await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Invalid outbox checkpoint');
-    f.setFloor(f.now() + 5_000);
+    f.setFloor(2 ** 48);
     (await DelegatedOutbox.open(f.options)).close();
   });
 
