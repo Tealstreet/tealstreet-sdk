@@ -588,6 +588,7 @@ export class DelegatedOutbox {
     params: Record<string, unknown>,
     action?: DelegatedAction,
     options?: EnqueueOptions,
+    compacted = false,
   ): Promise<string> {
     const createdAt = this.options.clock.now();
     if (!this.active) return Promise.reject(new Error('Outbox is closed or full'));
@@ -639,8 +640,15 @@ export class DelegatedOutbox {
         });
       }
     }
-    if (this.pendingCount() >= MAX_PENDING || this.intents.size >= MAX_PENDING + COMPLETED_HISTORY)
-      return Promise.reject(new Error('Outbox is closed or full'));
+    if (this.pendingCount() >= MAX_PENDING) return Promise.reject(new Error('Outbox is closed or full'));
+    if (this.intents.size >= MAX_PENDING + COMPLETED_HISTORY) {
+      // Completed rows inside the key window can fill the total and have no timer of their own.
+      if (compacted) return Promise.reject(new Error('Outbox is closed or full'));
+      return this.serial(() => this.compact()).then(
+        () => this.enqueueIntent(params, action, options, true),
+        () => Promise.reject(new Error('Outbox is closed or full')),
+      );
+    }
     const intentId =
       options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
     if (options) {

@@ -193,7 +193,8 @@ UUIDv7 timestamp floor in the same transaction. **A row raises the floor only on
 older than the box's key window** (`order_contract::key_age`: 10 s old, 5 s ahead), so the
 floor never refuses an ID the box could still accept: `placementLegIntent` children share
 their parent's timestamp, and a floor at the newest retired row refused a 34+ leg flatten
-as Unknown (AGT-106). Completed history may exceed 32 rows inside that window. A caller ID
+as Unknown (AGT-106). Completed history may exceed 32 rows inside that window; those rows have no
+timer, so an enqueue that finds the total full compacts once before refusing. A caller ID
 more than 5 s ahead refuses at ingress as `invalidIntentId`. Older forgotten caller IDs refuse with
 `intentRetired` / Unknown, never another sequence or send. IDs the outbox mints itself skip
 the floor: they are fresh by construction, so a corrected fast clock cannot lock writes, in

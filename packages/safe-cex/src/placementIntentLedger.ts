@@ -89,11 +89,10 @@ export class PlacementIntentLedger<Result> {
             (value) => {
               try {
                 markRetirable(this.canRetireResult(value));
-                resolve(value);
-              } catch (error) {
+              } catch {
                 markRetirable(false);
-                reject(error);
-              }
+              } // The send succeeded: keep its receipt, but never free history we cannot classify.
+              resolve(value);
             },
             (error: unknown) => {
               reject(fail(error));
