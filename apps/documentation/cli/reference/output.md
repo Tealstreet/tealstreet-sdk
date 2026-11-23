@@ -54,6 +54,11 @@ Where each stream goes:
   isn't operational noise**. Routine exchange-WebSocket chatter (keepalive
   pings, reconnect notices, balance-stream dumps) is classified as
   _operational_ and kept off the terminal — it still lands in `cli.log`.
+  That includes a socket the venue closed and the CLI is reconnecting
+  (`Bybit socket closed (…); reconnecting` — Bybit closes idle sockets) and
+  Bybit's optional startup fee-rate read (`Bybit fee rates: …`), which trading
+  does not depend on. A socket whose authentication fails, that is refused on
+  every route, or whose market data stays down is still shown.
   Everything else prints **above** the prompt (readline-aware, so async output
   never shreds what you're mid-typing).
 - `console.warn / error` → log file + printed above the prompt, and the latest

@@ -43,6 +43,14 @@ export const OPERATIONAL_PATTERNS: readonly RegExp[] = [
   // safe-cex bitunix dumps the full balance WS message via console.info before
   // refetching from REST — verbose, file-only.
   /received balance message, but we will fetch/i,
+  // Rust engine `ws.disconnected` notices for a routine close it recovers from
+  // (Bybit closes idle sockets). Auth failures and exhausted routes stay visible.
+  /^\w+ socket closed(?: \((?:\d+|idle timeout)\))?; reconnecting$/,
+  /^\w+ socket timed out; reconnecting$/,
+  /^\w+ public stream carried no data; reconnecting$/,
+  /^\w+ socket route refused; trying (?:the next route|another)$/,
+  // Optional startup fee metadata; trading does not depend on it.
+  /^Bybit fee rates: /,
 ];
 
 /**
