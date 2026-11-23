@@ -672,6 +672,36 @@ mod tests {
         assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
     }
 
+    // A kept list under its own 4 KiB bound can still push maximal, escape-heavy
+    // bindings past the receipt limit; the list goes, the unknown outcome stays.
+    #[tokio::test]
+    async fn a_leg_list_that_would_overflow_the_receipt_is_dropped_and_the_outcome_kept() {
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let elements: Vec<Value> = (0..32)
+            .map(|index| json!({"index":index,"status":"placed","orderIds":["e".repeat(75)]}))
+            .collect();
+        assert!(leg_results(&Value::Array(elements.clone())).is_some());
+        let receipt = |instance: &str, name: &str, message: &str| {
+            let (out, mut sent, _) = Out::channel(1);
+            let out = out.with_instance_id(Some(instance));
+            let error = json!({"message":message,"partialOrderIds":["e"],"elements":elements});
+            settle_intent(&out, name, &id, None, 1, 0, Err(error));
+            sent.try_recv().unwrap()
+        };
+        let text = receipt(&"\u{1}".repeat(128), &"\u{1}".repeat(256), &"𐐀".repeat(600));
+        assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["d"]["outcome"], "unknown");
+        assert_eq!(frame["d"]["error"]["outcome"], "unknown");
+        assert_eq!(frame["d"]["error"].get("elements"), None);
+        // Ordinary bindings keep the same list.
+        let frame: Value = serde_json::from_str(&receipt("r", "a", "m")).unwrap();
+        assert_eq!(
+            frame["d"]["error"]["elements"].as_array().unwrap().len(),
+            32
+        );
+    }
+
     #[tokio::test]
     async fn order_contract_receipts_are_bounded_and_sequenced_per_account() {
         let (out, mut sent, _) = Out::channel(8);

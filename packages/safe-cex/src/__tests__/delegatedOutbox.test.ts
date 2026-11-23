@@ -2579,7 +2579,7 @@ describe('an unknown placement’s per-leg results', () => {
     await box.flush(c);
     await box.receive(c, response(id, 'order.ack', { received: true }));
     await box.receive(c, response(id, 'order.outcome', { clientOrderId: id, venueOrderId: null, ...data }));
-    return { f, box, id };
+    return { f, box, id, c };
   };
 
   it('keeps them on the unknown row and never resends it', async () => {
@@ -2600,6 +2600,11 @@ describe('an unknown placement’s per-leg results', () => {
     ['an over-long reason', [{ index: 0, status: 'notSent', error: { message: 'x'.repeat(161) } }]],
     ['too many legs', Array.from({ length: 33 }, (_, index) => ({ index, status: 'applied' }))],
     ['an empty list', []],
+    ['an ID over 256 UTF-8 bytes', [{ index: 0, status: 'placed', orderIds: ['é'.repeat(129)] }]],
+    [
+      'a list over 4 KiB',
+      Array.from({ length: 32 }, (_, index) => ({ index, status: 'notSent', error: { message: 'x'.repeat(160) } })),
+    ],
   ])('drops a list with %s and keeps the row', async (_case, elements) => {
     const { box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements } });
     expect(box.entries()[0]).toMatchObject({ state: 'unknown', error: { message: 'raw' } });
@@ -2616,6 +2621,33 @@ describe('an unknown placement’s per-leg results', () => {
       expect(box.entries()[0].error).not.toHaveProperty('elements');
       box.close();
     }
+  });
+
+  it('drops them once a later receipt settles the row, even one without an error', async () => {
+    const { box, id, c } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcomeSeq: 2, clientOrderId: id, outcome: 'placed', venueOrderId: 'entry', error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(box.entries()[0].error ?? {}).not.toHaveProperty('elements');
+    box.close();
+  });
+
+  it('restores a list only onto a row that is still unknown', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    box.close();
+    const [stored] = [...f.rows.values()];
+    // An ACKed row restores as unknown and keeps its list; a placed one drops it.
+    await f.options.storage.put(f.options, { ...stored, state: 'acknowledged' } as never);
+    const acked = await DelegatedOutbox.open(f.options);
+    expect(acked.entries()[0]).toMatchObject({ state: 'unknown', error: { elements: legs } });
+    acked.close();
+    await f.options.storage.put(f.options, { ...stored, state: 'placed', venueOrderId: 'entry' } as never);
+    const placed = await DelegatedOutbox.open(f.options);
+    expect(placed.entries()[0].state).toBe('placed');
+    expect(placed.entries()[0].error).not.toHaveProperty('elements');
+    placed.close();
   });
 
   it('restores a valid list and drops an unreadable one without refusing the load', async () => {
