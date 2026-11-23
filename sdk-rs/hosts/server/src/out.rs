@@ -225,12 +225,24 @@ impl Out {
         };
         receipts.sequence = next;
         data["outcomeSeq"] = next.into();
-        let text = crate::envelope::order_frame(kind, name, data.clone());
-        // The registration ID is inserted by send; reserve its full bounded
-        // UTF-8/JSON expansion before exposing a result to the router.
-        let size = self.instance_id.as_deref().map_or(text.len(), |id| {
-            crate::envelope::with_instance_id(text.clone(), id).len()
-        });
+        let size_of = |text: &String| {
+            // The registration ID is inserted by send; reserve its full bounded
+            // UTF-8/JSON expansion before exposing a result to the router.
+            self.instance_id.as_deref().map_or(text.len(), |id| {
+                crate::envelope::with_instance_id(text.clone(), id).len()
+            })
+        };
+        let mut text = crate::envelope::order_frame(kind, name, data.clone());
+        let mut size = size_of(&text);
+        // A placement's leg list is display data (AGT-185): drop it, never the outcome.
+        if kind == "order.outcome"
+            && size > crate::order_contract::OUTCOME_MAX
+            && let Some(error) = data["error"].as_object_mut()
+            && error.remove("elements").is_some()
+        {
+            text = crate::envelope::order_frame(kind, name, data.clone());
+            size = size_of(&text);
+        }
         if kind == "order.actionOutcome" && size > crate::order_contract::OUTCOME_MAX {
             data["outcome"] = "unknown".into();
             data["result"] = serde_json::Value::Null;

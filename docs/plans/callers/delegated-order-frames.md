@@ -143,9 +143,11 @@ native failure, including a partially accepted split or multi-leg placement, is
 `unknown` with `error.outcome: "unknown"`; such an `unknown` may carry
 `error.elements`, each leg's result (`index`, optional `clientOrderId`, `status`
 `placed`/`applied`/`notSent`/`unknown`, `orderIds` or `error.message`), bounded to
-32 legs, 256-byte IDs, 160-character reasons and 4 KiB in all (AGT-185). It is
-display data only, never outcome evidence: the intent stays unknown and is never
-resent, and a reader drops an unreadable list. The router must record and replay
+32 legs, 256-byte IDs, 160-character reasons and 4 KiB in all (AGT-185). The box
+drops the list, never the outcome, when it would push the receipt past
+`OUTCOME_MAX`. It is display data only, never outcome evidence: the intent stays
+unknown and is never resent, a reader drops an unreadable list, and the outbox
+keeps it only while the row is unknown. The router must record and replay
 `refused`/`rejected` like any other box outcome. Receipts echo the input
 `seq`. `outcomeSeq` is a positive JS-safe transport delivery counter, not part
 of a business result or its fingerprint. The box numbers its registration output;

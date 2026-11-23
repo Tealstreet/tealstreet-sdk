@@ -39,11 +39,13 @@ export type DelegatedLegResult = { index: number; clientOrderId?: string } & (
 const LEGS_MAX = 32;
 const LEG_ID_MAX = 256;
 const LEG_REASON_MAX = 160;
+const LEGS_BYTES_MAX = 4 * 1024;
 
 /** The box's per-leg results, or undefined when any leg is unreadable or out of bounds. */
 export function delegatedLegResults(value: unknown): DelegatedLegResult[] | undefined {
   if (!Array.isArray(value) || value.length === 0 || value.length > LEGS_MAX) return undefined;
-  const boundedId = (id: unknown): id is string => typeof id === 'string' && id.length > 0 && id.length <= LEG_ID_MAX;
+  const boundedId = (id: unknown): id is string =>
+    typeof id === 'string' && id.length > 0 && utf8ToBytes(id).length <= LEG_ID_MAX;
   const reason = (error: unknown): { message: string } | undefined | null => {
     if (error === undefined) return undefined;
     if (typeof error !== 'object' || error === null || Array.isArray(error)) return null;
@@ -67,7 +69,7 @@ export function delegatedLegResults(value: unknown): DelegatedLegResult[] | unde
     else if (status === 'unknown' && why) legs.push({ ...identity, status, error: why });
     else return undefined;
   }
-  return legs;
+  return utf8ToBytes(JSON.stringify(legs)).length <= LEGS_BYTES_MAX ? legs : undefined;
 }
 
 export interface DelegatedOrderCancelQueuedFrame {

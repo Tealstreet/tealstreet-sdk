@@ -394,12 +394,6 @@ export class DelegatedOutbox {
             [...row.error.message].length > 512)
         )
           throw new Error('Invalid persisted unsupported action');
-        // A stored leg list is display data only: drop one that no longer reads, keep the row.
-        if (record(row.error) && row.error.elements !== undefined) {
-          const elements = row.version === 1 ? delegatedLegResults(row.error.elements) : undefined;
-          if (elements) row.error.elements = elements;
-          else delete row.error.elements;
-        }
         const fingerprint = row.action
           ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
           : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
@@ -431,6 +425,13 @@ export class DelegatedOutbox {
             !markDelegatedReplayable(row, proof)
           )
             unprovenNotSent(row);
+        }
+        // A stored leg list is display data for a row still unknown: drop any other, keep the row.
+        if (record(row.error) && row.error.elements !== undefined) {
+          const elements =
+            row.version === 1 && row.state === 'unknown' ? delegatedLegResults(row.error.elements) : undefined;
+          if (elements) row.error.elements = elements;
+          else delete row.error.elements;
         }
         box.intents.set(row.intentId, row);
         await box.persist(row);
@@ -783,6 +784,7 @@ export class DelegatedOutbox {
           }
         }
         if (typeof data.venueOrderId === 'string') row.venueOrderId = data.venueOrderId;
+        if (row.state !== 'unknown') delete row.error?.elements;
       } else return;
       delete row.noHandoffEvidence;
       row.cancelPending = false;
