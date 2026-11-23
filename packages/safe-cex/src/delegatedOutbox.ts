@@ -149,6 +149,9 @@ const KEY_FUTURE_MS = 5_000;
  * floor never refuses an id the box could still accept (sibling legs share a timestamp).
  */
 const RETIREMENT_MARGIN_MS = MAX_AGE_MS + KEY_FUTURE_MS;
+/** One past the largest UUIDv7 time. A floor ahead of the clock is legal: a corrected fast
+ * clock leaves one, and it only refuses caller ids as Unknown while minted ids skip it. */
+const MAX_INTENT_FLOOR = 2 ** 48;
 const MAX_PENDING = 1024;
 const UNKNOWN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const COMPLETED_HISTORY = 32;
@@ -365,7 +368,7 @@ export class DelegatedOutbox {
           (saved.version === 2 &&
             (!Number.isSafeInteger(saved.retiredIntentBefore) ||
               saved.retiredIntentBefore < 0 ||
-              saved.retiredIntentBefore > options.clock.unix() + KEY_FUTURE_MS))
+              saved.retiredIntentBefore > MAX_INTENT_FLOOR))
         )
           throw new Error('Invalid outbox checkpoint');
         box.sequence = saved.sequence;

@@ -319,7 +319,9 @@ describe('retirement floor against the box key window', () => {
     try {
       const id = await reopened.enqueue(params);
       expect(reopened.entries().find((row) => row.intentId === id)?.state).toBe('queued');
-      await expect(reopened.enqueue(params, { intentId: f.id() })).rejects.toMatchObject({ code: 'intentRetired' });
+      await expect(reopened.enqueue(params, { intentId: f.legId(f.now(), 1) })).rejects.toMatchObject({
+        code: 'intentRetired',
+      });
     } finally {
       reopened.close();
     }

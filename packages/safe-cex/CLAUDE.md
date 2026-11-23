@@ -194,10 +194,11 @@ older than the box's key window** (`order_contract::key_age`: 10 s old, 5 s ahea
 floor never refuses an ID the box could still accept: `placementLegIntent` children share
 their parent's timestamp, and a floor at the newest retired row refused a 34+ leg flatten
 as Unknown (AGT-106). Completed history may exceed 32 rows inside that window. A caller ID
-more than 5 s ahead refuses at ingress as `invalidIntentId`, and a loaded floor more than
-5 s ahead is an invalid checkpoint. Older forgotten caller IDs refuse with
+more than 5 s ahead refuses at ingress as `invalidIntentId`. Older forgotten caller IDs refuse with
 `intentRetired` / Unknown, never another sequence or send. IDs the outbox mints itself skip
-the floor: they are fresh by construction, so a corrected fast clock cannot lock writes. Existing unanswered
+the floor: they are fresh by construction, so a corrected fast clock cannot lock writes, in
+process or across reloads. **A loaded floor ahead of the clock is therefore legal** (that is what
+a corrected fast clock leaves); only one past the UUIDv7 time range is an invalid checkpoint. Existing unanswered
 rows still join below the floor; pending/Unknown retention rules are unchanged.
 An aborted transaction retains memory rows and the previous floor. Storage hosts
 must fence old writers that cannot preserve the checkpoint, keep it monotonic,
