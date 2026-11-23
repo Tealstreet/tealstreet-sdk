@@ -530,6 +530,73 @@ mod tests {
         assert_eq!(not_sent["error"]["outcome"], "notSent");
     }
 
+    // AGT-185, okx-t: entry and stop loss placed, take profit refused (51279). The
+    // receipt stayed unknown with only the engine's text, so the client could not
+    // say which legs landed. It stays unknown and now carries each leg's result.
+    #[tokio::test]
+    async fn a_partial_placement_carries_each_legs_result_and_stays_unknown() {
+        let refusal = "OKX 51279: TP trigger price cannot be lower than the last price";
+        let frame = settled(json!({"message":"{\"code\":\"1\"}","partialOrderIds":["entry","sl"],
+            "elements":[
+                {"index":0,"clientOrderId":"c0","status":"placed","orderIds":["entry"]},
+                {"index":1,"status":"placed","orderIds":["sl"]},
+                {"index":2,"status":"notSent","error":{"message":refusal,"outcome":"rejected",
+                    "kind":"rejected","venueCode":"51279","venueMessage":"raw"}},
+                {"index":3,"status":"unknown","error":{"message":"timed out","outcome":"unknown"}},
+                {"index":4,"status":"applied","effect":"cancel","targetOrderId":"x"}]}))
+        .await;
+        assert_eq!(frame["outcome"], "unknown");
+        assert_eq!(frame["venueOrderId"], Value::Null);
+        assert_eq!(frame["error"]["outcome"], "unknown");
+        assert_eq!(
+            frame["error"]["elements"],
+            json!([
+                {"index":0,"clientOrderId":"c0","status":"placed","orderIds":["entry"]},
+                {"index":1,"status":"placed","orderIds":["sl"]},
+                {"index":2,"status":"notSent","error":{"message":refusal}},
+                {"index":3,"status":"unknown","error":{"message":"timed out"}},
+                {"index":4,"status":"applied"}])
+        );
+        // A whole-order refusal and an error without elements carry none.
+        for error in [
+            json!({"message":"no","outcome":"rejected",
+                "elements":[{"index":0,"status":"notSent","error":{"message":"no"}}]}),
+            json!({"message":"timed out","outcome":"unknown"}),
+        ] {
+            assert_eq!(settled(error).await["error"].get("elements"), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn leg_results_that_cannot_be_read_or_bounded_are_left_out() {
+        let placed = json!({"index":0,"status":"placed","orderIds":["entry"]});
+        for elements in [
+            json!([placed, {"index":1,"status":"future"}]),
+            json!([placed, {"index":-1,"status":"placed","orderIds":["b"]}]),
+            json!([placed, {"index":1,"status":"placed","orderIds":[7]}]),
+            json!([placed, {"index":1,"status":"unknown"}]),
+            json!((0..40).map(|index| json!({"index":index,"status":"placed","orderIds":["x"]})).collect::<Vec<_>>()),
+        ] {
+            let frame = settled(json!({"message":"m","partialOrderIds":["entry"],"elements":elements})).await;
+            assert_eq!(frame["outcome"], "unknown");
+            assert_eq!(frame["error"].get("elements"), None, "{elements}");
+        }
+        // Long reasons are cut so every receipt stays inside the contract limit.
+        let (out, mut sent, _) = Out::channel(1);
+        let out = out.with_instance_id(Some(&"r".repeat(128)));
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let reason = "\u{0}".repeat(4_000);
+        let elements: Vec<Value> = (0..31)
+            .map(|index| json!({"index":index,"clientOrderId":"c".repeat(256),"status":"notSent",
+                "error":{"message":reason}}))
+            .chain([json!({"index":31,"status":"placed","orderIds":["e".repeat(256)]})])
+            .collect();
+        settle_intent(&out, "a", &id, Some(id.as_str().unwrap()), 1, 0,
+            Err(json!({"message":"\u{0}".repeat(4_000),"partialOrderIds":["e"],"elements":elements})));
+        let text = sent.recv().await.unwrap();
+        assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
+    }
+
     #[tokio::test]
     async fn order_contract_receipts_are_bounded_and_sequenced_per_account() {
         let (out, mut sent, _) = Out::channel(8);
