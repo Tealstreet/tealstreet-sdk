@@ -406,9 +406,65 @@ pub(super) fn settle_intent(
                 .take(512)
                 .collect();
             data["error"] = json!({"message":message,"outcome":outcome});
+            // The receipt stays unknown; the legs' results only let the client say which landed.
+            if outcome == "unknown"
+                && let Some(elements) = leg_results(&error["elements"])
+            {
+                data["error"]["elements"] = elements;
+            }
         }
     }
     out.order_outcome(name, data)
+}
+
+/// Each leg's result, projected to the fields the client reads, or `None` when any
+/// leg is unreadable or the list would not fit inside the receipt limit (AGT-185).
+fn leg_results(elements: &Value) -> Option<Value> {
+    const LEGS_MAX: usize = 32;
+    const LEGS_BYTES_MAX: usize = 4 * 1024;
+    const REASON_CHARS_MAX: usize = 160;
+    let bounded_id = |id: &Value| {
+        id.as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 256)
+    };
+    let legs = elements
+        .as_array()
+        .filter(|legs| !legs.is_empty() && legs.len() <= LEGS_MAX)?;
+    let projected = legs
+        .iter()
+        .map(|leg| {
+            let index = leg["index"].as_u64().filter(|index| *index <= 9_007_199_254_740_991)?;
+            let mut out = json!({ "index": index });
+            if let Some(id) = leg.get("clientOrderId") {
+                out["clientOrderId"] = Some(id).filter(|id| bounded_id(id))?.clone();
+            }
+            let reason = || {
+                leg["error"]["message"]
+                    .as_str()
+                    .map(|reason| json!({ "message": reason.chars().take(REASON_CHARS_MAX).collect::<String>() }))
+            };
+            match leg["status"].as_str()? {
+                "placed" => {
+                    let ids = leg["orderIds"]
+                        .as_array()
+                        .filter(|ids| ids.len() <= LEGS_MAX && ids.iter().all(bounded_id))?;
+                    out["orderIds"] = Value::Array(ids.clone());
+                }
+                "applied" => {}
+                "notSent" => {
+                    if let Some(reason) = reason() {
+                        out["error"] = reason;
+                    }
+                }
+                "unknown" => out["error"] = reason()?,
+                _ => return None,
+            }
+            out["status"] = leg["status"].clone();
+            Some(out)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let projected = Value::Array(projected);
+    (projected.to_string().len() <= LEGS_BYTES_MAX).then_some(projected)
 }
 
 /// Native evidence that some part of the command took effect at the venue.
@@ -536,14 +592,16 @@ mod tests {
     #[tokio::test]
     async fn a_partial_placement_carries_each_legs_result_and_stays_unknown() {
         let refusal = "OKX 51279: TP trigger price cannot be lower than the last price";
-        let frame = settled(json!({"message":"{\"code\":\"1\"}","partialOrderIds":["entry","sl"],
+        let frame = settled(
+            json!({"message":"{\"code\":\"1\"}","partialOrderIds":["entry","sl"],
             "elements":[
                 {"index":0,"clientOrderId":"c0","status":"placed","orderIds":["entry"]},
                 {"index":1,"status":"placed","orderIds":["sl"]},
                 {"index":2,"status":"notSent","error":{"message":refusal,"outcome":"rejected",
                     "kind":"rejected","venueCode":"51279","venueMessage":"raw"}},
                 {"index":3,"status":"unknown","error":{"message":"timed out","outcome":"unknown"}},
-                {"index":4,"status":"applied","effect":"cancel","targetOrderId":"x"}]}))
+                {"index":4,"status":"applied","effect":"cancel","targetOrderId":"x"}]}),
+        )
         .await;
         assert_eq!(frame["outcome"], "unknown");
         assert_eq!(frame["venueOrderId"], Value::Null);
@@ -575,9 +633,15 @@ mod tests {
             json!([placed, {"index":-1,"status":"placed","orderIds":["b"]}]),
             json!([placed, {"index":1,"status":"placed","orderIds":[7]}]),
             json!([placed, {"index":1,"status":"unknown"}]),
-            json!((0..40).map(|index| json!({"index":index,"status":"placed","orderIds":["x"]})).collect::<Vec<_>>()),
+            json!(
+                (0..40)
+                    .map(|index| json!({"index":index,"status":"placed","orderIds":["x"]}))
+                    .collect::<Vec<_>>()
+            ),
         ] {
-            let frame = settled(json!({"message":"m","partialOrderIds":["entry"],"elements":elements})).await;
+            let frame =
+                settled(json!({"message":"m","partialOrderIds":["entry"],"elements":elements}))
+                    .await;
             assert_eq!(frame["outcome"], "unknown");
             assert_eq!(frame["error"].get("elements"), None, "{elements}");
         }
@@ -587,12 +651,23 @@ mod tests {
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
         let reason = "\u{0}".repeat(4_000);
         let elements: Vec<Value> = (0..31)
-            .map(|index| json!({"index":index,"clientOrderId":"c".repeat(256),"status":"notSent",
-                "error":{"message":reason}}))
+            .map(|index| {
+                json!({"index":index,"clientOrderId":"c".repeat(256),"status":"notSent",
+                "error":{"message":reason}})
+            })
             .chain([json!({"index":31,"status":"placed","orderIds":["e".repeat(256)]})])
             .collect();
-        settle_intent(&out, "a", &id, Some(id.as_str().unwrap()), 1, 0,
-            Err(json!({"message":"\u{0}".repeat(4_000),"partialOrderIds":["e"],"elements":elements})));
+        settle_intent(
+            &out,
+            "a",
+            &id,
+            Some(id.as_str().unwrap()),
+            1,
+            0,
+            Err(
+                json!({"message":"\u{0}".repeat(4_000),"partialOrderIds":["e"],"elements":elements}),
+            ),
+        );
         let text = sent.recv().await.unwrap();
         assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
     }

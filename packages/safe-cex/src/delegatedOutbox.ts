@@ -19,6 +19,8 @@ import {
   DELEGATED_SUBMIT_MAX,
   delegatedIntentFingerprint,
   delegatedIntentTime,
+  delegatedLegResults,
+  type DelegatedLegResult,
 } from './delegatedOrderFrames';
 import { deriveRemoteSigningPolicy } from './exchanges/rust/construction';
 
@@ -85,7 +87,8 @@ export interface DelegatedIntent extends OutboxScope {
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
   venueOrderId?: string;
-  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent };
+  /** `elements`: an unknown placement's per-leg results (AGT-185); never outcome evidence. */
+  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent; elements?: DelegatedLegResult[] };
 }
 export interface OutboxStorage {
   load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[] | OutboxSnapshot>;
@@ -391,6 +394,12 @@ export class DelegatedOutbox {
             [...row.error.message].length > 512)
         )
           throw new Error('Invalid persisted unsupported action');
+        // A stored leg list is display data only: drop one that no longer reads, keep the row.
+        if (record(row.error) && row.error.elements !== undefined) {
+          const elements = row.version === 1 ? delegatedLegResults(row.error.elements) : undefined;
+          if (elements) row.error.elements = elements;
+          else delete row.error.elements;
+        }
         const fingerprint = row.action
           ? delegatedActionFingerprint(row.accountName, row.intentId, row.action, row.seq)
           : delegatedIntentFingerprint(row.accountName, row.intentId, row.params, row.seq);
@@ -761,6 +770,8 @@ export class DelegatedOutbox {
         delete row.retentionExpired;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
+          const elements = data.outcome === 'unknown' ? delegatedLegResults(data.error.elements) : undefined;
+          if (elements) row.error.elements = elements;
           if (data.error.outcome === 'notSent') {
             markDelegatedNotSent(row, {
               kind: 'routerRefusal',
