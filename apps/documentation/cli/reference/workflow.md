@@ -38,6 +38,14 @@ with `;`, so iterations are sequential by default. For condition-based
 waits use [`wait`](#wait); to act on a specific order use
 [capture syntax](./aliases-and-vars.md#capture-syntax).
 
+**A failed step stops the chain.** Once a step has failed, no later step
+runs: `lev 50; buy $500 stop 75700 tp 76100` never buys if the leverage
+change was refused. The CLI prints `Chain stopped after a failed step. Not
+run: …`, and a one-shot run (`tealstreet exec "…"`) exits with code 1,
+or `"ok": false` with `--json`. A failure inside an `&` group is seen at the
+next `;`, so steps already launched alongside it still run. To keep going
+past failures, put [`set ec`](#chain-modifiers) first.
+
 ---
 
 ## `sleep`

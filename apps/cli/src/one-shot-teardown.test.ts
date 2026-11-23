@@ -17,7 +17,11 @@ const teardown = replSource.slice(replSource.indexOf('async function teardownOne
 
 describe('one-shot teardown', () => {
   it('is what the single-command path ends with', () => {
-    expect(replSource).toMatch(/await teardownOneShot\(session\.currentExchange, chaseProblem \? 1 : 0\)/);
+    // The exit code also carries a failed chain step since fix/cli-chain-stops-on-failure:
+    // a subprocess caller saw exit 0 when `lev 50 isolated; buy ...` failed.
+    expect(replSource).toMatch(
+      /await teardownOneShot\(session\.currentExchange, chaseProblem \|\| !chainSucceeded \? 1 : 0\)/,
+    );
   });
 
   it('stops the virtual clock, whose sync timer would otherwise re-arm forever', () => {

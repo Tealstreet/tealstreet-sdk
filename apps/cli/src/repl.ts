@@ -1950,14 +1950,33 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
  * (stripped + one warning per invocation) for backwards compatibility;
  * users should migrate to `&`.
  */
-export function processCommand(commandString: string, options: { drainFinalInFlight?: boolean } = {}): Promise<void> {
-  return runInStorageSession(() => processCommandInSession(commandString, options));
-}
-
-async function processCommandInSession(
+export async function processCommand(
   commandString: string,
   options: { drainFinalInFlight?: boolean } = {},
 ): Promise<void> {
+  await runInStorageSession(() => processCommandInSession(commandString, options));
+}
+
+/** `processCommand` for one-shot runs, whose exit code needs the chain's outcome. */
+function processCommandSucceeded(
+  commandString: string,
+  options: { drainFinalInFlight?: boolean } = {},
+): Promise<boolean> {
+  return runInStorageSession(() => processCommandInSession(commandString, options));
+}
+
+/**
+ * Steps whose failure stops the rest of their chain. Filled by
+ * `reportStepError`, so every arm of `runStep` and `runScriptStep` reports
+ * into it without each returning a status. `set ec` steps never enter it.
+ */
+const failedSteps = new WeakSet<object>();
+
+/** Resolves false when the chain was refused or any non-`ec` step failed. */
+async function processCommandInSession(
+  commandString: string,
+  options: { drainFinalInFlight?: boolean } = {},
+): Promise<boolean> {
   const ownerSession = captureStorageSession();
   // Per-call overrides from the listener's `cmd:exec` handler. When a
   // web tab dispatches a command with `account`/`symbol` set, scope the
@@ -1977,7 +1996,7 @@ async function processCommandInSession(
     const bodyRefusal = webhookBodyRefusal(commandString);
     if (bodyRefusal) {
       adapter.printError(bodyRefusal);
-      return;
+      return false;
     }
   }
 
@@ -1991,7 +2010,7 @@ async function processCommandInSession(
     });
   } catch (e) {
     adapter.printError(e instanceof Error ? e.message : String(e));
-    return;
+    return false;
   }
 
   for (const w of result.warnings) {
@@ -2002,7 +2021,7 @@ async function processCommandInSession(
     const chainRefusal = webhookChainRefusal(result.steps);
     if (chainRefusal) {
       adapter.printError(chainRefusal);
-      return;
+      return false;
     }
   }
 
@@ -2012,19 +2031,29 @@ async function processCommandInSession(
   // dispatching it, so `close all; buy $1000` waits for the close to
   // finish before buying. `&` steps don't drain. block/retry/capture
   // steps are awaited inline as before (pacing / capture ordering).
+  // A failed step stops the chain at the next step that would run after
+  // it, so `lev 50; buy $500` never buys at the leverage it failed to set.
   //
   // The whole chain runs under one audit correlation id (TSBUG-107
   // slice 3) so every write — including a `repeat`'s expanded steps and
   // a script's internal orders — shares a `runId`. The id flows via
   // AsyncLocalStorage, so even `&`/default steps that settle after this
   // function returns still carry it (they were spawned inside the scope).
+  const dispatched: object[] = [];
+  const anyFailed = () => dispatched.some((step) => failedSteps.has(step));
   await runWithAuditRunId(newRunId(), async () => {
     const inFlight: Array<Promise<unknown>> = [];
-    for (const step of result.steps) {
+    for (const [index, step] of result.steps.entries()) {
       if (step.awaitPrior && inFlight.length > 0) {
         await Promise.allSettled(inFlight.splice(0));
       }
+      if (anyFailed()) {
+        const skipped = result.steps.slice(index).map((later) => later.command);
+        adapter.printError(`Chain stopped after a failed step. Not run: ${skipped.join('; ')}`);
+        break;
+      }
       ownerSession.assertCurrent();
+      dispatched.push(step);
       const p = runStep(step);
       if (step.block || step.retry !== undefined || step.captureTo !== undefined) {
         await p;
@@ -2036,6 +2065,7 @@ async function processCommandInSession(
       await Promise.allSettled(inFlight.splice(0));
     }
   });
+  return !anyFailed();
 }
 
 async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): Promise<void> {
@@ -2129,7 +2159,10 @@ function reportStepError(step: import('@tealstreet/cli-core').PreprocessedStep, 
   if (!isStorageSessionCurrent()) return;
   if (step.errorMode === 'continue') {
     adapter.printWarning(`(continue-on-error) ${err.message}`);
-  } else if (!(err as Error & { alreadyReported?: boolean }).alreadyReported) {
+    return;
+  }
+  failedSteps.add(step);
+  if (!(err as Error & { alreadyReported?: boolean }).alreadyReported) {
     adapter.printError(`Error in command: ${err.message}`);
   }
 }
@@ -2766,11 +2799,11 @@ export async function runSingleCommand(
 
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
   const settleChases = watchOneShotChases(session.currentExchange);
-  await processCommand(commandString, { drainFinalInFlight: true });
+  const chainSucceeded = await processCommandSucceeded(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
   const chaseProblem = await settleChases();
   if (chaseProblem) adapter.printError(chaseProblem.error);
-  await teardownOneShot(session.currentExchange, chaseProblem ? 1 : 0);
+  await teardownOneShot(session.currentExchange, chaseProblem || !chainSucceeded ? 1 : 0);
 }
 
 /**
@@ -2845,8 +2878,9 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
         const settleChases = watchOneShotChases(session.currentExchange);
         let chaseProblem: Awaited<ReturnType<typeof settleChases>>;
+        let chainSucceeded = true;
         try {
-          await processCommand(commandString, { drainFinalInFlight: true });
+          chainSucceeded = await processCommandSucceeded(commandString, { drainFinalInFlight: true });
           await waitForTwapsStartedByCommand(twapsBeforeCommand);
           chaseProblem = await settleChases();
         } catch (error) {
@@ -2858,7 +2892,7 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
           ? { ok: false, ...chaseProblem }
           : lateRejection
             ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
-            : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
+            : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring, chainSucceeded);
         output.push(...exchangeDuring);
         await emitJson(result(summary.ok, summary.code, summary.error));
         await teardownOneShot(session.currentExchange, summary.ok ? 0 : 1);
