@@ -363,3 +363,9 @@ amounts and amendments keep preserve-or-refuse; unknown native sizes refuse.
 notional, or exposure overflows. Its numeric summary never substitutes zero
 or publishes a partial sum. Position reads preserve unknown valuation; native
 close sizing continues through the SDK sizing helper.
+
+## Caller action identity
+
+A close captures the optional host placement identity before its first await and
+restores stable symbol/side child UUIDs for each actual placement. Venue client
+IDs, host ownership checks, rounding and partial-result handling are unchanged.

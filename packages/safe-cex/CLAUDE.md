@@ -141,6 +141,27 @@ fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
+## Placement intent coalescing
+
+`placementIntentLedger.ts` coalesces one action identity within one caller-owned
+authority scope. Equal payloads with distinct IDs remain distinct actions; the
+same ID joins its original promise, including an Unknown rejection. Changed
+payloads under a retained ID refuse without another dispatch.
+
+Capacity never evicts an unanswered or Unknown action. A caller may explicitly
+classify proven refusals for retirement; the original rejection is retained.
+Only known records retire behind
+a monotonic timestamp floor; an older forgotten ID returns Unknown and cannot
+send again. The floor cannot advance into an incoming clock rollback; records
+ahead of the clock stay retained. That refusal is not evidence of non-forwarding.
+The caller must retain the ledger/floor for its authority lifetime and validate
+UUIDv7 timestamps at ingress. This memory ledger is not a durable outbox or
+permission to adopt an old owner's action into a new scope.
+
+`placementIntentContext.ts` carries a validated UUIDv7 only during a synchronous
+method entry. Capture it before waiting and explicitly restore it at dispatch;
+ambient identity must never survive an await or leak into another action.
+
 ## DELEGATED order outbox
 
 `OutboxOptions`, every connection ticket, persisted intent and proof bind the
@@ -165,10 +186,24 @@ committed snapshot, preserving its handoff state and evidence even if a newer
 receipt could not be persisted. A retry never makes that newer outcome durable,
 renews replay permission, or replaces a committed handoff with an in-memory
 queued label. Persisted no-handoff claims still pass the evidence constructors.
-Caller-key rows remain reserved through ordinary history
-compaction, within the existing total capacity of 1,056 records; exhaustion
-refuses new intents rather than forgetting a key. Hosts must preserve scoped
-storage and close a writer before replacing it.
+Version-1 storage keeps caller-key rows permanently reserved within the 1,056
+record capacity. Version-2 snapshots opt into an atomic `retiredIntentBefore`
+checkpoint: compaction deletes only durably completed rows and advances that
+UUIDv7 timestamp floor in the same transaction. **A row raises the floor only once it is
+older than the box's key window** (`order_contract::key_age`: 10 s old, 5 s ahead), so the
+floor never refuses an ID the box could still accept: `placementLegIntent` children share
+their parent's timestamp, and a floor at the newest retired row refused a 34+ leg flatten
+as Unknown (AGT-106). Completed history may exceed 32 rows inside that window; those rows have no
+timer, so an enqueue that finds the total full compacts once before refusing. A caller ID
+more than 5 s ahead refuses at ingress as `invalidIntentId`. Older forgotten caller IDs refuse with
+`intentRetired` / Unknown, never another sequence or send. IDs the outbox mints itself skip
+the floor: they are fresh by construction, so a corrected fast clock cannot lock writes, in
+process or across reloads. **A loaded floor ahead of the clock is therefore legal** (that is what
+a corrected fast clock leaves); only one past the UUIDv7 time range is an invalid checkpoint. Existing unanswered
+rows still join below the floor; pending/Unknown retention rules are unchanged.
+An aborted transaction retains memory rows and the previous floor. Storage hosts
+must fence old writers that cannot preserve the checkpoint, keep it monotonic,
+and close the scoped writer before replacing it.
 
 Saved accounts and exchange options accept optional `signingMode` using the
 existing account-worker wire values `local`, `cosigned`, and `delegated`.
@@ -296,9 +331,10 @@ outbox before replacing it with a new writer for the same scope.
 `retire(intentId)` lets a host drop an entry it has settled itself (applied,
 not sent, or venue-rejected per `error.outcome: "rejected"` / reconciled venue
 state) instead of keeping it as completed history or 24 h unknown work. It
-removes the row from memory, then deletes it through `compact` with the current
-sequence, so its seq is never reused; a failed delete leaves the stored row
-to restore as before. It refuses (resolves false) queued, sending, acknowledged
+deletes the row through `compact` with the current sequence, then removes it from
+memory, so its seq is never reused; a failed delete leaves the stored and in-memory
+row as before. On version-2 storage a row still inside the key window resolves false
+and stays as completed history for compaction to retire later. It refuses (resolves false) queued, sending, acknowledged
 and cancel-pending intents, and caller-supplied keys, whose reservation must
 survive. Retirement is the host's assertion, never evidence: the SDK still
 never resends, and a later receipt for that ID finds no entry.
