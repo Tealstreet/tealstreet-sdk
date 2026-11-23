@@ -91,6 +91,23 @@ describe('durable caller-intent retirement', () => {
     }
   });
 
+  // CodeRabbit (AGT-106): completed rows inside the key window can fill the total cap. Once they
+  // age out, an enqueue with no other compaction trigger must reclaim them instead of refusing.
+  it('reclaims aged completed rows when a later enqueue finds the outbox full', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    try {
+      for (let i = 0; i < 1056; i++) await completed(box, f.id());
+      await expect(box.enqueue(params, { intentId: f.id() })).rejects.toThrow('Outbox is closed or full');
+      f.advance(16_000);
+      const id = f.id();
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      expect(box.entries().length).toBeLessThanOrEqual(32 + 1);
+    } finally {
+      box.close();
+    }
+  });
+
   it('refuses a forgotten caller UUID after restoring the durable checkpoint', async () => {
     const f = fixture();
     const first = f.id();

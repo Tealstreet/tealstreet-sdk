@@ -49,6 +49,19 @@ describe('placement intent identity', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  // CodeRabbit (AGT-106): a classifier that throws after a successful send must not discard
+  // the receipt of an order that may be live; the entry stays non-retirable instead.
+  it('resolves the send value and stays non-retirable when the result classifier throws', async () => {
+    const ledger = new PlacementIntentLedger<string[]>(1, () => {
+      throw new Error('classifier broke');
+    });
+    const send = vi.fn(async () => ['venue-order']);
+    expect(await ledger.run(intent(1), order, send)).toEqual(['venue-order']);
+    expect(await ledger.run({ ...intent(1) }, order, send)).toEqual(['venue-order']);
+    await expect(ledger.run(intent(2), order, send)).rejects.toMatchObject({ code: 'intentCapacity' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a changed payload under the same identity', async () => {
     const ledger = new PlacementIntentLedger<string[]>();
     const send = vi.fn(async () => ['venue-order']);
