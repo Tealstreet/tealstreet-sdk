@@ -2564,3 +2564,105 @@ describe('DELEGATED outbox retirement of host-settled entries', () => {
     });
   });
 });
+
+// AGT-185, okx-t: entry and stop loss placed, take profit refused. The box's unknown receipt carries
+// each leg's result so the host can say which landed; the intent stays unknown and is never resent.
+describe('an unknown placement’s per-leg results', () => {
+  const legs = [
+    { index: 0, status: 'placed', orderIds: ['entry'] },
+    { index: 1, status: 'placed', orderIds: ['sl'] },
+    { index: 2, status: 'notSent', error: { message: 'OKX 51279: TP trigger price cannot be lower than the last price' } },
+  ];
+  const settle = async (data: Record<string, unknown>) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.flush(c);
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    await box.receive(c, response(id, 'order.outcome', { clientOrderId: id, venueOrderId: null, ...data }));
+    return { f, box, id, c };
+  };
+
+  it('keeps them on the unknown row and never resends it', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    const [row] = box.entries();
+    expect(row.state).toBe('unknown');
+    expect(row.error).toEqual({ message: 'raw', elements: legs });
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+
+  it.each([
+    ['an unknown status', [...legs, { index: 3, status: 'future' }]],
+    ['a negative index', [{ ...legs[0], index: -1 }]],
+    ['a non-string order ID', [{ index: 0, status: 'placed', orderIds: [7] }]],
+    ['an unknown leg without its reason', [{ index: 0, status: 'unknown' }]],
+    ['an over-long reason', [{ index: 0, status: 'notSent', error: { message: 'x'.repeat(161) } }]],
+    ['too many legs', Array.from({ length: 33 }, (_, index) => ({ index, status: 'applied' }))],
+    ['an empty list', []],
+    ['an ID over 256 UTF-8 bytes', [{ index: 0, status: 'placed', orderIds: ['é'.repeat(129)] }]],
+    [
+      'a list over 4 KiB',
+      Array.from({ length: 32 }, (_, index) => ({ index, status: 'notSent', error: { message: 'x'.repeat(160) } })),
+    ],
+  ])('drops a list with %s and keeps the row', async (_case, elements) => {
+    const { box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements } });
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', error: { message: 'raw' } });
+    expect(box.entries()[0].error).not.toHaveProperty('elements');
+    box.close();
+  });
+
+  it('ignores them on a placed or refused receipt', async () => {
+    for (const data of [
+      { outcome: 'placed', venueOrderId: 'entry', error: { message: 'note', elements: legs } },
+      { outcome: 'refused', error: { message: 'no', outcome: 'rejected', elements: legs } },
+    ]) {
+      const { box } = await settle(data);
+      expect(box.entries()[0].error).not.toHaveProperty('elements');
+      box.close();
+    }
+  });
+
+  it('drops them once a later receipt settles the row, even one without an error', async () => {
+    const { box, id, c } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcomeSeq: 2, clientOrderId: id, outcome: 'placed', venueOrderId: 'entry', error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(box.entries()[0].error ?? {}).not.toHaveProperty('elements');
+    box.close();
+  });
+
+  it('restores a list only onto a row that is still unknown', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    box.close();
+    const [stored] = [...f.rows.values()];
+    // An ACKed row restores as unknown and keeps its list; a placed one drops it.
+    await f.options.storage.put(f.options, { ...stored, state: 'acknowledged' } as never);
+    const acked = await DelegatedOutbox.open(f.options);
+    expect(acked.entries()[0]).toMatchObject({ state: 'unknown', error: { elements: legs } });
+    acked.close();
+    await f.options.storage.put(f.options, { ...stored, state: 'placed', venueOrderId: 'entry' } as never);
+    const placed = await DelegatedOutbox.open(f.options);
+    expect(placed.entries()[0].state).toBe('placed');
+    expect(placed.entries()[0].error).not.toHaveProperty('elements');
+    placed.close();
+  });
+
+  it('restores a valid list and drops an unreadable one without refusing the load', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()[0].error).toEqual({ message: 'raw', elements: legs });
+    restored.close();
+    const [stored] = [...f.rows.values()];
+    await f.options.storage.put(f.options, { ...stored, error: { message: 'raw', elements: [{ index: 'zero' }] } } as never);
+    const reloaded = await DelegatedOutbox.open(f.options);
+    expect(reloaded.entries()[0]).toMatchObject({ state: 'unknown', error: { message: 'raw' } });
+    expect(reloaded.entries()[0].error).not.toHaveProperty('elements');
+    reloaded.close();
+  });
+});

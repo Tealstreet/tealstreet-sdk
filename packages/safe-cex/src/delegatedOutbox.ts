@@ -19,6 +19,8 @@ import {
   DELEGATED_SUBMIT_MAX,
   delegatedIntentFingerprint,
   delegatedIntentTime,
+  delegatedLegResults,
+  type DelegatedLegResult,
 } from './delegatedOrderFrames';
 import { deriveRemoteSigningPolicy } from './exchanges/rust/construction';
 
@@ -94,7 +96,8 @@ export interface DelegatedIntent extends OutboxScope {
   /** Unknown history expired after 24 hours; never evidence of non-forwarding. */
   retentionExpired?: boolean;
   venueOrderId?: string;
-  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent };
+  /** `elements`: an unknown placement's per-leg results (AGT-185); never outcome evidence. */
+  error?: { message: string; outcome?: 'unknown' | 'unsupported' | ProvenNotSent; elements?: DelegatedLegResult[] };
 }
 export interface OutboxStorage {
   load(scope: Readonly<OutboxScope>): Promise<DelegatedIntent[] | OutboxSnapshot>;
@@ -460,6 +463,13 @@ export class DelegatedOutbox {
           )
             unprovenNotSent(row);
         }
+        // A stored leg list is display data for a row still unknown: drop any other, keep the row.
+        if (record(row.error) && row.error.elements !== undefined) {
+          const elements =
+            row.version === 1 && row.state === 'unknown' ? delegatedLegResults(row.error.elements) : undefined;
+          if (elements) row.error.elements = elements;
+          else delete row.error.elements;
+        }
         box.intents.set(row.intentId, row);
         await box.persist(row);
       }
@@ -813,6 +823,8 @@ export class DelegatedOutbox {
         delete row.retentionExpired;
         if (record(data.error) && typeof data.error.message === 'string') {
           row.error = { message: data.error.message };
+          const elements = data.outcome === 'unknown' ? delegatedLegResults(data.error.elements) : undefined;
+          if (elements) row.error.elements = elements;
           if (data.error.outcome === 'notSent') {
             markDelegatedNotSent(row, {
               kind: 'routerRefusal',
@@ -824,6 +836,7 @@ export class DelegatedOutbox {
           }
         }
         if (typeof data.venueOrderId === 'string') row.venueOrderId = data.venueOrderId;
+        if (row.state !== 'unknown') delete row.error?.elements;
       } else return;
       delete row.noHandoffEvidence;
       row.cancelPending = false;
