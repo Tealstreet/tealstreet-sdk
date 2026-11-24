@@ -60,6 +60,12 @@ pub struct InitPayload {
     pub grvt_trading_account_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
     pub grvt_signer_address: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub paradex_public_key: Option<String>,
     pub tealstreet_proxy: Option<bool>,
     pub tealstreet_tunnel: Option<bool>,
     pub tealstreet_ws_route: Option<bool>,

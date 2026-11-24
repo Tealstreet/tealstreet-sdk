@@ -275,7 +275,20 @@ async fn grvt_changing_captured_account_after_proof_cannot_replace_resident() {
                 let request = challenge(&mut sent).await;
                 session.handle(&response(&request, scalar)).await.unwrap();
                 complete(&mut session, &mut done).await;
-                unchanged(&registry, &resident, &session);
+                if field == "api-key" {
+                    unchanged(&registry, &resident, &session);
+                } else {
+                    // Another trading account or signer is another canonical identity.
+                    assert!(
+                        session
+                            .joined
+                            .get("acct")
+                            .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &resident))
+                    );
+                    assert!(!registry.holds(&resident, session.socket));
+                    assert!(resident.handle.disposal_cause().is_none());
+                    assert!(resident.delegated().is_none());
+                }
                 assert!(Arc::ptr_eq(resident.link.as_ref().unwrap(), &original));
                 no_snapshot(&mut sent);
                 session.close();

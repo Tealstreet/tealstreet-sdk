@@ -1,5 +1,6 @@
 //! Generic Session local-proof boundary; fixture facts do not activate a venue.
 use super::*;
+use base64::Engine as _;
 use safe_cex_crypto::admission::{
     Family,
     identity::Projection,
@@ -11,7 +12,8 @@ fn init() -> InitPayload {
     InitPayload {
         account_name: "acct".into(),
         exchange_name: "backpack".into(),
-        key: safe_cex_crypto::hex(&safe_cex_crypto::ed25519::public_key(&[7; 32]).unwrap()),
+        key: base64::engine::general_purpose::STANDARD
+            .encode(safe_cex_crypto::ed25519::public_key(&[7; 32]).unwrap()),
         signing_mode: Some("cosigned".into()),
         instance_id: Some("local-proof-registration".into()),
         ..Default::default()
@@ -20,7 +22,7 @@ fn init() -> InitPayload {
 
 fn facts() -> String {
     json!({"venue":"backpack", "network":"mainnet", "credential":{
-        "kind":"ed25519", "publicKey":format!("0x{}", init().key)
+        "kind":"ed25519", "publicKey":format!("0x{}", safe_cex_crypto::hex(&safe_cex_crypto::ed25519::public_key(&[7; 32]).unwrap()))
     }})
     .to_string()
 }

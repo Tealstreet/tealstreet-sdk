@@ -440,7 +440,8 @@ async fn signing_mode_refusals_report_a_closed_reason_without_claiming_key_failu
                 "identity_namespace_conflict" => {
                     let collision = InitPayload {
                         account_name: crate::accounts::identity::digest("alice", &init).unwrap().unwrap(),
-                        exchange_name: "bybitinverse".into(),
+                        // A label-keyed venue registered under the identity digest.
+                        exchange_name: "txflow".into(),
                         ..init.clone()
                     };
                     Some(crate::accounts::testing::trading_account(&f.registry, "alice", &collision))

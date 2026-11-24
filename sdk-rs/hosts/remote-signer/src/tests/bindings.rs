@@ -81,6 +81,7 @@ fn orderly_alias_bindings_do_not_change_hosted_eligibility() {
                 broker: None,
                 zklink_seed: None, // This fixture retains its original non-ApeX roles.
             },
+            None,
         ));
         let source = PublicBindingSource(inner);
         let expected = bs58::decode(ORDERLY_KEY.strip_prefix("ed25519:").unwrap())

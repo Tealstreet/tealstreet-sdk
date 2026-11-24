@@ -104,6 +104,7 @@ pub(crate) struct Inner {
     pub link: Arc<SignerLink>,
     pub primary: Owned,
     coinbase: Option<safe_cex_venue_coinbase::sign::Binding>,
+    key_id: Option<String>,
     bound: Mutex<Option<Vec<u8>>>,
     published: AtomicBool,
     streak: Mutex<Streak>,
@@ -375,6 +376,7 @@ impl Inner {
         account_name: Option<String>,
         link: Arc<SignerLink>,
         primary: Owned,
+        key_id: Option<String>,
     ) -> Self {
         Self {
             family: Family::of(&venue),
@@ -384,6 +386,7 @@ impl Inner {
             link,
             primary,
             coinbase: None,
+            key_id,
             bound: Mutex::new(None),
             published: AtomicBool::new(false),
             streak: Mutex::new(Streak::default()),
@@ -476,7 +479,9 @@ impl Inner {
         request.insert("id".into(), id.clone().into());
         request.insert("type".into(), "ws-auth".into());
         request.insert("exchangeName".into(), exchange_name.into());
-        if self.venue == "bybit" && crate::supports_remote_signing(&self.venue) {
+        if let Some(key_id) = &self.key_id {
+            request.insert("keyId".into(), key_id.clone().into());
+        } else if self.venue == "bybit" && crate::supports_remote_signing(&self.venue) {
             let key_id =
                 std::str::from_utf8(&self.primary.public).map_err(|_| SignError::Refused)?;
             request.insert("keyId".into(), key_id.into());

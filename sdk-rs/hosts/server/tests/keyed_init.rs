@@ -55,9 +55,17 @@ fn browser_init(venue: &str, proxied: bool) -> String {
     });
     let extra = match venue {
         "okx" | "bitget" | "blofin" => json!({ "passphrase": "pass" }),
-        "hyperliquid" | "hyperliquidspot" => json!({ "key": WALLET }),
+        "hyperliquid" | "hyperliquidspot" => {
+            json!({ "key": WALLET, "hyperliquidSignerAddress": WALLET })
+        }
         "lighter" => json!({ "applicationId": "281474976710654", "apiKeyIndex": "3" }),
-        "paradex" => json!({ "paradexAddress": WALLET, "subkeyAddress": WALLET }),
+        "paradex" => {
+            let mut scalar = [0; 32];
+            scalar[31] = 7;
+            json!({ "paradexAddress": WALLET, "subkeyAddress": WALLET,
+                "paradexPublicKey": format!("0x{}", safe_cex_crypto::hex(
+                    &safe_cex_crypto::starknet::public_key_bytes(&scalar))) })
+        }
         _ => json!({}),
     };
     for (field, value) in extra.as_object().unwrap() {

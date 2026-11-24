@@ -300,11 +300,13 @@ async fn cosigned_window_expiry_stops_running_twap_and_records_reason() {
             assert_eq!(f.account.running.counts().1, 1);
             tokio::time::sleep(Duration::from_secs(2)).await;
             assert_eq!(f.registry.account_count(), 0);
+            // Hosted private notices are keyed by identity, not the label.
+            let identity = testing::identity_digest("u", &f.init).unwrap().unwrap();
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
                     if let Some(notice) =
                         f.registry
-                            .take_notice("u", "acct", &f.account.fingerprint, Some("r1"))
+                            .take_notice("u", &identity, &f.account.fingerprint, Some("r1"))
                     {
                         assert!(notice.summary().contains("no browser for 60s"));
                         assert!(notice.summary().contains("TWAP"));
