@@ -94,6 +94,8 @@ struct Execution {
     updated: f64,
     /// The algo or TP/SL ids a plain order names: what triggered it (AGT-196).
     /// UNVERIFIED: no live BloFin triggered-order sample confirms these ids.
+    /// Native only: a page needs no claim.
+    #[cfg(not(target_arch = "wasm32"))]
     triggered_by: [String; 2],
 }
 
@@ -2304,6 +2306,7 @@ impl Blofin {
             value,
             contract,
             updated,
+            #[cfg(not(target_arch = "wasm32"))]
             triggered_by: if row.order_category.as_ref() == "normal" {
                 [row.algo_id.to_string(), row.tpsl_id.to_string()]
             } else {
@@ -2447,6 +2450,7 @@ impl Blofin {
             value,
             contract,
             updated,
+            #[cfg(not(target_arch = "wasm32"))]
             triggered_by,
         } = execution;
         let previous = self
@@ -2521,8 +2525,10 @@ impl Blofin {
         self.account.observe_live_order(&fill.order_id);
         fill.price = prepared.price();
         fill.amount = prepared.amount();
+        #[cfg(not(target_arch = "wasm32"))]
         let (symbol, order_id) = (fill.symbol.clone(), fill.order_id.clone());
         cx.fill(fill);
+        #[cfg(not(target_arch = "wasm32"))]
         cx.order_triggered(&symbol, &order_id, triggered_by.iter().map(String::as_str));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

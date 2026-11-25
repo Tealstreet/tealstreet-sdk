@@ -2675,9 +2675,12 @@ impl BinanceFutures {
         let id = o.aid.to_string();
         cx.store.invalidate_order_snapshots();
         // A fired trigger's order fills under its own matching-engine id, so
-        // its fills name the algo that placed it (AGT-196).
-        let child = o.ai.map(|ai| ai.get().trim_matches('"'));
-        if let Some(child) = child.filter(|child| !child.is_empty() && *child != "0") {
+        // its fills name the algo that placed it (AGT-196). Native only.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(child) =
+            o.ai.map(|ai| ai.get().trim_matches('"'))
+                .filter(|child| !child.is_empty() && *child != "0")
+        {
             cx.order_triggered(&o.s, child, [id.as_str(), o.caid.as_deref().unwrap_or("")]);
         }
         if matches!(
