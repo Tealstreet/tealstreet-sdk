@@ -158,15 +158,22 @@ migrate. Neither registration method adds credential setup to the client wire.
 See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
 
 Each account actor also keeps a bounded, memory-only ledger of the order
-identities its own clients placed or amended: `PlaceOrders`/`AmendOrder*`
-dispatch receipts and completion ids (including Hyperliquid's amend
-`{orderIds, clientOrderId}` object), read through `AccountHandle::placements`
-(poison-safe `own_placements::lock`). A venue's `Notice::OrderTriggered` adds a
-triggered child (an OKX stop's `ordId`) when the algo it names, by id or client
-id, is already recorded. Matching is exact, never by leg suffix. It is how a
-host says which of a shared venue account's orders it placed (the exchange
-server's fill claims, AGT-196); a miss proves nothing, and it grants no command
-authority. The notice never reaches clients, and the WASM host drops it.
+identities its own clients placed: `PlaceOrders` dispatch receipts and
+completion ids, read through `AccountHandle::placements` (poison-safe
+`own_placements::lock`). An `AmendOrder*` records its receipts and completion
+ids (Hyperliquid's `{orderIds, clientOrderId}` replacement, BingX's new id,
+OKX's unchanged id) only when the amended row's id or client id is already
+recorded: another login sharing the venue account can amend this one's orders.
+A venue's `Notice::OrderTriggered` adds a triggered child (an OKX stop's
+`ordId`, a Binance futures algo's `ALGO_UPDATE.ai`) when the algo it names, by
+id or client id, is already recorded. Every identity is keyed by its symbol
+(venue ids repeat across symbols) and expires 24 hours after it was last
+recorded (`own_placements::RETENTION`), so a reused client id cannot claim a
+much later order; a resting order older than that is unclaimed. Matching is
+exact, never by leg suffix. It is how a host says which of a shared venue
+account's orders it placed (the exchange server's fill claims, AGT-196); a miss
+proves nothing, and it grants no command authority. The notice never reaches
+clients and does not exist on WASM.
 
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with

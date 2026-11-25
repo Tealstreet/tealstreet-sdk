@@ -129,15 +129,21 @@ never from a snapshot or a rejoin replay:
   accounts. The venue account (`accounts::identity::venue_account`) hashes the
   venue, network, Bybit site, subaccount, vault and API key, never the
   Tealstreet user; a second API key on the same venue account is another
-  digest, so its fills stay unclaimed there. No id or key leaves the box. `placedHere` is true when the native host's per-actor ledger
-  (`safe_cex_native::own_placements`: dispatch `commandProgress` receipts and
-  completion ids of this actor's placements and amends) names exactly the
-  order id, or the row's client order id or parent. A triggered child is
-  linked at fill time from its own frame (`Notice::OrderTriggered`), so it is
-  claimed even when it filled before any row was stored: OKX by `algoId` or
-  `algoClOrdId`; BloFin by `algoId`/`tpslId`, unverified live. False means "not known here", never "someone else's":
-  the ledger is memory-only (4096 newest identities), so orders from before a
-  box roll, the venue UI, bots and liquidations are all unclaimed. The gateway
+  digest, so its fills stay unclaimed there. No id or key leaves the box. A key the venue-account hash cannot read
+  falls back to that login's own account and logs `cause=unreadable_key`, so
+  its fills fail open. `placedHere` is true when the native host's per-actor
+  ledger (`safe_cex_native::own_placements`: dispatch `commandProgress` receipts
+  and completion ids of this actor's placements, and of amends only of orders
+  it already holds) names exactly the order id, or the row's client order id or
+  parent, on the fill's symbol. A triggered child is linked at fill time from
+  the venue's frame (`Notice::OrderTriggered`), so it is claimed even when it
+  filled before any row was stored: OKX by `algoId` or `algoClOrdId`; Binance
+  USDⓈ-M and COIN-M by `ALGO_UPDATE.ai`; BloFin by `algoId`/`tpslId`, unverified live.
+  False means "not known here", never "someone else's": the ledger is
+  memory-only (4096 newest identities, each for 24 hours), so orders from
+  before a box roll, older resting orders, the venue UI, bots, liquidations and
+  ADL are all unclaimed, as are Binance portfolio-margin triggered
+  children and Bybit/BingX attached TP/SL, which carry no link. The gateway
   withholds a fill only when ANOTHER user's resident claimed the same key;
   unclaimed fills reach every login on the account exactly as before.
 - `orderRejected`: a chase or TWAP placement the venue refused outright
