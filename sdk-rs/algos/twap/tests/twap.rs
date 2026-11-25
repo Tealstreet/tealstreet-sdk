@@ -71,12 +71,22 @@ struct View {
     client_id: Option<String>,
     started: std::cell::RefCell<Vec<safe_cex_algo_twap::ChaserRequest>>,
     refuse_chasers: std::cell::Cell<bool>,
-    step: Option<f64>,
+    step: std::cell::Cell<Option<f64>>,
+    min_amount: Option<f64>,
+    /// Hide the step from the start's admission check, its first `amount_step` read, so a
+    /// sub-step plan reaches the run-time refusals a restore or market change can (AGT-286).
+    skip_admission: std::cell::Cell<bool>,
 }
 
 impl TwapMarketView for View {
     fn amount_step(&self, _symbol: &str) -> Option<f64> {
-        self.step
+        if self.skip_admission.replace(false) {
+            return None;
+        }
+        self.step.get()
+    }
+    fn min_amount(&self, _symbol: &str) -> Option<f64> {
+        self.min_amount
     }
     fn start_chaser(&self, request: &safe_cex_algo_twap::ChaserRequest) -> Result<(), String> {
         if self.refuse_chasers.get() {
@@ -775,8 +785,8 @@ fn stopping_a_twap_drops_a_market_waiting_on_its_slice() {
 
 #[test]
 fn slices_stay_on_the_market_step_and_sum_to_the_size() {
-    let (mut env, mut view) = (Env::new(), View::default());
-    view.step = Some(0.001);
+    let (mut env, view) = (Env::new(), View::default());
+    view.step.set(Some(0.001));
     let mut book = owned_book();
     let (id, mut effects) = start(
         &mut book,
@@ -802,9 +812,11 @@ fn slices_stay_on_the_market_step_and_sum_to_the_size() {
 }
 
 /// Every slice and wake of a market TWAP with no chaser, settling each placement as placed.
+/// It skips the start's admission check so a sub-step plan reaches its run-time refusals.
 fn run_market_twap(view: &View, overrides: Value) -> (TwapBook, String, Vec<f64>, Vec<TwapEffect>) {
     let mut env = Env::new();
     let mut book = owned_book();
+    view.skip_admission.set(true);
     let (id, mut effects) = start(&mut book, &mut env, view, overrides);
     let (mut sent, mut all) = (Vec::new(), Vec::new());
     for _ in 0..20 {
@@ -825,7 +837,7 @@ fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice()
     // floor to 0 and ride on the next, so the 10th slice sold the whole position at once.
     // As in legacy TS (the venue refuses each raw slice), every slice is a visible refusal.
     let view = View {
-        step: Some(1.0),
+        step: std::cell::Cell::new(Some(1.0)),
         ..View::default()
     };
     let (_, _, sent, effects) = run_market_twap(
@@ -837,13 +849,16 @@ fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice()
         .into_iter()
         .filter(|message| message.contains("not sent"))
         .collect();
-    assert_eq!(refusals.len(), 10, "{:?}", logs(&effects));
+    // AGT-286: five refusals in a row pause it rather than refusing all ten.
+    assert_eq!(refusals.len(), 5, "{:?}", logs(&effects));
     assert_eq!(
         refusals[0],
         "TWAP BTCUSDT slice 1 of 10 not sent: 0.1 is below the market's amount step of 1"
     );
     assert!(
-        logs(&effects).contains(&"TWAP BTCUSDT ended with 0 of 10 slices placed"),
+        logs(&effects).contains(
+            &"TWAP BTCUSDT paused after 5 slices in a row were refused: 0.1 is below the market's amount step of 1. Resume it once that is fixed, or stop it."
+        ),
         "{:?}",
         logs(&effects)
     );
@@ -853,7 +868,7 @@ fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice()
 fn a_refused_sub_step_slice_is_not_carried_into_a_later_slice() {
     // 2.7 over 3 slices of 0.9 on a 1-unit step: carrying each refusal would have sent 1 + 1.
     let view = View {
-        step: Some(1.0),
+        step: std::cell::Cell::new(Some(1.0)),
         ..View::default()
     };
     let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 2.7, "ordersCount": 3 }));
@@ -871,7 +886,7 @@ fn a_refused_sub_step_slice_is_not_carried_into_a_later_slice() {
 fn whole_step_slices_still_carry_their_fraction_and_never_exceed_a_step_over_plan() {
     // 3.9 over 3 slices of 1.3: each places 1 and its 0.3 rides on; no slice grows by a step.
     let view = View {
-        step: Some(1.0),
+        step: std::cell::Cell::new(Some(1.0)),
         ..View::default()
     };
     let (_, _, sent, effects) = run_market_twap(&view, json!({ "size": 3.9, "ordersCount": 3 }));
@@ -1893,8 +1908,9 @@ fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
 #[test]
 fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:249-280.
-    let (mut env, mut view) = (Env::new(), View::default());
-    view.step = Some(1.0);
+    let (mut env, view) = (Env::new(), View::default());
+    view.step.set(Some(1.0));
+    view.skip_admission.set(true);
     let mut book = TwapBook::new("test-account");
     let (id, first) = start(
         &mut book,
@@ -1906,7 +1922,7 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
     // AGT-144 (fix(twap) after b2cc583e4): a sub-step slice no longer rides on, so the
     // first 0.5 is a refused slice and the second needs a 0.5 step to place. The test
     // still pins index alignment after a refused slice, now a refusal not a skip.
-    view.step = Some(0.5);
+    view.step.set(Some(0.5));
     env.advance(book.wake_at().unwrap() - env.now);
     let second = book.wake(&mut env, &view);
     assert_eq!(market_amounts(&second), [0.5]);
@@ -1942,4 +1958,185 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
         safe_cex_engine::write_plan::ElementResult::NotSent { .. }
     ));
     assert!(book.wake_at().is_none());
+}
+
+// --- AGT-286: admission and consecutive-refusal containment ---
+
+fn start_logs(view: &View, overrides: Value) -> (TwapBook, Vec<String>, Vec<f64>) {
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (_, effects) = start(&mut book, &mut env, view, overrides);
+    let logs = logs(&effects).into_iter().map(str::to_owned).collect();
+    (book, logs, market_amounts(&effects))
+}
+
+#[test]
+fn a_plan_whose_slices_are_below_the_amount_step_never_starts() {
+    // The AGT-286 repro: 0.001 BTC over 1000 slices on a 0.001 step.
+    let view = View {
+        step: std::cell::Cell::new(Some(0.001)),
+        ..View::default()
+    };
+    let (book, logs, sent) = start_logs(&view, json!({ "size": 0.001, "ordersCount": 1000 }));
+    assert!(book.ids().next().is_none(), "a refused plan was kept");
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        logs,
+        [
+            "TWAP BTCUSDT rejected: each slice would be 0.000001, below the minimum 0.001; use 1 slice or a larger size"
+        ]
+    );
+}
+
+#[test]
+fn the_minimum_amount_also_gates_a_plan_and_names_the_largest_count() {
+    let view = View {
+        step: std::cell::Cell::new(Some(0.001)),
+        min_amount: Some(0.01),
+        ..View::default()
+    };
+    let (book, logs, _) = start_logs(&view, json!({ "size": 0.05, "ordersCount": 10 }));
+    assert!(book.ids().next().is_none());
+    assert_eq!(
+        logs,
+        [
+            "TWAP BTCUSDT rejected: each slice would be 0.005, below the minimum 0.01; use at most 5 slices or a larger size"
+        ]
+    );
+}
+
+#[test]
+fn the_suggested_count_survives_randomness() {
+    // 20% randomness: the smallest of a pair is 80% of the average slice.
+    let view = View {
+        step: std::cell::Cell::new(Some(1.0)),
+        ..View::default()
+    };
+    let mut env = Env::new();
+    // Integer bounds: lodash floors 0.999 * 21 to the full 20% skew.
+    env.units = vec![0.999; 10];
+    let mut book = owned_book();
+    let (_, effects) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "size": 10.0, "ordersCount": 10, "randomnessPercentage": 20 }),
+    );
+    assert_eq!(
+        logs(&effects),
+        [
+            "TWAP BTCUSDT rejected: each slice would be 0.8, below the minimum 1; use at most 8 slices or a larger size"
+        ]
+    );
+    let (_, effects) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "size": 10.0, "ordersCount": 8, "randomnessPercentage": 20 }),
+    );
+    assert!(logs(&effects).is_empty(), "{:?}", logs(&effects));
+    assert_eq!(book.ids().count(), 1);
+}
+
+#[test]
+fn a_plan_at_exactly_the_minimum_starts() {
+    let view = View {
+        step: std::cell::Cell::new(Some(0.001)),
+        min_amount: Some(0.001),
+        ..View::default()
+    };
+    let (book, logs, sent) = start_logs(&view, json!({ "size": 0.01, "ordersCount": 10 }));
+    assert!(logs.is_empty(), "{logs:?}");
+    assert_eq!(book.ids().count(), 1);
+    assert_eq!(sent, [0.001]);
+}
+
+/// Start a market TWAP and refuse each slice's placement as it is released.
+fn refuse_every_slice(
+    view: &View,
+    overrides: Value,
+    reason: &str,
+) -> (TwapBook, String, Vec<TwapEffect>) {
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, mut effects) = start(&mut book, &mut env, view, overrides);
+    let mut all = Vec::new();
+    for _ in 0..20 {
+        let settled = settle_all(&mut book, &mut env, &id, &effects, refused(reason));
+        all.extend(effects);
+        all.extend(settled);
+        let Some(at) = book.wake_at() else { break };
+        env.advance(at - env.now);
+        effects = book.wake(&mut env, view);
+    }
+    (book, id, all)
+}
+
+#[test]
+fn consecutive_venue_refusals_pause_the_twap_with_the_reason() {
+    let view = View::default();
+    let (book, id, effects) =
+        refuse_every_slice(&view, json!({ "ordersCount": 10 }), "insufficient balance");
+    let failures = logs(&effects)
+        .into_iter()
+        .filter(|message| message.contains("slice failed"))
+        .count();
+    assert_eq!(failures, 5, "{:?}", logs(&effects));
+    assert!(logs(&effects).contains(
+        &"TWAP BTCUSDT paused after 5 slices in a row were refused: insufficient balance. Resume it once that is fixed, or stop it."
+    ));
+    let state = &book.serialize_state()[&id]["state"];
+    assert_eq!(state["status"], "paused", "{state}");
+    assert_eq!(state["ordersSizes"].as_array().map(Vec::len), Some(5));
+    assert_eq!(book.wake_at(), None, "a paused TWAP still schedules slices");
+}
+
+#[test]
+fn a_placed_slice_resets_the_refusal_count() {
+    let view = View::default();
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, mut effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 10 }));
+    let mut all = Vec::new();
+    // Four refusals, one placement, four refusals: never five in a row.
+    for slice in 0..9 {
+        let outcome = if slice == 4 {
+            Ok(vec!["o".to_owned()])
+        } else {
+            refused("insufficient balance")
+        };
+        all.extend(settle_all(&mut book, &mut env, &id, &effects, outcome));
+        let Some(at) = book.wake_at() else { break };
+        env.advance(at - env.now);
+        effects = book.wake(&mut env, &view);
+    }
+    assert!(
+        !logs(&all).iter().any(|message| message.contains("paused")),
+        "{:?}",
+        logs(&all)
+    );
+    assert_eq!(book.serialize_state()[&id]["state"]["status"], "running");
+}
+
+#[test]
+fn refused_chaser_slices_also_pause() {
+    let view = View::default();
+    view.refuse_chasers.set(true);
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, _) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "ordersCount": 10, "useChaserOrders": true }),
+    );
+    let mut all = Vec::new();
+    while let Some(at) = book.wake_at() {
+        env.advance(at - env.now);
+        all.extend(book.wake(&mut env, &view));
+    }
+    assert!(logs(&all).contains(
+        &"TWAP BTCUSDT paused after 5 slices in a row were refused: chaser refused. Resume it once that is fixed, or stop it."
+    ), "{:?}", logs(&all));
+    assert_eq!(book.serialize_state()[&id]["state"]["status"], "paused");
 }

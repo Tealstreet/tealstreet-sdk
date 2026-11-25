@@ -71,6 +71,10 @@ pub trait TwapMarketView {
     fn amount_step(&self, _symbol: &str) -> Option<f64> {
         None
     }
+    /// The market's smallest order amount (`limits.amount.min`), checked before a TWAP starts.
+    fn min_amount(&self, _symbol: &str) -> Option<f64> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -393,6 +397,9 @@ impl TwapBook {
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
+        instance
+            .admit(view)
+            .map_err(|reason| format!("TWAP {} rejected: {reason}", instance.options.symbol()))?;
         self.add(
             instance,
             self.owner.as_ref().map(|owner| owner.owner_id.clone()),

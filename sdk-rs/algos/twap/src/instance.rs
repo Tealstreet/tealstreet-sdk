@@ -72,7 +72,13 @@ pub struct TwapInstance {
     /// How it ended when that was its own doing: every slice handed off, or the user's stop.
     /// None for a halt or a disposal, which report themselves (or must not read as an end).
     end: Option<TwapEnd>,
+    /// Definite slice refusals since the last placed slice; see [`REFUSALS_BEFORE_PAUSE`].
+    consecutive_refusals: u32,
 }
+
+/// Definite refusals in a row that pause a running TWAP (AGT-286): a plan that cannot
+/// place must not refuse, and toast, every remaining slice until it runs out.
+pub const REFUSALS_BEFORE_PAUSE: u32 = 5;
 
 impl TwapInstance {
     pub fn new(
@@ -126,6 +132,7 @@ impl TwapInstance {
             next_element_index: restored_in_flight,
             elements_per_slice,
             end: None,
+            consecutive_refusals: 0,
         }
     }
 
@@ -285,6 +292,60 @@ impl TwapInstance {
             *next = add(*next, subtract(size, whole));
         }
         SliceSize::Whole(whole)
+    }
+
+    /// Refuse a new plan whose smallest slice is below the market's minimum
+    /// (AGT-286): every such slice would be refused at run time.
+    pub fn admit(&self, view: &dyn TwapMarketView) -> Result<(), String> {
+        let symbol = self.options.symbol();
+        let positive = |value: Option<f64>| value.filter(|value| value.is_finite() && *value > 0.0);
+        let minimum = positive(view.amount_step(symbol))
+            .unwrap_or(0.0)
+            .max(positive(view.min_amount(symbol)).unwrap_or(0.0));
+        let smallest = self
+            .state
+            .orders_sizes
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        if minimum <= 0.0 || !smallest.is_finite() || smallest / minimum + 1e-9 >= 1.0 {
+            return Ok(());
+        }
+        let size = self.options.size;
+        // Randomness skews a pair's smaller slice down by up to its percentage.
+        let skew = 1.0 - self.options.randomness_percentage / 100.0;
+        let mut fundable = (size * skew / minimum + 1e-9).floor();
+        if fundable < 1.0 && size / minimum + 1e-9 >= 1.0 {
+            fundable = 1.0;
+        }
+        let advice = match fundable {
+            count if count >= 2.0 => format!("use at most {count} slices or a larger size"),
+            count if count >= 1.0 => "use 1 slice or a larger size".to_owned(),
+            _ => "use a larger size".to_owned(),
+        };
+        Err(format!(
+            "each slice would be {}, below the minimum {}; {advice}",
+            display_amount(smallest),
+            display_amount(minimum),
+        ))
+    }
+
+    /// Count a definite slice refusal; pause after [`REFUSALS_BEFORE_PAUSE`] in a row.
+    fn note_refusal(&mut self, reason: &str, effects: &mut Vec<TwapEffect>) {
+        self.consecutive_refusals += 1;
+        if self.consecutive_refusals < REFUSALS_BEFORE_PAUSE
+            || self.state.status != TwapStatus::Running
+        {
+            return;
+        }
+        self.consecutive_refusals = 0;
+        self.pause();
+        effects.push(TwapEffect::Log {
+            message: format!(
+                "TWAP {} paused after {REFUSALS_BEFORE_PAUSE} slices in a row were refused: {reason}. Resume it once that is fixed, or stop it.",
+                self.options.symbol(),
+            ),
+        });
     }
 
     fn set_status(&mut self, status: TwapStatus) {
@@ -449,6 +510,10 @@ impl TwapInstance {
             effects.push(TwapEffect::Log { message });
             self.finish_slice(executed_before, next_order_at, wait_ms, now);
             self.report_shortfall(effects);
+            self.note_refusal(
+                &format!("{size} is below the market's amount step of {step}"),
+                effects,
+            );
             return;
         }
         let order_size = order_size.and_then(|size| match size {
@@ -487,6 +552,11 @@ impl TwapInstance {
                 now,
             );
             self.report_shortfall(effects);
+            if started {
+                self.consecutive_refusals = 0;
+            } else {
+                self.note_refusal("chaser refused", effects);
+            }
             return;
         }
 
@@ -587,8 +657,10 @@ impl TwapInstance {
             self.state.in_flight = None;
         }
         let mut executed = pending.executed_before + 1;
+        let mut refusal = None;
         match outcome {
             Ok(order_ids) => {
+                self.consecutive_refusals = 0;
                 self.record_success(pending.element_index, &order_ids, effects);
                 if pending.priced_limit && !order_ids.is_empty() {
                     self.tracked_limit_order_ids.extend(order_ids);
@@ -621,6 +693,7 @@ impl TwapInstance {
                         failure.message
                     ),
                 });
+                refusal = Some(failure.message);
             }
         }
         // terminate() may have run while the placement was in flight.
@@ -637,6 +710,9 @@ impl TwapInstance {
         };
         self.finish_slice(executed, next_at, wait_ms, now);
         self.report_shortfall(effects);
+        if let Some(reason) = refusal {
+            self.note_refusal(&reason, effects);
+        }
     }
 
     /// `Completed` alone must not read as done: say how few slices were placed.
@@ -892,6 +968,12 @@ impl TwapInstance {
         self.state.mark_for_cleanup = Some(true);
         self.state_changed = true;
     }
+}
+
+/// An amount for a message: at most 12 decimals, without float noise or trailing zeros.
+fn display_amount(value: f64) -> String {
+    let fixed = format!("{value:.12}");
+    fixed.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 /// JS truthiness of an optional number.
