@@ -21,6 +21,7 @@ pub const RESTART_FLUSH: Duration = Duration::from_secs(3);
 pub const WARNING_LEAD: Duration = Duration::from_secs(60 * 60);
 
 const ACCOUNT_DOMAIN: &[u8] = b"tealstreet/host-notify/account/v1";
+const FILL_DOMAIN: &[u8] = b"tealstreet/host-notify/fill/v1";
 const MAX_LABEL: usize = 64;
 
 /// Startup-only environment. An unset URL turns the whole lane off.
@@ -267,6 +268,13 @@ pub struct HostNotification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<u64>,
     pub fields: Fields,
+    /// AGT-196, `fill` only: the same key on every resident that saw this venue
+    /// order (`fill_key`), so the gateway can withhold a fill that ANOTHER
+    /// user's resident claimed with `placed_here`. Never withheld on the box.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placed_here: Option<bool>,
 }
 
 impl HostNotification {
@@ -291,6 +299,8 @@ impl HostNotification {
             collapse_key: format!("{}:{suffix}", draft.kind.as_str()),
             deadline: draft.deadline,
             fields: draft.fields,
+            fill_key: None,
+            placed_here: None,
         }
     }
 }
@@ -351,6 +361,12 @@ pub fn notification_id(user: &str, account_digest: &str, kind: Kind, natural_key
 }
 
 /// An opaque 16-hex collapse/correlation key for a value that must never be sent.
+/// User-independent: two residents on one venue account compute the same key
+/// for the same venue order, and the order id still never leaves the box.
+pub fn fill_key(venue: &str, order_id: &str) -> String {
+    hex(&length_prefixed(FILL_DOMAIN, &[venue, order_id]))
+}
+
 pub fn opaque_key(account_digest: &str, value: &str) -> String {
     hex(&length_prefixed(ACCOUNT_DOMAIN, &[account_digest, value]))[..16].to_owned()
 }

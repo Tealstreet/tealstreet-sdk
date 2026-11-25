@@ -566,9 +566,10 @@ rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 `TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
 timer. Retention arms `delegated.shutdownWarning` in its own task and emits
 `delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
-emits `fill` (only for orders this account's own clients placed, per the
-native host's `own_placements` ledger: two users can share one venue account,
-AGT-196), `orderRejected` (chase/TWAP placements only, through
+emits `fill` (every fill, with a user-independent `fillKey` and `placedHere`
+from the native host's `own_placements` ledger, so the gateway can withhold a
+fill another user's resident placed on a shared venue account; the box never
+withholds, AGT-196), `orderRejected` (chase/TWAP placements only, through
 `RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
 the key owner's life. The gateway only logs the drain's `serverRestart`
 shutdown, so a box stop (drain, SIGTERM, forced user drain) marks its

@@ -609,10 +609,11 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
 
 /// AGT-196: two Tealstreet users connected to ONE venue account each run their
 /// own resident, and both private streams carry every fill on that account.
-/// Before this, the user who did not place the order was pushed "Fill on ..."
-/// for the other user's trade.
+/// Both still report it (the box never withholds); each carries the same
+/// user-independent key, and only the placer claims it, so the gateway can
+/// withhold the other user's push.
 #[tokio::test(start_paused = true)]
-async fn a_shared_venue_accounts_fill_reaches_only_the_user_who_placed_the_order() {
+async fn a_shared_venue_accounts_fill_carries_one_key_and_only_the_placer_claims_it() {
     let placer_orders = Placements::default();
     placer_orders.lock().unwrap().record("shared-order");
     let (placer, placer_sent) = tap_for("auth0|placer", true, false, placer_orders);
@@ -623,73 +624,70 @@ async fn a_shared_venue_accounts_fill_reaches_only_the_user_who_placed_the_order
         tokio::time::advance(FILL_DEBOUNCE).await;
         tap.flush_fills(&venue_account, false);
     }
-    assert_eq!(sent(&placer_sent).len(), 1, "the placer is told");
-    assert!(
-        sent(&other_sent).is_empty(),
-        "another user on the same venue account is not: {:?}",
-        sent(&other_sent)
+    let (placer_sent, other_sent) = (sent(&placer_sent), sent(&other_sent));
+    assert_eq!((placer_sent.len(), other_sent.len()), (1, 1), "neither is withheld here");
+    assert_eq!(placer_sent[0]["placedHere"], true);
+    assert_eq!(other_sent[0]["placedHere"], false);
+    let key = placer_sent[0]["fillKey"].as_str().unwrap();
+    assert_eq!(key.len(), 64);
+    assert_eq!(other_sent[0]["fillKey"], key, "one key per venue order, whoever saw it");
+    assert!(!key.contains("shared-order"));
+    assert_ne!(
+        placer_sent[0]["collapseKey"], other_sent[0]["collapseKey"],
+        "collapse stays per account"
     );
 }
 
-/// An order placed here is known by its client order id (the dispatch receipt)
-/// or its native id (the completion); its attached legs are the user's too.
+/// A fill nobody placed through Tealstreet (venue UI, bot, liquidation, ADL) is
+/// still reported, unclaimed, so it reaches the user exactly as before.
 #[tokio::test(start_paused = true)]
-async fn placed_here_covers_client_ids_and_attached_legs() {
+async fn an_unplaced_fill_such_as_a_liquidation_is_still_reported_unclaimed() {
+    let (tap, notifier) = tap_for("auth0|u1", true, false, Placements::default());
+    tap.record_fills(&[fill("liquidation-1", 1.0)], &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["placedHere"], false);
+    assert_eq!(queued[0]["kind"], "fill");
+}
+
+/// An order placed here is claimed by its client order id (the dispatch
+/// receipt), its parent, or the venue algo order that triggered it: OKX files
+/// a triggered stop's fill under a new `ordId` with an empty `clOrdId`.
+#[tokio::test(start_paused = true)]
+async fn placed_here_covers_client_ids_parents_and_triggering_algos() {
     let placements = Placements::default();
-    placements.lock().unwrap().record("client-secret");
-    placements.lock().unwrap().record("entry");
+    for id in ["client-secret", "entry", "algo9"] {
+        placements.lock().unwrap().record(id);
+    }
     let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
     let mut by_client = order("venue-assigned", 1.0, 1.0);
     by_client.client_order_id = Some("client-secret".into());
     let mut leg = order("venue-leg", 1.0, 1.0);
     leg.client_order_id = None;
     leg.parent_id = Some("entry".into());
+    let mut triggered = order("900", 1.0, 1.0);
+    triggered.client_order_id = None;
+    triggered.extra = Some(safe_cex_engine::model::OrderExtra {
+        triggered_by: Some("algo9".into()),
+        ..Default::default()
+    });
     let mut foreign = order("foreign", 1.0, 1.0);
     foreign.client_order_id = Some("someone-else".into());
-    let rows = store(vec![by_client, leg, foreign]);
-    tap.record_fills(
-        &[
-            fill("venue-assigned", 1.0),
-            fill("venue-leg", 1.0),
-            fill("entry_sl", 1.0),
-            fill("foreign", 1.0),
-        ],
-        &rows,
-    );
+    let rows = store(vec![by_client, leg, triggered, foreign]);
+    let ids = ["venue-assigned", "venue-leg", "900", "foreign"];
+    tap.record_fills(&ids.map(|id| fill(id, 1.0)), &rows);
     tap.flush_fills(&rows, true);
-    assert_eq!(sent(&notifier).len(), 3, "{:?}", sent(&notifier));
-}
-
-/// A fill can arrive before its placement completes; it waits for the ids
-/// while a placement is in flight, and is withheld once none can name it.
-#[tokio::test(start_paused = true)]
-async fn an_unknown_fill_waits_for_an_in_flight_placement_then_is_withheld() {
-    let placements = Placements::default();
-    placements.lock().unwrap().begin();
-    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
-    tap.record_fills(&[fill("racing", 1.0)], &store(Vec::new()));
-    tap.record_fills(&[fill("never-ours", 1.0)], &store(Vec::new()));
-    tokio::time::advance(FILL_DEBOUNCE).await;
-    tap.flush_fills(&store(Vec::new()), false);
-    assert!(
-        sent(&notifier).is_empty(),
-        "both wait while a placement is in flight"
-    );
-    {
-        let mut placements = placements.lock().unwrap();
-        placements.record("racing");
-        placements.end();
-    }
-    tokio::time::advance(FILL_DEBOUNCE).await;
-    tap.flush_fills(&store(Vec::new()), false);
-    assert_eq!(
-        sent(&notifier).len(),
-        1,
-        "the completed placement's fill is sent"
-    );
-    assert_eq!(
-        tap.next_fill_due(),
-        None,
-        "the other is withheld, not held forever"
-    );
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 4, "every fill is reported");
+    let claimed: Vec<bool> = ids
+        .iter()
+        .map(|id| {
+            let key = crate::host_notify::fill_key("bybit", id);
+            queued.iter().find(|n| n["fillKey"] == key.as_str()).unwrap()["placedHere"]
+                .as_bool()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(claimed, [true, true, true, false]);
 }

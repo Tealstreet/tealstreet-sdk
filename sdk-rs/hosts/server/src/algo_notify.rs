@@ -23,11 +23,10 @@ pub const FILL_DEBOUNCE: Duration = Duration::from_secs(2);
 /// One `orderRejected` per algo, symbol and side in this window: a retrying
 /// chase must not page the user once per attempt.
 pub const REJECT_REPEAT: Duration = Duration::from_secs(60);
+/// RED checkpoint only: fills carry no claim, as before this change.
+const RED_NO_CLAIM: bool = true;
 /// Past this many orders waiting out the debounce, the earliest is sent now.
 const MAX_PENDING_FILLS: usize = 512;
-/// How long a fill of an order not yet known as this account's own may wait
-/// for a placement still in flight to name it, before it is withheld.
-pub const OWNERSHIP_WAIT: Duration = Duration::from_secs(10);
 
 /// Chase stop reasons that are an explicit client stop, never an `algoStopped`.
 /// They are the literal reasons `safe_cex_chaser` and exec's nuke record; a
@@ -67,12 +66,29 @@ impl AlgoNotify {
     }
 
     fn emit(&self, draft: Draft) {
-        self.notifier.push(HostNotification::build(
+        self.notifier.push(self.build(draft));
+    }
+
+    fn build(&self, draft: Draft) -> HostNotification {
+        HostNotification::build(
             &self.scope,
             draft,
             self.held.load(Ordering::Relaxed),
             crate::accounts::now_ms(),
-        ));
+        )
+    }
+
+    /// A fill carries its claim: the user-independent order key and whether
+    /// this account placed the order (AGT-196, decided by the gateway).
+    fn emit_fill(&self, draft: Draft, order_id: &str, placed_here: bool) {
+        let mut notification = self.build(draft);
+        if RED_NO_CLAIM {
+            self.notifier.push(notification);
+            return;
+        }
+        notification.fill_key = Some(crate::host_notify::fill_key(&self.scope.venue, order_id));
+        notification.placed_here = Some(placed_here);
+        self.notifier.push(notification);
     }
 }
 
@@ -83,11 +99,9 @@ struct PendingFill {
     /// The order row (amount, filled) right after its latest fill applied, if
     /// the store still held it. Only the order's own fields share a unit.
     row: Option<(f64, f64)>,
-    /// The row's client order id and parent order, kept for the ownership
-    /// check after the venue may have removed a filled row.
-    client_order_id: Option<String>,
-    parent_id: Option<String>,
-    first: Instant,
+    /// The row's identities (client order id, parent, triggering algo), kept
+    /// for the placement claim after the venue may have removed a filled row.
+    identities: Identities,
     due: Instant,
 }
 
@@ -114,8 +128,8 @@ struct TwapSeen {
 pub(crate) struct Tap {
     notify: AlgoNotify,
     /// Orders this account's own clients placed (AGT-196). Another Tealstreet
-    /// user connected to the same venue account sees the same fills on its own
-    /// account; only a fill of an order placed here is this user's.
+    /// user connected to the same venue account sees the same fills; this is
+    /// how a fill says which resident placed it.
     placements: Placements,
     /// The main loop ended: disposal's stops are not ordinary ends. Only a box
     /// stop reports them (`server_stopped`).
@@ -130,13 +144,20 @@ pub(crate) struct Tap {
     chases: RefCell<Option<ActiveChases>>,
 }
 
-/// The row's client order id and parent order, when the store holds it.
-fn identities(store: &AlgoStore, order_id: &str) -> Option<(Option<String>, Option<String>)> {
-    store
-        .orders
-        .iter()
-        .find(|order| order.id == order_id)
-        .map(|order| (order.client_order_id.clone(), order.parent_id.clone()))
+/// The other ids a stored order answers to: its client order id, its parent,
+/// and the venue algo order that triggered it (OKX, BloFin).
+#[derive(Default)]
+struct Identities(Vec<String>);
+
+fn identities(store: &AlgoStore, order_id: &str) -> Option<Identities> {
+    let order = store.orders.iter().find(|order| order.id == order_id)?;
+    let triggered_by = order.extra.as_ref().and_then(|extra| extra.triggered_by.clone());
+    Some(Identities(
+        [order.client_order_id.clone(), order.parent_id.clone(), triggered_by]
+            .into_iter()
+            .flatten()
+            .collect(),
+    ))
 }
 
 fn row(store: &AlgoStore, order_id: &str) -> Option<(f64, f64)> {
@@ -254,18 +275,15 @@ impl Tap {
                     side: fill.side,
                     filled: 0.0,
                     row: None,
-                    client_order_id: None,
-                    parent_id: None,
-                    first: Instant::now(),
+                    identities: Identities::default(),
                     due,
                 });
             if fill.amount.is_finite() && fill.amount > 0.0 {
                 entry.filled += fill.amount;
             }
             entry.row = row(store, &fill.order_id);
-            if let Some((client_order_id, parent_id)) = identities(store, &fill.order_id) {
-                entry.client_order_id = client_order_id;
-                entry.parent_id = parent_id;
+            if let Some(identities) = identities(store, &fill.order_id) {
+                entry.identities = identities;
             }
             entry.due = due;
         }
@@ -303,25 +321,11 @@ impl Tap {
                 .collect()
         };
         ready.sort_by_key(|(_, fill)| fill.due);
-        let mut withheld = 0;
         for (order_id, mut fill) in ready {
-            if let Some((client_order_id, parent_id)) = identities(store, &order_id) {
-                fill.client_order_id = client_order_id;
-                fill.parent_id = parent_id;
+            if let Some(identities) = identities(store, &order_id) {
+                fill.identities = identities;
             }
-            if !self.placed_here(&order_id, &fill) {
-                let waiting = !all
-                    && now.duration_since(fill.first) < OWNERSHIP_WAIT
-                    && self.placements.lock().unwrap().in_flight();
-                if waiting {
-                    fill.due = now + FILL_DEBOUNCE;
-                    self.fills.borrow_mut().insert(order_id, fill);
-                    self.wake.notify_one();
-                } else {
-                    withheld += 1;
-                }
-                continue;
-            }
+            let placed_here = self.placed_here(&order_id, &fill.identities);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
             let (verb, natural_key) = match row(store, &order_id).or(fill.row) {
@@ -335,7 +339,8 @@ impl Tap {
                     format!("{order_id}\0partiallyFilled\0{}", fill.filled),
                 ),
             };
-            self.notify.emit(Draft {
+            self.notify.emit_fill(
+                Draft {
                 kind: Kind::Fill,
                 severity: Severity::Info,
                 natural_key,
@@ -348,28 +353,18 @@ impl Tap {
                     &self.notify.scope.account_digest,
                     &order_id,
                 )),
-            });
-        }
-        if withheld > 0 {
-            crate::state::Log::info(&format!(
-                "{withheld} fill notification(s) withheld: orders not placed through this account"
-            ));
+                },
+                &order_id,
+                placed_here,
+            );
         }
     }
 
-    /// AGT-196: only an order this account placed, or a leg or child of one,
-    /// is the user's own. Anything else on a shared venue account is not.
-    fn placed_here(&self, order_id: &str, fill: &PendingFill) -> bool {
-        let placements = self.placements.lock().unwrap();
-        placements.placed(order_id)
-            || fill
-                .client_order_id
-                .as_deref()
-                .is_some_and(|id| placements.placed(id))
-            || fill
-                .parent_id
-                .as_deref()
-                .is_some_and(|id| placements.placed(id))
+    /// AGT-196: whether this account placed the order, a parent of it or the
+    /// algo order that triggered it. False is "not known here", never "foreign".
+    fn placed_here(&self, order_id: &str, identities: &Identities) -> bool {
+        let placements = safe_cex_native::own_placements::lock(&self.placements);
+        placements.placed(order_id) || identities.0.iter().any(|id| placements.placed(id))
     }
 
     /// A server-initiated placement the venue refused outright.

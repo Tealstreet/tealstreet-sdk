@@ -1050,6 +1050,17 @@ impl Blofin {
         if o.order_id.is_empty() || !matches!(o.order_category.as_ref(), "normal" | "pre_tp_sl") {
             return vec![];
         }
+        // A plain order that names an algo/TP-SL id was triggered by it; keep the
+        // link for its fill (AGT-196). Unverified against a live triggered sample.
+        let triggered_by = [&o.algo_id, &o.tpsl_id]
+            .into_iter()
+            .find(|id| !id.is_empty())
+            .filter(|_| o.order_category.as_ref() == "normal")
+            .map(|id| id.to_string());
+        let mut base = base;
+        if let Some(extra) = base.extra.as_mut() {
+            extra.triggered_by = triggered_by;
+        }
         vec![Order {
             kind: if matches!(o.order_type.as_ref(), "market" | "optimal_limit_ioc") {
                 OrderType::Market

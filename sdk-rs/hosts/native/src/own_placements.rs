@@ -1,14 +1,15 @@
-//! Order identities this account's own clients placed (AGT-196).
+//! Order identities this account's own clients placed or amended (AGT-196).
 //!
 //! Two users can connect the same venue account, and each gets its own
 //! account actor, so every actor's private stream carries the other user's
-//! fills too. Only this actor's placements are known to belong to its user:
-//! the identities its engine selected at dispatch (`commandProgress`) and the
-//! native ids its placement completions returned. Bounded and memory-only, so
-//! a restarted actor knows none of the orders placed before it.
+//! fills too. This records what is known to be this actor's: the identities
+//! its engine selected at dispatch (`commandProgress`) and the native ids its
+//! placement and amend completions returned. Bounded and memory-only, so a
+//! restarted actor knows none of the orders placed before it; a miss means
+//! "not known here", never "someone else's".
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// Identities kept per account; the oldest are forgotten first.
 const CAPACITY: usize = 4096;
@@ -26,11 +27,16 @@ const LEG_SUFFIXES: [&str; 6] = [
 /// Shared between the account actor, which records, and its handle's readers.
 pub type Placements = Arc<Mutex<OwnPlacements>>;
 
+/// Poison-safe: this ledger only labels notifications, so a panic elsewhere
+/// while it was held must never take order placement down with it.
+pub fn lock(placements: &Placements) -> MutexGuard<'_, OwnPlacements> {
+    placements.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 #[derive(Debug, Default)]
 pub struct OwnPlacements {
     order: VecDeque<String>,
     ids: HashSet<String>,
-    in_flight: usize,
 }
 
 impl OwnPlacements {
@@ -59,26 +65,15 @@ impl OwnPlacements {
                 .any(|parent| self.ids.contains(parent))
     }
 
-    /// A placement is dispatched but not yet completed: its ids may still come.
-    pub fn in_flight(&self) -> bool {
-        self.in_flight > 0
-    }
-
-    /// A placement was dispatched. Host-owned, like `record`.
-    pub fn begin(&mut self) {
-        self.in_flight += 1;
-    }
-
-    /// A dispatched placement completed or failed. Host-owned, like `record`.
-    pub fn end(&mut self) {
-        self.in_flight = self.in_flight.saturating_sub(1);
-    }
 }
 
-/// The ids in a placement completion's result: a plain JSON array of strings.
-/// Any other shape records nothing, so an unknown order is never claimed.
+/// The ids in a placement or amend completion's result: a JSON array of
+/// strings or one string. Any other shape records nothing, so an unknown
+/// order is never claimed.
 pub(crate) fn result_ids(result: &str) -> Vec<String> {
-    serde_json::from_str::<Vec<String>>(result).unwrap_or_default()
+    serde_json::from_str::<Vec<String>>(result)
+        .or_else(|_| serde_json::from_str::<String>(result).map(|id| vec![id]))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -110,20 +105,22 @@ mod tests {
     }
 
     #[test]
-    fn in_flight_counts_dispatched_placements() {
-        let mut placements = OwnPlacements::default();
-        assert!(!placements.in_flight());
-        placements.begin();
-        placements.begin();
-        placements.end();
-        assert!(placements.in_flight());
-        placements.end();
-        placements.end();
-        assert!(!placements.in_flight());
+    fn a_poisoned_ledger_still_answers() {
+        let placements = Placements::default();
+        let poisoner = placements.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = poisoner.lock().unwrap();
+            panic!("poison the ledger");
+        })
+        .join();
+        assert!(placements.is_poisoned());
+        lock(&placements).record("after-poison");
+        assert!(lock(&placements).placed("after-poison"));
     }
 
     #[test]
-    fn result_ids_read_plain_string_arrays_only() {
+    fn result_ids_read_string_arrays_and_single_strings_only() {
+        assert_eq!(result_ids(r#""9""#), vec!["9"]);
         assert_eq!(result_ids(r#"["7","8"]"#), vec!["7", "8"]);
         assert!(result_ids(r#"{"orderIds":["7"]}"#).is_empty());
         assert!(result_ids("[7]").is_empty());

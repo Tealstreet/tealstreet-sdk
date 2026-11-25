@@ -158,11 +158,11 @@ migrate. Neither registration method adds credential setup to the client wire.
 See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
 
 Each account actor also keeps a bounded, memory-only ledger of the order
-identities its own clients placed: `PlaceOrders` dispatch receipts and
-completion id arrays, read through `AccountHandle::placements`. It is how a
-host tells its own orders from another account actor's on a shared venue
-account (the exchange server's fill notifications, AGT-196); it grants no
-command authority.
+identities its own clients placed or amended: `PlaceOrders`/`AmendOrder*`
+dispatch receipts and completion ids, read through `AccountHandle::placements`
+(poison-safe `own_placements::lock`). It is how a host says which of a shared
+venue account's orders it placed (the exchange server's fill claims, AGT-196);
+a miss proves nothing, and it grants no command authority.
 
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with

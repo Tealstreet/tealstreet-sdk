@@ -1296,6 +1296,38 @@ fn triggered_order_row_survives_its_parent_algo_going_effective() {
     assert!(e.store().order("900").is_some());
 }
 
+// AGT-196: the triggered child is its own order with an empty clOrdId, so the
+// only link from its fill back to the stop the user placed is the algoId it
+// carries (the same real frame pair as the test above).
+#[test]
+fn a_triggered_child_order_keeps_the_algo_id_that_triggered_it() {
+    let (mut e, private, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    ws(
+        &mut e,
+        business,
+        r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT-SWAP","algoId":"algo9","algoClOrdId":"","ordId":"900","ordType":"trigger","state":"effective","side":"buy","sz":"4","triggerPx":"39000","triggerPxType":"last","ordPx":"39000"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"900","clOrdId":"","algoId":"algo9","algoClOrdId":"","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}]}"#,
+    );
+    let triggered_by = |e: &Engine<Okx>, id: &str| {
+        e.store()
+            .order(id)
+            .and_then(|o| o.extra.as_ref())
+            .and_then(|extra| extra.triggered_by.clone())
+    };
+    assert_eq!(triggered_by(&e, "900").as_deref(), Some("algo9"));
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"901","clOrdId":"caller901","algoId":"","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"38000"}]}"#,
+    );
+    assert_eq!(triggered_by(&e, "901"), None, "a plain order names no algo");
+}
+
 #[test]
 fn a_failed_algo_is_reported_once_and_ends() {
     for state in ["order_failed", "partially_failed"] {

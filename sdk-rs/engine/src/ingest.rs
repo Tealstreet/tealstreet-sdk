@@ -679,6 +679,7 @@ fn orders(
             conditional_order_price: present(column(10)),
             reject_reason: optional(&REJECT, flags >> 4)?,
             native_algo: tp_sl & word::NATIVE_ALGO != 0,
+            triggered_by: None,
         };
         orders.push(Order {
             id: strings.required(id)?.to_owned(),

@@ -2734,6 +2734,11 @@ impl Okx {
                     extra: Some(OrderExtra {
                         remaining_native: Some(remaining_native),
                         filled_in_placement_units: (!algo).then_some(filled),
+                        // A triggered child is its own order and carries its
+                        // parent's algoId; keep the link for its fill (AGT-196).
+                        // RED checkpoint only: the link is dropped, as before.
+                        triggered_by: (!algo && !o.algo_id.is_empty() && false)
+                            .then(|| o.algo_id.to_owned()),
                         conditional_order_price: if o.ord_type == "trigger" {
                             let p = num::parse(if o.ord_px.is_empty() {
                                 o.order_px

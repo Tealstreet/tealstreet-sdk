@@ -815,7 +815,7 @@ struct Peer {
 struct Pending {
     client: Option<u64>,
     original: u32,
-    /// A `PlaceOrders`: its receipts and result ids are this account's own orders.
+    /// A placement or amend: its receipts and result ids are this account's own orders.
     placement: bool,
 }
 
@@ -1109,8 +1109,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     if let Some(pending) = &pending
                         && pending.placement
                     {
-                        let mut placements = self.placements.lock().unwrap();
-                        placements.end();
+                        let mut placements = crate::own_placements::lock(&self.placements);
                         for id in crate::own_placements::result_ids(&result) {
                             placements.record(&id);
                         }
@@ -1129,11 +1128,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandFailed { command, error } => {
-                    let pending = self.pending.remove(&command);
-                    if pending.as_ref().is_some_and(|pending| pending.placement) {
-                        self.placements.lock().unwrap().end();
-                    }
-                    if let Some(pending) = pending
+                    if let Some(pending) = self.pending.remove(&command)
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1152,7 +1147,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         .get(&command)
                         .is_some_and(|pending| pending.placement)
                     {
-                        let mut placements = self.placements.lock().unwrap();
+                        let mut placements = crate::own_placements::lock(&self.placements);
                         for receipt in &receipts {
                             placements.record(&receipt.identity);
                         }
@@ -1318,9 +1313,6 @@ impl<V: Venue, T: Transport> Account<V, T> {
             // once without fabricating a NotSent result or a new engine turn.
             let pending: Vec<_> = self.pending.drain().map(|(_, pending)| pending).collect();
             for pending in pending {
-                if pending.placement {
-                    self.placements.lock().unwrap().end();
-                }
                 if let Some(client) = pending.client {
                     let text = encode_notice(ServerNotice::Done {
                         command: pending.original,
@@ -1806,10 +1798,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
         };
         self.next_command = internal;
         *id = internal;
-        let placement = matches!(command, Command::PlaceOrders { .. });
-        if placement {
-            self.placements.lock().unwrap().begin();
-        }
+        // Amends too: Hyperliquid and BingX replace the order under a new id.
+        // Never cancels, whose receipts can name another user's orders.
+        let placement = matches!(
+            command,
+            Command::PlaceOrders { .. }
+                | Command::AmendOrder { .. }
+                | Command::AmendOrderWithSymbol { .. }
+        );
         self.pending.insert(
             internal,
             Pending {
@@ -3089,10 +3085,10 @@ mod tests {
         assert!(receivers[1].try_recv().is_err());
     }
 
-    /// AGT-196: a placement's dispatch receipts and completion ids are recorded
-    /// as this account's own orders; other commands' receipts are not.
+    /// AGT-196: placement and amend dispatch receipts and completion ids are
+    /// recorded as this account's own orders; other commands' receipts are not.
     #[test]
-    fn placements_record_their_receipts_and_result_ids_only() {
+    fn placements_and_amends_record_their_receipts_and_result_ids_only() {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let mut actor = Account::new(
             Host::new(
@@ -3132,6 +3128,16 @@ mod tests {
                 symbol: "BTC-USD".into(),
             },
         );
+        actor.command(
+            1,
+            Command::AmendOrderWithSymbol {
+                command: 42,
+                id: "venue-1".into(),
+                symbol: "BTC-USD".into(),
+                price: Some(2.0),
+                amount: None,
+            },
+        );
         actor.execute();
         assert!(
             commands
@@ -3141,9 +3147,16 @@ mod tests {
             "the placement reached the venue as internal command 1: {:?}",
             commands.borrow()
         );
+        assert!(
+            commands
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, Command::AmendOrderWithSymbol { command: 3, .. })),
+            "the amend reached the venue as internal command 3: {:?}",
+            commands.borrow()
+        );
         let placements = actor.placements.clone();
-        assert!(placements.lock().unwrap().in_flight());
-        for text in ["1", "2", "placed:1"] {
+        for text in ["1", "2", "placed:1", "3", "placed:3"] {
             actor.host.engine.handle(
                 1.,
                 Event::WsMessage {
@@ -3153,14 +3166,17 @@ mod tests {
             );
             actor.execute();
         }
-        let placements = placements.lock().unwrap();
+        let placements = crate::own_placements::lock(&placements);
         assert!(placements.placed("native-1"), "dispatch receipt");
         assert!(placements.placed("venue-1"), "completion id");
+        assert!(
+            placements.placed("native-3") && placements.placed("venue-3"),
+            "an amend's replacement identity (Hyperliquid, BingX)"
+        );
         assert!(
             !placements.placed("native-2"),
             "a read's receipt is not a placement"
         );
-        assert!(!placements.in_flight());
     }
 
     #[test]
