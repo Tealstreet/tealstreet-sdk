@@ -210,21 +210,30 @@ row saved by one build is not restored by the other, so that release rolls, and
 rolls back, only with zero TWAPs on the box being restarted. There is no
 dual-owner path.
 
-**Pre-roll check.** From the jump box, before each box's roll (forward or back):
+**Pre-roll check.** From the jump box, for the box about to roll (forward or back),
+immediately before rolling it:
 
 ```bash
-ssh root@exchange-01 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'
+twap_preroll() { ssh "root@$1" 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'; }
+twap_preroll exchange-01   # then exchange-02 before its own roll
 ```
 
-Roll only when it prints `true` (exit 0). `false`, or an unreadable body, means
-do not roll. The deployed build cannot tell owners apart, and on the old build
-every non-Bybit TWAP is owned by a bare uid, so this count (Bybit and paused
-TWAPs included) is an upper bound and 0 is the only safe reading. If users keep
-starting TWAPs, drain the box first (new starts are refused, nothing running
-stops) and re-check. Never end TWAPs to reach 0 during this release: no
-`roll.sh --now`, no `force` or `cancel` at the roller's cap, and no
-`/admin/user-drain/force`. Those stop TWAPs that a page would later restore on
-a box running the other build.
+Roll a box only when its check prints `true` (exit 0). `false`, or an unreadable
+body, means do not roll it. The deployed build cannot tell owners apart, and on the
+old build every non-Bybit TWAP is owned by a bare uid, so this count (Bybit and
+paused TWAPs included) is an upper bound. If users keep starting TWAPs, drain the
+box first (new starts are refused, nothing running stops) and re-check. Never end
+TWAPs to reach 0 during this release: no `roll.sh --now`, no `force` or `cancel` at
+the roller's cap, and no `/admin/user-drain/force`. Those stop TWAPs that a page
+would later restore on a box running the other build.
+
+What it cannot see: a TWAP interrupted earlier (break-glass, crash, user-drain
+force) whose row survives only in a browser. After the roll the owner fence skips
+that row, places nothing, and the page gets the forced error toast "TWAP <symbol>
+not restored: persisted TWAP owner or generation does not match"
+(`session/tests/delegated_restart.rs`, `tests/algo_ops.rs`). So 0 means no live
+TWAP on the box is orphaned, not that every saved row restores. Web restore must
+also carry the box's owner unchanged (NX #10363, AGT-215) before this release.
 
 ### Per-user drain (psmp2r-1)
 

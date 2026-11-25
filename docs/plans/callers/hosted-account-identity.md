@@ -22,7 +22,7 @@ the public credential used by its signer:
 | --- | --- |
 | API-key venues, including Coinbase | `key`, preserving case and applying only the primary credential trimming declared by construction rules |
 | Backpack | `key`, a valid base64 Ed25519 public key |
-| Hyperliquid and Hyperliquid spot | `key` for the main wallet, the existing `hyperliquidSignerAddress` for the agent (see `public-key-admission.md`), and optional `vault` |
+| Hyperliquid and Hyperliquid spot | the existing `hyperliquidSignerAddress` for the agent (see `public-key-admission.md`) and optional `vault`. `key` is the API-wallet field, a setting rather than identity: the venue binds the agent to one master. |
 | GRVT | existing `grvtTradingAccountId` and `grvtSignerAddress` |
 | Paradex | existing `paradexAddress` and `subkeyAddress` (the subkey's Stark public key, as in `/auth/{subkey}`) |
 
@@ -62,7 +62,7 @@ user, scope and canonical public key ID. Existing Bybit identities keep their
 published vector. Sibling-product actor IDs qualify that credential digest with
 the native product name in a separate `tealstreet/actor/v1` domain. OKX demo
 aliases use the corresponding non-demo spelling (`okxdemo` to `okx`,
-`okxeudemo` to `okxeu`); their effective network and site remain in credential
+`okxeudemo` to `okxeu`, and `bybitdemo` with `testnet: true` to `bybit`); their effective network and site remain in credential
 scope. Alias routing/settings differences still require the existing explicit
 settings action rather than creating another actor. Each family's base product
 retains the credential digest as its actor ID. Raw public credentials are not
@@ -71,7 +71,9 @@ checks remain separate: sharing a public identity does not permit an implicit
 settings change or attach another signing mode. Existing explicit settings
 actions retain their lifecycle.
 
-GRVT's login API key is a settings input separate from its trading-account/signer
+Hyperliquid's `key` (the API-wallet field) is likewise a settings input: the same
+agent with another `key` selects the same actor and needs the explicit settings
+action. GRVT's login API key is a settings input separate from its trading-account/signer
 identity. Changing it requires the existing explicit settings action, which
 rebuilds the login provider; ordinary re-init refuses the change. Its fingerprint
 uses the existing process-salted digest rather than retaining the login key.
@@ -91,7 +93,7 @@ which device may answer a request.
 
 Wallet tuples are ordered as follows:
 
-- Hyperliquid: main wallet, signer address, vault (empty for the main wallet).
+- Hyperliquid: signer address, vault (empty for the main wallet).
 - GRVT: decimal trading account, signer address.
 - Paradex: account address, subkey Stark public key.
 
