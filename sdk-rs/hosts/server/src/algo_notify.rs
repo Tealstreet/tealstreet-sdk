@@ -78,9 +78,9 @@ impl AlgoNotify {
 
     /// A fill carries its claim: the user-independent order key and whether
     /// this account placed the order (AGT-196, decided by the gateway).
-    fn emit_fill(&self, draft: Draft, order_id: &str, placed_here: bool) {
+    fn emit_fill(&self, draft: Draft, symbol: &str, order_id: &str, placed_here: bool) {
         let mut notification = self.build(draft);
-        notification.fill_key = Some(crate::host_notify::fill_key(&self.scope.venue, order_id));
+        notification.fill_key = Some(crate::host_notify::fill_key(&self.scope, symbol, order_id));
         notification.placed_here = Some(placed_here);
         self.notifier.push(notification);
     }
@@ -355,6 +355,7 @@ impl Tap {
                         &order_id,
                     )),
                 },
+                &fill.symbol,
                 &order_id,
                 placed_here,
             );

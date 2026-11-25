@@ -225,11 +225,14 @@ pub struct Scope {
     pub user: String,
     pub account_digest: String,
     pub venue: String,
+    /// The venue account itself, the same for every user connected to it
+    /// (`accounts::identity::venue_account`). Never sent; only `fill_key` uses it.
+    pub venue_account: String,
 }
 
 impl Scope {
     /// `registry_name` is the identity digest or the label; only its hash leaves the box.
-    pub fn new(user: &str, venue: &str, registry_name: &str) -> Self {
+    pub fn new(user: &str, venue: &str, registry_name: &str, venue_account: &str) -> Self {
         Self {
             user: user.to_owned(),
             account_digest: hex(&length_prefixed(
@@ -237,6 +240,7 @@ impl Scope {
                 &[user, venue, registry_name],
             )),
             venue: label(venue).unwrap_or_else(|| "unknown".to_owned()),
+            venue_account: venue_account.to_owned(),
         }
     }
 }
@@ -360,13 +364,17 @@ pub fn notification_id(user: &str, account_digest: &str, kind: Kind, natural_key
     hex(&safe_cex_crypto::sha256(input.as_bytes()))
 }
 
-/// An opaque 16-hex collapse/correlation key for a value that must never be sent.
-/// User-independent: two residents on one venue account compute the same key
-/// for the same venue order, and the order id still never leaves the box.
-pub fn fill_key(venue: &str, order_id: &str) -> String {
-    hex(&length_prefixed(FILL_DOMAIN, &[venue, order_id]))
+/// One venue order's key, the same on every resident of that venue account and
+/// no other: per-symbol order ids (Binance USDⓈ-M) and caller-chosen ids
+/// (portfolio margin) repeat across accounts. The ids never leave the box.
+pub fn fill_key(scope: &Scope, symbol: &str, order_id: &str) -> String {
+    hex(&length_prefixed(
+        FILL_DOMAIN,
+        &[&scope.venue_account, &scope.venue, symbol, order_id],
+    ))
 }
 
+/// An opaque 16-hex collapse/correlation key for a value that must never be sent.
 pub fn opaque_key(account_digest: &str, value: &str) -> String {
     hex(&length_prefixed(ACCOUNT_DOMAIN, &[account_digest, value]))[..16].to_owned()
 }

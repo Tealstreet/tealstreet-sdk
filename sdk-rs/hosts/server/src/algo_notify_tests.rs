@@ -32,7 +32,7 @@ fn tap_for(
     let notifier = HostNotifier::unstarted();
     let notify = AlgoNotify::new(
         notifier.clone(),
-        Scope::new(user, "bybit", "synthetic-main"),
+        Scope::new(user, "bybit", "synthetic-main", "venue-account"),
         Arc::new(move || delegated),
         Arc::new(AtomicBool::new(held)),
     );
@@ -594,7 +594,7 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
     let id = |order: &str, key: &str| {
         crate::host_notify::notification_id(
             "auth0|u1",
-            &Scope::new("auth0|u1", "bybit", "synthetic-main").account_digest,
+            &Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account").account_digest,
             Kind::Fill,
             &format!("{order}\0{key}"),
         )
@@ -690,7 +690,11 @@ async fn placed_here_covers_client_ids_parents_and_triggering_algos() {
     let claimed: Vec<bool> = ids
         .iter()
         .map(|id| {
-            let key = crate::host_notify::fill_key("bybit", id);
+            let key = crate::host_notify::fill_key(
+                &Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account"),
+                "BTCUSDT",
+                id,
+            );
             queued
                 .iter()
                 .find(|n| n["fillKey"] == key.as_str())
@@ -700,4 +704,47 @@ async fn placed_here_covers_client_ids_parents_and_triggering_algos() {
         })
         .collect();
     assert_eq!(claimed, [true, true, true, false]);
+}
+
+/// One fill's key on a tap for `user` connected to `venue_account`.
+async fn fill_key_on(user: &str, venue_account: &str, fill: Fill) -> Value {
+    let notifier = HostNotifier::unstarted();
+    let notify = AlgoNotify::new(
+        notifier.clone(),
+        Scope::new(user, "bybit", "synthetic-main", venue_account),
+        Arc::new(|| true),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let tap = Tap::new(notify, Placements::default());
+    tap.record_fills(std::slice::from_ref(&fill), &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    sent(&notifier)[0]["fillKey"].clone()
+}
+
+/// AGT-196 review: the key names the VENUE account, so every Tealstreet user
+/// connected to it computes the same one, and unrelated accounts never collide
+/// on per-symbol order ids (Binance USDⓈ-M) or caller-chosen ids (PM).
+#[tokio::test(start_paused = true)]
+async fn a_fill_key_is_shared_on_one_venue_account_and_distinct_across_accounts() {
+    let on = |user: &'static str, account: &'static str, symbol: &'static str| {
+        let mut fill = fill("7", 1.0);
+        fill.symbol = symbol.into();
+        fill_key_on(user, account, fill)
+    };
+    let shared = on("auth0|a", "venue-account-1", "BTCUSDT").await;
+    assert_eq!(
+        on("auth0|b", "venue-account-1", "BTCUSDT").await,
+        shared,
+        "two users, one venue account"
+    );
+    assert_ne!(
+        on("auth0|c", "venue-account-2", "BTCUSDT").await,
+        shared,
+        "another venue account, same order id and symbol"
+    );
+    assert_ne!(
+        on("auth0|a", "venue-account-1", "ETHUSDT").await,
+        shared,
+        "the same id on another symbol is another order"
+    );
 }

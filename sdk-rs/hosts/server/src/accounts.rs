@@ -87,6 +87,8 @@ pub struct Account {
     pub name: String,
     identity: Option<String>,
     pub venue: String,
+    /// `identity::venue_account`: shared by every user on this venue account.
+    venue_account: String,
     pub handle: AccountHandle,
     /// Explicit construction mode, independent of a remote signer link.
     public_only: bool,
@@ -460,7 +462,12 @@ impl Account {
     }
 
     pub(crate) fn notify_scope(&self) -> crate::host_notify::Scope {
-        crate::host_notify::Scope::new(&self.user, &self.venue, self.registry_name())
+        crate::host_notify::Scope::new(
+            &self.user,
+            &self.venue,
+            self.registry_name(),
+            &self.venue_account,
+        )
     }
 
     pub fn is_public(&self) -> bool {
@@ -2163,6 +2170,11 @@ impl Registry {
             identity::digest(user, init)?
         };
         let registry_name = identity.as_deref().unwrap_or(&init.account_name);
+        // A key this cannot read falls back to this user's own account, which
+        // no other login shares: its fills stay unclaimed and fail open.
+        let venue_account = identity::venue_account(init).unwrap_or_else(|_| {
+            crate::host_notify::Scope::new(user, &venue, registry_name, "").account_digest
+        });
         self.user_drains
             .track(user, registry_name, &running, std::sync::Weak::new());
         if let Some(lease) = &authority.lease {
@@ -2180,7 +2192,7 @@ impl Registry {
                 let signing = Arc::downgrade(&signing);
                 crate::algo_notify::AlgoNotify::new(
                     notifier,
-                    crate::host_notify::Scope::new(user, &venue, registry_name),
+                    crate::host_notify::Scope::new(user, &venue, registry_name, &venue_account),
                     Arc::new(move || {
                         signing
                             .upgrade()
@@ -2283,6 +2295,7 @@ impl Registry {
             name: init.account_name.clone(),
             identity,
             venue: init.exchange_name.clone(),
+            venue_account,
             handle,
             link,
             public_only,
@@ -3546,6 +3559,8 @@ pub mod testing {
             name: name.into(),
             identity: None,
             venue: venue_name.into(),
+            // Tests name one venue account by its label, whoever connects it.
+            venue_account: name.into(),
             handle,
             public_only: link.is_none(),
             signing: AccountSigner::new(None, Default::default(), link.clone(), None),

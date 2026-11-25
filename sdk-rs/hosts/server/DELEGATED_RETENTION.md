@@ -122,9 +122,14 @@ never from a snapshot or a rejoin replay:
   **Each fill carries a placement claim (AGT-196).** Two Tealstreet users can
   connect the same venue account; each gets its own resident and both private
   streams carry every fill on it. The box reports every fill, as before, plus
-  `fillKey` (a domain-separated hash of venue and order id: the same on every
-  resident that saw the order, and no order id leaves the box) and
-  `placedHere`. `placedHere` is true when the native host's per-actor ledger
+  `fillKey` and `placedHere`. `fillKey` is a domain-separated hash of the
+  venue account, venue, symbol and order id: the same on every resident of
+  that venue account and on no other, so per-symbol order ids (Binance USDⓈ-M)
+  and caller-chosen ids (portfolio margin) cannot collide across unrelated
+  accounts. The venue account (`accounts::identity::venue_account`) hashes the
+  venue, network, Bybit site, subaccount, vault and API key, never the
+  Tealstreet user; a second API key on the same venue account is another
+  digest, so its fills stay unclaimed there. No id or key leaves the box. `placedHere` is true when the native host's per-actor ledger
   (`safe_cex_native::own_placements`: dispatch `commandProgress` receipts and
   completion ids of this actor's placements and amends) names the order id,
   the row's client order id or parent, or the venue algo order that triggered
