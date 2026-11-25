@@ -701,6 +701,57 @@ mod tests {
     }
 
     #[test]
+    fn a_stamped_line_keeps_only_allowlisted_fields() {
+        let mut fields = command(&json!({"op":"placeOrders","command":5,
+            "orders":[{"symbol":"BTCUSDT","side":"buy","amount":1,"intentId":"i-1","signature":"sig"}],
+            "stages_us":{"received":999},"intentId":"i-1","requestId":"r-1","key":"pub-key"}))
+        .unwrap();
+        assert!(
+            !fields.contains_key("stages_us"),
+            "a caller cannot supply stages"
+        );
+        let stages = Stages {
+            received: Some(Instant::now()),
+            ..Stages::default()
+        };
+        fields.insert("stages_us".into(), stages.offsets().unwrap());
+        let stamped = line(&who(), "socket:1/client:2", &fields, "ok".into());
+        let mut keys: Vec<&str> = stamped
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "account",
+                "command",
+                "level",
+                "msg",
+                "op",
+                "orders",
+                "origin",
+                "result",
+                "service",
+                "stages_us",
+                "user",
+                "venue",
+            ]
+        );
+        assert_eq!(stamped["stages_us"], json!({"received":0}));
+        let mut order: Vec<&str> = stamped["orders"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        order.sort_unstable();
+        assert_eq!(order, ["amount", "side", "symbol"]);
+    }
+
+    #[test]
     fn typed_outcomes_count_settled_and_unknown_receipts() {
         let before = typed_outcomes();
         for outcome in ["placed", "applied", "refused", "unknown", "unknown"] {
