@@ -266,7 +266,7 @@ async fn token_expiry_stops_a_command_waiting_for_startup() {
             for (user, expired) in [("alice", true), ("bob", false)] {
                 let commands = Arc::new(AtomicUsize::new(0));
                 let init = acct_init();
-                let (account, _inbox) = crate::accounts::testing::account_on(
+                let (mut account, _inbox) = crate::accounts::testing::account_on(
                     ReadyLater {
                         commands: commands.clone(),
                         ready: ready.clone(),
@@ -279,6 +279,7 @@ async fn token_expiry_stops_a_command_waiting_for_startup() {
                     init.fingerprint(),
                     Arc::default(),
                 );
+                crate::accounts::testing::bind_identity(&mut account, &init);
                 crate::accounts::tests::register(&registry, &account);
                 let (mut session, sent) = user_session(registry.clone(), user);
                 session.init(init).await.unwrap();

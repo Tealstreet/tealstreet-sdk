@@ -168,9 +168,9 @@ mappings reject `signingKey` and empty signing secrets. The canonical registry
 setup validates the material before the unchanged private-startup proof. There
 is no fallback to the old scalar-in-init layout.
 
-The existing Bybit identity-sharing namespace and remote `keyId` scheme remain
-unchanged in both modes. Other hosted venues retain their current account-label
-identity; that distinction does not gate DELEGATED or COSIGNED admission.
+Bybit keeps its published identity digest and remote `keyId` in both modes.
+Other hosted venues key private accounts by canonical public identity (see Hosted
+private identity); identity does not gate DELEGATED or COSIGNED admission.
 
 Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
@@ -632,3 +632,19 @@ drain refusals settle notSent (a drained start still keeps its pre-existing
 interrupted receipt); accepted edits keep the existing unknown algo receipt and
 reconcile through account events/state. Exact units/limits and mobile event
 names live in docs/plans/callers/delegated-action-frames.md.
+
+## Hosted private identity
+
+Private hosted registry keys use the verified user and canonical public credential
+within its venue/network/site namespace and native product; account names remain
+per-connection labels. Sibling products share credential scope, but have separate
+actors and TWAP owners. GRVT login-key and provider-captured API passphrase changes
+use explicit settings replacement, compared through process-salted digests.
+Wallet public fields bind that credential; Lighter keeps its label identity because
+its registered-key admission owns that read. Paradex keys on `subkeyAddress`.
+DELEGATED construction derives the signer or Stark key from the sealed secret and
+refuses a differing claim (`identity::check_sealed_signer`). This does not enable a venue or replace its
+possession proof. See `docs/plans/callers/hosted-account-identity.md` for the host
+fields and NEEDS-NX requirements. Existing public-only identities remain unchanged.
+The non-Bybit TWAP owner moved from uid to actor digest; roll that release only
+through the pre-roll check in `DESIGN.md` under "Drain and roll".

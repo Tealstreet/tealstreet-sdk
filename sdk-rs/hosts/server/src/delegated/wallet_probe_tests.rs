@@ -97,6 +97,8 @@ fn wallet_init() -> InitPayload {
         exchange_name: "hyperliquidspot".into(),
         key: WALLET.into(),
         application_id: Some(WALLET.into()),
+        // MATERIAL's own address: construction checks the claimed signer.
+        hyperliquid_signer_address: Some(WALLET.into()),
         ..Default::default()
     }
 }
@@ -109,8 +111,14 @@ async fn wallet_public_metadata_cannot_satisfy_private_admission() {
                 MATERIAL,
                 "0x0000000000000000000000000000000000000000000000000000000000000002",
             ] {
+                let init = InitPayload {
+                    hyperliquid_signer_address: Some(
+                        safe_cex_crypto::ethereum::private_key_address(material).unwrap(),
+                    ),
+                    ..wallet_init()
+                };
                 let prepared = prepare_delegated(
-                    &wallet_init(),
+                    &init,
                     DelegatedPair::new(WALLET.into(), material.into(), None),
                 )
                 .unwrap();
@@ -196,28 +204,118 @@ async fn wallet_private_startup_retains_the_public_address() {
         .await;
 }
 
+fn stark_public(scalar: u8) -> String {
+    let mut bytes = [0; 32];
+    bytes[31] = scalar;
+    format!(
+        "0x{}",
+        safe_cex_crypto::hex(&safe_cex_crypto::starknet::public_key_bytes(&bytes))
+    )
+}
+
+fn paradex_init(subkey: &str) -> InitPayload {
+    InitPayload {
+        account_name: "fixture".into(),
+        exchange_name: "paradex".into(),
+        key: subkey.into(),
+        paradex_address: Some("0x123".into()),
+        subkey_address: Some(subkey.into()),
+        ..Default::default()
+    }
+}
+
+fn paradex_pair(subkey: &str) -> DelegatedPair {
+    DelegatedPair::new(subkey.into(), String::new(), None).with_signing_key(MATERIAL.into())
+}
+
 #[test]
 fn wallet_paradex_key_only_shape_uses_the_existing_trusted_mapping() {
-    let input = json!({"key":MATERIAL,"paradexAddress":"0x123","subkeyAddress":"0x456"});
+    let subkey = stark_public(1);
+    let input = json!({"key":MATERIAL,"paradexAddress":"0x123","subkeyAddress":subkey});
     let mut local: safe_cex_venues::EngineOptions = serde_json::from_value(input).unwrap();
     let (_, identities) = safe_cex_venues::prepare_local_signer_for("paradex", &mut local).unwrap();
     assert!(identities.primary.unwrap().signing_ref().is_ok());
-    let init = InitPayload {
-        account_name: "fixture".into(),
-        exchange_name: "paradex".into(),
-        key: "0x456".into(),
-        paradex_address: Some("0x123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Default::default()
-    };
-    assert!(
-        prepare_delegated(
-            &init,
-            DelegatedPair::new("0x456".into(), String::new(), None)
-                .with_signing_key(MATERIAL.into())
-        )
-        .is_ok()
+    assert!(prepare_delegated(&paradex_init(&subkey), paradex_pair(&subkey)).is_ok());
+}
+
+#[test]
+fn wallet_delegated_identity_claims_must_be_the_sealed_key() {
+    let other_signer = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 2))
+        .unwrap()
+        .to_lowercase();
+    assert_eq!(
+        safe_cex_crypto::ethereum::private_key_address(MATERIAL)
+            .unwrap()
+            .to_lowercase(),
+        WALLET
     );
+    for venue in ["hyperliquid", "hyperliquidspot", "grvt"] {
+        let init = |signer: Option<&str>| InitPayload {
+            account_name: "fixture".into(),
+            exchange_name: venue.into(),
+            key: if venue == "grvt" {
+                "synthetic-grvt-api-key"
+            } else {
+                WALLET
+            }
+            .into(),
+            hyperliquid_signer_address: signer.filter(|_| venue != "grvt").map(Into::into),
+            grvt_signer_address: signer.filter(|_| venue == "grvt").map(Into::into),
+            grvt_trading_account_id: (venue == "grvt").then(|| "42".into()),
+            ..Default::default()
+        };
+        let pair = |init: &InitPayload| DelegatedPair::new(init.key.clone(), MATERIAL.into(), None);
+        let own = init(Some(WALLET));
+        assert!(
+            prepare_delegated(&own, pair(&own)).is_ok(),
+            "{venue}: own signer"
+        );
+        let upper = init(Some(&WALLET.to_uppercase().replacen("0X", "0x", 1)));
+        assert!(
+            prepare_delegated(&upper, pair(&upper)).is_ok(),
+            "{venue}: case"
+        );
+        for claim in [Some(other_signer.as_str()), None] {
+            let claimed = init(claim);
+            assert!(
+                prepare_delegated(&claimed, pair(&claimed)).is_err(),
+                "{venue}: {claim:?}"
+            );
+        }
+    }
+    let other = stark_public(2);
+    assert!(prepare_delegated(&paradex_init(&other), paradex_pair(&other)).is_err());
+}
+
+#[test]
+fn wallet_paradex_ethereum_derived_key_goes_through_the_sealed_signer_check() {
+    // 64 hex digits is an Ethereum key; a 66-character key would be a Stark scalar.
+    let ethereum = "11".repeat(32);
+    let subkey_on = |chain: &str| {
+        let scalar = safe_cex_crypto::starknet::derive_from_ethereum(&ethereum, chain).unwrap();
+        let public = safe_cex_crypto::starknet::public_key_bytes(&scalar);
+        format!("0x{}", safe_cex_crypto::hex(&public))
+    };
+    let pair = |subkey: &str| {
+        DelegatedPair::new(subkey.into(), String::new(), None).with_signing_key(ethereum.clone())
+    };
+    // Mainnet derives on chain 1 (`safe_cex_venue_paradex::sign::ethereum_chain(false)`).
+    let mainnet = subkey_on("1");
+    assert!(prepare_delegated(&paradex_init(&mainnet), pair(&mainnet)).is_ok());
+    for other in [subkey_on("11155111"), stark_public(1)] {
+        assert!(
+            prepare_delegated(&paradex_init(&other), pair(&other)).is_err(),
+            "{other}"
+        );
+    }
+    // Testnet derives on Sepolia (11155111); the mainnet derivation is another key there.
+    let on_testnet = |subkey: &str| InitPayload {
+        testnet: Some(true),
+        ..paradex_init(subkey)
+    };
+    let testnet = subkey_on("11155111");
+    assert!(prepare_delegated(&on_testnet(&testnet), pair(&testnet)).is_ok());
+    assert!(prepare_delegated(&on_testnet(&mainnet), pair(&mainnet)).is_err());
 }
 
 #[test]

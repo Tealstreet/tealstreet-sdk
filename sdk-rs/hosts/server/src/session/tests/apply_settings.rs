@@ -20,7 +20,7 @@ async fn apply_settings_requires_an_admitted_client_and_records_the_stop_reason(
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let init = acct_init();
-            let (account, mut algos) = crate::accounts::testing::account_on(
+            let (mut account, mut algos) = crate::accounts::testing::account_on(
                 crate::accounts::testing::HeldLoad {
                     placed: Arc::default(),
                     load_after_ms: Some(0.),
@@ -34,6 +34,7 @@ async fn apply_settings_requires_an_admitted_client_and_records_the_stop_reason(
                 init.fingerprint(),
                 Arc::default(),
             );
+            crate::accounts::testing::bind_identity(&mut account, &init);
             crate::accounts::testing::register(&registry, &account);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
             let mut init = init;

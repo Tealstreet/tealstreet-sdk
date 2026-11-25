@@ -275,7 +275,20 @@ async fn grvt_changing_captured_account_after_proof_cannot_replace_resident() {
                 let request = challenge(&mut sent).await;
                 session.handle(&response(&request, scalar)).await.unwrap();
                 complete(&mut session, &mut done).await;
-                unchanged(&registry, &resident, &session);
+                if field == "api-key" {
+                    unchanged(&registry, &resident, &session);
+                } else {
+                    // Another trading account or signer is another canonical identity.
+                    assert!(
+                        session
+                            .joined
+                            .get("acct")
+                            .is_none_or(|joined| !Arc::ptr_eq(&joined.account, &resident))
+                    );
+                    assert!(!registry.holds(&resident, session.socket));
+                    assert!(resident.handle.disposal_cause().is_none());
+                    assert!(resident.delegated().is_none());
+                }
                 assert!(Arc::ptr_eq(resident.link.as_ref().unwrap(), &original));
                 no_snapshot(&mut sent);
                 session.close();
@@ -476,7 +489,16 @@ async fn grvt_legacy_resident_key_mismatch_refuses_before_holding_the_actor() {
                 &json!({"key":init().key,"secret":format!("{:064x}",2)}).to_string(),
             )
             .unwrap();
-            let installed = crate::delegated::prepare_delegated(&init(), credentials.pair())
+            // Construction now refuses a mismatched claim, so install the scalar
+            // under its own signer, then attach it to the old metadata's actor.
+            let own = InitPayload {
+                grvt_signer_address: Some(
+                    safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 2))
+                        .unwrap(),
+                ),
+                ..init()
+            };
+            let installed = crate::delegated::prepare_delegated(&own, credentials.pair())
                 .unwrap()
                 .resident;
             let provider = installed.provider();

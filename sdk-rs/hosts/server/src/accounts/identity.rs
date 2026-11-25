@@ -1,4 +1,8 @@
 use crate::envelope::InitPayload;
+use base64::Engine as _;
+use safe_cex_crypto::admission::{Family, PublicKey};
+
+const INVALID: &str = "Invalid account identity";
 
 pub(super) fn hyperliquid_projection(
     user: &str,
@@ -32,7 +36,7 @@ pub(super) fn grvt_projection(
     if init.exchange_name != "grvt" {
         return Err(invalid());
     }
-    key_id(init)?;
+    opaque(init)?;
     let signer = safe_cex_crypto::ethereum::get_address(
         init.grvt_signer_address.as_deref().ok_or_else(invalid)?,
     )
@@ -59,11 +63,11 @@ pub(super) fn backpack_projection(
     if init.exchange_name != "backpack" {
         return Err(invalid());
     }
-    let key = key_id(init)?;
+    let key = opaque(init)?;
     if key.len() != 44 {
         return Err(invalid());
     }
-    let public = STANDARD.decode(key).map_err(|_| invalid())?;
+    let public = STANDARD.decode(&key).map_err(|_| invalid())?;
     if public.len() != 32 || STANDARD.encode(&public) != key {
         return Err(invalid());
     }
@@ -76,23 +80,185 @@ pub(super) fn backpack_projection(
         .map_err(|_| invalid())
 }
 
+/// Lighter keeps its label identity: its registered-key admission owns that read.
 pub(crate) fn enabled(init: &InitPayload) -> bool {
-    init.exchange_name == "bybit"
-        && crate::delegated::enabled(&init.exchange_name)
+    crate::delegated::enabled(&init.exchange_name)
+        && !matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
         && init.public_only != Some(true)
         && !init.account_name.starts_with("__pub_")
 }
 
-pub(super) fn key_id(init: &InitPayload) -> Result<&str, String> {
+fn opaque(init: &InitPayload) -> Result<String, String> {
     let trim = safe_cex_venues::signer_setup_policy(&init.exchange_name)
         .primary
         .and_then(|primary| primary.trim_credential)
         == Some(true);
     let key = if trim { init.key.trim() } else { &init.key };
     if key.is_empty() || key.len() > 1_048_576 || key.contains(['\r', '\n', '\0']) {
-        return Err("Invalid account identity".into());
+        return Err(INVALID.into());
     }
-    Ok(key)
+    Ok(key.into())
+}
+
+fn hex(text: &str, width: usize, padded: bool) -> Result<Vec<u8>, String> {
+    let body = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .ok_or(INVALID)?;
+    if body.is_empty()
+        || body.len() > width * 2
+        || (!padded && body.len() != width * 2)
+        || !body.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err(INVALID.into());
+    }
+    let canonical = format!("{body:0>length$}", length = width * 2);
+    (0..canonical.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&canonical[i..i + 2], 16).map_err(|_| INVALID.into()))
+        .collect()
+}
+
+fn address(text: Option<&str>) -> Result<String, String> {
+    let public = PublicKey::new(Family::Ethereum, &hex(text.ok_or(INVALID)?, 20, false)?)
+        .map_err(|_| INVALID)?;
+    Ok(format!("0x{}", safe_cex_crypto::hex(public.as_bytes())))
+}
+
+/// Master's Hyperliquid engine read `key` and `vault` with or without `0x`
+/// (`ethereum::get_address`), so identity accepts both spellings.
+fn prefixed(text: &str) -> String {
+    if text.starts_with("0x") || text.starts_with("0X") {
+        text.to_owned()
+    } else {
+        format!("0x{text}")
+    }
+}
+
+fn stark_address(text: Option<&str>) -> Result<String, String> {
+    let bytes = hex(text.ok_or(INVALID)?, 32, true)?;
+    let mut prime = [0u8; 32];
+    prime[0] = 8;
+    prime[7] = 17;
+    prime[31] = 1;
+    if bytes.iter().all(|b| *b == 0) || bytes.as_slice() >= prime.as_slice() {
+        return Err(INVALID.into());
+    }
+    Ok(format!("0x{}", safe_cex_crypto::hex(&bytes)))
+}
+
+/// Paradex's `subkeyAddress` is the subkey's Stark public key (`/auth/{subkey}`).
+fn stark_public(text: Option<&str>) -> Result<String, String> {
+    let public = PublicKey::new(Family::Stark, &hex(text.ok_or(INVALID)?, 32, true)?)
+        .map_err(|_| INVALID)?;
+    Ok(format!("0x{}", safe_cex_crypto::hex(public.as_bytes())))
+}
+
+/// A DELEGATED wallet init's claimed signer (Hyperliquid, GRVT) or Stark key
+/// (Paradex) keys its identity, so it must be the key the sealed secret derives.
+pub(crate) fn check_sealed_signer(
+    init: &InitPayload,
+    provider: &safe_cex_engine::signing::Provider,
+    key: &safe_cex_engine::signing::KeyRef,
+) -> Result<(), String> {
+    let (family, claimed) = match init.exchange_name.as_str() {
+        "hyperliquid" | "hyperliquidspot" => (
+            Family::Ethereum,
+            address(init.hyperliquid_signer_address.as_deref())?,
+        ),
+        "grvt" => (
+            Family::Ethereum,
+            address(init.grvt_signer_address.as_deref())?,
+        ),
+        "paradex" => (Family::Stark, stark_public(init.subkey_address.as_deref())?),
+        _ => return Ok(()),
+    };
+    let derived = PublicKey::from_provider(family, provider, key).map_err(|_| INVALID)?;
+    if format!("0x{}", safe_cex_crypto::hex(derived.as_bytes())) != claimed {
+        return Err(INVALID.into());
+    }
+    Ok(())
+}
+
+fn decimal(text: Option<&str>, max: u64) -> Result<u64, String> {
+    let text = text.ok_or(INVALID)?.trim();
+    if text.is_empty() || text.len() > 20 || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(INVALID.into());
+    }
+    text.parse::<u64>()
+        .ok()
+        .filter(|n| *n <= max)
+        .ok_or_else(|| INVALID.into())
+}
+
+pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
+    let tuple = |fields: &[String]| serde_json::to_string(fields).expect("identity strings");
+    match init.exchange_name.as_str() {
+        // `key` is the API-wallet field: the venue binds the agent to one master, so
+        // it is a setting (in the fingerprint), never part of the agent's identity.
+        "hyperliquid" | "hyperliquidspot" => {
+            address(Some(&prefixed(&init.key)))?;
+            Ok(tuple(&[
+                address(init.hyperliquid_signer_address.as_deref())?,
+                init.vault
+                    .as_deref()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| address(Some(&prefixed(v))))
+                    .transpose()?
+                    .unwrap_or_default(),
+            ]))
+        }
+        "grvt" => Ok(tuple(&[
+            decimal(init.grvt_trading_account_id.as_deref(), u64::MAX)?.to_string(),
+            address(init.grvt_signer_address.as_deref())?,
+        ])),
+        "paradex" => Ok(tuple(&[
+            stark_address(init.paradex_address.as_deref())?,
+            stark_public(init.subkey_address.as_deref())?,
+        ])),
+        "backpack" => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(opaque(init)?)
+                .map_err(|_| INVALID)?;
+            let public = PublicKey::new(Family::Ed25519, &bytes).map_err(|_| INVALID)?;
+            Ok(base64::engine::general_purpose::STANDARD.encode(public.as_bytes()))
+        }
+        _ => opaque(init),
+    }
+}
+
+fn family(venue: &str) -> &str {
+    match venue {
+        "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => "bybit",
+        "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
+        "okxeu" | "okxdemo" | "okxeudemo" => "okx",
+        "bitgetinverse" | "bitgetusdc" => "bitget",
+        "kucoinspot" => "kucoin",
+        "hyperliquidspot" => "hyperliquid",
+        "bingxspot" => "bingx",
+        "coinbasespot" => "coinbase",
+        _ => venue,
+    }
+}
+
+fn scope(init: &InitPayload) -> String {
+    let venue = init.exchange_name.as_str();
+    let family = family(venue);
+    let testnet = init.testnet == Some(true);
+    let network = match venue {
+        "okx" | "okxeu" | "okxdemo" | "okxeudemo" if testnet || venue.ends_with("demo") => "demo",
+        "bybitdemo" if !testnet => "demo",
+        "binancespot" if testnet => "spot-testnet",
+        _ if testnet => "testnet",
+        _ => "mainnet",
+    };
+    let site = match venue {
+        "bybit" | "bybitinverse" | "bybitspot" => init.bybit_site_id.as_deref().unwrap_or_default(),
+        "okxeu" | "okxeudemo" => "eu",
+        "hyrotrader" => "hyrotrader",
+        _ => "",
+    };
+    serde_json::to_string(&[family, network, site]).expect("identity scope strings")
 }
 
 pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
@@ -102,32 +268,42 @@ pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, S
     if user.is_empty() {
         return Err("Authenticated user required".into());
     }
-    let network = if init.testnet == Some(true) {
-        "testnet"
-    } else {
-        "mainnet"
-    };
-    let scope = serde_json::to_string(&[
-        init.exchange_name.as_str(),
-        network,
-        init.bybit_site_id.as_deref().unwrap_or_default(),
-    ])
-    .expect("identity scope strings");
+    let (scope, key) = (scope(init), key_id(init)?);
     let mut input = b"tealstreet/identity/v1".to_vec();
-    for component in [user, scope.as_str(), key_id(init)?] {
+    for component in [user, scope.as_str(), key.as_str()] {
         input.extend_from_slice(&(component.len() as u64).to_be_bytes());
         input.extend_from_slice(component.as_bytes());
     }
-    Ok(Some(
-        safe_cex_crypto::sha256(&input)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-    ))
+    Ok(Some(safe_cex_crypto::hex(&safe_cex_crypto::sha256(&input))))
+}
+
+/// Sibling products share a credential namespace, but need separate actors and
+/// algo owners. Environment aliases select the same product, with network/site
+/// already bound by the credential scope. Preserve each base product's identity.
+pub(super) fn actor_digest(user: &str, init: &InitPayload) -> Result<Option<String>, String> {
+    let Some(credential) = digest(user, init)? else {
+        return Ok(None);
+    };
+    let product = match (init.exchange_name.as_str(), init.testnet == Some(true)) {
+        ("okxdemo", _) => "okx",
+        ("okxeudemo", _) => "okxeu",
+        // Bybit demo with `testnet` routes to ordinary Bybit testnet.
+        ("bybitdemo", true) => "bybit",
+        (venue, _) => venue,
+    };
+    if product == family(product) {
+        return Ok(Some(credential));
+    }
+    let mut input = b"tealstreet/actor/v1".to_vec();
+    for component in [credential.as_str(), product] {
+        input.extend_from_slice(&(component.len() as u64).to_be_bytes());
+        input.extend_from_slice(component.as_bytes());
+    }
+    Ok(Some(safe_cex_crypto::hex(&safe_cex_crypto::sha256(&input))))
 }
 
 pub(super) fn registry_name(user: &str, init: &InitPayload) -> Result<String, String> {
-    Ok(digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
+    Ok(actor_digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
 }
 
 // A slot queue is intentionally stricter than a registered-key identity: rotation

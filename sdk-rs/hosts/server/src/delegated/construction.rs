@@ -136,13 +136,14 @@ pub fn prepare_delegated(
     if !protection.memory_locked() {
         crate::delegated_memory::warn_locking_unavailable();
     }
-    if identities
+    let Some(key) = identities
         .primary
         .as_ref()
-        .is_none_or(|identity| identity.signing_ref().is_err())
-    {
+        .and_then(|identity| identity.signing_ref().ok())
+        .cloned()
+    else {
         return Err("The server couldn’t set up this trading account".into());
-    }
+    };
     let state = safe_cex_venues::TrustedSignerState::capture(&init.exchange_name, &native);
     let fields = options.as_object_mut().expect("engine options object");
     fields.remove("passphrase");
@@ -152,6 +153,8 @@ pub fn prepare_delegated(
     fields.insert("remoteSigning".into(), false.into());
     fields.insert("payloadSigner".into(), false.into());
     let mut resident = ResidentCopy::new(protection, identities.clone(), Some(state));
+    crate::accounts::identity::check_sealed_signer(init, &resident.provider(), &key)
+        .map_err(|_| "The server couldn’t set up this trading account".to_owned())?;
     resident.trusted_identities = Some(safe_cex_native::TrustedSignerIdentities::capture(
         &init.exchange_name,
         resident.provider(),

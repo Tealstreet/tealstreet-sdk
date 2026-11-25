@@ -201,6 +201,45 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
 - **Break-glass:** sticky force intent is published before any cleanup await and excludes planned-move classification until explicit undrain. It stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
 - **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
 
+### Rolling a TWAP owner change (AGT-192)
+
+The canonical-identity release changes the native TWAP owner on every hosted
+venue except Bybit: from the bare user ID to the actor digest
+(`docs/plans/callers/hosted-account-identity.md`, "Rolling this change"). A TWAP
+row saved by one build is not restored by the other, so that release rolls, and
+rolls back, only with zero TWAPs on the box being restarted. There is no
+dual-owner path.
+
+**Pre-roll check.** On the jump box (`ssh jumpbox`; the fleet trusts only its key,
+and `ssh -J` or host aliases do not reach the boxes), for the box about to roll
+(forward or back), immediately before rolling it:
+
+```bash
+twap_preroll() { ssh -n -o BatchMode=yes -o ConnectTimeout=8 "root@$1" 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'; }
+twap_preroll <private address of the box>   # exchange-01, then exchange-02 before its own roll
+```
+
+The boxes' private `10.20.0.x` addresses are `exchange-roll`'s `BOX_IP` map in
+the monorepo's `infra/tofu/jumpbox/exchange-roll.sh` (see `infra/tofu/CLAUDE.md`,
+"SSH: the fleet trusts only the jump box"); they are not repeated in this mirror.
+
+Roll a box only when its check prints `true` (exit 0). `false`, or an unreadable
+body, means do not roll it. The deployed build cannot tell owners apart, and on the
+old build every non-Bybit TWAP is owned by a bare uid, so this count (Bybit and
+paused TWAPs included) is an upper bound. If users keep starting TWAPs, drain the
+box first (new starts are refused, nothing running stops) and re-check. Never end
+TWAPs to reach 0 during this release: no `roll.sh --now`, no `force` or `cancel` at
+the roller's cap, and no `/admin/user-drain/force`. Those stop TWAPs that a page
+would later restore on a box running the other build.
+
+What it cannot see: a TWAP interrupted earlier (break-glass, crash, user-drain
+force) whose row survives only in a browser. After the roll the owner fence skips
+that row, places nothing, and the page gets the forced error toast "TWAP <symbol>
+not restored: persisted TWAP owner or generation does not match"
+(`session/tests/delegated_restart.rs`, `tests/algo_ops.rs`). So 0 means no live
+TWAP on the box is orphaned, not that every saved row restores. Web restore must
+also carry the box's owner unchanged (NX #10363, AGT-215) before this release.
+
 ### Per-user drain (psmp2r-1)
 
 These routes move one user while `/health` and everyone else keep serving. All
@@ -1140,8 +1179,8 @@ Sizing, for 110 to 1,200 accounts per region (from the CI replay data):
 
 Account identity:
 
-- **Hosted Bybit private accounts:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor. This existing identity namespace is independent of venue-generic admission; other hosted venues keep their current account-label identity.
-- **Other accounts:** `(userId, accountName)` retains its existing behavior.
+- **Private accounts on hosted venues:** `(verified uid, identity digest)`, for both hosted signing modes. Each connection maps its account labels to that identity and receives its own label and current `instanceId` on account frames. Different labels for the same identity share one actor. This identity namespace is independent of venue-generic admission and possession proof.
+- **Public and unhosted accounts:** `(userId, accountName)` retains its existing behavior.
 - **Different users:** never share an account, even with equal names.
 - **Unauthenticated public:** `__pub_bybit` is a single shared, public-only bybit account.
 
@@ -1153,12 +1192,17 @@ The identity digest is lowercase SHA-256 hex. Its input starts with the UTF-8
 bytes `tealstreet/identity/v1`, followed by three UTF-8 components: verified uid,
 scope, and canonical public key id. Each component is prefixed by its byte length
 as an unsigned 64-bit big-endian integer. Scope is the compact JSON array
-`[venue, network, site]`, where network is `mainnet` or `testnet` and an absent
-site is the empty string. Credential trimming follows the venue's signer setup
+`[family, network, site]`; testnet and demo networks and regional namespaces
+remain separate. An absent site is the empty string. Credential trimming follows the venue's signer setup
 policy. The digest uses no process salt. Account labels and signing secrets are
-excluded. Enabled Bybit settings fingerprints exclude primary credentials.
+excluded. Private hosted settings fingerprints exclude public identity keys;
+GRVT's login key and provider-captured API passphrases participate through
+process-salted digests. Wallet IDs
+use canonical public signing values. Lighter keeps its `(userId, accountName)`
+label identity. See
+`docs/plans/callers/hosted-account-identity.md` for host field requirements.
 
-Settings changes on a held Bybit identity use the admitted connection's
+Settings changes on a held private identity use the admitted connection's
 `msg` operation `applySettings`, with `data: {requestId, settings: InitPayload}`.
 The settings must name the same label and identity. Replacement construction and
 its captured authority checks succeed before retiring the resident account through
@@ -1169,9 +1213,9 @@ The reply is `applySettings:done` with
 `{requestId, success, result}` and the current registration's `instanceId`.
 Parked holders and the DELEGATED resident copy participate in settings refusal.
 
-Bybit remote sign requests include `keyId` alongside the connection-local label.
-Hosted Bybit TWAP persistence carries the identity digest in `ownerId`.
-Restoration requires that identity and can follow a renamed label. Other TWAP
+Hosted remote sign requests include canonical `keyId` alongside the connection-local label.
+Hosted private TWAP persistence carries the identity digest in `ownerId`.
+Restoration requires that identity and can follow a renamed label. Public TWAP
 books retain their existing persistence shape. Connection-local labels and
 registration IDs remain the account binding at the hosted write-frame boundary.
 

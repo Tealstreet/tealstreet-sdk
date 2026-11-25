@@ -72,7 +72,7 @@ fn fixture_with_binding(original: Option<u8>) -> Fixture {
             tokio::sync::watch::channel(0).0,
         ))),
     );
-    let remote = remote_account(
+    let remote = safe_cex_remote_signer::remote_account(
         link.clone(),
         "lighter",
         Some(init.account_name.clone()),

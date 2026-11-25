@@ -695,6 +695,10 @@ impl Session {
                 .refusal_context(&init.account_name, &init.exchange_name)
         });
         let mut signing_mode_reason = None;
+        // An unready COSIGNED venue keeps its typed proof-unavailable refusal below,
+        // even when its init also lacks canonical identity facts.
+        let proof_unavailable =
+            !delegated && !self.registry.cosigned_proof_ready(self.user(), &init);
         let refusal_kind = if !self.admission_token_valid() {
             Some(RefusalStage::Authentication)
         } else if delegated && !crate::delegated::enabled(&init.exchange_name) {
@@ -708,7 +712,11 @@ impl Session {
                 !matches!(
                     reason,
                     crate::accounts::SigningModeRefusalReason::ResidentModeConflict
-                )
+                ) && !(proof_unavailable
+                    && matches!(
+                        reason,
+                        crate::accounts::SigningModeRefusalReason::InvalidIdentity
+                    ))
             })
         {
             signing_mode_reason = Some(reason);
@@ -750,9 +758,7 @@ impl Session {
             return;
         }
         // DELEGATED CDP handover remains separate from COSIGNED JWT proof readiness.
-        if (!delegated && !self.registry.cosigned_proof_ready(self.user(), &init))
-            || cdp_unavailable
-        {
+        if proof_unavailable || cdp_unavailable {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)
@@ -4139,6 +4145,7 @@ mod tests {
                     &registry,
                     link,
                     acct_init().fingerprint(),
+                    Some(&acct_init()),
                 );
                 let (mut session, mut sent) = user_session(registry.clone(), "u");
                 let before = account.fingerprint.clone();
@@ -4203,7 +4210,7 @@ mod tests {
     const WEB_CHASE: &str = r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#;
     const WEB_TWAP: &str = r#"{"accountName":"acct","activeMarket":{"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true},"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"}"#;
 
-    // Legacy session fixtures use an unflagged venue; enabled Bybit has its own suite.
+    // Session lifecycle fixtures use Bybit inverse; proof-ready Bybit has its own suite.
     fn acct_init() -> InitPayload {
         InitPayload {
             account_name: "acct".into(),
@@ -4343,7 +4350,7 @@ mod tests {
         tokio::task::LocalSet::new().run_until(async {
             let registry = crate::accounts::tests::registry();
             let first = acct_init();
-            let (account_a, inbox) = crate::accounts::testing::account_on(
+            let (mut account_a, inbox) = crate::accounts::testing::account_on(
                 crate::accounts::testing::HeldLoad {
                     placed: Arc::default(), load_after_ms: None, ticker: false,
                 },
@@ -4352,6 +4359,7 @@ mod tests {
                 first.fingerprint(), Arc::default(),
             );
             drop(inbox);
+            crate::accounts::testing::bind_identity(&mut account_a, &first);
             crate::accounts::testing::register(&registry, &account_a);
             let (mut session, mut sent) = user_session(registry.clone(), "u");
             session.init(first.clone()).await.unwrap();
@@ -4637,7 +4645,7 @@ mod tests {
             ..acct_init()
         };
         let account_a = if held_load {
-            let (account, inbox) = crate::accounts::testing::account_on(
+            let (mut account, inbox) = crate::accounts::testing::account_on(
                 crate::accounts::testing::HeldLoad {
                     placed: Arc::default(),
                     load_after_ms: None,
@@ -4652,6 +4660,7 @@ mod tests {
                 Arc::default(),
             );
             drop(inbox);
+            crate::accounts::testing::bind_identity(&mut account, &first);
             crate::accounts::tests::register(&registry, &account);
             account
         } else {
@@ -4667,6 +4676,7 @@ mod tests {
             session.take_dropped()
         };
         session.init(first.clone()).await.unwrap();
+        assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_a));
         let client_a = session.joined["acct"].client.id;
         if held_load {
             let mut hold = Some(Hold {
@@ -4792,8 +4802,12 @@ mod tests {
     ) -> (Arc<Account>, Session, crate::out::Receiver) {
         let init = acct_init();
         let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
-        let account =
-            crate::accounts::tests::held_account_counted(registry, link, init.fingerprint());
+        let account = crate::accounts::tests::held_account_counted(
+            registry,
+            link,
+            init.fingerprint(),
+            Some(&init),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let (mut session, sent) = user_session(registry.clone(), "u");
         assert!(session.init(init).await.is_ok());
@@ -5128,6 +5142,7 @@ mod tests {
                     let account = crate::accounts::tests::held_account_running_algos(
                         link,
                         init.fingerprint(),
+                        Some(&init),
                     );
                     crate::accounts::tests::register(&registry, &account);
                     settle().await;
@@ -5172,8 +5187,11 @@ mod tests {
                     ..InitPayload::default()
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
-                let account =
-                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link,
+                    init.fingerprint(),
+                    Some(&init),
+                );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
                 let (mut session, _sent) = sign_silent_session(registry);
@@ -5214,8 +5232,11 @@ mod tests {
                     ..InitPayload::default()
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
-                let account =
-                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link,
+                    init.fingerprint(),
+                    Some(&init),
+                );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
                 let (mut session, _sent) = sign_silent_session(registry.clone());
@@ -5232,7 +5253,7 @@ mod tests {
                 let recorded = |key: &str| {
                     !registry.allow_repair(
                         &account.user,
-                        &account.name,
+                        account.registry_name(),
                         key,
                         std::time::Instant::now(),
                     )
@@ -5245,7 +5266,7 @@ mod tests {
                 session.msg(candle("subscribeOHLCV", true)).await;
                 assert!(recorded(&key), "the reset of a held topic was repaired");
                 let later = std::time::Instant::now() + crate::accounts::REPAIR_EVERY;
-                assert!(registry.allow_repair(&account.user, &account.name, &key, later));
+                assert!(registry.allow_repair(&account.user, account.registry_name(), &key, later));
                 assert!(
                     registry.allow_repair(&account.user, "other", &key, std::time::Instant::now()),
                     "another account's same topic has its own window"
@@ -5298,6 +5319,7 @@ mod tests {
                 let account = crate::accounts::tests::held_account_running_algos(
                     link.clone(),
                     init.fingerprint(),
+                    Some(&init),
                 );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
@@ -5394,7 +5416,7 @@ mod tests {
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let account = crate::accounts::tests::held_account_running_algos(
                     link,
-                    init.fingerprint(),
+                    init.fingerprint(), Some(&init),
                 );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
@@ -5492,8 +5514,11 @@ mod tests {
                     ..InitPayload::default()
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
-                let account =
-                    crate::accounts::tests::held_account_running_algos(link, init.fingerprint());
+                let account = crate::accounts::tests::held_account_running_algos(
+                    link,
+                    init.fingerprint(),
+                    Some(&init),
+                );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
                 let (mut session, _sent) = sign_silent_session(registry);
@@ -5622,6 +5647,7 @@ mod tests {
                 let account = crate::accounts::tests::held_account_running_algos(
                     link.clone(),
                     init.fingerprint(),
+                    Some(&init),
                 );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
@@ -5689,6 +5715,7 @@ mod tests {
                 let account = crate::accounts::tests::held_account_running_algos(
                     link.clone(),
                     init.fingerprint(),
+                    Some(&init),
                 );
                 crate::accounts::tests::register(&registry, &account);
                 let second = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -5782,6 +5809,7 @@ mod tests {
                 let account = crate::accounts::tests::held_account_running_algos(
                     link.clone(),
                     init.fingerprint(),
+                    Some(&init),
                 );
                 crate::accounts::tests::register(&registry, &account);
                 settle().await;
@@ -5850,7 +5878,7 @@ mod tests {
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let (account, _algos) =
-                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                    crate::accounts::tests::held_account_for_init(Some(link), &init);
                 crate::accounts::tests::register(&registry, &account);
                 (registry.keep_notice(&account, "r1"))("Chase on BTCUSDT stopped".into());
                 let wire = format!(
@@ -5908,23 +5936,31 @@ mod tests {
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let (account, _algos) =
-                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                    crate::accounts::tests::held_account_for_init(Some(link), &init);
                 crate::accounts::tests::register(&registry, &account);
-                let end = r#"{"t":"msg","d":{"op":"chaser:complete","data":{"id":"c1","filled":0.001,"replayed":true}}}"#;
+                let end = envelope::msg(
+                    "acct",
+                    "chaser:complete",
+                    json!({"id":"c1","filled":0.001,"replayed":true}),
+                );
                 (registry.keep_notice(&account, "r1"))(crate::algos::Kept {
                     notices: Vec::new(),
-                    ends: vec![end.to_owned()],
+                    ends: vec![end.clone()],
                 });
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
-            chat_handle: None,
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
                 };
-                let mut session =
-                    Session::new(registry.clone(), Arc::new(Metrics::default()), identity, out);
+                let mut session = Session::new(
+                    registry.clone(),
+                    Arc::new(Metrics::default()),
+                    identity,
+                    out,
+                );
                 session.open().await;
                 let wire = format!(
                     r#"{{"t":"init","d":{}}}"#,
@@ -5935,7 +5971,11 @@ mod tests {
                 while let Ok(frame) = sent.try_recv() {
                     frames.push(frame);
                 }
-                assert_eq!(frames.iter().filter(|frame| *frame == end).count(), 1, "{frames:?}");
+                assert_eq!(
+                    frames.iter().filter(|frame| *frame == &end).count(),
+                    1,
+                    "{frames:?}"
+                );
                 assert!(
                     !frames.iter().any(|frame| frame.contains(r#""op":"error""#)),
                     "{frames:?}"
@@ -5983,7 +6023,7 @@ mod tests {
                 let init = acct_init();
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let (rebuilt, _algos) =
-                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                    crate::accounts::tests::held_account_for_init(Some(link), &init);
                 crate::accounts::tests::register(&registry, &rebuilt);
                 let (out, mut sent, _) = Out::channel(256);
                 let identity = Identity {
@@ -6057,7 +6097,7 @@ mod tests {
                 };
                 let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
                 let (account, _algos) =
-                    crate::accounts::tests::held_account_with(Some(link), init.fingerprint());
+                    crate::accounts::tests::held_account_for_init(Some(link), &init);
                 crate::accounts::tests::register(&registry, &account);
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {

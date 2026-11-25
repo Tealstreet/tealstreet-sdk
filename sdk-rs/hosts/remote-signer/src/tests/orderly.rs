@@ -53,6 +53,7 @@ fn provider(venue: &str, link: Arc<SignerLink>) -> TestResult<RemoteProvider> {
                 broker: None,
                 zklink_seed: None, // This fixture retains its original non-ApeX roles.
             },
+            None,
         )),
     })
 }
