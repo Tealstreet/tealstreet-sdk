@@ -788,10 +788,12 @@ fn known_partial_refusal() -> VenueError {
         Element {
             index: 0,
             client_order_id: None,
+            role: None,
         },
         Element {
             index: 1,
             client_order_id: None,
+            role: None,
         },
     ]);
     journal

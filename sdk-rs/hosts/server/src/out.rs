@@ -234,7 +234,16 @@ impl Out {
         };
         let mut text = crate::envelope::order_frame(kind, name, data.clone());
         let mut size = size_of(&text);
-        // A placement's leg list is display data (AGT-185): drop it, never the outcome.
+        // A placement's leg list is display data (AGT-185): shed its roles (AGT-214),
+        // then the list, never the outcome.
+        if kind == "order.outcome"
+            && size > crate::order_contract::OUTCOME_MAX
+            && let Some(legs) = data["error"]["elements"].as_array().cloned()
+        {
+            data["error"]["elements"] = crate::session::strip_roles(legs).into();
+            text = crate::envelope::order_frame(kind, name, data.clone());
+            size = size_of(&text);
+        }
         if kind == "order.outcome"
             && size > crate::order_contract::OUTCOME_MAX
             && let Some(error) = data["error"].as_object_mut()

@@ -96,3 +96,37 @@ test('placed identities must be nonempty dense arrays of nonempty strings', asyn
     assert.equal(writePlanElementsOf([{ index: 0, status: 'placed', orderIds }]), undefined);
   }
 });
+
+// AGT-214: an OKX-style bracket whose take-profit was refused names each leg.
+test('leg roles survive the host boundary; an unrecognised role drops only itself', async () => {
+  const { writePlanElementsOf } = await import('./host.mjs');
+  const rows = [
+    { index: 0, clientOrderId: 'c0', role: 'entry', status: 'placed', orderIds: ['entry'] },
+    { index: 1, role: 'stopLoss', status: 'placed', orderIds: ['sl'] },
+    { index: 2, role: 'takeProfit', status: 'notSent', error: { message: 'refused', outcome: 'rejected' } },
+    { index: 3, role: 'other', status: 'applied', effect: 'settings' },
+  ];
+  assert.deepEqual(writePlanElementsOf(rows), rows);
+  assert.deepEqual(
+    writePlanElementsOf([
+      { index: 0, role: 'trailingStop', status: 'notSent' },
+      { index: 1, role: 7, status: 'notSent' },
+    ]),
+    [
+      { index: 0, status: 'notSent' },
+      { index: 1, status: 'notSent' },
+    ],
+  );
+});
+
+// AGT-214 review: every role the engine emits (its shared fixture) survives this reader.
+test('the reader keeps every engine leg role', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { writePlanElementsOf } = await import('./host.mjs');
+  const roles = JSON.parse(
+    readFileSync(new URL('../../../engine/tests/fixtures/leg-roles.json', import.meta.url), 'utf8'),
+  );
+  assert.ok(roles.length > 0);
+  const rows = roles.map((role, index) => ({ index, role, status: 'notSent' }));
+  assert.deepEqual(writePlanElementsOf(rows), rows);
+});

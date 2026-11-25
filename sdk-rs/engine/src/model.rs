@@ -747,7 +747,9 @@ impl PlaceOrderOpts {
         (self.reduce_only == Some(true) || self.close == Some(true)) && self.has_attached_legs()
     }
 
-    fn has_attached_legs(&self) -> bool {
+    /// A non-zero attached stop-loss or take-profit, which split-bracket venues place as
+    /// their own legs (AGT-214 names them in the write plan).
+    pub fn has_attached_legs(&self) -> bool {
         [self.stop_loss, self.take_profit]
             .iter()
             .any(|leg| leg.is_some_and(|price| price != 0.0))

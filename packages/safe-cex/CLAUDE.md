@@ -1101,6 +1101,7 @@ Partial information with empty order IDs still exposes the attempted total and f
 index when supplied, plus `partialOrderIds: []` and `partialOrderCount: 0`.
 That zero counts created IDs; applied cancellation effects remain in `elements`.
 Recorded `elements` retain each logical row's index, optional client order ID,
+optional split-bracket leg `role` (AGT-214; an unrecognised role drops only itself),
 placed IDs, applied effects with existing-target references, refusal or unknown
 detail through host errors and worker/CLI clones. Applied effects create no IDs;
 accepted partial IDs without row attribution remain unknown.

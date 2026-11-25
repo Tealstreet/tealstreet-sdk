@@ -1,6 +1,7 @@
 //! Reporting-only outcomes for writes dispatched by the venue.
 //! This module never validates, schedules, stops, retries or performs a write.
 use crate::VenueError;
+use crate::model::OrderType;
 use serde::Serialize;
 use std::fmt;
 
@@ -10,6 +11,34 @@ pub struct Element {
     pub index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_order_id: Option<String>,
+    /// What this element is within a split placement, when the venue knows (AGT-214).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<LegRole>,
+}
+
+/// A placement leg's part in its order: display data only, never outcome evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LegRole {
+    Entry,
+    TakeProfit,
+    StopLoss,
+    Other,
+}
+
+impl LegRole {
+    /// Every role, in wire-name fixture order (`tests/fixtures/leg-roles.json`).
+    pub const ALL: [Self; 4] = [Self::Entry, Self::TakeProfit, Self::StopLoss, Self::Other];
+
+    /// A split bracket's element by the order kind the venue places it as.
+    pub fn of_kind(kind: OrderType) -> Self {
+        match kind {
+            OrderType::Limit | OrderType::Market => Self::Entry,
+            OrderType::StopLoss => Self::StopLoss,
+            OrderType::TakeProfit => Self::TakeProfit,
+            OrderType::Conditional | OrderType::TrailingStopLoss => Self::Other,
+        }
+    }
 }
 
 /// Proven accepted effects that do not identify a newly created native order.

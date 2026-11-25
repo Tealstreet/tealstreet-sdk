@@ -30,12 +30,15 @@ export interface DelegatedOrderOutcomeFrame {
  * One leg of an unknown multi-leg placement, as the box reports it (AGT-185). It only lets the
  * client say which legs landed; it never proves the intent's outcome, which stays unknown.
  */
-export type DelegatedLegResult = { index: number; clientOrderId?: string } & (
+export type DelegatedLegResult = { index: number; clientOrderId?: string; role?: DelegatedLegRole } & (
   | { status: 'placed'; orderIds: string[] }
   | { status: 'applied' }
   | { status: 'notSent'; error?: { message: string } }
   | { status: 'unknown'; error: { message: string } }
 );
+/** The leg's part in a split placement (AGT-214); absent when the venue does not say. */
+export type DelegatedLegRole = 'entry' | 'takeProfit' | 'stopLoss' | 'other';
+const LEG_ROLES: ReadonlySet<unknown> = new Set<DelegatedLegRole>(['entry', 'takeProfit', 'stopLoss', 'other']);
 const LEGS_MAX = 32;
 const LEG_ID_MAX = 256;
 const LEG_REASON_MAX = 160;
@@ -55,10 +58,15 @@ export function delegatedLegResults(value: unknown): DelegatedLegResult[] | unde
   const legs: DelegatedLegResult[] = [];
   for (const leg of value) {
     if (typeof leg !== 'object' || leg === null || Array.isArray(leg)) return undefined;
-    const { index, clientOrderId, status, orderIds, error } = leg as Record<string, unknown>;
+    const { index, clientOrderId, role, status, orderIds, error } = leg as Record<string, unknown>;
     if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0) return undefined;
     if (clientOrderId !== undefined && !boundedId(clientOrderId)) return undefined;
-    const identity = { index, ...(clientOrderId !== undefined ? { clientOrderId } : {}) };
+    // An unrecognised role is display data the reader cannot use: it drops the role, never the leg.
+    const identity = {
+      index,
+      ...(clientOrderId !== undefined ? { clientOrderId } : {}),
+      ...(LEG_ROLES.has(role) ? { role: role as DelegatedLegRole } : {}),
+    };
     const why = reason(error);
     if (why === null) return undefined;
     if (status === 'placed') {

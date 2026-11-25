@@ -31,10 +31,13 @@ fn placed(e: &mut TestEngine, orders: Vec<PlaceOrderOpts>) -> Vec<Action> {
 
 #[test]
 fn caller_identity_precedes_write_and_omission_is_preserved() {
-    for supplied in [false, true] {
+    // AGT-214: a bracketed entry lot carries role `entry`; it still sends no identity it
+    // was not given. A caller ID on a bracket is refused before any write (below).
+    for (supplied, bracketed) in [(false, false), (true, false), (false, true)] {
         let mut e = engine();
         let mut o = opts();
         o.client_order_id = supplied.then(|| "123456789".into());
+        o.take_profit = bracketed.then_some(62000.0);
         let out = placed(&mut e, vec![o]);
         let http = out
             .iter()
@@ -85,6 +88,23 @@ fn caller_identity_precedes_write_and_omission_is_preserved() {
             );
         }
     }
+}
+
+// AGT-214 review: the bracketed-with-caller-ID identity path cannot be reached today,
+// because WOO refuses a caller client order ID on a bracket before any write.
+#[test]
+fn a_caller_identity_on_a_bracket_is_refused_before_any_write() {
+    let mut e = engine();
+    let mut o = opts();
+    o.client_order_id = Some("123456789".into());
+    o.take_profit = Some(62000.0);
+    let out = placed(&mut e, vec![o]);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        result(&out)
+            .unwrap_err()
+            .contains("WOO client order ID requires exactly one plain native order")
+    );
 }
 fn req(actions: &[Action], method: Method, path: &str) -> HttpRequest {
     actions
@@ -2231,4 +2251,79 @@ fn a_stop_or_trailing_entry_with_attached_legs_is_refused_before_any_request() {
             }
         }
     }
+}
+
+// AGT-214: an entry whose positional take-profit is refused names each row. WOO sends
+// both legs as one positional algo, so a stop-loss and take-profit together are `other`.
+#[test]
+fn a_split_bracket_names_its_entry_and_positional_legs() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    for (sl, tp, role) in [
+        (None, Some(62000.0), LegRole::TakeProfit),
+        (Some(58000.0), Some(62000.0), LegRole::Other),
+    ] {
+        let mut e = engine();
+        let mut o = opts();
+        o.stop_loss = sl;
+        o.take_profit = tp;
+        let a = placed(&mut e, vec![o]);
+        let r = req(&a, Method::Post, "/v1/order");
+        let a = reply(&mut e, &r, 1010.0, r#"{"success":true,"order_id":1}"#);
+        let a = tick(&mut e, &a);
+        let r = req(&a, Method::Post, "/v3/algo/order");
+        let a = reply(
+            &mut e,
+            &r,
+            1020.0,
+            r#"{"success":false,"code":-1103,"message":"The order does not meet the price filter requirement."}"#,
+        );
+        let rows = failure(&a).elements.as_ref().expect("each row's result");
+        let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+        assert_eq!(roles, [Some(LegRole::Entry), Some(role)]);
+        assert!(matches!(rows[0].result, ElementResult::Placed { .. }));
+        assert!(!matches!(rows[1].result, ElementResult::Placed { .. }));
+    }
+}
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's entry and positional legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_beside_a_reduce_only_order() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut e = engine();
+    let mut bracket = opts();
+    bracket.take_profit = Some(62000.0);
+    let mut close = opts();
+    close.side = OrderSide::Sell;
+    close.price = Some(61000.0);
+    close.reduce_only = Some(true);
+    let a = placed(&mut e, vec![bracket, close]);
+    let r = req(&a, Method::Post, "/v1/order");
+    let a = reply(&mut e, &r, 1010.0, r#"{"success":true,"order_id":1}"#);
+    let a = tick(&mut e, &a);
+    let r = req(&a, Method::Post, "/v3/algo/order");
+    let a = reply(
+        &mut e,
+        &r,
+        1020.0,
+        r#"{"success":false,"code":-1103,"message":"The order does not meet the price filter requirement."}"#,
+    );
+    let a = if a.iter().any(|a| matches!(a, Action::SetTimer { .. })) {
+        let a = tick(&mut e, &a);
+        let r = req(&a, Method::Post, "/v1/order");
+        reply(&mut e, &r, 1030.0, r#"{"success":true,"order_id":2}"#)
+    } else {
+        a
+    };
+    let roles: Vec<_> = failure(&a)
+        .elements
+        .as_ref()
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [Some(LegRole::Entry), Some(LegRole::TakeProfit), None]
+    );
 }

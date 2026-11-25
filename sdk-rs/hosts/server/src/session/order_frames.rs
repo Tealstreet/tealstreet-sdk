@@ -362,6 +362,41 @@ pub(super) fn settle_intent(
     protective_legs: usize,
     answer: Result<Value, Value>,
 ) -> bool {
+    let receipt = Receipt {
+        out,
+        name,
+        id,
+        client_id,
+        seq,
+    };
+    settle(receipt, protective_legs, answer, DELEGATED_LEG_ROLES)
+}
+
+/// Whether the box sends each leg's `role` to the router (AGT-214). Off until the live
+/// exchange router accepts it: its strict leg reader (tealstreet-next `legResultsOf`)
+/// drops a whole leg list carrying an unknown key. LOCAL/wasm keeps roles regardless.
+const DELEGATED_LEG_ROLES: bool = false;
+
+struct Receipt<'a> {
+    out: &'a Out,
+    name: &'a str,
+    id: &'a Value,
+    client_id: Option<&'a str>,
+    seq: u64,
+}
+
+fn settle(
+    Receipt {
+        out,
+        name,
+        id,
+        client_id,
+        seq,
+    }: Receipt<'_>,
+    protective_legs: usize,
+    answer: Result<Value, Value>,
+    leg_roles: bool,
+) -> bool {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
@@ -408,7 +443,7 @@ pub(super) fn settle_intent(
             data["error"] = json!({"message":message,"outcome":outcome});
             // The receipt stays unknown; the legs' results only let the client say which landed.
             if outcome == "unknown"
-                && let Some(elements) = leg_results(&error["elements"])
+                && let Some(elements) = leg_results(&error["elements"], leg_roles)
             {
                 data["error"]["elements"] = elements;
             }
@@ -417,9 +452,12 @@ pub(super) fn settle_intent(
     out.order_outcome(name, data)
 }
 
+/// The engine's `write_plan::LegRole` wire names.
+const LEG_ROLES: [&str; 4] = ["entry", "takeProfit", "stopLoss", "other"];
+
 /// Each leg's result, projected to the fields the client reads, or `None` when any
 /// leg is unreadable or the list would not fit inside the receipt limit (AGT-185).
-fn leg_results(elements: &Value) -> Option<Value> {
+fn leg_results(elements: &Value, roles: bool) -> Option<Value> {
     const LEGS_MAX: usize = 32;
     const LEGS_BYTES_MAX: usize = 4 * 1024;
     const REASON_CHARS_MAX: usize = 160;
@@ -437,6 +475,14 @@ fn leg_results(elements: &Value) -> Option<Value> {
             let mut out = json!({ "index": index });
             if let Some(id) = leg.get("clientOrderId") {
                 out["clientOrderId"] = Some(id).filter(|id| bounded_id(id))?.clone();
+            }
+            // Display-only (AGT-214): an unrecognised role is left out, never the leg.
+            if roles
+                && let Some(role) = leg["role"]
+                .as_str()
+                .filter(|role| LEG_ROLES.contains(role))
+            {
+                out["role"] = role.into();
             }
             let reason = || {
                 leg["error"]["message"]
@@ -463,8 +509,23 @@ fn leg_results(elements: &Value) -> Option<Value> {
             Some(out)
         })
         .collect::<Option<Vec<_>>>()?;
-    let projected = Value::Array(projected);
-    (projected.to_string().len() <= LEGS_BYTES_MAX).then_some(projected)
+    let fits = |legs: &Vec<Value>| Value::from(legs.as_slice()).to_string().len() <= LEGS_BYTES_MAX;
+    if fits(&projected) {
+        return Some(Value::Array(projected));
+    }
+    // Roles cost ~20 bytes a leg (AGT-214): shed them before the list that fit without them.
+    let roleless = strip_roles(projected);
+    fits(&roleless).then_some(Value::Array(roleless))
+}
+
+/// The same legs without their display-only roles.
+pub(crate) fn strip_roles(mut legs: Vec<Value>) -> Vec<Value> {
+    for leg in &mut legs {
+        if let Some(leg) = leg.as_object_mut() {
+            leg.remove("role");
+        }
+    }
+    legs
 }
 
 /// Native evidence that some part of the command took effect at the venue.
@@ -491,6 +552,22 @@ mod tests {
         let (out, mut sent, _) = Out::channel(1);
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
         settle_intent(&out, "a", &id, None, 1, 0, Err(error));
+        let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        frame["d"].clone()
+    }
+
+    /// As `settled`, with the box sending roles as it will once the router accepts them.
+    async fn settled_with_roles(error: Value) -> Value {
+        let (out, mut sent, _) = Out::channel(1);
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let receipt = Receipt {
+            out: &out,
+            name: "a",
+            id: &id,
+            client_id: None,
+            seq: 1,
+        };
+        settle(receipt, 0, Err(error), true);
         let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         frame["d"].clone()
     }
@@ -625,6 +702,68 @@ mod tests {
         }
     }
 
+    // AGT-214: the same OKX bracket names each leg, so the client can say "Entry and
+    // stop-loss placed. Take-profit not sent". A role the box does not know is left
+    // out; the leg and the list stay.
+    #[tokio::test]
+    async fn each_legs_role_is_carried_and_an_unknown_role_is_left_out() {
+        let refusal = "OKX 51279: TP trigger price cannot be lower than the last price";
+        let frame = settled_with_roles(json!({"message":"m","partialOrderIds":["entry","sl"],
+            "elements":[
+                {"index":0,"clientOrderId":"c0","role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"clientOrderId":"c1","role":"stopLoss","status":"placed","orderIds":["sl"]},
+                {"index":2,"clientOrderId":"c2","role":"takeProfit","status":"notSent",
+                    "error":{"message":refusal,"outcome":"rejected"}},
+                {"index":3,"role":"other","status":"applied","effect":"settings"},
+                {"index":4,"role":"trailingStop","status":"unknown","error":{"message":"timed out"}},
+                {"index":5,"role":7,"status":"applied"}]}))
+        .await;
+        assert_eq!(frame["outcome"], "unknown");
+        assert_eq!(
+            frame["error"]["elements"],
+            json!([
+                {"index":0,"clientOrderId":"c0","role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"clientOrderId":"c1","role":"stopLoss","status":"placed","orderIds":["sl"]},
+                {"index":2,"clientOrderId":"c2","role":"takeProfit","status":"notSent",
+                    "error":{"message":refusal}},
+                {"index":3,"role":"other","status":"applied"},
+                {"index":4,"status":"unknown","error":{"message":"timed out"}},
+                {"index":5,"status":"applied"}])
+        );
+    }
+
+    // AGT-214 round 3: the live exchange router drops a whole leg list that carries an
+    // unknown key, so by default the box sends each leg without its role.
+    #[tokio::test]
+    async fn the_box_sends_no_leg_roles_until_the_router_accepts_them() {
+        const { assert!(!DELEGATED_LEG_ROLES) };
+        let error = json!({"message":"m","partialOrderIds":["entry"],
+            "elements":[
+                {"index":0,"role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"role":"takeProfit","status":"notSent","error":{"message":"no"}}]});
+        let by_default = settled(error.clone()).await;
+        assert_eq!(
+            by_default["error"]["elements"],
+            json!([
+                {"index":0,"status":"placed","orderIds":["entry"]},
+                {"index":1,"status":"notSent","error":{"message":"no"}}])
+        );
+        let enabled = settled_with_roles(error).await;
+        assert_eq!(enabled["error"]["elements"][0]["role"], "entry");
+        assert_eq!(enabled["error"]["elements"][1]["role"], "takeProfit");
+    }
+
+    #[test]
+    fn the_box_reads_every_engine_leg_role() {
+        use safe_cex_engine::write_plan::LegRole;
+        // `LegRole::ALL` is pinned to every variant by the engine's fixture test.
+        let names: Vec<Value> = LegRole::ALL
+            .iter()
+            .map(|role| serde_json::to_value(role).unwrap())
+            .collect();
+        assert_eq!(names, LEG_ROLES.map(Value::from));
+    }
+
     #[tokio::test]
     async fn leg_results_that_cannot_be_read_or_bounded_are_left_out() {
         let placed = json!({"index":0,"status":"placed","orderIds":["entry"]});
@@ -672,6 +811,90 @@ mod tests {
         assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
     }
 
+    // AGT-214 review: roles cost ~20 bytes a leg. A list that fits the 4 KiB bound
+    // without them keeps every leg and sheds the roles instead of being dropped.
+    #[test]
+    fn a_leg_list_that_fits_only_without_roles_keeps_its_legs() {
+        let legs = |id_len: usize, role: bool| -> Vec<Value> {
+            (0..32)
+                .map(|index| {
+                    let mut leg =
+                        json!({"index":index,"status":"placed","orderIds":["e".repeat(id_len)]});
+                    if role {
+                        leg["role"] = "takeProfit".into();
+                    }
+                    leg
+                })
+                .collect()
+        };
+        let size = |legs: Vec<Value>| Value::Array(legs).to_string().len();
+        let id_len = (1..=256)
+            .rev()
+            .find(|len| size(legs(*len, false)) <= 4 * 1024)
+            .unwrap();
+        assert!(
+            size(legs(id_len, true)) > 4 * 1024,
+            "the control needs roles to overflow"
+        );
+        let kept =
+            leg_results(&Value::Array(legs(id_len, true)), true).expect("legs that fit today");
+        assert_eq!(kept, Value::Array(legs(id_len, false)));
+        // A list that fits with its roles keeps them.
+        let kept = leg_results(&Value::Array(legs(id_len - 20, true)), true).unwrap();
+        assert!(
+            kept.as_array()
+                .unwrap()
+                .iter()
+                .all(|leg| leg["role"] == "takeProfit")
+        );
+    }
+
+    // AGT-214 review: near the receipt limit the roles go before the leg list does.
+    #[tokio::test]
+    async fn a_receipt_near_its_limit_sheds_roles_before_the_leg_list() {
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let elements: Vec<Value> = (0..32)
+            .map(|index| {
+                json!({"index":index,"role":"takeProfit","status":"placed",
+                    "orderIds":["e".repeat(60)]})
+            })
+            .collect();
+        assert_eq!(
+            leg_results(&Value::Array(elements.clone()), true),
+            Some(Value::Array(elements.clone()))
+        );
+        let state = |message: &str| {
+            let (out, mut sent, _) = Out::channel(1);
+            let out = out.with_instance_id(Some(&"\u{1}".repeat(128)));
+            let error = json!({"message":message,"partialOrderIds":["e"],"elements":elements});
+            let name = "\u{1}".repeat(256);
+            let receipt = Receipt {
+                out: &out,
+                name: &name,
+                id: &id,
+                client_id: None,
+                seq: 1,
+            };
+            settle(receipt, 0, Err(error), true);
+            let text = sent.try_recv().unwrap();
+            assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame["d"]["outcome"], "unknown");
+            match frame["d"]["error"]["elements"].as_array() {
+                Some(legs) if legs.iter().all(|leg| leg["role"] == "takeProfit") => 0,
+                Some(legs) if legs.iter().all(|leg| leg.get("role").is_none()) => 1,
+                Some(legs) => panic!("partly shed roles: {legs:?}"),
+                None => 2,
+            }
+        };
+        let states: Vec<u8> = (0..=512).map(|chars| state(&"𐐀".repeat(chars))).collect();
+        assert!(
+            states.is_sorted(),
+            "roles go first, then the list: {states:?}"
+        );
+        assert!(states.contains(&0) && states.contains(&1), "{states:?}");
+    }
+
     // A kept list under its own 4 KiB bound can still push maximal, escape-heavy
     // bindings past the receipt limit; the list goes, the unknown outcome stays.
     #[tokio::test]
@@ -680,7 +903,7 @@ mod tests {
         let elements: Vec<Value> = (0..32)
             .map(|index| json!({"index":index,"status":"placed","orderIds":["e".repeat(75)]}))
             .collect();
-        assert!(leg_results(&Value::Array(elements.clone())).is_some());
+        assert!(leg_results(&Value::Array(elements.clone()), false).is_some());
         let receipt = |instance: &str, name: &str, message: &str| {
             let (out, mut sent, _) = Out::channel(1);
             let out = out.with_instance_id(Some(instance));

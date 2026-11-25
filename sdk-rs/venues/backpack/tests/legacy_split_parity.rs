@@ -320,6 +320,18 @@ fn definite_not_sent_child_refusal_still_allows_sl() -> Result {
     assert!(
         matches!(&elements[1].result, ElementResult::NotSent { error:Some(error) } if error.outcome==Some(safe_cex_engine::Outcome::NotSent))
     );
+    // AGT-214: each row names its leg, so the app can say "Entry and stop-loss placed.
+    // Take-profit not sent". Backpack sends the take-profit before the stop-loss.
+    use safe_cex_engine::write_plan::LegRole;
+    let roles: Vec<_> = elements.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::TakeProfit),
+            Some(LegRole::StopLoss)
+        ]
+    );
     assert_eq!(
         error
             .partial

@@ -31,6 +31,7 @@ use safe_cex_engine::request_context::{
     Context, Error, HttpOwnerRetirement, Plan, ReconciliationData,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::write_plan::LegRole;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -129,6 +130,8 @@ struct Step {
     path: &'static str,
     params: Params,
     call: Call,
+    /// Reporting only: this placement's part in a split bracket (AGT-214).
+    role: Option<LegRole>,
 }
 #[derive(Default)]
 struct Job {
@@ -1367,6 +1370,7 @@ impl Trading {
                         path: ORDER,
                         params,
                         call: Call::Place,
+                        role: None,
                     };
                     run.writes.restore(&restore);
                     run.job.steps.push_back(restore);
@@ -1448,7 +1452,13 @@ impl Trading {
             ..Job::default()
         };
         for o in orders {
-            let steps = self.format(cx, o)?;
+            let mut steps = self.format(cx, o)?;
+            if o.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
+                for step in &mut steps {
+                    step.role.get_or_insert(LegRole::Entry);
+                }
+            }
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
                 let lots = steps.len()
                     - usize::from(o.stop_loss.is_some())
@@ -1674,7 +1684,9 @@ impl Trading {
             if !cx.store.hedged() {
                 bracket = bracket.boolean("reduceOnly", true);
             }
-            out.push(place_step(bracket.num("quantity", amount)));
+            let mut leg = place_step(bracket.num("quantity", amount));
+            leg.role = Some(LegRole::of_kind(kind));
+            out.push(leg);
         }
         Ok(out)
     }
@@ -1700,6 +1712,7 @@ impl Trading {
                     symbol: o.symbol.clone(),
                     absent_ok: true,
                 },
+                role: None,
             });
         }
         Ok(job)
@@ -2044,6 +2057,7 @@ impl Trading {
                 leverage,
                 side,
             },
+            role: None,
         };
         let mut job = Job::default();
         if cx.store.hedged() && side.is_none() {
@@ -2079,6 +2093,7 @@ fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
             path,
             params,
             call,
+            role: None,
         }]),
         ..Job::default()
     }
@@ -2090,6 +2105,7 @@ fn place_step(params: Params) -> Step {
         path: ORDER,
         params,
         call: Call::Place,
+        role: None,
     }
 }
 fn positive(value: Option<f64>, field: &str) -> Result<f64, String> {

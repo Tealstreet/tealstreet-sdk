@@ -21,7 +21,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -165,6 +165,8 @@ struct Planned {
     path: &'static str,
     query: Query,
     call: Call,
+    /// Reporting only: each reported row's part in a split bracket (AGT-214).
+    roles: Vec<Option<LegRole>>,
 }
 
 #[derive(Default)]
@@ -204,16 +206,18 @@ impl PlacementReport {
             .flatten()
             .flat_map(|planned| {
                 (0..reporting_count(&planned.call)).map(|index| {
-                    planned
+                    let client_order_id = planned
                         .receipts
                         .get(index)
-                        .map(|receipt| receipt.identity.clone())
+                        .map(|receipt| receipt.identity.clone());
+                    (client_order_id, planned.roles.get(index).copied().flatten())
                 })
             })
             .enumerate()
-            .map(|(index, client_order_id)| Element {
+            .map(|(index, (client_order_id, role))| Element {
                 index,
                 client_order_id,
+                role,
             })
             .collect();
         Self {
@@ -335,9 +339,10 @@ pub struct TradingState {
     id_generator: Option<fn() -> Result<String, String>>,
 }
 
-/// Request parameters in order, rendered as a query or as a batch JSON object.
+/// Request parameters in order, rendered as a query or as a batch JSON object, and
+/// (reporting only, never sent) the order's part in a split bracket (AGT-214).
 #[derive(Clone, Default)]
-struct Params(Vec<(&'static str, String)>);
+struct Params(Vec<(&'static str, String)>, Option<LegRole>);
 
 impl Params {
     fn set(&mut self, name: &'static str, value: impl Into<String>) {
@@ -550,6 +555,7 @@ impl BinanceFutures {
                             }),
                             ids: ids(regular),
                         },
+                        roles: Vec::new(),
                     },
                     Planned {
                         receipts: Vec::new(),
@@ -566,6 +572,7 @@ impl BinanceFutures {
                             }),
                             ids: ids(algo),
                         },
+                        roles: Vec::new(),
                     },
                 ];
                 if self.is_spot() || self.is_inverse() || self.is_options() {
@@ -1771,7 +1778,7 @@ impl BinanceFutures {
                     }
                 }
             }
-            let (r, a) = if self.is_options() {
+            let (mut r, mut a) = if self.is_options() {
                 (self.format_option(cx, opts)?, Vec::new())
             } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
@@ -1780,6 +1787,12 @@ impl BinanceFutures {
             } else {
                 self.format_order(cx, opts)?
             };
+            if opts.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
+                for params in r.iter_mut().chain(a.iter_mut()) {
+                    params.1.get_or_insert(LegRole::Entry);
+                }
+            }
             regular.extend(r);
             algo.extend(a);
         }
@@ -1811,6 +1824,7 @@ impl BinanceFutures {
                             .then(|| only.get("newClientOrderId"))
                             .flatten(),
                     },
+                    roles: vec![only.1],
                 },
                 (_, Some(path)) => {
                     let batch: Vec<String> = lot.iter().map(Params::json).collect();
@@ -1823,6 +1837,7 @@ impl BinanceFutures {
                         call: Call::PlaceBatch {
                             expected: lot.len(),
                         },
+                        roles: lot.iter().map(|params| params.1).collect(),
                     }
                 }
                 (_, None) => unreachable!("lots are single orders without a batch endpoint"),
@@ -1838,6 +1853,7 @@ impl BinanceFutures {
                 call: Call::PlaceAlgo {
                     client_id: pm.then(|| params.get("clientAlgoId")).flatten(),
                 },
+                roles: vec![params.1],
             }]);
         }
         job.report = Some(PlacementReport::new(&job.steps));
@@ -1898,6 +1914,7 @@ impl BinanceFutures {
                         ids: vec![order.id.clone()],
                         proof: Some(CancelProof::One(self.cancel_target(order))),
                     },
+                    roles: Vec::new(),
                 }]);
             }
             return job;
@@ -1944,6 +1961,7 @@ impl BinanceFutures {
                             CancelProof::One(self.cancel_target(order))
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
                 if strategy {
                     job.steps.push_back(vec![Planned {
@@ -1952,6 +1970,7 @@ impl BinanceFutures {
                         path: crate::paths::PM_ALGO_QUERY,
                         query: Query::new().str("algoId", &identity),
                         call: Call::VerifyPmAlgo { target },
+                        roles: Vec::new(),
                     }]);
                 }
             }
@@ -1986,6 +2005,7 @@ impl BinanceFutures {
                             })
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
                 continue;
             }
@@ -2013,6 +2033,7 @@ impl BinanceFutures {
                             )
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
             }
         }
@@ -2039,6 +2060,7 @@ impl BinanceFutures {
                     ids: vec![order.id.clone()],
                     proof: Some(CancelProof::Algo(self.cancel_target(order))),
                 },
+                roles: Vec::new(),
             })
             .collect()
     }
@@ -2198,6 +2220,11 @@ impl BinanceFutures {
                 // Attached protection keeps the whole intent quantity, independent of entry lots.
                 p.set("quantity", number(amount));
                 p.set("newClientOrderId", self.generated_id(cx)?);
+                p.1 = Some(if kind == "STOP_LOSS" {
+                    LegRole::StopLoss
+                } else {
+                    LegRole::TakeProfit
+                });
                 out.push(p);
             }
         }
@@ -2339,7 +2366,10 @@ impl BinanceFutures {
                 bracket.take_profit = None;
                 bracket.reduce_only = Some(true);
                 bracket.close = Some(false);
-                let (r, a) = self.format_inverse(cx, &bracket, false)?;
+                let (mut r, mut a) = self.format_inverse(cx, &bracket, false)?;
+                for params in r.iter_mut().chain(a.iter_mut()) {
+                    params.1 = Some(LegRole::of_kind(kind));
+                }
                 regular.extend(r);
                 algo.extend(a);
             }
@@ -2748,6 +2778,7 @@ impl BinanceFutures {
             };
             params.set("workingType", working_type(&bracket));
             params.set("clientAlgoId", self.generated_id(cx)?);
+            params.1 = Some(LegRole::of_kind(kind));
             algo.push(params);
         }
         Ok((regular, algo))
@@ -3009,6 +3040,7 @@ fn single(method: Method, path: &'static str, query: Query, call: Call) -> Job {
             path,
             query,
             call,
+            roles: Vec::new(),
         }]]),
         ..Job::default()
     }

@@ -7,6 +7,7 @@ fn journal(count: usize) -> WritePlan {
             .map(|index| Element {
                 index,
                 client_order_id: Some(format!("client-{index}")),
+                role: None,
             })
             .collect(),
     )

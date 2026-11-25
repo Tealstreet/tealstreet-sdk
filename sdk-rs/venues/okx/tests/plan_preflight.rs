@@ -814,3 +814,152 @@ fn legacy_protective_child_native_bounds_are_not_a_new_gate() {
     assert_eq!(seen[4].1["slTriggerPx"], "36000");
     assert_eq!(seen[5].1["tpTriggerPx"], "42000");
 }
+
+// AGT-214, okx-t (AGT-185): an entry with a stop-loss and a take-profit; OKX placed the
+// entry and the stop-loss and refused the take-profit (51279). Each element now names
+// its leg, so the app can say "Entry and stop-loss placed. Take-profit not sent".
+#[test]
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    let mut bracket = limit(4.);
+    bracket["stopLoss"] = json!(36000);
+    bracket["takeProfit"] = json!(42000);
+    let mut engine = ready(instrument());
+    let mut transport = ScriptedTransport::default();
+    let mut pending = transport.record(&submit(&mut engine, vec![bracket]));
+    let mut output = Vec::new();
+    for (at, ack) in [
+        (
+            6.,
+            json!({"code":"0","data":[{"ordId":"entry","sCode":"0"}]}),
+        ),
+        (7., json!({"code":"0","data":[{"algoId":"sl","sCode":"0"}]})),
+        (
+            8.,
+            json!({"code":"1","data":[{"algoId":"","sCode":"51279",
+            "sMsg":"TP trigger price cannot be lower than the last price"}]}),
+        ),
+    ] {
+        let [request] = pending.as_slice() else {
+            panic!("one native write at a time")
+        };
+        reply(
+            &mut engine,
+            &Action::Http(request.clone()),
+            &ack.to_string(),
+            at,
+        );
+        output = prepared(&mut engine, at);
+        pending = transport.record(&output);
+    }
+    assert_eq!(transport.write_count(), 3);
+    let results = terminals(&output, 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one partial terminal")
+    };
+    let elements = error.elements.as_ref().expect("each leg's result");
+    let roles: Vec<_> = elements.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+    assert!(
+        matches!(&elements[0].result, ElementResult::Placed { order_ids } if order_ids == &["entry"])
+    );
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["sl"])
+    );
+    assert!(matches!(
+        &elements[2].result,
+        ElementResult::NotSent { error: Some(e) } if e.venue_code.as_deref() == Some("51279")
+    ));
+    let wire = serde_json::to_value(elements).unwrap();
+    assert_eq!(wire[2]["role"], "takeProfit");
+
+    // A split without attached legs reports no roles: nothing there is a bracket leg.
+    let mut engine = ready(instrument());
+    let first = submit(&mut engine, vec![limit(11.)]);
+    let request = first
+        .iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .expect("one batch");
+    reply(
+        &mut engine,
+        request,
+        &json!({"code":"1","data":[{"ordId":"a","sCode":"0"},{"ordId":"b","sCode":"0"},
+            {"ordId":"","sCode":"51008","sMsg":"refused"}]})
+        .to_string(),
+        6.,
+    );
+    let results = terminals(&prepared(&mut engine, 6.), 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one partial terminal")
+    };
+    let elements = error.elements.as_ref().expect("each lot's result");
+    assert_eq!(elements.len(), 3);
+    assert!(elements.iter().all(|row| row.element.role.is_none()));
+}
+
+// AGT-214 review: a reduce-only order batched beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut bracket = limit(4.);
+    bracket["stopLoss"] = json!(36000);
+    bracket["takeProfit"] = json!(42000);
+    let mut close = limit(4.);
+    close["side"] = json!("sell");
+    close["reduceOnly"] = json!(true);
+    let mut engine = ready(instrument());
+    let mut transport = ScriptedTransport::default();
+    let mut pending = transport.record(&submit(&mut engine, vec![bracket, close]));
+    let mut output = Vec::new();
+    for (at, ack) in [
+        (
+            6.,
+            json!({"code":"0","data":[{"ordId":"entry","sCode":"0"},{"ordId":"close","sCode":"0"}]}),
+        ),
+        (7., json!({"code":"0","data":[{"algoId":"sl","sCode":"0"}]})),
+        (
+            8.,
+            json!({"code":"1","data":[{"algoId":"","sCode":"51279","sMsg":"refused"}]}),
+        ),
+    ] {
+        let [request] = pending.as_slice() else {
+            panic!("one native write at a time")
+        };
+        reply(
+            &mut engine,
+            &Action::Http(request.clone()),
+            &ack.to_string(),
+            at,
+        );
+        output = prepared(&mut engine, at);
+        pending = transport.record(&output);
+    }
+    let results = terminals(&output, 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one partial terminal")
+    };
+    let roles: Vec<_> = error
+        .elements
+        .as_ref()
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            None,
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+}
