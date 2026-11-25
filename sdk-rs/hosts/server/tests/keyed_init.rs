@@ -62,9 +62,11 @@ fn browser_init(venue: &str, proxied: bool) -> String {
         "paradex" => {
             let mut scalar = [0; 32];
             scalar[31] = 7;
-            json!({ "paradexAddress": WALLET, "subkeyAddress": WALLET,
-                "paradexPublicKey": format!("0x{}", safe_cex_crypto::hex(
-                    &safe_cex_crypto::starknet::public_key_bytes(&scalar))) })
+            let subkey = format!(
+                "0x{}",
+                safe_cex_crypto::hex(&safe_cex_crypto::starknet::public_key_bytes(&scalar))
+            );
+            json!({ "paradexAddress": WALLET, "subkeyAddress": subkey })
         }
         _ => json!({}),
     };

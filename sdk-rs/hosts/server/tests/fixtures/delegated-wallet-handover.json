@@ -6,7 +6,7 @@
     "attemptId": "synthetic-wallet-attempt",
     "bootId": "synthetic-wallet-boot",
     "exchangeName": "paradex",
-    "key": "0x456",
+    "key": "0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca",
     "secret": "",
     "signingKey": "0x0000000000000000000000000000000000000000000000000000000000000001"
   },
@@ -16,13 +16,13 @@
       "accountName": "synthetic-wallet",
       "exchangeName": "paradex",
       "signingMode": "delegated",
-      "key": "0x456",
+      "key": "0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca",
       "paradexAddress": "0x123",
-      "subkeyAddress": "0x456",
+      "subkeyAddress": "0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca",
       "sealed": {
         "attemptId": "synthetic-wallet-attempt",
         "enc": "D6poTtKIZ7l/Smot7l34zpdOdrcBjj8iocTPJnhXDyA=",
-        "ciphertext": "KaKrxqPNe/C6rkZWAak7T2kRqFYLag09rMoQRjOBCAdCu+ZTBP/MzT8iN2+N73f3WEfx5PPn8CbGcMsC8AwjENkf79DuC/WnLjdnRFwkPSqRqeYOxYm91C314ltrYQJ11HJmSNV8pgHHqgTC0ESaj+Hn04xgKuY1FSOLAXY="
+        "ciphertext": "KaKrxqPNe/C6rkJSUu0mWHlF8xFXJxYwv4oLBiWLCg0f5LR5VbaIx34lKzrcvCGjURXxsPLv8S+TcMhW9w4gRNFNvNnqCKbxfWZ1WE5naHnT/KIcz5uvyD+2uww1OFwirycvWt9upknHqgXQnY49/uajoe81AnDoynCqKn2twTmizB1ozpmxkQ35cO9HO1OlTa6/5NreCDdB8D78ug4b6OXG+3P8oIhAUW6JXC8thxn7af/vfhUYL4o0"
       }
     }
   }

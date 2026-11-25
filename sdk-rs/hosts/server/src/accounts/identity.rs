@@ -137,6 +137,39 @@ fn stark_address(text: Option<&str>) -> Result<String, String> {
     Ok(format!("0x{}", safe_cex_crypto::hex(&bytes)))
 }
 
+/// Paradex's `subkeyAddress` is the subkey's Stark public key (`/auth/{subkey}`).
+fn stark_public(text: Option<&str>) -> Result<String, String> {
+    let public = PublicKey::new(Family::Stark, &hex(text.ok_or(INVALID)?, 32, true)?)
+        .map_err(|_| INVALID)?;
+    Ok(format!("0x{}", safe_cex_crypto::hex(public.as_bytes())))
+}
+
+/// A DELEGATED wallet init's claimed signer (Hyperliquid, GRVT) or Stark key
+/// (Paradex) keys its identity, so it must be the key the sealed secret derives.
+pub(crate) fn check_sealed_signer(
+    init: &InitPayload,
+    provider: &safe_cex_engine::signing::Provider,
+    key: &safe_cex_engine::signing::KeyRef,
+) -> Result<(), String> {
+    let (family, claimed) = match init.exchange_name.as_str() {
+        "hyperliquid" | "hyperliquidspot" => (
+            Family::Ethereum,
+            address(init.hyperliquid_signer_address.as_deref())?,
+        ),
+        "grvt" => (
+            Family::Ethereum,
+            address(init.grvt_signer_address.as_deref())?,
+        ),
+        "paradex" => (Family::Stark, stark_public(init.subkey_address.as_deref())?),
+        _ => return Ok(()),
+    };
+    let derived = PublicKey::from_provider(family, provider, key).map_err(|_| INVALID)?;
+    if format!("0x{}", safe_cex_crypto::hex(derived.as_bytes())) != claimed {
+        return Err(INVALID.into());
+    }
+    Ok(())
+}
+
 fn decimal(text: Option<&str>, max: u64) -> Result<u64, String> {
     let text = text.ok_or(INVALID)?.trim();
     if text.is_empty() || text.len() > 20 || !text.bytes().all(|b| b.is_ascii_digit()) {
@@ -165,17 +198,10 @@ pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
             decimal(init.grvt_trading_account_id.as_deref(), u64::MAX)?.to_string(),
             address(init.grvt_signer_address.as_deref())?,
         ])),
-        "paradex" => {
-            let public = PublicKey::new(
-                Family::Stark,
-                &hex(init.paradex_public_key.as_deref().ok_or(INVALID)?, 32, true)?,
-            )
-            .map_err(|_| INVALID)?;
-            Ok(tuple(&[
-                stark_address(init.paradex_address.as_deref())?,
-                format!("0x{}", safe_cex_crypto::hex(public.as_bytes())),
-            ]))
-        }
+        "paradex" => Ok(tuple(&[
+            stark_address(init.paradex_address.as_deref())?,
+            stark_public(init.subkey_address.as_deref())?,
+        ])),
         "backpack" => {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(opaque(init)?)

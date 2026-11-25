@@ -270,31 +270,35 @@ fn hosted_grvt_identity_uses_trading_account_and_signer() {
 }
 
 #[test]
-fn hosted_paradex_identity_uses_the_account_and_stark_public_key() {
+fn hosted_paradex_identity_uses_the_account_and_subkey_public_key() {
     let mut scalar = [0; 32];
     scalar[31] = 7;
     let public = safe_cex_crypto::hex(&safe_cex_crypto::starknet::public_key_bytes(&scalar));
     let first: InitPayload = serde_json::from_value(json!({
-        "accountName":"desktop", "exchangeName":"paradex", "key":"synthetic-public-selector",
-        "paradexAddress":"0xabc", "paradexPublicKey":format!("0x{public}")
+        "accountName":"desktop", "exchangeName":"paradex", "key":format!("0x{public}"),
+        "paradexAddress":"0xabc", "subkeyAddress":format!("0x{public}")
     }))
     .unwrap();
     let original = digest(&first);
     let mut same = serde_json::to_value(&first).unwrap();
     same["paradexAddress"] = format!("0x{:0>64}", "ABC").into();
-    same["paradexPublicKey"] = format!("0x{}", public.to_uppercase()).into();
+    same["subkeyAddress"] = format!("0x{}", public.to_uppercase()).into();
     assert_eq!(digest(&serde_json::from_value(same).unwrap()), original);
     let mut other = first.clone();
     other.paradex_address = Some("0xabd".into());
     assert_ne!(digest(&other), original);
     scalar[31] = 8;
-    let mut other = serde_json::to_value(&first).unwrap();
-    other["paradexPublicKey"] = format!(
+    let mut other = first.clone();
+    other.subkey_address = Some(format!(
         "0x{}",
         safe_cex_crypto::hex(&safe_cex_crypto::starknet::public_key_bytes(&scalar))
-    )
-    .into();
-    assert_ne!(digest(&serde_json::from_value(other).unwrap()), original);
+    ));
+    assert_ne!(digest(&other), original);
+    for invalid in [None, Some("0x0".to_owned()), Some("not-hex".to_owned())] {
+        let mut other = first.clone();
+        other.subkey_address = invalid;
+        assert!(identity::digest("u", &other).is_err());
+    }
 }
 
 #[test]

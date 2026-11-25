@@ -1216,7 +1216,7 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         let identity_fields: &[&str] = match init.exchange_name.as_str() {
             "hyperliquid" | "hyperliquidspot" => &["vault"],
             "grvt" => &["grvtTradingAccountId", "grvtSignerAddress"],
-            "paradex" => &["paradexAddress"],
+            "paradex" => &["paradexAddress", "subkeyAddress"],
             _ => &[],
         };
         for field in identity_fields {

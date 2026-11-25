@@ -489,7 +489,16 @@ async fn grvt_legacy_resident_key_mismatch_refuses_before_holding_the_actor() {
                 &json!({"key":init().key,"secret":format!("{:064x}",2)}).to_string(),
             )
             .unwrap();
-            let installed = crate::delegated::prepare_delegated(&init(), credentials.pair())
+            // Construction now refuses a mismatched claim, so install the scalar
+            // under its own signer, then attach it to the old metadata's actor.
+            let own = InitPayload {
+                grvt_signer_address: Some(
+                    safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 2))
+                        .unwrap(),
+                ),
+                ..init()
+            };
+            let installed = crate::delegated::prepare_delegated(&own, credentials.pair())
                 .unwrap()
                 .resident;
             let provider = installed.provider();
