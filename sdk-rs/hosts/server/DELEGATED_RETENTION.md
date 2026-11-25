@@ -119,6 +119,20 @@ never from a snapshot or a rejoin replay:
   IOC or capped market order whose remainder was cancelled in the fill's own
   batch, and a full fill whose row the venue removed in that batch. It collapses per order through an
   opaque hash; order ids, prices and sizes stay on the box.
+  **Only an order this account placed is reported (AGT-196).** Two Tealstreet
+  users can connect the same venue account; each gets its own resident and
+  both private streams carry every fill on it. The native host records, per
+  account actor, the identities of placements its own clients sent (the
+  dispatch `commandProgress` receipts and the completion's id array:
+  `safe_cex_native::own_placements`), and a fill is reported only when its
+  order id, its row's client order id or parent order, or the order a virtual
+  leg id belongs to is in that ledger. A fill the ledger cannot name waits
+  while a placement is still in flight (up to `OWNERSHIP_WAIT`, 10 seconds),
+  then is withheld and counted in the log, never sent. The conservative
+  consequence is deliberate: a fill of an order placed anywhere else (web
+  LOCAL, the venue's own UI, another user sharing the keys) or before this
+  resident started (a box roll) is not pushed. The ledger is memory-only and
+  keeps the newest 4096 identities.
 - `orderRejected`: a chase or TWAP placement the venue refused outright
   (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
   port and never emit; unknown and not-sent outcomes never emit. At most one

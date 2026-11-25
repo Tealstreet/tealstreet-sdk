@@ -27,8 +27,6 @@ pub const REJECT_REPEAT: Duration = Duration::from_secs(60);
 const MAX_PENDING_FILLS: usize = 512;
 /// How long a fill of an order not yet known as this account's own may wait
 /// for a placement still in flight to name it, before it is withheld.
-/// RED checkpoint only: today's behaviour, every account fill is the user's.
-const RED_IGNORES_OWNERSHIP: bool = true;
 pub const OWNERSHIP_WAIT: Duration = Duration::from_secs(10);
 
 /// Chase stop reasons that are an explicit client stop, never an `algoStopped`.
@@ -362,16 +360,16 @@ impl Tap {
     /// AGT-196: only an order this account placed, or a leg or child of one,
     /// is the user's own. Anything else on a shared venue account is not.
     fn placed_here(&self, order_id: &str, fill: &PendingFill) -> bool {
-        if RED_IGNORES_OWNERSHIP {
-            return true;
-        }
         let placements = self.placements.lock().unwrap();
         placements.placed(order_id)
             || fill
                 .client_order_id
                 .as_deref()
                 .is_some_and(|id| placements.placed(id))
-            || fill.parent_id.as_deref().is_some_and(|id| placements.placed(id))
+            || fill
+                .parent_id
+                .as_deref()
+                .is_some_and(|id| placements.placed(id))
     }
 
     /// A server-initiated placement the venue refused outright.

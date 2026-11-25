@@ -1147,7 +1147,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandProgress { command, receipts } => {
-                    if self.pending.get(&command).is_some_and(|pending| pending.placement) {
+                    if self
+                        .pending
+                        .get(&command)
+                        .is_some_and(|pending| pending.placement)
+                    {
                         let mut placements = self.placements.lock().unwrap();
                         for receipt in &receipts {
                             placements.record(&receipt.identity);
@@ -2527,6 +2531,11 @@ mod tests {
                 cx.command_error(command, "placement rejected");
                 return;
             }
+            if let Some(command) = text.strip_prefix("placed:") {
+                let command: u32 = command.parse().expect("placed command");
+                cx.done(command, format!(r#"["venue-{command}"]"#));
+                return;
+            }
             let command: u32 = text.parse().expect("receipt command");
             cx.command_progress(
                 command,
@@ -3078,6 +3087,80 @@ mod tests {
         actor.execute();
         assert!(receivers[0].try_recv().is_err());
         assert!(receivers[1].try_recv().is_err());
+    }
+
+    /// AGT-196: a placement's dispatch receipts and completion ids are recorded
+    /// as this account's own orders; other commands' receipts are not.
+    #[test]
+    fn placements_record_their_receipts_and_result_ids_only() {
+        let commands = Rc::new(RefCell::new(Vec::new()));
+        let mut actor = Account::new(
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(commands.clone())),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let (outgoing, _receiver) = mpsc::channel(8);
+        let (cancel, _) = watch::channel(false);
+        actor.peers.insert(
+            1,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+                account_auth: false,
+            },
+        );
+        let order = serde_json::from_value(serde_json::json!({
+            "symbol": "BTC-USD", "type": "limit", "side": "buy", "amount": 1.0, "price": 1.0
+        }))
+        .unwrap();
+        actor.command(
+            1,
+            Command::PlaceOrders {
+                command: 40,
+                orders: vec![order],
+            },
+        );
+        actor.command(
+            1,
+            Command::FetchLeverage {
+                command: 41,
+                symbol: "BTC-USD".into(),
+            },
+        );
+        actor.execute();
+        assert!(
+            commands
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, Command::PlaceOrders { command: 1, .. })),
+            "the placement reached the venue as internal command 1: {:?}",
+            commands.borrow()
+        );
+        let placements = actor.placements.clone();
+        assert!(placements.lock().unwrap().in_flight());
+        for text in ["1", "2", "placed:1"] {
+            actor.host.engine.handle(
+                1.,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text,
+                },
+            );
+            actor.execute();
+        }
+        let placements = placements.lock().unwrap();
+        assert!(placements.placed("native-1"), "dispatch receipt");
+        assert!(placements.placed("venue-1"), "completion id");
+        assert!(
+            !placements.placed("native-2"),
+            "a read's receipt is not a placement"
+        );
+        assert!(!placements.in_flight());
     }
 
     #[test]

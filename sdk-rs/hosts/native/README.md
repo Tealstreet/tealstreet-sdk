@@ -157,6 +157,13 @@ normalizes legacy credential inputs through trusted setup until cutover callers
 migrate. Neither registration method adds credential setup to the client wire.
 See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
 
+Each account actor also keeps a bounded, memory-only ledger of the order
+identities its own clients placed: `PlaceOrders` dispatch receipts and
+completion id arrays, read through `AccountHandle::placements`. It is how a
+host tells its own orders from another account actor's on a shared venue
+account (the exchange server's fill notifications, AGT-196); it grants no
+command authority.
+
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with
 pre-existing venue jobs. Registration rejects an engine that has received any

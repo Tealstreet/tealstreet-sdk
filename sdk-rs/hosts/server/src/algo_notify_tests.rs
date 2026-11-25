@@ -671,7 +671,10 @@ async fn an_unknown_fill_waits_for_an_in_flight_placement_then_is_withheld() {
     tap.record_fills(&[fill("never-ours", 1.0)], &store(Vec::new()));
     tokio::time::advance(FILL_DEBOUNCE).await;
     tap.flush_fills(&store(Vec::new()), false);
-    assert!(sent(&notifier).is_empty(), "both wait while a placement is in flight");
+    assert!(
+        sent(&notifier).is_empty(),
+        "both wait while a placement is in flight"
+    );
     {
         let mut placements = placements.lock().unwrap();
         placements.record("racing");
@@ -679,6 +682,14 @@ async fn an_unknown_fill_waits_for_an_in_flight_placement_then_is_withheld() {
     }
     tokio::time::advance(FILL_DEBOUNCE).await;
     tap.flush_fills(&store(Vec::new()), false);
-    assert_eq!(sent(&notifier).len(), 1, "the completed placement's fill is sent");
-    assert_eq!(tap.next_fill_due(), None, "the other is withheld, not held forever");
+    assert_eq!(
+        sent(&notifier).len(),
+        1,
+        "the completed placement's fill is sent"
+    );
+    assert_eq!(
+        tap.next_fill_due(),
+        None,
+        "the other is withheld, not held forever"
+    );
 }

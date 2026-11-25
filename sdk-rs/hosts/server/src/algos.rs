@@ -967,7 +967,8 @@ pub(crate) async fn run_with_identity(
     };
     let name = who.account.clone();
     handle.configure_store_frames(&name, &who.venue);
-    let tap = notify.map(|notify| Rc::new(crate::algo_notify::Tap::new(notify, handle.placements())));
+    let tap =
+        notify.map(|notify| Rc::new(crate::algo_notify::Tap::new(notify, handle.placements())));
     let port = Rc::new(Port {
         handle: handle.clone(),
         client: Cell::new(client),
