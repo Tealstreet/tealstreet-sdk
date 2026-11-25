@@ -179,3 +179,162 @@ fn a_fired_algo_orders_fill_is_claimed_through_its_algo() {
     assert_eq!(ids, ["8886774", "8886775"]);
     assert_eq!(claimed(&ledger, &seen), [true, false]);
 }
+
+// Binance portfolio margin's documented `/papi` startup payloads, as
+// `venues/binance/tests/portfolio_margin.rs` answers them (docs-derived).
+const PM_POSITION_RISK: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
+const PM_SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#;
+const PM_BALANCE: &str = r#"[{"asset":"USDT","totalWalletBalance":"1000.0","crossMarginAsset":"0","crossMarginBorrowed":"0","crossMarginFree":"900.0","crossMarginInterest":"0","crossMarginLocked":"0","umWalletBalance":"1000.0","umUnrealizedPNL":"10.0","cmWalletBalance":"0","cmUnrealizedPNL":"0","updateTime":0,"negativeBalance":"0"}]"#;
+const PM_OPEN_ORDERS: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpresting","cumQuote":"0","executedQty":"0","orderId":1917641,"origQty":"0.40","origType":"LIMIT","price":"90000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","symbol":"BTCUSDT","time":1579276756075,"timeInForce":"GTC","type":"LIMIT","updateTime":1579276756075,"selfTradePreventionMode":"NONE","goodTillDate":0}]"#;
+
+fn pm_ready() -> Harness {
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        portfolio_margin: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond(
+        "/papi/v1/um/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+    );
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/papi/v1/um/positionRisk", 200, PM_POSITION_RISK);
+    h.respond("/papi/v1/um/symbolConfig", 200, PM_SYMBOL_CONFIG);
+    h.respond("/papi/v1/balance", 200, PM_BALANCE);
+    h.respond("/papi/v1/um/openOrders", 200, PM_OPEN_ORDERS);
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
+    for path in ["/public/ws", "/market/ws", "/pm/ws"] {
+        let socket = h.socket(path).unwrap();
+        h.event(Event::WsOpened { socket });
+    }
+    h.answer_open_position_read();
+    h
+}
+
+/// What the actor's `retire_closed_caller_ids` reads: every store row by id
+/// and client id, with whether it is closed or canceled.
+fn retire(h: &Harness, ledger: &mut OwnPlacements, now: std::time::Instant) {
+    use safe_cex_engine::model::OrderStatus;
+    let rows: Vec<(String, String, bool)> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .flat_map(|order| {
+            let terminal = matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
+            std::iter::once(order.id.clone())
+                .chain(order.client_order_id.clone())
+                .map(move |identity| (order.symbol.clone(), identity, terminal))
+        })
+        .collect();
+    ledger.retire_caller_ids(
+        rows.iter()
+            .map(|(symbol, identity, terminal)| (symbol.as_str(), identity.as_str(), *terminal)),
+        now,
+    );
+}
+
+/// Review B (e6e681d490) through real Binance portfolio-margin frame shapes:
+/// PM keys orders by client id and allows reuse after close. A caller's `desk`
+/// claims once the venue acks it; when the order closes during a stream gap,
+/// the reconnect's open-orders read drops it, and the id stops claiming after
+/// `TERMINAL_GRACE` instead of 24 h.
+#[test]
+fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
+    use safe_cex_native::own_placements::TERMINAL_GRACE;
+    let mut h = pm_ready();
+    let mut ledger = OwnPlacements::default();
+    let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_value(serde_json::json!({
+        "symbol": SYMBOL, "type": "limit", "side": "buy", "amount": 0.002,
+        "price": 91000.0, "clientOrderId": "desk"
+    }))
+    .unwrap();
+    let legs = [(SYMBOL.to_owned(), Some("desk".to_owned()))];
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![order],
+    }));
+    for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == 1) {
+        assert!(
+            ledger
+                .record_receipts(&[SYMBOL.into()], &legs, receipts)
+                .is_empty(),
+            "a caller id is never claimed from its receipt"
+        );
+    }
+    let sent = h.take("/papi/v1/um/order");
+    assert_eq!(query(&sent.url, "newClientOrderId"), "desk");
+    h.reply(
+        sent.id,
+        200,
+        "",
+        r#"{"clientOrderId":"desk","cumQty":"0","cumQuote":"0","executedQty":"0","orderId":8886774,"avgPrice":"0.00000","origQty":"0.002","price":"91000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"LIMIT","origType":"LIMIT","updateTime":1566818724722}"#,
+    );
+    let result = h.result(1).cloned().expect("completed").expect("placed");
+    ledger.record_completion(&[SYMBOL.into()], &legs, &result);
+    assert!(
+        ledger.placed(SYMBOL, "desk"),
+        "acked: PM's order id is `desk`"
+    );
+
+    h.message(
+        "/pm/ws",
+        r#"{"fs":"UM","e":"ORDER_TRADE_UPDATE","T":1,"E":1,"o":{"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","q":"0.002","p":"91000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":8886774,"l":"0","z":"0","L":"0","T":1,"t":0,"b":"0","a":"0","m":false,"R":false,"ps":"BOTH","rp":"0"}}"#,
+    );
+    let now = std::time::Instant::now();
+    retire(&h, &mut ledger, now);
+    let later = now + TERMINAL_GRACE;
+    assert!(
+        ledger.placed_at(SYMBOL, "desk", later),
+        "resting: still claimed"
+    );
+
+    // The stream drops; `desk` fills and closes unseen; the reconnect re-reads.
+    let old = h.socket("/pm/ws").unwrap();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    h.advance(500.0);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey2"}"#);
+    let fresh = h.socket("/pm/ws").unwrap();
+    assert_ne!(old, fresh);
+    h.event(Event::WsOpened { socket: fresh });
+    // Answer the reconnect's account re-read, whatever order it asks in.
+    // Binance re-reads open orders on a timer after the reconnect.
+    for _ in 0..8 {
+        h.advance(5_000.0);
+        for (path, body) in [
+            ("/papi/v1/um/positionRisk", PM_POSITION_RISK),
+            ("/papi/v1/um/symbolConfig", PM_SYMBOL_CONFIG),
+            ("/papi/v1/balance", PM_BALANCE),
+            ("/papi/v1/um/algo/openAlgoOrders", "[]"),
+            ("/papi/v1/um/openOrders", PM_OPEN_ORDERS),
+        ] {
+            if h.has_request(path) {
+                h.respond(path, 200, body);
+            }
+        }
+    }
+    assert!(
+        h.engine.store().order("desk").is_none(),
+        "the snapshot dropped it"
+    );
+    retire(&h, &mut ledger, now);
+    assert!(ledger.placed_at(SYMBOL, "desk", now), "its own last fills");
+    assert!(
+        !ledger.placed_at(SYMBOL, "desk", later),
+        "a later reuse of `desk`"
+    );
+}

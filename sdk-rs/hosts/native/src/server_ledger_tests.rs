@@ -27,6 +27,9 @@ enum AmendShape {
     Okx,
 }
 
+/// SYNTHETIC: a stub venue, not a recorded frame shape; the Binance portfolio
+/// margin test in `tests/own_placements_binance.rs` uses real frame shapes.
+///
 /// The shared venue account as one actor's engine sees it. A placement rests
 /// as `<n>` with a generated client id `cl-<n>`. Its amount picks an outcome:
 /// - with a caller-chosen client id: 0.001 rejected; 0.01 Unknown (as Bybit,
@@ -34,9 +37,11 @@ enum AmendShape {
 ///   Binance portfolio margin keys orders by client id;
 /// - without one: 0.03 rejected and 0.04 Unknown, after its receipt.
 ///
-/// A two-order batch fails Unknown with its first leg proven placed.
-/// `row:<symbol>:<id>:<client>` is another login's order arriving on this
-/// actor's private stream; `close:<id>` closes a row.
+/// A two-order batch reports both legs' generated client ids, then fails
+/// Unknown with its first leg proven placed under a native row index that is
+/// not its batch position. `row:<symbol>:<id>:<client>` is another login's
+/// order arriving on this actor's private stream; `close:<id>` closes a row;
+/// `drop:<id>` is an open-orders snapshot without it (after a stream gap).
 struct SharedAccount {
     amend: AmendShape,
     prefix: &'static str,
@@ -84,6 +89,17 @@ impl Venue for SharedAccount {
             cx.store.set_order_status(id, OrderStatus::Closed);
             return;
         }
+        if let Some(id) = text.strip_prefix("drop:") {
+            let open = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|order| order.id != id)
+                .cloned()
+                .collect();
+            cx.store.set_orders(open);
+            return;
+        }
         let fields: Vec<&str> = text
             .strip_prefix("row:")
             .expect("row:<symbol>:<id>:<client>")
@@ -110,23 +126,30 @@ impl Venue for SharedAccount {
         match command {
             Command::PlaceOrders { command, orders } => {
                 if orders.len() == 2 {
-                    let leg = |index: usize, result: ElementResult| ElementOutcome {
+                    let clients = [format!("cl-{fresh}-0"), format!("cl-{fresh}-1")];
+                    for client in &clients {
+                        cx.command_progress(command, receipt(BTC, client));
+                    }
+                    let leg = |index: usize, client: &str, result: ElementResult| ElementOutcome {
                         element: Element {
                             index,
-                            client_order_id: None,
+                            client_order_id: Some(client.into()),
+                            role: None,
                         },
                         result,
                     };
                     let mut error = VenueError::new("second leg lost").outcome(Outcome::Unknown);
                     error.elements = Some(Box::new(ElementOutcomes(vec![
                         leg(
-                            0,
+                            5,
+                            &clients[0],
                             ElementResult::Placed {
                                 order_ids: vec![format!("{fresh}-0")],
                             },
                         ),
                         leg(
-                            1,
+                            0,
+                            &clients[1],
                             ElementResult::Unknown {
                                 error: Box::new(VenueError::new("lost")),
                             },
@@ -385,8 +408,8 @@ fn a_generated_id_is_forgotten_on_refusal_and_kept_on_unknown() {
     assert!(claims(&a, "cl-a2"), "unknown: kept");
 }
 
-/// Review B (942d22190f): a caller-chosen id is claimed only once a placement
-/// under it is proven. Bybit reports a duplicate `orderLinkId` as Unknown, and
+/// Review B (942d22190f), synthetic venue: a caller-chosen id is claimed only
+/// once a placement under it is proven. Bybit reports a duplicate `orderLinkId` as Unknown, and
 /// the duplicate is login B's resting `desk`: A must not claim it.
 #[test]
 fn a_caller_id_is_claimed_only_once_proven() {
@@ -402,8 +425,9 @@ fn a_caller_id_is_claimed_only_once_proven() {
     );
 }
 
-/// Review B (942d22190f): a batch claims only the legs the venue proved
-/// accepted; its Unknown leg claims nothing.
+/// Review B (942d22190f, e6e681d490), synthetic venue: a batch claims only the
+/// legs the venue proved accepted, matched by client id rather than by row
+/// index; its Unknown leg's native id claims nothing.
 #[test]
 fn a_batch_claims_only_its_proven_legs() {
     let mut a = login(AmendShape::Okx, "a");
@@ -425,7 +449,7 @@ fn a_batch_claims_only_its_proven_legs() {
     assert!(!claims(&a, "a1-1"), "the Unknown leg");
 }
 
-/// Review B (942d22190f): once a caller-chosen id's order closes, the id stops
+/// Review B (942d22190f), synthetic venue: once a caller-chosen id's order closes, the id stops
 /// claiming after `TERMINAL_GRACE`, so B reusing `desk` (Binance allows it
 /// after close) is not claimed by A. A's own late fills inside the grace are.
 #[test]
@@ -460,4 +484,28 @@ fn an_id_only_amend_of_an_id_on_two_symbols_records_nothing() {
     for id in ["a2", "0xa2"] {
         assert!(!claims(&a, id), "{id}");
     }
+}
+
+/// Review B (e6e681d490), synthetic venue: an order that closed during a
+/// stream gap is simply absent from the reconnect's open-orders snapshot. Its
+/// caller id retires then too, not after 24 h.
+#[test]
+fn a_caller_id_retires_when_a_snapshot_drops_its_order() {
+    use crate::own_placements::TERMINAL_GRACE;
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.02);
+    sees(&mut a, "unrelated", "x");
+    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
+    assert!(crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later));
+    a.host.engine.handle(
+        1.,
+        Event::WsMessage {
+            socket: SocketId(0),
+            text: "drop:desk",
+        },
+    );
+    a.execute();
+    let placements = crate::own_placements::lock(&a.placements);
+    assert!(placements.placed(BTC, "desk"), "its own last fills");
+    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
 }

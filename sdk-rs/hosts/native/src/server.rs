@@ -567,7 +567,13 @@ pub fn spawn_venue_account<T: Transport + 'static>(
             spawn,
         ),
     };
-    result.map_err(construction_refusal)?
+    let (handle, task) = result.map_err(construction_refusal)??;
+    // AGT-196: Coinbase completes a repeated client id with the existing
+    // order's id, which may be another login's, so caller ids prove nothing.
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        crate::own_placements::lock(&handle.placements).set_idempotent_client_ids();
+    }
+    Ok((handle, task))
 }
 
 /// Why `AccountHandle::input` refused a client message; `notice` is the
@@ -838,6 +844,9 @@ struct Pending {
     recorded: Vec<crate::own_placements::Key>,
     /// A placement's legs, by index: their symbols and caller-chosen client ids.
     legs: Vec<crate::own_placements::Leg>,
+    /// Every (symbol, client id) its receipts named, to match a batch's
+    /// proven legs by identity.
+    sent: Vec<crate::own_placements::Key>,
 }
 
 struct StartupFailure {
@@ -1158,7 +1167,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         if definitively_refused(&error) {
                             placements.forget(&pending.recorded);
                         } else if let Some(elements) = &error.elements {
-                            placements.record_proven_legs(&pending.legs, elements);
+                            placements.record_proven_legs(&pending.sent, &pending.legs, elements);
                         }
                     }
                     if let Some(pending) = pending
@@ -1184,6 +1193,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             &receipts,
                         );
                         pending.recorded.extend(added);
+                        pending.sent.extend(
+                            receipts
+                                .iter()
+                                .map(|receipt| (receipt.symbol.clone(), receipt.identity.clone())),
+                        );
                     }
                     if let Some(pending) = self.pending.get(&command)
                         && let Some(client) = pending.client
@@ -1856,32 +1870,28 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 own,
                 recorded: Vec::new(),
                 legs,
+                sent: Vec::new(),
             },
         );
         self.handle(command);
     }
 
-    /// AGT-196: a caller-chosen id whose order is now closed or canceled stops
-    /// claiming shortly after, so another login reusing it is not claimed.
+    /// AGT-196: a caller-chosen id whose order is now closed, canceled or gone
+    /// from the open orders stops claiming shortly after, so another login
+    /// reusing it is not claimed.
     fn retire_closed_caller_ids(&self) {
         use safe_cex_engine::model::OrderStatus;
         let mut placements = crate::own_placements::lock(&self.placements);
         if !placements.has_caller_ids() {
             return;
         }
-        let terminal = self
-            .host
-            .engine
-            .store()
-            .orders()
-            .iter()
-            .filter(|order| matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled))
-            .flat_map(|order| {
-                std::iter::once(order.id.as_str())
-                    .chain(order.client_order_id.as_deref())
-                    .map(|identity| (order.symbol.as_str(), identity))
-            });
-        placements.retire_terminal(terminal, std::time::Instant::now());
+        let rows = self.host.engine.store().orders().iter().flat_map(|order| {
+            let terminal = matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
+            std::iter::once(order.id.as_str())
+                .chain(order.client_order_id.as_deref())
+                .map(move |identity| (order.symbol.as_str(), identity, terminal))
+        });
+        placements.retire_caller_ids(rows, std::time::Instant::now());
     }
 
     /// AGT-196: whose ids a command's receipts and completion may record. A

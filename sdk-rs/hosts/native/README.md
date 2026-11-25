@@ -167,11 +167,16 @@ identities its own clients placed, read through `AccountHandle::placements`
   them; an Unknown outcome keeps them.
 - **Caller-chosen client ids** are never claimed from a receipt: a venue may
   report a duplicate as Unknown (Bybit, BingX, BloFin). Only a proven placement
-  claims, through the native ids its completion returned; a failed batch claims
-  only the legs the venue proved placed. A recorded id equal to a caller id
-  (Binance portfolio margin keys orders by client id) stops claiming
-  `TERMINAL_GRACE` (60 s) after its order closes, so a reuse elsewhere is not
-  claimed.
+  claims, through the native ids its completion returned. A completion's ids
+  are recorded only for a single-symbol command; a failed batch claims only the
+  legs the venue proved placed, matched by client id to their receipts, never
+  by row index. A recorded id equal to a caller id (Binance portfolio margin
+  and spot key orders by client id) stops claiming `TERMINAL_GRACE` (60 s)
+  after its order closes, or after its row, once seen, leaves the open orders
+  (a reconnect snapshot after a stream gap), so a reuse elsewhere is not
+  claimed. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
+  id with the existing order's id, which may be another login's, so no
+  caller-id placement claims there at all (`set_idempotent_client_ids`).
 - **Amends** record their receipts and completion ids (Hyperliquid's
   `{orderIds, clientOrderId}` replacement, BingX's new id, OKX's unchanged id)
   only when the amended row's id or client id is already recorded; an id-only
