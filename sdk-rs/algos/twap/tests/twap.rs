@@ -73,20 +73,19 @@ struct View {
     refuse_chasers: std::cell::Cell<bool>,
     step: std::cell::Cell<Option<f64>>,
     min_amount: Option<f64>,
-    /// Hide the step from the start's admission check, its first `amount_step` read, so a
+    /// Hide the rules from the start's admission check, its first `amount_rules` read, so a
     /// sub-step plan reaches the run-time refusals a restore or market change can (AGT-286).
     skip_admission: std::cell::Cell<bool>,
 }
 
 impl TwapMarketView for View {
-    fn amount_step(&self, _symbol: &str) -> Option<f64> {
+    fn amount_rules(&self, _symbol: &str) -> Option<(f64, f64)> {
         if self.skip_admission.replace(false) {
             return None;
         }
-        self.step.get()
-    }
-    fn min_amount(&self, _symbol: &str) -> Option<f64> {
-        self.min_amount
+        let step = self.step.get();
+        (step.is_some() || self.min_amount.is_some())
+            .then(|| (step.unwrap_or(0.0), self.min_amount.unwrap_or(0.0)))
     }
     fn start_chaser(&self, request: &safe_cex_algo_twap::ChaserRequest) -> Result<(), String> {
         if self.refuse_chasers.get() {
@@ -857,7 +856,7 @@ fn a_slice_below_the_amount_step_is_refused_and_never_dumped_on_the_last_slice()
     );
     assert!(
         logs(&effects).contains(
-            &"TWAP BTCUSDT paused after 5 slices in a row were refused: 0.1 is below the market's amount step of 1. Resume it once that is fixed, or stop it."
+            &"TWAP BTCUSDT paused after 5 refused slices: below the market's amount step"
         ),
         "{:?}",
         logs(&effects)
@@ -1983,13 +1982,13 @@ fn a_plan_whose_slices_are_below_the_amount_step_never_starts() {
     assert_eq!(
         logs,
         [
-            "TWAP BTCUSDT rejected: each slice would be 0.000001, below the minimum 0.001; use 1 slice or a larger size"
+            "TWAP BTCUSDT rejected: a slice is below the market minimum; use fewer slices or a larger size"
         ]
     );
 }
 
 #[test]
-fn the_minimum_amount_also_gates_a_plan_and_names_the_largest_count() {
+fn the_minimum_amount_also_gates_a_plan() {
     let view = View {
         step: std::cell::Cell::new(Some(0.001)),
         min_amount: Some(0.01),
@@ -2000,21 +1999,20 @@ fn the_minimum_amount_also_gates_a_plan_and_names_the_largest_count() {
     assert_eq!(
         logs,
         [
-            "TWAP BTCUSDT rejected: each slice would be 0.005, below the minimum 0.01; use at most 5 slices or a larger size"
+            "TWAP BTCUSDT rejected: a slice is below the market minimum; use fewer slices or a larger size"
         ]
     );
 }
 
 #[test]
-fn the_suggested_count_survives_randomness() {
+fn admission_checks_the_worst_randomness_draw() {
     // 20% randomness: the smallest of a pair is 80% of the average slice.
     let view = View {
         step: std::cell::Cell::new(Some(1.0)),
         ..View::default()
     };
     let mut env = Env::new();
-    // Integer bounds: lodash floors 0.999 * 21 to the full 20% skew.
-    env.units = vec![0.999; 10];
+    // Admission checks the worst draw: the smaller of a pair is 80% of the average.
     let mut book = owned_book();
     let (_, effects) = start(
         &mut book,
@@ -2025,7 +2023,7 @@ fn the_suggested_count_survives_randomness() {
     assert_eq!(
         logs(&effects),
         [
-            "TWAP BTCUSDT rejected: each slice would be 0.8, below the minimum 1; use at most 8 slices or a larger size"
+            "TWAP BTCUSDT rejected: a slice is below the market minimum; use fewer slices or a larger size"
         ]
     );
     let (_, effects) = start(
@@ -2082,9 +2080,10 @@ fn consecutive_venue_refusals_pause_the_twap_with_the_reason() {
         .filter(|message| message.contains("slice failed"))
         .count();
     assert_eq!(failures, 5, "{:?}", logs(&effects));
-    assert!(logs(&effects).contains(
-        &"TWAP BTCUSDT paused after 5 slices in a row were refused: insufficient balance. Resume it once that is fixed, or stop it."
-    ));
+    assert!(
+        logs(&effects)
+            .contains(&"TWAP BTCUSDT paused after 5 refused slices: insufficient balance")
+    );
     let state = &book.serialize_state()[&id]["state"];
     assert_eq!(state["status"], "paused", "{state}");
     assert_eq!(state["ordersSizes"].as_array().map(Vec::len), Some(5));
@@ -2135,8 +2134,10 @@ fn refused_chaser_slices_also_pause() {
         env.advance(at - env.now);
         all.extend(book.wake(&mut env, &view));
     }
-    assert!(logs(&all).contains(
-        &"TWAP BTCUSDT paused after 5 slices in a row were refused: chaser refused. Resume it once that is fixed, or stop it."
-    ), "{:?}", logs(&all));
+    assert!(
+        logs(&all).contains(&"TWAP BTCUSDT paused after 5 refused slices: chaser refused"),
+        "{:?}",
+        logs(&all)
+    );
     assert_eq!(book.serialize_state()[&id]["state"]["status"], "paused");
 }

@@ -1,6 +1,7 @@
 //! Bounds on client-supplied TWAP options and restored state. The TS worker
 //! trusted them; a server shared by every account cannot.
 
+use crate::TwapMarketView;
 use crate::types::{TwapOptions, TwapState, TwapStatus};
 
 /// The web form's and frame API's slice cap (`TWAP_MAX_ORDERS`).
@@ -38,6 +39,30 @@ pub fn options(options: &TwapOptions) -> Result<(), String> {
     }
     if !(options.chaser_delay.is_finite() && options.chaser_delay >= 0.0) {
         return Err("chaserDelay must be a non-negative number".to_owned());
+    }
+    Ok(())
+}
+
+/// A new plan with a slice below the market minimum (the larger of the amount
+/// step and `limits.amount.min`) would refuse every such slice (AGT-286). The
+/// smallest slice is the worst randomness can draw, as the web preflight checks.
+/// The reason is static because every venue's wasm carries it; hosts add numbers.
+pub fn slice_minimum(options: &TwapOptions, view: &dyn TwapMarketView) -> Result<(), String> {
+    let Some(minimum) = view
+        .amount_rules(options.symbol())
+        .map(|(step, min)| step.max(min))
+        .filter(|minimum| minimum.is_finite() && *minimum > 0.0)
+    else {
+        return Ok(());
+    };
+    let mut smallest = options.size / f64::from(options.orders_count);
+    if options.orders_count > 1 {
+        smallest *= 1.0 - options.randomness_percentage / 100.0;
+    }
+    if smallest / minimum + 1e-9 < 1.0 {
+        return Err(
+            "a slice is below the market minimum; use fewer slices or a larger size".to_owned(),
+        );
     }
     Ok(())
 }
