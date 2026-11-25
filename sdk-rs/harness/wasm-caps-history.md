@@ -1789,3 +1789,27 @@ the merge of PR head `fc18ea3212b73b2afdaf139d2889f72b31aeb894` into master
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | hyperliquid | 2448972 | 2448384 | 2459648 |
+
+## 2026-11-26 — #3813 TWAP slice minimum and refusal pause raise 3 family caps
+
+AGT-286: a TWAP whose every slice was below the amount step started and refused,
+and toasted, every slice (~870 refusals in 75 s). The fix adds a start admission
+check (`validate::slice_minimum`) and a pause after five definite slice refusals
+in a row, with the last reason. That code ships in every venue's wasm. The first
+cut grew each family by about 2 KB and failed 25 budget checks. It was trimmed to
+about 0.8 KB: one shared `amount_rules` market read, no float formatting, a static
+admission reason that reuses the start chain's single format, and short notice
+text. What remains is the check, the counter and the pause notice themselves. It
+still exceeds the three families whose headroom on master was under 0.8 KB; every
+other family passes under its current cap. Rule-17 raise per `harness/CLAUDE.md`,
+generated with `update-wasm-caps.mjs` from PR run 45723942763 (sealed source
+`ab83b2549a12a3ee0e0d6be7777b5a3d33a74308`, the merge of PR head
+`1affeac7cae319175d6da91347385c1af9bcf915` into master
+`e6b28a1f0dfc20554f66b64d386d13a2c7d7f6de`), filtered to the families measured
+above their ceiling.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| bitget | 2949761 | 2949120 | 2960384 |
+| okx | 2222371 | 2222080 | 2233344 |
+| phemex | 2273340 | 2273280 | 2284544 |
