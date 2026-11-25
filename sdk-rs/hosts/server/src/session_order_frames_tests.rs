@@ -979,7 +979,7 @@ async fn hyrotrader_hosted_submit_omits_unsupported_caller_id() {
 
 /// Top-level keys a typed placement's order audit line may carry; anything
 /// else means a field escaped the audit allowlist.
-const PLACEMENT_AUDIT_KEYS: [&str; 13] = [
+const PLACEMENT_AUDIT_KEYS: [&str; 12] = [
     "level",
     "service",
     "msg",
@@ -988,7 +988,6 @@ const PLACEMENT_AUDIT_KEYS: [&str; 13] = [
     "venue",
     "origin",
     "op",
-    "command",
     "orders",
     "result",
     "result_shape",
@@ -1036,6 +1035,16 @@ async fn audited_submit(venue: &str, unknown: bool) -> Value {
             "{key} is not allowlisted: {line}"
         );
     }
+    let text = line.to_string();
+    for frame_only in [
+        "intentId",
+        "fingerprint",
+        "ageMs",
+        "params",
+        "synthetic-key",
+    ] {
+        assert!(!text.contains(frame_only), "{frame_only} in audit: {text}");
+    }
     let stages = line["stages_us"]
         .as_object()
         .expect("settled command carries stage offsets");
@@ -1045,7 +1054,7 @@ async fn audited_submit(venue: &str, unknown: bool) -> Value {
             "{stage} is not a stage: {stages:?}"
         );
     }
-    for stage in ["received", "admitted", "queued", "responded", "replied"] {
+    for stage in ["received", "admitted", "queued", "sent", "replied"] {
         assert!(stages[stage].is_u64(), "{stage} stamped: {stages:?}");
     }
     assert_eq!(stages["received"], 0);
@@ -1067,7 +1076,7 @@ async fn order_frames_audit_line_carries_monotonic_stage_offsets() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let line = audited_submit("bybit", false).await;
-            assert!(line["stages_us"]["sent"].is_u64(), "{line}");
+            assert!(line["stages_us"]["responded"].is_u64(), "{line}");
         })
         .await;
 }
@@ -1076,8 +1085,9 @@ async fn order_frames_audit_line_carries_monotonic_stage_offsets() {
 async fn order_frames_unknown_audit_line_carries_monotonic_stage_offsets() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let line = audited_submit("bybit", true).await;
-            assert!(line["stages_us"]["sent"].is_u64(), "{line}");
+            // The write reached I/O before its answer proved unusable, so `sent`
+            // is required; `responded`, when stamped, is still ordered.
+            audited_submit("bybit", true).await;
         })
         .await;
 }

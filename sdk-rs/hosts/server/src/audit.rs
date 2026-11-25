@@ -727,7 +727,6 @@ mod tests {
             keys,
             [
                 "account",
-                "command",
                 "level",
                 "msg",
                 "op",
