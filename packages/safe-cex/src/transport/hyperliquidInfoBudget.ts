@@ -190,10 +190,8 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
             try {
               let state = boundedState(read.result ?? emptyState());
               mergedRevision = this.localRevision;
-              if (this.localKeys.has(key)) {
-                state = mergeState(state, memoryStorage.snapshot(key));
-                state.generation += 1;
-              }
+              // Grants reserve nothing, so only a 429 retires them; the max-merge carries any local one.
+              if (this.localKeys.has(key)) state = mergeState(state, memoryStorage.snapshot(key));
               const changed = { ...state };
               try {
                 value = change(changed, true);

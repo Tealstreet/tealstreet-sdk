@@ -159,6 +159,24 @@ describe('unavailable shared storage', () => {
     });
   });
 
+  // AGT-299: recovery used to bump the generation, refusing every outstanding grant on the
+  // row as an admission expiry although only a 429 can invalidate one.
+  it('recovering storage merges local spend without refusing grants waiting elsewhere', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    const b = client();
+    await b.response(ORIGIN, 200, '');
+    const deadline = Date.now() + 60_000;
+    const grant = await b.wait(ORIGIN, ORDERS, deadline, signal(), 'normal');
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+      throw new DOMException('disabled', 'InvalidStateError');
+    });
+    await admit(a, ORIGIN, ORDERS, deadline, signal());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await a.response(ORIGIN, 200, '');
+    await expect(b.admitDispatch(ORIGIN, grant, deadline, signal(), () => 'sent')).resolves.toBe('sent');
+  });
+
   it('max-merges memory spend from never-opened storage when it becomes available', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let available = false;
@@ -1986,4 +2004,64 @@ it('keys resolved routes without account, credential, query or lane-port identit
   expect(custom).toBe(hyperliquidInfoBudgetKey(ORIGIN, 'https://proxy.example.test/another-path'));
   expect(custom).not.toContain('PRIVATE');
   expect(custom).not.toBe(direct);
+});
+
+// AGT-299: every new public engine discovers perpDexs, 11 perp-dex catalogues and spot (13 x 20 weight),
+// all queued at once. Their polling stalls IndexedDB past its 1.5 s bound (like a busy main thread), so
+// the realm falls back and recovers mid-burst. Normal discovery ranks ahead of a bulk chart read.
+describe('repeated public discovery on the direct row', () => {
+  const DISCOVERY = [
+    JSON.stringify({ type: 'perpDexs' }),
+    ...Array.from({ length: 11 }, (_, dex) => JSON.stringify({ type: 'metaAndAssetCtxs', dex: dex ? `d${dex}` : '' })),
+    JSON.stringify({ type: 'spotMetaAndAssetCtxs' }),
+  ];
+  const read = async (budget: HyperliquidInfoBudget, body: string, budgetMs: number) => {
+    const deadline = Date.now() + budgetMs;
+    const grant = await budget.wait(ORIGIN, body, deadline, signal(), 'normal');
+    return budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => grant);
+  };
+  const discover = (budget: HyperliquidInfoBudget) => DISCOVERY.map((body) => read(budget, body, 60_000));
+  // A 330-bar 1m chart read: 26 weight, bulk, inside the page candle command's 20 s bound.
+  const chartRead = (budget: HyperliquidInfoBudget) => {
+    const end = Date.now();
+    const body = JSON.stringify({
+      type: 'candleSnapshot',
+      req: { coin: 'BTC', interval: '1m', startTime: end - 329 * 60_000, endTime: end },
+    });
+    return read(budget, body, 20_000);
+  };
+  const outcome = async (pending: Promise<unknown>) => {
+    const settled = pending.then(
+      (grant) => ({ grant }),
+      (error: unknown) => ({ error }),
+    );
+    for (let i = 0; i < 400; i++) await vi.advanceTimersByTimeAsync(100);
+    return settled;
+  };
+  const startEngines = async (budget: HyperliquidInfoBudget, engines: number) => {
+    const reads = Array.from({ length: engines }, () => discover(budget)).flat();
+    await flushDatabase();
+    return reads;
+  };
+
+  it('one fresh engine leaves the chart read room within its bound', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    await spend(a, 600);
+    const discovery = await startEngines(a, 1);
+    expect(await outcome(chartRead(a))).toMatchObject({ grant: { weight: 26, readClass: 'bulk' } });
+    await Promise.all(discovery);
+  });
+
+  // Still true after the fix: the remaining starvation is the queue, not the recovery.
+  it('three fresh engines starve the chart read behind their queued discovery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    await spend(a, 600);
+    const discovery = await startEngines(a, 3);
+    expect(await outcome(chartRead(a))).toMatchObject({
+      error: expect.objectContaining({ code: 'HTTP_PREPARATION_TIMED_OUT', cause: 'info_admission' }),
+    });
+    await outcome(Promise.allSettled(discovery));
+  });
 });

@@ -135,7 +135,9 @@ timeouts use a shared local budget, retaining known pacing state. Local admissio
 keeps normal speed until IndexedDB has opened successfully in this realm; later
 storage failures use one-quarter speed because shared and local budgets may split.
 After a 30-second cooldown, reads retry IndexedDB and max-merge local
-reservations and 429 pauses back into shared state, invalidating prior grants.
+reservations and 429 pauses back into shared state. Recovery keeps the token
+generation: grants reserve nothing, and only a 429 (merged by max) retires one.
+Bumping it refused every waiter on the row as an admission expiry (AGT-299).
 While storage is unavailable, independent realms cannot share their 429 pauses.
 If IDB never opens, each realm has its own full 1,000-weight initial bucket.
 Only pacing timestamps and retry counters are stored, never account or request
