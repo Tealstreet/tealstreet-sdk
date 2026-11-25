@@ -23,8 +23,6 @@ pub const FILL_DEBOUNCE: Duration = Duration::from_secs(2);
 /// One `orderRejected` per algo, symbol and side in this window: a retrying
 /// chase must not page the user once per attempt.
 pub const REJECT_REPEAT: Duration = Duration::from_secs(60);
-/// RED checkpoint only: fills carry no claim, as before this change.
-const RED_NO_CLAIM: bool = true;
 /// Past this many orders waiting out the debounce, the earliest is sent now.
 const MAX_PENDING_FILLS: usize = 512;
 
@@ -82,10 +80,6 @@ impl AlgoNotify {
     /// this account placed the order (AGT-196, decided by the gateway).
     fn emit_fill(&self, draft: Draft, order_id: &str, placed_here: bool) {
         let mut notification = self.build(draft);
-        if RED_NO_CLAIM {
-            self.notifier.push(notification);
-            return;
-        }
         notification.fill_key = Some(crate::host_notify::fill_key(&self.scope.venue, order_id));
         notification.placed_here = Some(placed_here);
         self.notifier.push(notification);
@@ -151,12 +145,19 @@ struct Identities(Vec<String>);
 
 fn identities(store: &AlgoStore, order_id: &str) -> Option<Identities> {
     let order = store.orders.iter().find(|order| order.id == order_id)?;
-    let triggered_by = order.extra.as_ref().and_then(|extra| extra.triggered_by.clone());
+    let triggered_by = order
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.triggered_by.clone());
     Some(Identities(
-        [order.client_order_id.clone(), order.parent_id.clone(), triggered_by]
-            .into_iter()
-            .flatten()
-            .collect(),
+        [
+            order.client_order_id.clone(),
+            order.parent_id.clone(),
+            triggered_by,
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
     ))
 }
 
@@ -341,18 +342,18 @@ impl Tap {
             };
             self.notify.emit_fill(
                 Draft {
-                kind: Kind::Fill,
-                severity: Severity::Info,
-                natural_key,
-                fields: Fields::default()
-                    .symbol(&fill.symbol)
-                    .side(side(fill.side))
-                    .verb(verb),
-                deadline: None,
-                collapse: Some(crate::host_notify::opaque_key(
-                    &self.notify.scope.account_digest,
-                    &order_id,
-                )),
+                    kind: Kind::Fill,
+                    severity: Severity::Info,
+                    natural_key,
+                    fields: Fields::default()
+                        .symbol(&fill.symbol)
+                        .side(side(fill.side))
+                        .verb(verb),
+                    deadline: None,
+                    collapse: Some(crate::host_notify::opaque_key(
+                        &self.notify.scope.account_digest,
+                        &order_id,
+                    )),
                 },
                 &order_id,
                 placed_here,

@@ -3128,16 +3128,6 @@ mod tests {
                 symbol: "BTC-USD".into(),
             },
         );
-        actor.command(
-            1,
-            Command::AmendOrderWithSymbol {
-                command: 42,
-                id: "venue-1".into(),
-                symbol: "BTC-USD".into(),
-                price: Some(2.0),
-                amount: None,
-            },
-        );
         actor.execute();
         assert!(
             commands
@@ -3147,16 +3137,8 @@ mod tests {
             "the placement reached the venue as internal command 1: {:?}",
             commands.borrow()
         );
-        assert!(
-            commands
-                .borrow()
-                .iter()
-                .any(|command| matches!(command, Command::AmendOrderWithSymbol { command: 3, .. })),
-            "the amend reached the venue as internal command 3: {:?}",
-            commands.borrow()
-        );
         let placements = actor.placements.clone();
-        for text in ["1", "2", "placed:1", "3", "placed:3"] {
+        let reply = |actor: &mut Account<_, _>, text: &str| {
             actor.host.engine.handle(
                 1.,
                 Event::WsMessage {
@@ -3165,7 +3147,31 @@ mod tests {
                 },
             );
             actor.execute();
+        };
+        for text in ["1", "2", "placed:1"] {
+            reply(&mut actor, text);
         }
+        actor.command(
+            1,
+            Command::AmendOrder {
+                command: 42,
+                id: "venue-1".into(),
+                price: Some(2.0),
+                amount: None,
+            },
+        );
+        actor.execute();
+        for text in ["3", "placed:3"] {
+            reply(&mut actor, text);
+        }
+        assert!(
+            commands
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, Command::AmendOrder { command: 3, .. })),
+            "the amend reached the venue as internal command 3: {:?}",
+            commands.borrow()
+        );
         let placements = crate::own_placements::lock(&placements);
         assert!(placements.placed("native-1"), "dispatch receipt");
         assert!(placements.placed("venue-1"), "completion id");

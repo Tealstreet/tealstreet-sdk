@@ -625,12 +625,19 @@ async fn a_shared_venue_accounts_fill_carries_one_key_and_only_the_placer_claims
         tap.flush_fills(&venue_account, false);
     }
     let (placer_sent, other_sent) = (sent(&placer_sent), sent(&other_sent));
-    assert_eq!((placer_sent.len(), other_sent.len()), (1, 1), "neither is withheld here");
+    assert_eq!(
+        (placer_sent.len(), other_sent.len()),
+        (1, 1),
+        "neither is withheld here"
+    );
     assert_eq!(placer_sent[0]["placedHere"], true);
     assert_eq!(other_sent[0]["placedHere"], false);
     let key = placer_sent[0]["fillKey"].as_str().unwrap();
     assert_eq!(key.len(), 64);
-    assert_eq!(other_sent[0]["fillKey"], key, "one key per venue order, whoever saw it");
+    assert_eq!(
+        other_sent[0]["fillKey"], key,
+        "one key per venue order, whoever saw it"
+    );
     assert!(!key.contains("shared-order"));
     assert_ne!(
         placer_sent[0]["collapseKey"], other_sent[0]["collapseKey"],
@@ -684,7 +691,10 @@ async fn placed_here_covers_client_ids_parents_and_triggering_algos() {
         .iter()
         .map(|id| {
             let key = crate::host_notify::fill_key("bybit", id);
-            queued.iter().find(|n| n["fillKey"] == key.as_str()).unwrap()["placedHere"]
+            queued
+                .iter()
+                .find(|n| n["fillKey"] == key.as_str())
+                .unwrap()["placedHere"]
                 .as_bool()
                 .unwrap()
         })

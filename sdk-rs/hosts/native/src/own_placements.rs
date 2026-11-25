@@ -64,7 +64,6 @@ impl OwnPlacements {
                 .filter_map(|suffix| identity.strip_suffix(suffix))
                 .any(|parent| self.ids.contains(parent))
     }
-
 }
 
 /// The ids in a placement or amend completion's result: a JSON array of
