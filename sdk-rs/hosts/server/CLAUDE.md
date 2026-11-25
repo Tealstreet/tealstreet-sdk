@@ -641,6 +641,10 @@ per-connection labels. Sibling products share credential scope, but have separat
 actors and TWAP owners. GRVT login-key and provider-captured API passphrase changes
 use explicit settings replacement, compared through process-salted digests.
 Wallet public fields bind that credential; Lighter keeps its label identity because
-its registered-key admission owns that read. This does not enable a venue or replace its
+its registered-key admission owns that read. Paradex keys on `subkeyAddress`.
+DELEGATED construction derives the signer or Stark key from the sealed secret and
+refuses a differing claim (`identity::check_sealed_signer`). This does not enable a venue or replace its
 possession proof. See `docs/plans/callers/hosted-account-identity.md` for the host
 fields and NEEDS-NX requirements. Existing public-only identities remain unchanged.
+The non-Bybit TWAP owner moved from uid to actor digest; roll that release only
+through the pre-roll check in `DESIGN.md` under "Drain and roll".

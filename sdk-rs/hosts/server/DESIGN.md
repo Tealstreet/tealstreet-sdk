@@ -201,6 +201,31 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
 - **Break-glass:** sticky force intent is published before any cleanup await and excludes planned-move classification until explicit undrain. It stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
 - **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
 
+### Rolling a TWAP owner change (AGT-192)
+
+The canonical-identity release changes the native TWAP owner on every hosted
+venue except Bybit: from the bare user ID to the actor digest
+(`docs/plans/callers/hosted-account-identity.md`, "Rolling this change"). A TWAP
+row saved by one build is not restored by the other, so that release rolls, and
+rolls back, only with zero TWAPs on the box being restarted. There is no
+dual-owner path.
+
+**Pre-roll check.** From the jump box, before each box's roll (forward or back):
+
+```bash
+ssh root@exchange-01 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'
+```
+
+Roll only when it prints `true` (exit 0). `false`, or an unreadable body, means
+do not roll. The deployed build cannot tell owners apart, and on the old build
+every non-Bybit TWAP is owned by a bare uid, so this count (Bybit and paused
+TWAPs included) is an upper bound and 0 is the only safe reading. If users keep
+starting TWAPs, drain the box first (new starts are refused, nothing running
+stops) and re-check. Never end TWAPs to reach 0 during this release: no
+`roll.sh --now`, no `force` or `cancel` at the roller's cap, and no
+`/admin/user-drain/force`. Those stop TWAPs that a page would later restore on
+a box running the other build.
+
 ### Per-user drain (psmp2r-1)
 
 These routes move one user while `/health` and everyone else keep serving. All

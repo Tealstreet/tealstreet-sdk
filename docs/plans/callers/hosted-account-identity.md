@@ -24,13 +24,18 @@ the public credential used by its signer:
 | Backpack | `key`, a valid base64 Ed25519 public key |
 | Hyperliquid and Hyperliquid spot | `key` for the main wallet, the existing `hyperliquidSignerAddress` for the agent (see `public-key-admission.md`), and optional `vault` |
 | GRVT | existing `grvtTradingAccountId` and `grvtSignerAddress` |
-| Paradex | existing `paradexAddress` and new `paradexPublicKey` |
+| Paradex | existing `paradexAddress` and `subkeyAddress` (the subkey's Stark public key, as in `/auth/{subkey}`) |
 
 Ethereum addresses use their canonical lowercase 20-byte form. GRVT's trading
 account is a decimal uint64. Paradex account addresses and Stark public keys use
 canonical 32-byte hex; the public key must be a valid Stark curve public value.
 These fields are public values; no additional secret enters a COSIGNED init.
 The device obtains signer public values through its existing local provider.
+
+A DELEGATED init seals the signing secret, so trusted construction derives the
+signer (Hyperliquid, GRVT) or Stark public key (Paradex) from it and refuses an
+init whose claimed field differs. A claim therefore cannot select another key's
+actor. COSIGNED binds the same fields through its possession proof.
 
 Lighter and Lighter Robinhood keep their existing `(userId, accountName)` label
 identity. Their registered-key admission (`public-key-admission.md`) already
@@ -88,18 +93,19 @@ Wallet tuples are ordered as follows:
 
 - Hyperliquid: main wallet, signer address, vault (empty for the main wallet).
 - GRVT: decimal trading account, signer address.
-- Paradex: account address, Stark public key.
+- Paradex: account address, subkey Stark public key.
 
 The additive native `remote_account_with_key_id` constructor accepts that hint.
 The existing `remote_account` constructor retains its original behavior.
 
 ## NEEDS-NX
 
-The hosted init builder must send `hyperliquidSignerAddress` for Hyperliquid and
-`paradexPublicKey` for Paradex, obtained from the account's existing trusted device
-provider. GRVT must supply its existing public signer and trading-account fields.
-Host protocol typings need these public additions; no generated SDK exchange
-option or TypeScript account type is changed by this server contract.
+The hosted init builder must send `hyperliquidSignerAddress` for Hyperliquid,
+derived from the agent secret (NX already does). Paradex uses the existing
+`subkeyAddress` and `paradexAddress`, and GRVT its existing public signer and
+trading-account fields, so no new init field is needed. Paradex stays LOCAL in
+NX's `AWAITING_LIVE_TEST` until a live hosted test passes. No generated SDK
+exchange option or TypeScript account type is changed by this server contract.
 
 Hosts keep account names as labels. A signing responder that uses `keyId` must compare the
 canonical public credential within the current user and venue/network scope;
@@ -109,6 +115,15 @@ The same public fields are required on an explicit settings request.
 Native TWAP state must retain its identity `ownerId` when an account label changes.
 A legacy record without that owner cannot be attributed from its label and is
 refused by the existing owner fence; hosts must not automatically replay it.
+
+## Rolling this change
+
+Before this change only Bybit was identity-keyed; every other hosted account's
+TWAP rows carry the bare user ID as `ownerId`. This build owns them by the actor
+digest, so a row saved by one build is not restored by the other: the owner fence
+skips it, not even paused. There is no dual-owner acceptance. Roll this release,
+and roll it back, only with zero TWAPs on the box being restarted, using the
+pre-roll check in `sdk-rs/hosts/server/DESIGN.md` under "Drain and roll".
 
 Order submit, acknowledgement, outcome and receipt formats are unchanged.
 An unknown write outcome is never re-sent by this work. Identity or metadata
