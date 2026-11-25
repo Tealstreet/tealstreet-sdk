@@ -125,6 +125,16 @@ fn address(text: Option<&str>) -> Result<String, String> {
     Ok(format!("0x{}", safe_cex_crypto::hex(public.as_bytes())))
 }
 
+/// Master's Hyperliquid engine read `key` and `vault` with or without `0x`
+/// (`ethereum::get_address`), so identity accepts both spellings.
+fn prefixed(text: &str) -> String {
+    if text.starts_with("0x") || text.starts_with("0X") {
+        text.to_owned()
+    } else {
+        format!("0x{text}")
+    }
+}
+
 fn stark_address(text: Option<&str>) -> Result<String, String> {
     let bytes = hex(text.ok_or(INVALID)?, 32, true)?;
     let mut prime = [0u8; 32];
@@ -187,20 +197,13 @@ pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
         // `key` is the API-wallet field: the venue binds the agent to one master, so
         // it is a setting (in the fingerprint), never part of the agent's identity.
         "hyperliquid" | "hyperliquidspot" => {
-            // Master ran a `key` saved without `0x` (with the venue's warning): accept it.
-            let key = init.key.as_str();
-            let prefixed = key.starts_with("0x") || key.starts_with("0X");
-            address(Some(&if prefixed {
-                key.to_owned()
-            } else {
-                format!("0x{key}")
-            }))?;
+            address(Some(&prefixed(&init.key)))?;
             Ok(tuple(&[
                 address(init.hyperliquid_signer_address.as_deref())?,
                 init.vault
                     .as_deref()
                     .filter(|v| !v.is_empty())
-                    .map(|v| address(Some(v)))
+                    .map(|v| address(Some(&prefixed(v))))
                     .transpose()?
                     .unwrap_or_default(),
             ]))

@@ -255,6 +255,21 @@ fn hosted_hyperliquid_identity_uses_signer_and_vault_scope() {
         let mut bare = first.clone();
         bare.key = "1111111111111111111111111111111111111111".into();
         assert_eq!(digest(&bare), original, "{venue}: bare-hex key");
+        // Likewise a vault: the bare spelling is the same vault identity.
+        let mut vault = first.clone();
+        vault.vault = Some("0x3333333333333333333333333333333333333333".into());
+        let mut bare_vault = first.clone();
+        bare_vault.vault = Some("3333333333333333333333333333333333333333".into());
+        assert_eq!(
+            digest(&bare_vault),
+            digest(&vault),
+            "{venue}: bare-hex vault"
+        );
+        bare_vault.vault = Some("333333333333333333333333333333333333333".into());
+        assert!(
+            identity::digest("alice", &bare_vault).is_err(),
+            "{venue}: short vault"
+        );
         for invalid in [
             "",
             "0x",

@@ -215,7 +215,7 @@ and `ssh -J` or host aliases do not reach the boxes), for the box about to roll
 (forward or back), immediately before rolling it:
 
 ```bash
-twap_preroll() { ssh "root@$1" 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'; }
+twap_preroll() { ssh -n -o BatchMode=yes -o ConnectTimeout=8 "root@$1" 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'; }
 twap_preroll <private address of the box>   # exchange-01, then exchange-02 before its own roll
 ```
 
