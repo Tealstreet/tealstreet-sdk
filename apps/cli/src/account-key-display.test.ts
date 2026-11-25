@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { exchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { formatAccountKeyLine, SIGNING_KEY_MASK } from './account-key-display';
 
-const PRIVATE_KEY = '0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+const PRIVATE_KEY = `0x${'abcdef0123456789'.repeat(4)}`;
 const ADDRESS = '0x1111222233334444555566667777888899990000';
 
 const expectNoKeyFragment = (shown: string) => {
