@@ -239,6 +239,7 @@ impl CancelReport {
                     .map(|(index, _)| Element {
                         index,
                         client_order_id: None,
+                        role: None,
                     })
                     .collect(),
             ),

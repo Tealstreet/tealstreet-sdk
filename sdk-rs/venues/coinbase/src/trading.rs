@@ -577,6 +577,7 @@ impl Coinbase {
                     elements.push(Element {
                         index,
                         client_order_id: Some(payload.client_order_id.clone()),
+                        role: None,
                     });
                     job.steps.push_back(step);
                 }

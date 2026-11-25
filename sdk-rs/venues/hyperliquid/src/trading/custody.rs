@@ -967,6 +967,7 @@ impl Hyperliquid {
                         .map(|index| Element {
                             index,
                             client_order_id: None,
+                            role: None,
                         })
                         .collect(),
                 );

@@ -15,7 +15,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::write_plan::{
-    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, WritePlan,
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, LegRole, WritePlan,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -168,6 +168,8 @@ struct Step {
     /// An amend-algos call that cancels one leg of a two-leg algo; it settles
     /// as a cancellation of the named algo (AGT-98).
     leg_delete: bool,
+    /// Reporting only: each receipt's part in a split bracket (AGT-214).
+    roles: Vec<Option<LegRole>>,
 }
 impl Step {
     fn cancels(&self) -> bool {
@@ -380,10 +382,11 @@ impl Job {
                 return;
             }
             step.write_index = Some(elements.len());
-            for receipt in &step.receipts {
+            for (row, receipt) in step.receipts.iter().enumerate() {
                 elements.push(Element {
                     index: elements.len(),
                     client_order_id: Some(receipt.identity.clone()),
+                    role: step.roles.get(row).copied().flatten(),
                 });
             }
         }
@@ -396,6 +399,9 @@ impl Job {
 struct OrderPayload {
     #[serde(skip)]
     symbol: String,
+    /// Reporting only, never sent: set on a bracketed order's own entry and legs (AGT-214).
+    #[serde(skip)]
+    role: Option<LegRole>,
     inst_id: String,
     td_mode: &'static str,
     tag: &'static str,
@@ -843,7 +849,7 @@ impl Okx {
         let mut derived = Vec::new();
         for o in orders {
             if is_algo(o.kind) {
-                algos.push(o);
+                algos.push((o, false));
                 continue;
             }
             let m = cx.store.market(&o.symbol).expect("preflight market");
@@ -872,7 +878,8 @@ impl Okx {
             let mut count = 0;
             while remaining > 0.0 {
                 let size = remaining.min(max);
-                let payload = self.order_payload(cx, &o, size)?;
+                let mut payload = self.order_payload(cx, &o, size)?;
+                payload.role = bracket.then_some(LegRole::Entry);
                 count += 1;
                 regular.push(payload);
                 remaining = num::adjust(remaining - size, m.precision.amount);
@@ -897,13 +904,13 @@ impl Okx {
                         leg.stop_loss = None;
                         leg.take_profit = None;
                         leg.reduce_only = Some(true);
-                        derived.push(leg);
+                        derived.push((leg, true));
                     }
                 }
             }
         }
         algos.extend(derived);
-        algos.sort_by_key(|o| match o.kind {
+        algos.sort_by_key(|(o, _)| match o.kind {
             OrderType::StopLoss => 0,
             OrderType::TrailingStopLoss => 1,
             OrderType::TakeProfit => 2,
@@ -912,8 +919,12 @@ impl Okx {
         // Build every payload before issuing a write, including protective legs.
         let algos = algos
             .into_iter()
-            .map(|o| self.order_payload(cx, &o, o.amount))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(o, leg)| {
+                let mut payload = self.order_payload(cx, &o, o.amount)?;
+                payload.role = leg.then(|| algo_role(&payload));
+                Ok(payload)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
@@ -951,6 +962,7 @@ impl Okx {
         for payload in payloads {
             if let Some(partner) = placed.iter_mut().find(|p| complements(p, &payload)) {
                 partner.ord_type = "oco";
+                partner.role = partner.role.or(payload.role).map(|_| LegRole::Other);
                 if payload.sl_trigger_px.is_some() {
                     partner.sl_trigger_px = payload.sl_trigger_px;
                     partner.sl_ord_px = payload.sl_ord_px;
@@ -2795,6 +2807,7 @@ fn cancel_outcomes(
                     element: Element {
                         index,
                         client_order_id: None,
+                        role: None,
                     },
                     result,
                 }
@@ -2927,6 +2940,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 fn empty_payload() -> OrderPayload {
     OrderPayload {
         symbol: String::new(),
+        role: None,
         inst_id: String::new(),
         td_mode: "cross",
         tag: BROKER,
@@ -2953,6 +2967,15 @@ fn empty_payload() -> OrderPayload {
         callback_spread: None,
     }
 }
+/// An algo's part in a split bracket: a lone stop-loss or take-profit trigger, or
+/// another kind (trailing, conditional, or a full-position `oco` holding both legs).
+fn algo_role(payload: &OrderPayload) -> LegRole {
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => LegRole::StopLoss,
+        (None, Some(_)) => LegRole::TakeProfit,
+        _ => LegRole::Other,
+    }
+}
 fn step<T: Serialize + ?Sized>(
     path: &'static str,
     body: &T,
@@ -2969,6 +2992,7 @@ fn step<T: Serialize + ?Sized>(
         write_index: None,
         unknown_row: None,
         leg_delete: false,
+        roles: Vec::new(),
     })
 }
 
@@ -3198,12 +3222,18 @@ fn placement_step<T: Serialize + ?Sized + PlacementIdentities>(
 ) -> Result<Step, String> {
     let mut write = step(path, body, expected, collect_ids)?;
     write.receipts = body.identities();
+    write.roles = body.identity_roles();
     Ok(write)
 }
 trait PlacementIdentities {
     fn identities(&self) -> Vec<OrderIdentityReceipt>;
+    /// Each receipt's bracket role, row for row with `identities`.
+    fn identity_roles(&self) -> Vec<Option<LegRole>>;
 }
 impl PlacementIdentities for OrderPayload {
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        vec![self.role; self.identities().len()]
+    }
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.cl_ord_id
             .iter()
@@ -3220,11 +3250,19 @@ impl<const N: usize> PlacementIdentities for [OrderPayload; N] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.as_slice().identities()
     }
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        self.as_slice().identity_roles()
+    }
 }
 impl PlacementIdentities for [OrderPayload] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.iter()
             .flat_map(PlacementIdentities::identities)
+            .collect()
+    }
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        self.iter()
+            .flat_map(PlacementIdentities::identity_roles)
             .collect()
     }
 }

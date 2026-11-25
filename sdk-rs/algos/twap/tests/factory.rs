@@ -1525,10 +1525,12 @@ fn native_partial_facts_distinguish_refusal_from_uncertainty() {
         Element {
             index: 0,
             client_order_id: None,
+            role: None,
         },
         Element {
             index: 1,
             client_order_id: None,
+            role: None,
         },
     ]);
     journal

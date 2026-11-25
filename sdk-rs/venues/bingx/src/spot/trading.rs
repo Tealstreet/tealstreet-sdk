@@ -468,6 +468,7 @@ impl BingxSpot {
                         .map(|(index, step)| Element {
                             index,
                             client_order_id: step.receipt.as_ref().map(|r| r.identity.clone()),
+                            role: None,
                         })
                         .collect(),
                 );

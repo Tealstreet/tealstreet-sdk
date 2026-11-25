@@ -1,6 +1,6 @@
 //! Passive outcomes: native planning and dispatch remain entirely in the driver.
 use super::*;
-use safe_cex_engine::write_plan::{Element, ElementOutcomes, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{Element, ElementOutcomes, ElementResult, LegRole, WritePlan};
 
 #[derive(Default)]
 pub(super) struct Journal {
@@ -9,40 +9,51 @@ pub(super) struct Journal {
     pending: Option<usize>,
 }
 
-fn clients(step: &Step) -> Vec<Option<String>> {
+type Row = (Option<String>, Option<LegRole>);
+
+fn clients(step: &Step) -> Vec<Row> {
+    let plain = |id: &Option<String>| (id.clone(), None);
     match step {
         Step::Place(opts) => {
-            let mut clients = vec![opts.client_order_id.clone()];
+            let mut clients = vec![(opts.client_order_id.clone(), None)];
             // Mirrors `wires`: limit and market entries carry their legs (AGT-117).
             if matches!(opts.kind, OrderType::Limit | OrderType::Market) {
-                for price in [opts.stop_loss, opts.take_profit].into_iter().flatten() {
-                    if price > 0. {
-                        clients.push(None);
+                for (price, role) in [
+                    (opts.stop_loss, LegRole::StopLoss),
+                    (opts.take_profit, LegRole::TakeProfit),
+                ] {
+                    if price.is_some_and(|price| price > 0.) {
+                        clients.push((None, Some(role)));
                     }
                 }
+            }
+            // AGT-214: one grouped action, but each leg is its own reported row.
+            if clients.len() > 1 {
+                clients[0].1 = Some(LegRole::Entry);
             }
             clients
         }
         Step::Places(orders) => orders
             .iter()
-            .map(|order| order.client_order_id.clone())
+            .map(|order| plain(&order.client_order_id))
             .collect(),
         Step::Cancel(orders) => orders
             .iter()
-            .map(|order| order.client_order_id.clone())
+            .map(|order| plain(&order.client_order_id))
             .collect(),
-        Step::ScheduleCancel { .. } | Step::Leverage { .. } | Step::Restore => vec![None],
+        Step::ScheduleCancel { .. } | Step::Leverage { .. } | Step::Restore => vec![(None, None)],
     }
 }
 
-fn write(clients: Vec<Option<String>>) -> WritePlan {
+fn write(clients: Vec<Row>) -> WritePlan {
     WritePlan::new(
         clients
             .into_iter()
             .enumerate()
-            .map(|(index, client_order_id)| Element {
+            .map(|(index, (client_order_id, role))| Element {
                 index,
                 client_order_id,
+                role,
             })
             .collect(),
     )
@@ -77,7 +88,7 @@ impl Journal {
         let Some(index) = self.pending else {
             return;
         };
-        let clients = match effect {
+        let clients: Vec<_> = match effect {
             Effect::Place(records) => records
                 .iter()
                 .map(|r| r.order.client_order_id.clone())
@@ -85,7 +96,19 @@ impl Journal {
             Effect::Cancel(orders) => orders.iter().map(|o| o.client_order_id.clone()).collect(),
             Effect::ScheduleCancel | Effect::Leverage { .. } => vec![None],
         };
-        self.writes[index] = write(clients);
+        // The prepared rows keep the roles planned from the step, row for row.
+        let roles: Vec<_> = self.writes[index]
+            .outcomes()
+            .iter()
+            .map(|row| row.element.role)
+            .collect();
+        self.writes[index] = write(
+            clients
+                .into_iter()
+                .enumerate()
+                .map(|(row, client)| (client, roles.get(row).copied().flatten()))
+                .collect(),
+        );
         let count = self.writes[index].outcomes().len();
         self.record(
             (0..count)

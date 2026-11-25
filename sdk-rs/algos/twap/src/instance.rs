@@ -103,6 +103,7 @@ impl TwapInstance {
                 } else {
                     None
                 },
+                role: None,
             })
             .collect();
         Self {
@@ -369,6 +370,7 @@ impl TwapInstance {
                 .map(|index| Element {
                     index,
                     client_order_id: None,
+                    role: None,
                 }),
         );
         let mut journal = WritePlan::new(elements);

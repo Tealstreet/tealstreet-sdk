@@ -5,6 +5,7 @@ use crate::{
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::LegRole;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -13,8 +14,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 enum Accepted {
-    Regular(Option<OrderIdentityReceipt>),
-    Algo,
+    /// Reporting only: a bracketed order's entry lots carry `Entry` (AGT-214).
+    Regular(Option<OrderIdentityReceipt>, Option<LegRole>),
+    /// Reporting only: an entry's positional TP/SL carries its part in the split (AGT-214).
+    Algo(Option<LegRole>),
     Ids(Vec<String>),
     Canceled(String),
     CancelAll,
@@ -423,7 +426,7 @@ impl Woo {
             "/v3/algo/order",
             vec![],
             Some(body),
-            Accepted::Algo,
+            Accepted::Algo(None),
         ))
     }
     fn build_places(
@@ -466,6 +469,7 @@ impl Woo {
                 } else {
                     "LIMIT"
                 };
+                let lots = steps.len();
                 for quantity in quantities(o.amount, m)? {
                     let mut params = vec![
                         ("symbol".into(), symbol.clone()),
@@ -491,26 +495,53 @@ impl Woo {
                         "/v1/order",
                         params,
                         None,
-                        Accepted::Regular(o.client_order_id.as_ref().map(|identity| {
-                            OrderIdentityReceipt {
-                                symbol: o.symbol.clone(),
-                                kind: OrderIdentityKind::ClientOrderId,
-                                identity: identity.clone(),
-                            }
-                        })),
+                        Accepted::Regular(
+                            o.client_order_id
+                                .as_ref()
+                                .map(|identity| OrderIdentityReceipt {
+                                    symbol: o.symbol.clone(),
+                                    kind: OrderIdentityKind::ClientOrderId,
+                                    identity: identity.clone(),
+                                }),
+                            None,
+                        ),
                     ));
                 }
-                if o.stop_loss.is_some_and(|v| v > 0.0) || o.take_profit.is_some_and(|v| v > 0.0) {
+                let sl = o.stop_loss.is_some_and(|v| v > 0.0);
+                let tp = o.take_profit.is_some_and(|v| v > 0.0);
+                if sl || tp {
+                    for lot in steps.range_mut(lots..) {
+                        if let Step::Write {
+                            accepted: Accepted::Regular(_, role),
+                            ..
+                        } = lot
+                        {
+                            *role = Some(LegRole::Entry);
+                        }
+                    }
                     let mut closing = o.clone();
                     closing.side = o.side.opposite();
-                    steps.push_back(self.positional(
+                    let mut legs = self.positional(
                         cx,
                         &closing,
                         o.stop_loss,
                         o.take_profit,
                         o.sl_trigger_type.or(o.trigger_type),
                         o.tp_trigger_type.or(o.trigger_type),
-                    )?);
+                    )?;
+                    // One native algo holds both legs; together they are `Other`.
+                    if let Step::Write {
+                        accepted: Accepted::Algo(role),
+                        ..
+                    } = &mut legs
+                    {
+                        *role = Some(match (sl, tp) {
+                            (true, false) => LegRole::StopLoss,
+                            (false, true) => LegRole::TakeProfit,
+                            _ => LegRole::Other,
+                        });
+                    }
+                    steps.push_back(legs);
                 }
             } else if o.kind == OrderType::TrailingStopLoss {
                 let t = cx.store.ticker(&o.symbol).unwrap();
@@ -549,7 +580,7 @@ impl Woo {
                     "/v3/algo/order",
                     vec![],
                     Some(body),
-                    Accepted::Algo,
+                    Accepted::Algo(None),
                 ));
             } else if o.amount > 0.0 {
                 for quantity in quantities(o.amount, m)? {
@@ -579,7 +610,7 @@ impl Woo {
                         "/v3/algo/order",
                         vec![],
                         Some(body),
-                        Accepted::Algo,
+                        Accepted::Algo(None),
                     ));
                 }
             } else {
@@ -1038,18 +1069,20 @@ impl Woo {
                                 .iter()
                                 .filter_map(|step| match step {
                                     Step::Write { accepted, .. } => Some(match accepted {
-                                        Accepted::Regular(receipt) => {
-                                            receipt.as_ref().map(|r| r.identity.clone())
+                                        Accepted::Regular(receipt, role) => {
+                                            (receipt.as_ref().map(|r| r.identity.clone()), *role)
                                         }
-                                        _ => None,
+                                        Accepted::Algo(role) => (None, *role),
+                                        _ => (None, None),
                                     }),
                                     _ => None,
                                 })
                                 .enumerate()
-                                .map(|(index, client_order_id)| {
+                                .map(|(index, (client_order_id, role))| {
                                     safe_cex_engine::write_plan::Element {
                                         index,
                                         client_order_id,
+                                        role,
                                     }
                                 })
                                 .collect();
@@ -1107,7 +1140,7 @@ impl Woo {
                         }
                     }
                     if let Step::Write {
-                        accepted: Accepted::Regular(Some(receipt)),
+                        accepted: Accepted::Regular(Some(receipt), _),
                         ..
                     } = &outbound
                     {
@@ -1439,7 +1472,7 @@ impl Woo {
                         return Err("WOO mutation was not accepted".into());
                     }
                     match accepted {
-                        Accepted::Regular(_) => {
+                        Accepted::Regular(..) => {
                             #[derive(Deserialize)]
                             struct Placed {
                                 #[serde(deserialize_with = "id")]
@@ -1457,7 +1490,7 @@ impl Woo {
                                 .ids
                                 .push(result.order_id);
                         }
-                        Accepted::Algo => {
+                        Accepted::Algo(_) => {
                             #[derive(Deserialize)]
                             struct Rows {
                                 rows: Vec<Row>,

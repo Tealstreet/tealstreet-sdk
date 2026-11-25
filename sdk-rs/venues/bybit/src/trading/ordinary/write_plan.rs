@@ -145,6 +145,7 @@ pub(super) fn build(legs: &mut VecDeque<Leg>) -> Result<Option<WritePlan>, Venue
             elements.push(Element {
                 index,
                 client_order_id,
+                role: None,
             });
         }
     }
@@ -158,6 +159,7 @@ pub(super) fn append_restore(journal: &mut WritePlan) -> Result<usize, String> {
     elements.push(Element {
         index,
         client_order_id: None,
+        role: None,
     });
     let mut extended = WritePlan::new(elements);
     for row in previous {

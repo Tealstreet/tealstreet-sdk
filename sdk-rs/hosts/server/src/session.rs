@@ -22,6 +22,7 @@ mod order_actions;
 mod order_frames;
 mod settings;
 use history_completeness::HistoryCompleteness;
+pub(crate) use order_frames::strip_roles;
 
 #[cfg(test)]
 mod history_completeness_tests;
