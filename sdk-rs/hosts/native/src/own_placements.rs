@@ -53,12 +53,27 @@ impl OwnPlacements {
     }
 }
 
+/// Hyperliquid's amend completion: the replacement order's ids and cloid.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Replacement {
+    order_ids: Vec<String>,
+    client_order_id: String,
+}
+
 /// The ids in a placement or amend completion's result: a JSON array of
-/// strings or one string. Any other shape records nothing, so an unknown
-/// order is never claimed.
+/// strings, one string, or an amend's `Replacement`. Any other shape records
+/// nothing, so an unknown order is never claimed.
 pub(crate) fn result_ids(result: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(result)
         .or_else(|_| serde_json::from_str::<String>(result).map(|id| vec![id]))
+        .or_else(|_| {
+            serde_json::from_str::<Replacement>(result).map(|replacement| {
+                let mut ids = replacement.order_ids;
+                ids.push(replacement.client_order_id);
+                ids
+            })
+        })
         .unwrap_or_default()
 }
 
@@ -113,11 +128,18 @@ mod tests {
         assert!(lock(&placements).placed("after-poison"));
     }
 
+    /// Hyperliquid completes an amend with its replacement's object
+    /// (`venues/hyperliquid/src/trading.rs`), not an array (AGT-196 review).
     #[test]
-    fn result_ids_read_string_arrays_and_single_strings_only() {
+    fn result_ids_read_arrays_strings_and_amend_replacements() {
         assert_eq!(result_ids(r#""9""#), vec!["9"]);
         assert_eq!(result_ids(r#"["7","8"]"#), vec!["7", "8"]);
-        assert!(result_ids(r#"{"orderIds":["7"]}"#).is_empty());
+        assert_eq!(
+            result_ids(r#"{"orderIds":["7"],"clientOrderId":"0xabc"}"#),
+            vec!["7", "0xabc"]
+        );
+        assert!(result_ids(r#"{"orderIds":[7]}"#).is_empty());
+        assert!(result_ids(r#"{"partial":{"orderIds":["7"]}}"#).is_empty());
         assert!(result_ids("[7]").is_empty());
         assert!(result_ids("null").is_empty());
     }

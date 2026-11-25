@@ -2532,6 +2532,15 @@ mod tests {
                 cx.done(command, format!(r#"["venue-{command}"]"#));
                 return;
             }
+            // Hyperliquid's amend completion: its replacement's object.
+            if let Some(command) = text.strip_prefix("amended:") {
+                let command: u32 = command.parse().expect("amended command");
+                cx.done(
+                    command,
+                    format!(r#"{{"orderIds":["venue-{command}"],"clientOrderId":"0xamend-{command}"}}"#),
+                );
+                return;
+            }
             let command: u32 = text.parse().expect("receipt command");
             cx.command_progress(
                 command,
@@ -3161,7 +3170,7 @@ mod tests {
             },
         );
         actor.execute();
-        for text in ["3", "placed:3"] {
+        for text in ["3", "amended:3"] {
             reply(&mut actor, text);
         }
         assert!(
@@ -3176,8 +3185,10 @@ mod tests {
         assert!(placements.placed("native-1"), "dispatch receipt");
         assert!(placements.placed("venue-1"), "completion id");
         assert!(
-            placements.placed("native-3") && placements.placed("venue-3"),
-            "an amend's replacement identity (Hyperliquid, BingX)"
+            placements.placed("native-3")
+                && placements.placed("venue-3")
+                && placements.placed("0xamend-3"),
+            "an amend's replacement identities, from Hyperliquid's real result object"
         );
         assert!(
             !placements.placed("native-2"),
