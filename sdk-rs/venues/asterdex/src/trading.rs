@@ -15,7 +15,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -307,6 +307,8 @@ struct Planned {
     endpoint: &'static str,
     query: Query,
     call: Call,
+    /// Reporting only: this placement's part in a split bracket (AGT-214).
+    role: Option<LegRole>,
 }
 #[derive(Default)]
 struct Job {
@@ -649,6 +651,7 @@ impl AsterDex {
                         endpoint: "allOpenOrders",
                         query: Query::new().str("symbol", &symbol),
                         call: Call::CancelSymbol(symbol.clone()),
+                        role: None,
                     });
                 }
                 (command, job)
@@ -793,6 +796,7 @@ impl AsterDex {
                     .map(|(index, step)| Element {
                         index,
                         client_order_id: step.query.value("newClientOrderId").map(str::to_owned),
+                        role: step.role,
                     })
                     .collect()));
                 // Validate the shared auth shape before reserving any split step.
@@ -1501,6 +1505,7 @@ impl AsterDex {
                         id: order.id.clone(),
                         filled_at_amend: None,
                     },
+                    role: None,
                 })
                 .collect(),
             continue_on_error: true,
@@ -1521,6 +1526,7 @@ impl AsterDex {
                         id: order.id.clone(),
                         filled_at_amend: (!continue_on_error).then_some(order.filled),
                     },
+                    role: None,
                 })
                 .collect(),
             continue_on_error,
@@ -1680,6 +1686,7 @@ impl AsterDex {
                     symbol: order.symbol.clone(),
                     position_side,
                 },
+                role: None,
             });
         }
         job.steps.extend(place.steps);
@@ -1725,6 +1732,7 @@ impl AsterDex {
             continue_on_error: true,
             ..Job::default()
         };
+        let split = orders.iter().any(PlaceOrderOpts::has_attached_legs);
         for opts in orders {
             if opts.kind == OrderType::TrailingStopLoss {
                 job.error = Some(not_sent("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable").kind(ErrorKind::Unsupported));
@@ -1811,6 +1819,7 @@ impl AsterDex {
                                     symbol: child.symbol.clone(),
                                     position_side,
                                 },
+                                role: split.then_some(LegRole::of_kind(child.kind)),
                             });
                         }
                     }
@@ -2024,6 +2033,7 @@ fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> J
             endpoint,
             query,
             call,
+            role: None,
         }]),
         ..Job::default()
     }

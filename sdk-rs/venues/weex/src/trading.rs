@@ -1177,6 +1177,7 @@ impl WeexFutures {
                 .map(|(index, client_order_id)| Element {
                     index,
                     client_order_id,
+                    role: None,
                 })
                 .collect(),
         );

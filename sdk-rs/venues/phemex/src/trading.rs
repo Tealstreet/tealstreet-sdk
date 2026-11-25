@@ -1942,6 +1942,7 @@ impl PhemexPerpetuals {
                                 Call::Place { order, .. } => Some(Element {
                                     index,
                                     client_order_id: order.client_order_id.clone(),
+                                    role: None,
                                 }),
                                 _ => None,
                             })

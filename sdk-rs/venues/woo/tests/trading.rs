@@ -2232,3 +2232,35 @@ fn a_stop_or_trailing_entry_with_attached_legs_is_refused_before_any_request() {
         }
     }
 }
+
+// AGT-214: an entry whose positional take-profit is refused names each row. WOO sends
+// both legs as one positional algo, so a stop-loss and take-profit together are `other`.
+#[test]
+fn a_split_bracket_names_its_entry_and_positional_legs() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    for (sl, tp, role) in [
+        (None, Some(62000.0), LegRole::TakeProfit),
+        (Some(58000.0), Some(62000.0), LegRole::Other),
+    ] {
+        let mut e = engine();
+        let mut o = opts();
+        o.stop_loss = sl;
+        o.take_profit = tp;
+        let a = placed(&mut e, vec![o]);
+        let r = req(&a, Method::Post, "/v1/order");
+        let a = reply(&mut e, &r, 1010.0, r#"{"success":true,"order_id":1}"#);
+        let a = tick(&mut e, &a);
+        let r = req(&a, Method::Post, "/v3/algo/order");
+        let a = reply(
+            &mut e,
+            &r,
+            1020.0,
+            r#"{"success":false,"code":-1103,"message":"The order does not meet the price filter requirement."}"#,
+        );
+        let rows = failure(&a).elements.as_ref().expect("each row's result");
+        let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+        assert_eq!(roles, [Some(LegRole::Entry), Some(role)]);
+        assert!(matches!(rows[0].result, ElementResult::Placed { .. }));
+        assert!(!matches!(rows[1].result, ElementResult::Placed { .. }));
+    }
+}

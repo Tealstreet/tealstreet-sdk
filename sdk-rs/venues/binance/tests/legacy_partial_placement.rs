@@ -140,3 +140,59 @@ fn spot_split_lots_keep_the_legacy_partial_write_sequence() {
         safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(_) }
     ));
 }
+
+#[test]
+// AGT-214: an entry with a stop-loss and a take-profit whose take-profit is refused.
+// Each logical row names its leg, so the app can say which one was not sent.
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    for (variant, entry, leg) in [
+        (Variant::UsdM, "/fapi/v1/order", "/fapi/v1/algoOrder"),
+        (Variant::Spot, "/api/v3/order", "/api/v3/order"),
+    ] {
+        let mut h = ready(variant);
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: serde_json::from_str(r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":5,"price":100,"stopLoss":90,"takeProfit":110}]"#).unwrap(),
+        }));
+        let first = h.take(entry);
+        h.reply(first.id, 200, "", r#"{"orderId":1}"#);
+        let sl = h.take(leg);
+        h.reply(sl.id, 200, "", r#"{"algoId":2,"orderId":2}"#);
+        let tp = h.take(leg);
+        h.reply(
+            tp.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let failures: Vec<_> = h.failures.iter().filter(|(id, _)| *id == 77).collect();
+        let [(_, error)] = failures.as_slice() else {
+            panic!("{variant:?}: one partial failure")
+        };
+        let rows = error.elements.as_ref().expect("each leg's result");
+        let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+        assert_eq!(
+            roles,
+            [
+                Some(LegRole::Entry),
+                Some(LegRole::StopLoss),
+                Some(LegRole::TakeProfit)
+            ],
+            "{variant:?}"
+        );
+        assert!(
+            matches!(rows[0].result, ElementResult::Placed { .. }),
+            "{variant:?}"
+        );
+        assert!(
+            matches!(rows[1].result, ElementResult::Placed { .. }),
+            "{variant:?}"
+        );
+        assert!(
+            matches!(&rows[2].result, ElementResult::NotSent { error: Some(e) } if e.venue_code.as_deref() == Some("-2021")),
+            "{variant:?}: {:?}",
+            rows[2].result
+        );
+    }
+}

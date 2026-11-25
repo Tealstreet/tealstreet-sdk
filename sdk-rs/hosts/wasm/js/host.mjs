@@ -286,6 +286,8 @@ function writePlanErrorOf(value, active, depth) {
 }
 
 const APPLIED_EFFECTS = new Set(['cancel', 'amend', 'tradingStop', 'settings', 'deferredChild', 'positionTrigger']);
+// `write_plan::LegRole` (AGT-214): display data, so an unrecognised role drops only itself.
+const LEG_ROLES = new Set(['entry', 'takeProfit', 'stopLoss', 'other']);
 
 function parseWritePlanElements(value, active, depth) {
   if (!Array.isArray(value) || active.has(value) || depth > 32) return undefined;
@@ -297,6 +299,7 @@ function parseWritePlanElements(value, active, depth) {
         || (row.clientOrderId !== undefined && typeof row.clientOrderId !== 'string')) return undefined;
       const element = { index: row.index };
       if (row.clientOrderId !== undefined) element.clientOrderId = row.clientOrderId;
+      if (LEG_ROLES.has(row.role)) element.role = row.role;
       if (row.status === 'placed') {
         if (!Array.isArray(row.orderIds) || !row.orderIds.length
           || !Array.from(row.orderIds).every((id) => typeof id === 'string' && id.length > 0)) return undefined;

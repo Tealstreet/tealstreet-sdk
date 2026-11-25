@@ -9,7 +9,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
     BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Level,
     Outcome, Response, VenueError,
@@ -1165,6 +1165,9 @@ impl Grvt {
                 }
                 // Describe prepared native creates, including bracket children;
                 // reporting never controls the existing sequential dispatch.
+                let split = plan.steps.iter().any(
+                    |step| matches!(&step.effect, Effect::Place(order) if order.parent_id.is_some()),
+                );
                 plan.create_report = Some(CreateReport {
                     journal: WritePlan::new(
                         plan.steps
@@ -1177,6 +1180,7 @@ impl Grvt {
                                 Element {
                                     index,
                                     client_order_id: Some(order.id.clone()),
+                                    role: split.then_some(LegRole::of_kind(order.kind)),
                                 }
                             })
                             .collect(),

@@ -1621,3 +1621,49 @@ fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
     let entry = h.take(Method::Post);
     assert!(entry.url.contains("type=STOP_MARKET"), "{}", entry.url);
 }
+
+// AGT-214: an entry with a stop-loss and a take-profit whose take-profit's reply is lost.
+// (A refused leg completes with the placed IDs, as legacy TS does.) Each row names its leg,
+// so the app can say "Entry and stop-loss placed. Take-profit not confirmed".
+#[test]
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_unconfirmed() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    let mut h = Harness::new();
+    let mut opts = limit();
+    opts["stopLoss"] = json!(9000);
+    opts["takeProfit"] = json!(9800);
+    h.place(opts);
+    let entry = h.take(Method::Post);
+    h.reply(entry, r#"{"orderId":1}"#);
+    let sl = h.take(Method::Post);
+    assert!(sl.url.contains("type=STOP_MARKET"), "{}", sl.url);
+    h.reply(sl, r#"{"orderId":2}"#);
+    let tp = h.take(Method::Post);
+    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET"), "{}", tp.url);
+    h.engine.handle(
+        1700000000000.0,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "connection lost",
+        },
+    );
+    h.collect();
+    let (_, error) = h.failures.last().expect("an unconfirmed placement");
+    let rows = error.elements.as_ref().expect("each leg's result");
+    let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+    assert!(matches!(rows[0].result, ElementResult::Placed { .. }));
+    assert!(matches!(rows[1].result, ElementResult::Placed { .. }));
+    assert!(
+        matches!(rows[2].result, ElementResult::Unknown { .. }),
+        "{:?}",
+        rows[2].result
+    );
+}

@@ -69,7 +69,7 @@ mod plan_expiry_cleanup {
             assert!(!self.panic_cleanup, "cleanup panic control");
             if self.report_elements {
                 use crate::write_plan::{Element, ElementResult, WritePlan};
-                let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None }]);
+                let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None, role: None }]);
                 let result = if error.outcome == Some(crate::Outcome::NotSent) {
                     ElementResult::NotSent { error: Some(Box::new(error.clone())) }
                 } else {
@@ -338,7 +338,7 @@ mod plan_expiry_cleanup {
         let old = e.venue.plan.clone().unwrap();
         let (other, _) = setup(1, Phase::Preparation);
         let foreign = other.venue.plan.clone().unwrap();
-        let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None }]);
+        let mut report = WritePlan::new(vec![Element { index: 42, client_order_id: None, role: None }]);
         report.record(42, ElementResult::Placed { order_ids: vec!["accepted-prefix".into()] }).unwrap();
         assert_eq!(Cx { now: 0., store: &mut e.store, io: &mut e.io }
             .retain_idle_plan_elements(&foreign, &report), Err(Error::Revoked));

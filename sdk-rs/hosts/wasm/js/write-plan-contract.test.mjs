@@ -96,3 +96,25 @@ test('placed identities must be nonempty dense arrays of nonempty strings', asyn
     assert.equal(writePlanElementsOf([{ index: 0, status: 'placed', orderIds }]), undefined);
   }
 });
+
+// AGT-214: an OKX-style bracket whose take-profit was refused names each leg.
+test('leg roles survive the host boundary; an unrecognised role drops only itself', async () => {
+  const { writePlanElementsOf } = await import('./host.mjs');
+  const rows = [
+    { index: 0, clientOrderId: 'c0', role: 'entry', status: 'placed', orderIds: ['entry'] },
+    { index: 1, role: 'stopLoss', status: 'placed', orderIds: ['sl'] },
+    { index: 2, role: 'takeProfit', status: 'notSent', error: { message: 'refused', outcome: 'rejected' } },
+    { index: 3, role: 'other', status: 'applied', effect: 'settings' },
+  ];
+  assert.deepEqual(writePlanElementsOf(rows), rows);
+  assert.deepEqual(
+    writePlanElementsOf([
+      { index: 0, role: 'trailingStop', status: 'notSent' },
+      { index: 1, role: 7, status: 'notSent' },
+    ]),
+    [
+      { index: 0, status: 'notSent' },
+      { index: 1, status: 'notSent' },
+    ],
+  );
+});

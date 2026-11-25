@@ -417,6 +417,9 @@ pub(super) fn settle_intent(
     out.order_outcome(name, data)
 }
 
+/// The engine's `write_plan::LegRole` wire names.
+const LEG_ROLES: [&str; 4] = ["entry", "takeProfit", "stopLoss", "other"];
+
 /// Each leg's result, projected to the fields the client reads, or `None` when any
 /// leg is unreadable or the list would not fit inside the receipt limit (AGT-185).
 fn leg_results(elements: &Value) -> Option<Value> {
@@ -437,6 +440,13 @@ fn leg_results(elements: &Value) -> Option<Value> {
             let mut out = json!({ "index": index });
             if let Some(id) = leg.get("clientOrderId") {
                 out["clientOrderId"] = Some(id).filter(|id| bounded_id(id))?.clone();
+            }
+            // Display-only (AGT-214): an unrecognised role is left out, never the leg.
+            if let Some(role) = leg["role"]
+                .as_str()
+                .filter(|role| LEG_ROLES.contains(role))
+            {
+                out["role"] = role.into();
             }
             let reason = || {
                 leg["error"]["message"]
@@ -623,6 +633,51 @@ mod tests {
         ] {
             assert_eq!(settled(error).await["error"].get("elements"), None);
         }
+    }
+
+    // AGT-214: the same OKX bracket names each leg, so the client can say "Entry and
+    // stop-loss placed. Take-profit not sent". A role the box does not know is left
+    // out; the leg and the list stay.
+    #[tokio::test]
+    async fn each_legs_role_is_carried_and_an_unknown_role_is_left_out() {
+        let refusal = "OKX 51279: TP trigger price cannot be lower than the last price";
+        let frame = settled(json!({"message":"m","partialOrderIds":["entry","sl"],
+            "elements":[
+                {"index":0,"clientOrderId":"c0","role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"clientOrderId":"c1","role":"stopLoss","status":"placed","orderIds":["sl"]},
+                {"index":2,"clientOrderId":"c2","role":"takeProfit","status":"notSent",
+                    "error":{"message":refusal,"outcome":"rejected"}},
+                {"index":3,"role":"other","status":"applied","effect":"settings"},
+                {"index":4,"role":"trailingStop","status":"unknown","error":{"message":"timed out"}},
+                {"index":5,"role":7,"status":"applied"}]}))
+        .await;
+        assert_eq!(frame["outcome"], "unknown");
+        assert_eq!(
+            frame["error"]["elements"],
+            json!([
+                {"index":0,"clientOrderId":"c0","role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"clientOrderId":"c1","role":"stopLoss","status":"placed","orderIds":["sl"]},
+                {"index":2,"clientOrderId":"c2","role":"takeProfit","status":"notSent",
+                    "error":{"message":refusal}},
+                {"index":3,"role":"other","status":"applied"},
+                {"index":4,"status":"unknown","error":{"message":"timed out"}},
+                {"index":5,"status":"applied"}])
+        );
+    }
+
+    #[test]
+    fn the_box_reads_every_engine_leg_role() {
+        use safe_cex_engine::write_plan::LegRole;
+        let names: Vec<Value> = [
+            LegRole::Entry,
+            LegRole::TakeProfit,
+            LegRole::StopLoss,
+            LegRole::Other,
+        ]
+        .iter()
+        .map(|role| serde_json::to_value(role).unwrap())
+        .collect();
+        assert_eq!(names, LEG_ROLES.map(Value::from));
     }
 
     #[tokio::test]

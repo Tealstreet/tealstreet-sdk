@@ -10,6 +10,7 @@ fn indexed_failure_metadata_survives_native_error_selection() {
                 .map(|index| Element {
                     index,
                     client_order_id: None,
+                    role: None,
                 })
                 .collect(),
         );

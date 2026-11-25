@@ -5,6 +5,7 @@ use crate::{
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::LegRole;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -14,7 +15,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Clone)]
 enum Accepted {
     Regular(Option<OrderIdentityReceipt>),
-    Algo,
+    /// Reporting only: an entry's positional TP/SL carries its part in the split (AGT-214).
+    Algo(Option<LegRole>),
     Ids(Vec<String>),
     Canceled(String),
     CancelAll,
@@ -423,7 +425,7 @@ impl Woo {
             "/v3/algo/order",
             vec![],
             Some(body),
-            Accepted::Algo,
+            Accepted::Algo(None),
         ))
     }
     fn build_places(
@@ -500,17 +502,32 @@ impl Woo {
                         })),
                     ));
                 }
-                if o.stop_loss.is_some_and(|v| v > 0.0) || o.take_profit.is_some_and(|v| v > 0.0) {
+                let sl = o.stop_loss.is_some_and(|v| v > 0.0);
+                let tp = o.take_profit.is_some_and(|v| v > 0.0);
+                if sl || tp {
                     let mut closing = o.clone();
                     closing.side = o.side.opposite();
-                    steps.push_back(self.positional(
+                    let mut legs = self.positional(
                         cx,
                         &closing,
                         o.stop_loss,
                         o.take_profit,
                         o.sl_trigger_type.or(o.trigger_type),
                         o.tp_trigger_type.or(o.trigger_type),
-                    )?);
+                    )?;
+                    // One native algo holds both legs; together they are `Other`.
+                    if let Step::Write {
+                        accepted: Accepted::Algo(role),
+                        ..
+                    } = &mut legs
+                    {
+                        *role = Some(match (sl, tp) {
+                            (true, false) => LegRole::StopLoss,
+                            (false, true) => LegRole::TakeProfit,
+                            _ => LegRole::Other,
+                        });
+                    }
+                    steps.push_back(legs);
                 }
             } else if o.kind == OrderType::TrailingStopLoss {
                 let t = cx.store.ticker(&o.symbol).unwrap();
@@ -549,7 +566,7 @@ impl Woo {
                     "/v3/algo/order",
                     vec![],
                     Some(body),
-                    Accepted::Algo,
+                    Accepted::Algo(None),
                 ));
             } else if o.amount > 0.0 {
                 for quantity in quantities(o.amount, m)? {
@@ -579,7 +596,7 @@ impl Woo {
                         "/v3/algo/order",
                         vec![],
                         Some(body),
-                        Accepted::Algo,
+                        Accepted::Algo(None),
                     ));
                 }
             } else {
@@ -1034,22 +1051,36 @@ impl Woo {
                         std::mem::take(&mut self.trading.active.as_mut().unwrap().touches);
                     match self.build_places(cx, orders, &touches) {
                         Ok(steps) => {
+                            let split = steps.iter().any(|step| {
+                                matches!(
+                                    step,
+                                    Step::Write {
+                                        accepted: Accepted::Algo(Some(_)),
+                                        ..
+                                    }
+                                )
+                            });
                             let elements = steps
                                 .iter()
                                 .filter_map(|step| match step {
                                     Step::Write { accepted, .. } => Some(match accepted {
-                                        Accepted::Regular(receipt) => {
-                                            receipt.as_ref().map(|r| r.identity.clone())
+                                        Accepted::Regular(receipt) => (
+                                            receipt.as_ref().map(|r| r.identity.clone()),
+                                            Some(LegRole::Entry),
+                                        ),
+                                        Accepted::Algo(role) => {
+                                            (None, role.or(Some(LegRole::Other)))
                                         }
-                                        _ => None,
+                                        _ => (None, None),
                                     }),
                                     _ => None,
                                 })
                                 .enumerate()
-                                .map(|(index, client_order_id)| {
+                                .map(|(index, (client_order_id, role))| {
                                     safe_cex_engine::write_plan::Element {
                                         index,
                                         client_order_id,
+                                        role: role.filter(|_| split),
                                     }
                                 })
                                 .collect();
@@ -1457,7 +1488,7 @@ impl Woo {
                                 .ids
                                 .push(result.order_id);
                         }
-                        Accepted::Algo => {
+                        Accepted::Algo(_) => {
                             #[derive(Deserialize)]
                             struct Rows {
                                 rows: Vec<Row>,

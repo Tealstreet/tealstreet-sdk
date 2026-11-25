@@ -2594,6 +2594,29 @@ describe('an unknown placement’s per-leg results', () => {
     box.close();
   });
 
+  // AGT-214: each leg's role survives the outbox and a reload; a role this reader
+  // does not know is dropped from its leg, and the leg and the list stay.
+  it('keeps each leg’s role and drops one it does not know', async () => {
+    const roled = [
+      { index: 0, clientOrderId: 'c0', role: 'entry', status: 'placed', orderIds: ['entry'] },
+      { index: 1, role: 'stopLoss', status: 'placed', orderIds: ['sl'] },
+      { index: 2, role: 'takeProfit', status: 'notSent', error: { message: 'OKX 51279: TP trigger price' } },
+      { index: 3, role: 'other', status: 'applied' },
+    ];
+    const elements = [
+      ...roled,
+      { index: 4, role: 'trailingStop', status: 'applied' },
+      { index: 5, role: 7, status: 'applied' },
+    ];
+    const kept = [...roled, { index: 4, status: 'applied' }, { index: 5, status: 'applied' }];
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements } });
+    expect(box.entries()[0].error).toEqual({ message: 'raw', elements: kept });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()[0].error).toEqual({ message: 'raw', elements: kept });
+    restored.close();
+  });
+
   it.each([
     ['an unknown status', [...legs, { index: 3, status: 'future' }]],
     ['a negative index', [{ ...legs[0], index: -1 }]],

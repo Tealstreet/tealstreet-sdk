@@ -157,8 +157,8 @@ export interface VenueErrorDetail {
   /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
   protection?: 'restored' | 'unprotected';
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
-  /** Complete logical outcomes of a validated multi-write plan, in dispatch order. */
-  elements?: ({ index: number; clientOrderId?: string } & (
+  /** Complete logical outcomes of a validated multi-write plan, in dispatch order; `role` names a split placement's leg when the venue knows it. */
+  elements?: ({ index: number; clientOrderId?: string; role?: 'entry' | 'takeProfit' | 'stopLoss' | 'other' } & (
     | { status: 'placed'; orderIds: string[] }
     | { status: 'applied'; effect: 'cancel' | 'amend' | 'tradingStop' | 'settings' | 'deferredChild' | 'positionTrigger'; targetOrderId?: string; positionKey?: string }
     | { status: 'notSent'; error?: VenueErrorDetail }

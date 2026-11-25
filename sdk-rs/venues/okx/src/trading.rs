@@ -15,7 +15,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::write_plan::{
-    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, WritePlan,
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, LegRole, WritePlan,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -168,6 +168,8 @@ struct Step {
     /// An amend-algos call that cancels one leg of a two-leg algo; it settles
     /// as a cancellation of the named algo (AGT-98).
     leg_delete: bool,
+    /// Reporting only: this placement's part in a split bracket (AGT-214).
+    role: Option<LegRole>,
 }
 impl Step {
     fn cancels(&self) -> bool {
@@ -384,6 +386,7 @@ impl Job {
                 elements.push(Element {
                     index: elements.len(),
                     client_order_id: Some(receipt.identity.clone()),
+                    role: step.role,
                 });
             }
         }
@@ -838,6 +841,7 @@ impl Okx {
                 }
             }
         }
+        let split = orders.iter().any(PlaceOrderOpts::has_attached_legs);
         let mut regular = Vec::new();
         let mut algos = Vec::new();
         let mut derived = Vec::new();
@@ -917,17 +921,16 @@ impl Okx {
         let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
-            steps.push(placement_step(
-                "/api/v5/trade/batch-orders",
-                batch,
-                batch.len(),
-                true,
-            )?);
+            let mut write = placement_step("/api/v5/trade/batch-orders", batch, batch.len(), true)?;
+            write.role = split.then_some(LegRole::Entry);
+            steps.push(write);
         }
         for write in algos {
             steps.push(match write {
                 AlgoWrite::Place(payload) => {
-                    placement_step("/api/v5/trade/order-algo", &*payload, 1, true)?
+                    let mut write = placement_step("/api/v5/trade/order-algo", &*payload, 1, true)?;
+                    write.role = split.then(|| algo_role(&payload));
+                    write
                 }
                 AlgoWrite::Join(amend) => step("/api/v5/trade/amend-algos", &amend, 1, true)?,
             });
@@ -2795,6 +2798,7 @@ fn cancel_outcomes(
                     element: Element {
                         index,
                         client_order_id: None,
+                        role: None,
                     },
                     result,
                 }
@@ -2953,6 +2957,15 @@ fn empty_payload() -> OrderPayload {
         callback_spread: None,
     }
 }
+/// An algo's part in a split bracket: a lone stop-loss or take-profit trigger, or
+/// another kind (trailing, conditional, or a full-position `oco` holding both legs).
+fn algo_role(payload: &OrderPayload) -> LegRole {
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => LegRole::StopLoss,
+        (None, Some(_)) => LegRole::TakeProfit,
+        _ => LegRole::Other,
+    }
+}
 fn step<T: Serialize + ?Sized>(
     path: &'static str,
     body: &T,
@@ -2969,6 +2982,7 @@ fn step<T: Serialize + ?Sized>(
         write_index: None,
         unknown_row: None,
         leg_delete: false,
+        role: None,
     })
 }
 

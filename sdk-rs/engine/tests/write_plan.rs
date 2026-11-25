@@ -7,6 +7,7 @@ fn plan(count: usize) -> WritePlan {
             .map(|index| Element {
                 index,
                 client_order_id: Some(format!("client-{index}")),
+                role: None,
             })
             .collect(),
     )
@@ -147,6 +148,7 @@ fn construction_does_not_validate_or_refuse_a_venue_plan() {
     let mut plan = WritePlan::new(vec![Element {
         index: 9,
         client_order_id: None,
+        role: None,
     }]);
     plan.record(9, placed(9)).unwrap();
     assert_eq!(plan.outcomes()[0].element.index, 9);
@@ -244,6 +246,7 @@ fn serialized_fixture_is_byte_identical_to_the_applied_contract() {
             .map(|(index, id)| Element {
                 index,
                 client_order_id: id.map(str::to_owned),
+                role: None,
             })
             .collect(),
     );
@@ -299,4 +302,47 @@ fn plain_errors_omit_elements_and_keep_the_native_layout_budget() {
             .is_none()
     );
     assert!(std::mem::size_of::<VenueError>() <= 112);
+}
+
+// AGT-214: a leg role is optional display data; without one the wire shape is unchanged.
+#[test]
+fn a_leg_role_serializes_only_when_the_venue_names_one() {
+    use safe_cex_engine::model::OrderType;
+    use safe_cex_engine::write_plan::LegRole;
+    let mut plan = WritePlan::new(
+        [Some(LegRole::Entry), Some(LegRole::TakeProfit), None]
+            .into_iter()
+            .enumerate()
+            .map(|(index, role)| Element {
+                index,
+                client_order_id: None,
+                role,
+            })
+            .collect(),
+    );
+    plan.record(0, placed(0)).unwrap();
+    plan.record(1, refused()).unwrap();
+    let wire = serde_json::to_value(plan.outcomes()).unwrap();
+    assert_eq!(wire[0]["role"], "entry");
+    assert_eq!(wire[1]["role"], "takeProfit");
+    assert_eq!(wire[2].get("role"), None);
+    assert_eq!(
+        [
+            OrderType::Limit,
+            OrderType::Market,
+            OrderType::StopLoss,
+            OrderType::TakeProfit,
+            OrderType::Conditional,
+            OrderType::TrailingStopLoss,
+        ]
+        .map(LegRole::of_kind),
+        [
+            LegRole::Entry,
+            LegRole::Entry,
+            LegRole::StopLoss,
+            LegRole::TakeProfit,
+            LegRole::Other,
+            LegRole::Other,
+        ]
+    );
 }

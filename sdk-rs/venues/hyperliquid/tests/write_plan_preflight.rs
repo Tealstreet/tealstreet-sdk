@@ -620,6 +620,18 @@ fn mixed_native_group_retains_placed_applied_refused_and_unsent_rows() {
     assert_eq!(elements[2]["error"]["outcome"], "rejected");
     assert_eq!(elements[3]["status"], "notSent");
     assert!(elements[3].get("error").is_none());
+    // AGT-214: the grouped bracket names each leg, so the app can say "Entry and
+    // stop-loss placed. Take-profit not sent"; the plain order after it names none.
+    let roles: Vec<_> = elements.iter().map(|row| row.get("role")).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(&json!("entry")),
+            Some(&json!("stopLoss")),
+            Some(&json!("takeProfit")),
+            None
+        ]
+    );
 }
 
 #[test]
