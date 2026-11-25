@@ -1,7 +1,8 @@
 # Hyperliquid write outcomes
 
 Hyperliquid writes follow the legacy TS serial/grouping behavior, except that
-plain placements within one command are batched (see Batched placements). The
+plain placements are batched, within one command (see Batched placements) and
+across queued commands (see Separate commands in one action). The
 shared WritePlan records outcomes and has no validation or dispatch authority.
 
 Stop-after-UNKNOWN is a recorded parity exception (Sean/daxx, 2026-11-08;
@@ -47,8 +48,35 @@ any row, so every row is Unknown. A `waitingForFill` row in a batch has no paren
 and is Unknown as well. A failed write still halts the command's later writes, and
 nothing is resent. One action takes one nonce, so signing is unchanged.
 
-Separate commands are not batched together: each owns its own engine Plan, and one
-physical request cannot settle several owners (`docs/plans/RUST_EXECUTION_GROUPS.md`).
+## Separate commands in one action (AGT-145)
+
+Plain placement commands that are already queued when the next placement's write
+is built join that write. The founding job admits its Plan as a row-attributed
+execution (`Cx::begin_serial_row_execution`) and adopts each queued command
+directly behind it with `Cx::adopt_planned_observer`. Each command declares its own
+rows, so its outcome comes from those rows alone; nothing infers attribution
+(`docs/plans/RUST_EXECUTION_GROUPS.md`, "Row-attributed planned executions").
+
+- Nothing waits for later arrivals. A lone order, or one whose queue is empty, goes
+  exactly as before. Only commands already parked behind the write join it.
+- A command joins only if its whole job is plain orders on the founder's DEX, each
+  building one `na` row, and the action stays within 40 rows. Amends, protective
+  edits, brackets and triggers never join. The first job that does not qualify
+  ends the batch, so queue order holds.
+- A follower's caller deadline must not be earlier than the founder's, because the
+  founder's deadline gates the shared release. Once adopted, the engine completes
+  it, and the venue clears its own intent timer.
+- Each command receives only its own rows. A refused row fails only its command,
+  an unproven row makes only its command Unknown, and siblings stay placed. A lost,
+  short or unparseable reply has no per-row facts, so every command is Unknown.
+  Nothing is resent.
+- `CommandProgress` identities and `order.outcome_unknown` telemetry are published
+  per command, for that command's rows only.
+
+`tests/cross_command_batch.rs` pins these rules. With a simulated 400 ms round trip,
+25 single-order commands took 25 writes and +10.0 s to the last result before this
+change, and take 2 writes and +0.8 s after it. The first command still lands at
++0.4 s.
 
 ## Confirmed fill reconciliation
 

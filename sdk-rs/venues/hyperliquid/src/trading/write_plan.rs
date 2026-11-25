@@ -159,13 +159,39 @@ impl Journal {
         error
     }
 
+    /// The single batched write's rows, for a row-attributed success.
+    pub(super) fn row_outcomes(&self) -> Vec<safe_cex_engine::write_plan::ElementOutcome> {
+        self.outcomes()
+    }
+
     pub(super) fn report_unknown(
         &self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
         message: &str,
     ) {
-        let outcomes = self.outcomes();
+        self.report_unknown_rows(cx, command, 0..usize::MAX, message);
+    }
+
+    /// `report_unknown` for one batched command's own rows, indexed from zero.
+    pub(super) fn report_unknown_rows(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        rows: std::ops::Range<usize>,
+        message: &str,
+    ) {
+        let outcomes: Vec<_> = self
+            .outcomes()
+            .into_iter()
+            .skip(rows.start)
+            .take(rows.len())
+            .enumerate()
+            .map(|(index, mut row)| {
+                row.element.index = index;
+                row
+            })
+            .collect();
         let unknown = outcomes
             .iter()
             .filter(|row| matches!(row.result, ElementResult::Unknown { .. }))
