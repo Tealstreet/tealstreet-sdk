@@ -150,6 +150,53 @@ fn pm_reconnect_replays_the_all_market_and_book_quote_topics() {
 }
 
 #[test]
+fn pm_reopened_book_resubscribes_its_quote_and_starts_a_fresh_update_id() {
+    let mut h = pm();
+    let socket = h.socket("/public/ws").unwrap();
+    subscribe_book(&mut h);
+    h.message("/public/ws", &quote("BTCUSDT", 160, "99.8", "100.0"));
+    h.event(Event::Command(Command::UnsubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    assert!(sent_with(&h, socket, "UNSUBSCRIBE", "btcusdt@bookTicker"));
+
+    h.sent.clear();
+    subscribe_book(&mut h);
+    assert!(subscribed(&h, socket, "btcusdt@bookTicker"));
+    h.message("/public/ws", &quote("BTCUSDT", 150, "99.5", "99.7"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.5, 99.7));
+}
+
+/// A reopened socket may restart a symbol's update-id sequence; a kept id would
+/// freeze the open book's bid and ask.
+#[test]
+fn pm_reconnect_with_an_open_book_accepts_a_restarted_update_id() {
+    let mut h = pm();
+    subscribe_book(&mut h);
+    h.message("/public/ws", &quote("BTCUSDT", 160, "99.8", "100.0"));
+    let old = h.socket("/public/ws").unwrap();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    h.advance(500.0);
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/public/ws", &quote("BTCUSDT", 5, "99.5", "99.7"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.5, 99.7));
+
+    h.message("/public/ws", &quote("BTCUSDT", 4, "99.1", "99.3"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!(
+        (ticker.bid, ticker.ask),
+        (99.5, 99.7),
+        "the guard still applies"
+    );
+}
+
+#[test]
 fn pm_catalogue_retry_adds_markets_without_new_quote_subscriptions() {
     // Exercise the legacy PM flag as well as the explicit variant above.
     let mut h = Harness::started(Options {
