@@ -12,7 +12,9 @@ type KeyDisplayAccount = Pick<ExchangeAccountConfig, 'exchange' | 'apiKey' | 'pa
  * the public address if the account has one, otherwise a fixed mask. Unknown venues are treated the same way.
  */
 export function formatAccountKeyLine(account: KeyDisplayAccount): string {
-  const metadata = exchangeMetadata[account.exchange as keyof typeof exchangeMetadata];
+  const metadata = Object.hasOwn(exchangeMetadata, account.exchange)
+    ? exchangeMetadata[account.exchange as keyof typeof exchangeMetadata]
+    : undefined;
   if (!metadata || metadata.requiresNoSecret) {
     const address = account.paradexAddress?.trim();
     return address ? `Address: ${address}` : `API Key: ${SIGNING_KEY_MASK}`;

@@ -33,8 +33,11 @@ describe('formatAccountKeyLine', () => {
     expectNoKeyFragment(shown);
   });
 
-  it('masks unknown venues rather than guessing the key is public', () => {
-    const shown = formatAccountKeyLine({ exchange: 'retiredvenue' as ExchangeName, apiKey: PRIVATE_KEY });
-    expect(shown).toBe(`API Key: ${SIGNING_KEY_MASK}`);
-  });
+  it.each(['retiredvenue', 'constructor', '__proto__'])(
+    'masks unknown venue %s rather than guessing the key is public',
+    (exchange) => {
+      const shown = formatAccountKeyLine({ exchange: exchange as ExchangeName, apiKey: PRIVATE_KEY });
+      expect(shown).toBe(`API Key: ${SIGNING_KEY_MASK}`);
+    },
+  );
 });
