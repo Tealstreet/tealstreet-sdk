@@ -294,6 +294,13 @@ that. Any future account-creation surface must expose the same fields.
 Note the proxy/tunnel path then requires `login` — an account can be added
 non-interactively but not _used_ through the proxy until the OAuth flow has run.
 
+### `account list` never prints signing material
+
+On `requiresNoSecret` venues (Paradex, Polymarket) `apiKey` holds a private key, so
+the old first-4/last-4 line leaked 8 characters of it (AGT-321). Print account keys only
+through `src/account-key-display.ts`: those venues, and unknown ones, show the public
+`paradexAddress` when present, otherwise a fixed mask. `--json` prints no key at all.
+
 ## Auth Flow
 
 1. CLI opens browser → `{web}/cli-login?callback=http://localhost:9876/callback`
