@@ -3,17 +3,22 @@
 //! Two users can connect the same venue account, and each gets its own
 //! account actor, so every actor's private stream carries the other user's
 //! fills too. This records what is known to be this actor's: the identities
-//! its engine selected at dispatch (`commandProgress`) and the native ids its
-//! placement and amend completions returned. Bounded and memory-only, so a
-//! restarted actor knows none of the orders placed before it; a miss means
-//! "not known here", never "someone else's".
+//! its engine generated at dispatch (`commandProgress`) and the native ids its
+//! placement and amend completions, or a batch's proven legs, returned.
+//! Bounded and memory-only, so a restarted actor knows none of the orders
+//! placed before it; a miss means "not known here", never "someone else's".
 //!
 //! Every identity is scoped to its symbol: Binance USDⓈ-M order ids repeat
-//! across symbols, so `7` on BTCUSDT never claims `7` on ETHUSDT. And each
-//! expires `RETENTION` after it was last recorded, so an old caller client id
-//! (`desk`) cannot claim a much later `desk` placed elsewhere.
+//! across symbols, so `7` on BTCUSDT never claims `7` on ETHUSDT. Each expires
+//! `RETENTION` after it was last recorded.
+//!
+//! A CALLER-chosen client id (`desk`) can name another login's order: a venue
+//! may report a duplicate as Unknown, and a closed id can be reused. So it is
+//! never claimed from a receipt; only a proven placement's native ids are,
+//! and an id equal to a caller id (Binance portfolio margin keys orders by
+//! client id) retires `TERMINAL_GRACE` after its order closes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -36,12 +41,23 @@ pub fn lock(placements: &Placements) -> MutexGuard<'_, OwnPlacements> {
     placements.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// How long a caller-chosen id still claims after its order closed: long
+/// enough for that order's last fills to be reported, short enough that a
+/// reuse of the id elsewhere is not claimed.
+pub const TERMINAL_GRACE: Duration = Duration::from_secs(60);
+
 /// (symbol, order id or client order id).
 pub type Key = (String, String);
 
+/// One leg of a placement: its symbol and the client id its caller chose.
+pub type Leg = (String, Option<String>);
+
 #[derive(Debug, Default)]
 pub struct OwnPlacements {
+    /// Each identity's expiry.
     recorded: HashMap<Key, Instant>,
+    /// Recorded identities equal to a caller-chosen client id.
+    caller: HashSet<Key>,
 }
 
 impl OwnPlacements {
@@ -59,58 +75,114 @@ impl OwnPlacements {
         let fresh = !self.placed_at(symbol, identity, now);
         let key = (symbol.to_owned(), identity.to_owned());
         if !self.recorded.contains_key(&key) && self.recorded.len() >= CAPACITY {
-            self.recorded.retain(|_, at| live(*at, now));
+            self.recorded.retain(|_, expiry| now < *expiry);
             if self.recorded.len() >= CAPACITY
                 && let Some(oldest) = self
                     .recorded
                     .iter()
-                    .min_by_key(|(_, at)| **at)
+                    .min_by_key(|(_, expiry)| **expiry)
                     .map(|(key, _)| key.clone())
             {
                 self.recorded.remove(&oldest);
             }
+            let recorded = &self.recorded;
+            self.caller.retain(|key| recorded.contains_key(key));
         }
-        self.recorded.insert(key, now);
+        self.recorded.insert(key, now + RETENTION);
         fresh
     }
 
     /// Drop identities a placement recorded before the venue definitively
-    /// refused it: a refused caller id must not claim another login's order.
+    /// refused it.
     pub fn forget(&mut self, keys: &[Key]) {
         for key in keys {
             self.recorded.remove(key);
+            self.caller.remove(key);
         }
     }
 
-    /// A command's dispatch receipts on the symbols it was checked against;
-    /// a receipt naming any other symbol records nothing. Returns the keys
-    /// this added, for `forget`.
+    /// A command's engine-generated dispatch receipts on the symbols it was
+    /// checked against. A receipt naming another symbol, or a caller-chosen
+    /// client id, records nothing. Returns the keys this added, for `forget`.
     pub fn record_receipts(
         &mut self,
         symbols: &[String],
+        legs: &[Leg],
         receipts: &[safe_cex_engine::OrderIdentityReceipt],
     ) -> Vec<Key> {
         receipts
             .iter()
             .filter(|receipt| symbols.contains(&receipt.symbol))
+            .filter(|receipt| !caller_chosen(legs, &receipt.identity))
             .filter(|receipt| self.record(&receipt.symbol, &receipt.identity))
             .map(|receipt| (receipt.symbol.clone(), receipt.identity.clone()))
             .collect()
     }
 
-    /// A placement's completion ids. A result names no symbol, so a batch's ids
-    /// go under each of its symbols, still never under one it did not touch.
-    pub fn record_completion(&mut self, symbols: &[String], result: &str) {
+    /// A completed command's ids: every leg was accepted. A result names no
+    /// symbol, so a batch's ids go under each of its symbols, still never
+    /// under one it did not touch.
+    pub fn record_completion(&mut self, symbols: &[String], legs: &[Leg], result: &str) {
         for id in result_ids(result) {
             for symbol in symbols {
-                self.record(symbol, &id);
+                self.record_placed(symbol, &id, caller_chosen(legs, &id));
+            }
+        }
+    }
+
+    /// A failed batch's legs the venue proved accepted, each under its own
+    /// leg's symbol. Unknown and refused legs record nothing.
+    pub fn record_proven_legs(
+        &mut self,
+        legs: &[Leg],
+        elements: &[safe_cex_engine::write_plan::ElementOutcome],
+    ) {
+        use safe_cex_engine::write_plan::ElementResult;
+        for element in elements {
+            let (Some((symbol, caller)), ElementResult::Placed { order_ids }) =
+                (legs.get(element.element.index), &element.result)
+            else {
+                continue;
+            };
+            for id in order_ids {
+                self.record_placed(symbol, id, caller.as_deref() == Some(id.as_str()));
+            }
+        }
+    }
+
+    fn record_placed(&mut self, symbol: &str, id: &str, caller: bool) {
+        self.record(symbol, id);
+        if caller {
+            self.caller.insert((symbol.to_owned(), id.to_owned()));
+        }
+    }
+
+    /// Whether any caller-chosen id needs `retire_terminal`.
+    pub fn has_caller_ids(&self) -> bool {
+        !self.caller.is_empty()
+    }
+
+    /// Orders in a terminal state, by (symbol, id or client id): a
+    /// caller-chosen id among them stops claiming after `TERMINAL_GRACE`, so
+    /// its reuse by another login is not claimed.
+    pub fn retire_terminal<'a>(
+        &mut self,
+        terminal: impl IntoIterator<Item = (&'a str, &'a str)>,
+        now: Instant,
+    ) {
+        for (symbol, identity) in terminal {
+            let key = (symbol.to_owned(), identity.to_owned());
+            if self.caller.remove(&key)
+                && let Some(expiry) = self.recorded.get_mut(&key)
+            {
+                *expiry = (*expiry).min(now + TERMINAL_GRACE);
             }
         }
     }
 
     /// A venue order an algo's trigger created is this account's when the algo
-    /// is, by its id or its client id (an Unknown placement records only the
-    /// latter). Never the reverse: a child cannot make its algo ours.
+    /// is, by its id or its client id. Never the reverse: a child cannot make
+    /// its algo ours.
     pub fn link(&mut self, symbol: &str, order_id: &str, triggered_by: &[String]) {
         self.link_at(symbol, order_id, triggered_by, Instant::now());
     }
@@ -125,7 +197,7 @@ impl OwnPlacements {
     }
 
     /// Whether this account placed the order on `symbol` with exactly this id
-    /// or client order id, within `RETENTION`. Never by prefix: fills carry
+    /// or client order id, and it has not expired. Never by prefix: fills carry
     /// native ids, and a caller's `desk_sl` is not the leg of another's `desk`.
     pub fn placed(&self, symbol: &str, identity: &str) -> bool {
         self.placed_at(symbol, identity, Instant::now())
@@ -134,12 +206,13 @@ impl OwnPlacements {
     pub fn placed_at(&self, symbol: &str, identity: &str, now: Instant) -> bool {
         self.recorded
             .get(&(symbol.to_owned(), identity.to_owned()))
-            .is_some_and(|at| live(*at, now))
+            .is_some_and(|expiry| now < *expiry)
     }
 }
 
-fn live(recorded: Instant, now: Instant) -> bool {
-    now.saturating_duration_since(recorded) < RETENTION
+fn caller_chosen(legs: &[Leg], identity: &str) -> bool {
+    legs.iter()
+        .any(|(_, caller)| caller.as_deref() == Some(identity))
 }
 
 /// Hyperliquid's amend completion: the replacement order's ids and cloid.
@@ -214,7 +287,9 @@ mod tests {
         placements.record(BTC, "held");
         let added = placements.record_receipts(
             &[BTC.into()],
+            &[(BTC.into(), Some("desk".into()))],
             &[
+                receipt(BTC, "desk"),
                 receipt(BTC, "new"),
                 receipt(BTC, "held"),
                 receipt("ETHUSDT", "other"),
@@ -222,8 +297,83 @@ mod tests {
         );
         assert_eq!(added, [(BTC.to_owned(), "new".to_owned())]);
         assert!(!placements.placed("ETHUSDT", "other"));
+        assert!(
+            !placements.placed(BTC, "desk"),
+            "a caller's id is never claimed from a receipt"
+        );
         placements.forget(&added);
         assert!(!placements.placed(BTC, "new") && placements.placed(BTC, "held"));
+    }
+
+    /// Review B (942d22190f): a batch records only the legs the venue proved
+    /// accepted, each under its own leg's symbol.
+    #[test]
+    fn a_failed_batch_records_only_its_proven_legs() {
+        use safe_cex_engine::write_plan::{Element, ElementOutcome, ElementResult};
+        let leg = |index: usize, result: ElementResult| ElementOutcome {
+            element: Element {
+                index,
+                client_order_id: None,
+            },
+            result,
+        };
+        let legs: Vec<Leg> = vec![
+            (BTC.into(), None),
+            ("ETHUSDT".into(), None),
+            (BTC.into(), None),
+        ];
+        let mut placements = OwnPlacements::default();
+        placements.record_proven_legs(
+            &legs,
+            &[
+                leg(
+                    0,
+                    ElementResult::Placed {
+                        order_ids: vec!["leg-0".into()],
+                    },
+                ),
+                leg(
+                    1,
+                    ElementResult::Unknown {
+                        error: Box::new(safe_cex_engine::VenueError::new("lost")),
+                    },
+                ),
+                leg(2, ElementResult::NotSent { error: None }),
+                leg(
+                    7,
+                    ElementResult::Placed {
+                        order_ids: vec!["no-leg".into()],
+                    },
+                ),
+            ],
+        );
+        assert!(placements.placed(BTC, "leg-0"));
+        assert!(!placements.placed("ETHUSDT", "leg-0"));
+        assert!(!placements.placed(BTC, "no-leg") && !placements.placed("ETHUSDT", "no-leg"));
+    }
+
+    /// Review B (942d22190f): an id equal to a caller-chosen client id (Binance
+    /// portfolio margin) stops claiming shortly after its order closes, so a
+    /// reuse of `desk` by another login is not claimed. A generated id keeps
+    /// its retention, so late fills of its own closed order still claim.
+    #[test]
+    fn a_caller_id_retires_after_its_order_closes() {
+        let start = Instant::now();
+        let legs: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
+        let mut placements = OwnPlacements::default();
+        placements.record_completion(&[BTC.into()], &legs, r#"["desk"]"#);
+        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["9001"]"#);
+        assert!(placements.has_caller_ids());
+        placements.retire_terminal([(BTC, "desk"), (BTC, "9001")], start);
+        assert!(!placements.has_caller_ids());
+        let soon = start + TERMINAL_GRACE - Duration::from_secs(1);
+        assert!(
+            placements.placed_at(BTC, "desk", soon),
+            "its own last fills"
+        );
+        let later = start + TERMINAL_GRACE;
+        assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
+        assert!(placements.placed_at(BTC, "9001", later));
     }
 
     /// A caller-reused client id, or a portfolio-margin client-keyed id, ages

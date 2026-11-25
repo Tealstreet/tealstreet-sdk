@@ -7,6 +7,7 @@ use crate::Events;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::error::Outcome;
 use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::write_plan::{Element, ElementOutcome, ElementOutcomes, ElementResult};
 use safe_cex_engine::{
     Cx, HttpRequest, OrderIdentityKind, OrderIdentityReceipt, Response, SocketId, TimerId,
 };
@@ -27,10 +28,15 @@ enum AmendShape {
 }
 
 /// The shared venue account as one actor's engine sees it. A placement rests
-/// as `<n>` with client id `cl-<n>`, unless its client id is `rejected` or
-/// `unknown`: then it reports that id and fails with that outcome.
+/// as `<n>` with a generated client id `cl-<n>`. Its amount picks an outcome:
+/// - with a caller-chosen client id: 0.001 rejected; 0.01 Unknown (as Bybit,
+///   BingX and BloFin classify a duplicate id); 0.02 placed under that id, as
+///   Binance portfolio margin keys orders by client id;
+/// - without one: 0.03 rejected and 0.04 Unknown, after its receipt.
+///
+/// A two-order batch fails Unknown with its first leg proven placed.
 /// `row:<symbol>:<id>:<client>` is another login's order arriving on this
-/// actor's private stream.
+/// actor's private stream; `close:<id>` closes a row.
 struct SharedAccount {
     amend: AmendShape,
     prefix: &'static str,
@@ -74,6 +80,10 @@ impl Venue for SharedAccount {
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+        if let Some(id) = text.strip_prefix("close:") {
+            cx.store.set_order_status(id, OrderStatus::Closed);
+            return;
+        }
         let fields: Vec<&str> = text
             .strip_prefix("row:")
             .expect("row:<symbol>:<id>:<client>")
@@ -99,11 +109,53 @@ impl Venue for SharedAccount {
         let fresh = format!("{}{}", self.prefix, self.next);
         match command {
             Command::PlaceOrders { command, orders } => {
+                if orders.len() == 2 {
+                    let leg = |index: usize, result: ElementResult| ElementOutcome {
+                        element: Element {
+                            index,
+                            client_order_id: None,
+                        },
+                        result,
+                    };
+                    let mut error = VenueError::new("second leg lost").outcome(Outcome::Unknown);
+                    error.elements = Some(Box::new(ElementOutcomes(vec![
+                        leg(
+                            0,
+                            ElementResult::Placed {
+                                order_ids: vec![format!("{fresh}-0")],
+                            },
+                        ),
+                        leg(
+                            1,
+                            ElementResult::Unknown {
+                                error: Box::new(VenueError::new("lost")),
+                            },
+                        ),
+                    ])));
+                    cx.fail(command, error);
+                    return;
+                }
+                let amount = orders[0].amount;
+                let symbol = orders[0].symbol.clone();
                 if let Some(caller) = orders[0].client_order_id.clone() {
-                    // A caller-chosen id (`desk`), as Binance reports it before
-                    // its venue refuses a duplicate or the response is lost.
-                    cx.command_progress(command, receipt(&orders[0].symbol, &caller));
-                    let outcome = if orders[0].amount > 0.005 {
+                    cx.command_progress(command, receipt(&symbol, &caller));
+                    if amount > 0.015 {
+                        cx.store.upsert_order(resting(&caller, &caller));
+                        cx.done(command, format!(r#"["{caller}"]"#));
+                    } else {
+                        let outcome = if amount > 0.005 {
+                            Outcome::Unknown
+                        } else {
+                            Outcome::Rejected
+                        };
+                        cx.fail(command, VenueError::new("refused").outcome(outcome));
+                    }
+                    return;
+                }
+                let client = format!("cl-{fresh}");
+                cx.command_progress(command, receipt(&symbol, &client));
+                if amount > 0.025 {
+                    let outcome = if amount > 0.035 {
                         Outcome::Unknown
                     } else {
                         Outcome::Rejected
@@ -111,8 +163,6 @@ impl Venue for SharedAccount {
                     cx.fail(command, VenueError::new("refused").outcome(outcome));
                     return;
                 }
-                let client = format!("cl-{fresh}");
-                cx.command_progress(command, receipt(&orders[0].symbol, &client));
                 cx.store.upsert_order(resting(&fresh, &client));
                 cx.done(command, format!(r#"["{fresh}"]"#));
             }
@@ -309,27 +359,93 @@ fn place_caller(actor: &mut Account<SharedAccount, NoTransport>, command: u32, a
     actor.execute();
 }
 
-/// Review B (e49c33ac90): a placement the venue definitively refused (a
-/// duplicate caller id) must not keep claiming that id for 24 h, or it claims
-/// the other login's resting `desk`. An Unknown outcome may have placed it, so
-/// its id stays.
-#[test]
-fn a_refused_placement_forgets_its_id_and_an_unknown_one_keeps_it() {
-    let mut a = login(AmendShape::Okx, "a");
-    place_caller(&mut a, 1, 0.001);
-    assert!(!claims(&a, "desk"), "rejected: forgotten");
-    place_caller(&mut a, 2, 0.01);
-    assert!(claims(&a, "desk"), "unknown: kept");
+fn place_with(actor: &mut Account<SharedAccount, NoTransport>, command: u32, amount: f64) {
+    let order = serde_json::from_value(serde_json::json!({
+        "symbol": BTC, "type": "limit", "side": "sell", "amount": amount, "price": 78_000.0
+    }))
+    .unwrap();
+    actor.command(
+        CLIENT,
+        Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        },
+    );
+    actor.execute();
 }
 
-/// A refusal forgets only what its own receipts added: an id this login
-/// already held from an earlier placement stays.
+/// A generated client id cannot name another login's order: it is claimed from
+/// its receipt, kept on Unknown, and forgotten only on a definitive refusal.
 #[test]
-fn a_refusal_keeps_an_id_recorded_before_it() {
+fn a_generated_id_is_forgotten_on_refusal_and_kept_on_unknown() {
+    let mut a = login(AmendShape::Okx, "a");
+    place_with(&mut a, 1, 0.03);
+    assert!(!claims(&a, "cl-a1"), "rejected: forgotten");
+    place_with(&mut a, 2, 0.04);
+    assert!(claims(&a, "cl-a2"), "unknown: kept");
+}
+
+/// Review B (942d22190f): a caller-chosen id is claimed only once a placement
+/// under it is proven. Bybit reports a duplicate `orderLinkId` as Unknown, and
+/// the duplicate is login B's resting `desk`: A must not claim it.
+#[test]
+fn a_caller_id_is_claimed_only_once_proven() {
     let mut a = login(AmendShape::Okx, "a");
     place_caller(&mut a, 1, 0.01);
+    assert!(!claims(&a, "desk"), "Unknown (a Bybit duplicate id)");
     place_caller(&mut a, 2, 0.001);
-    assert!(claims(&a, "desk"));
+    assert!(!claims(&a, "desk"), "rejected");
+    place_caller(&mut a, 3, 0.02);
+    assert!(
+        claims(&a, "desk"),
+        "placed: the venue acked it under that id"
+    );
+}
+
+/// Review B (942d22190f): a batch claims only the legs the venue proved
+/// accepted; its Unknown leg claims nothing.
+#[test]
+fn a_batch_claims_only_its_proven_legs() {
+    let mut a = login(AmendShape::Okx, "a");
+    let leg = |price: f64| {
+        serde_json::from_value(serde_json::json!({
+            "symbol": BTC, "type": "limit", "side": "sell", "amount": 0.001, "price": price
+        }))
+        .unwrap()
+    };
+    a.command(
+        CLIENT,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![leg(78_000.), leg(79_000.)],
+        },
+    );
+    a.execute();
+    assert!(claims(&a, "a1-0"), "the proven leg");
+    assert!(!claims(&a, "a1-1"), "the Unknown leg");
+}
+
+/// Review B (942d22190f): once a caller-chosen id's order closes, the id stops
+/// claiming after `TERMINAL_GRACE`, so B reusing `desk` (Binance allows it
+/// after close) is not claimed by A. A's own late fills inside the grace are.
+#[test]
+fn a_reused_caller_id_is_not_claimed_after_its_order_closed() {
+    use crate::own_placements::TERMINAL_GRACE;
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.02);
+    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
+    assert!(crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later));
+    a.host.engine.handle(
+        1.,
+        Event::WsMessage {
+            socket: SocketId(0),
+            text: "close:desk",
+        },
+    );
+    a.execute();
+    let placements = crate::own_placements::lock(&a.placements);
+    assert!(placements.placed(BTC, "desk"), "its own last fills");
+    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
 }
 
 /// Review B (e49c33ac90): an id-only amend whose id names rows on two symbols

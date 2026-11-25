@@ -836,6 +836,8 @@ struct Pending {
     own: Option<Vec<String>>,
     /// Identities its receipts newly recorded, forgotten if it is refused.
     recorded: Vec<crate::own_placements::Key>,
+    /// A placement's legs, by index: their symbols and caller-chosen client ids.
+    legs: Vec<crate::own_placements::Leg>,
 }
 
 struct StartupFailure {
@@ -1125,10 +1127,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
             match notice {
                 Notice::CommandDone { command, result } => {
                     let pending = self.pending.remove(&command);
-                    if let Some(symbols) = pending.as_ref().and_then(|pending| pending.own.as_ref())
+                    if let Some(pending) = &pending
+                        && let Some(symbols) = &pending.own
                     {
-                        crate::own_placements::lock(&self.placements)
-                            .record_completion(symbols, &result);
+                        crate::own_placements::lock(&self.placements).record_completion(
+                            symbols,
+                            &pending.legs,
+                            &result,
+                        );
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1146,9 +1152,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 Notice::CommandFailed { command, error } => {
                     let pending = self.pending.remove(&command);
                     if let Some(pending) = &pending
-                        && definitively_refused(&error)
+                        && pending.own.is_some()
                     {
-                        crate::own_placements::lock(&self.placements).forget(&pending.recorded);
+                        let mut placements = crate::own_placements::lock(&self.placements);
+                        if definitively_refused(&error) {
+                            placements.forget(&pending.recorded);
+                        } else if let Some(elements) = &error.elements {
+                            placements.record_proven_legs(&pending.legs, elements);
+                        }
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1167,8 +1178,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     if let Some(pending) = self.pending.get_mut(&command)
                         && let Some(symbols) = &pending.own
                     {
-                        let added = crate::own_placements::lock(&self.placements)
-                            .record_receipts(symbols, &receipts);
+                        let added = crate::own_placements::lock(&self.placements).record_receipts(
+                            symbols,
+                            &pending.legs,
+                            &receipts,
+                        );
                         pending.recorded.extend(added);
                     }
                     if let Some(pending) = self.pending.get(&command)
@@ -1334,6 +1348,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 }
             }
         }
+        self.retire_closed_caller_ids();
         if let Some(error) = self.host.terminal.clone() {
             // A released command may have reached the venue, even when the
             // fatal callback's output was withheld. Settle every owned waiter
@@ -1826,6 +1841,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.next_command = internal;
         *id = internal;
         let own = self.own_symbols(&command);
+        let legs = match &command {
+            Command::PlaceOrders { orders, .. } => orders
+                .iter()
+                .map(|order| (order.symbol.clone(), order.client_order_id.clone()))
+                .collect(),
+            _ => Vec::new(),
+        };
         self.pending.insert(
             internal,
             Pending {
@@ -1833,9 +1855,33 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 original,
                 own,
                 recorded: Vec::new(),
+                legs,
             },
         );
         self.handle(command);
+    }
+
+    /// AGT-196: a caller-chosen id whose order is now closed or canceled stops
+    /// claiming shortly after, so another login reusing it is not claimed.
+    fn retire_closed_caller_ids(&self) {
+        use safe_cex_engine::model::OrderStatus;
+        let mut placements = crate::own_placements::lock(&self.placements);
+        if !placements.has_caller_ids() {
+            return;
+        }
+        let terminal = self
+            .host
+            .engine
+            .store()
+            .orders()
+            .iter()
+            .filter(|order| matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled))
+            .flat_map(|order| {
+                std::iter::once(order.id.as_str())
+                    .chain(order.client_order_id.as_deref())
+                    .map(|identity| (order.symbol.as_str(), identity))
+            });
+        placements.retire_terminal(terminal, std::time::Instant::now());
     }
 
     /// AGT-196: whose ids a command's receipts and completion may record. A

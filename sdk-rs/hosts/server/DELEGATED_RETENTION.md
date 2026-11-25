@@ -132,9 +132,10 @@ never from a snapshot or a rejoin replay:
   digest, so its fills stay unclaimed there. No id or key leaves the box. A key the venue-account hash cannot read
   falls back to that login's own account and logs `cause=unreadable_key`, so
   its fills fail open. `placedHere` is true when the native host's per-actor
-  ledger (`safe_cex_native::own_placements`: dispatch `commandProgress` receipts
-  and completion ids of this actor's placements, and of amends only of orders
-  it already holds) names exactly the order id, or the row's client order id or
+  ledger (`safe_cex_native::own_placements`: engine-generated dispatch receipts
+  and completion ids of this actor's placements, proven legs of a failed batch,
+  and amends only of orders it already holds; a caller-chosen client id only
+  through a proven placement, retired a minute after its order closes) names exactly the order id, or the row's client order id or
   parent, on the fill's symbol. A triggered child is linked at fill time from
   the venue's frame (`Notice::OrderTriggered`), so it is claimed even when it
   filled before any row was stored: OKX by `algoId` or `algoClOrdId`; Binance

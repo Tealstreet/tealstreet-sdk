@@ -34,13 +34,14 @@ fn ready() -> Harness {
 
 /// Place one order as the actor would, recording what the actor records.
 fn place(h: &mut Harness, ledger: &mut OwnPlacements, command: u32, order: serde_json::Value) {
-    let order = serde_json::from_value(order).unwrap();
+    let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_value(order).unwrap();
+    let legs = [(order.symbol.clone(), order.client_order_id.clone())];
     h.event(Event::Command(Command::PlaceOrders {
         command,
         orders: vec![order],
     }));
     for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == command) {
-        ledger.record_receipts(&[SYMBOL.into()], receipts);
+        ledger.record_receipts(&[SYMBOL.into()], &legs, receipts);
     }
 }
 
@@ -51,7 +52,8 @@ fn complete(h: &Harness, ledger: &mut OwnPlacements, command: u32) {
         .find(|(id, _)| *id == command)
         .and_then(|(_, result)| result.clone().ok())
         .expect("the placement completed");
-    ledger.record_completion(&[SYMBOL.into()], &result);
+    // These placements carry no caller id: Binance's are engine-generated.
+    ledger.record_completion(&[SYMBOL.into()], &[(SYMBOL.into(), None)], &result);
 }
 
 fn query(url: &str, name: &str) -> String {
