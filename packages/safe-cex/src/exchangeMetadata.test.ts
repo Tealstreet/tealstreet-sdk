@@ -235,14 +235,13 @@ describe('exchangeMetadata', () => {
       expect(coinbaseSpot.enableInPreview).toBe(true);
     });
 
-    it('should keep HyroTrader preview-enabled without production rollout', () => {
+    it('should keep HyroTrader enabled in production and preview', () => {
       // Hyro fronts the simulator at a TLS hostname with browser CORS for
-      // Tealstreet, so preview beta validation can run direct. Keep production
-      // dark until the beta is explicitly approved.
+      // Tealstreet, so it runs direct. It is available in production and preview.
       const hyrotrader = exchangeMetadata.hyrotrader;
 
       expect(hyrotrader.exchangeName).toBe('hyrotrader');
-      expect(hyrotrader.enabled).toBe(false);
+      expect(hyrotrader.enabled).toBe(true);
       expect(hyrotrader.enabledInDev).toBe(true);
       expect(hyrotrader.enableInPreview).toBe(true);
       expect(hyrotrader.forbidCors).toBe(false);
@@ -250,11 +249,11 @@ describe('exchangeMetadata', () => {
       expect(hyrotrader.supportsTunnel).toBe(false);
     });
 
-    it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
+    it('should keep Robinhood Lighter enabled in production and preview', () => {
       const lighterRobinhood = exchangeMetadata['lighter-robinhood'];
 
       expect(lighterRobinhood.exchangeName).toBe('lighter-robinhood');
-      expect(lighterRobinhood.enabled).toBe(false);
+      expect(lighterRobinhood.enabled).toBe(true);
       expect(lighterRobinhood.enabledInDev).toBe(true);
       expect(lighterRobinhood.enableInPreview).toBe(true);
       expect(lighterRobinhood.defaultQuote).toBe('USDG');
