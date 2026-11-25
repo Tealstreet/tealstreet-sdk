@@ -347,26 +347,27 @@ fn a_leg_role_serializes_only_when_the_venue_names_one() {
     );
 }
 
-// AGT-214 review: the JS readers (`host.mjs`, safe-cex `delegatedLegResults`) check
-// their role names against this same fixture, so a rename cannot drop roles silently.
+// AGT-214 review: the JS readers (`host.mjs`, safe-cex `delegatedLegResults`) and the
+// box's `LEG_ROLES` check their role names against this fixture or `LegRole::ALL`, so a
+// rename or a new variant cannot drop roles silently.
 #[test]
 fn leg_role_wire_names_match_the_shared_fixture() {
     use safe_cex_engine::write_plan::LegRole;
-    let every = [
-        LegRole::Entry,
-        LegRole::TakeProfit,
-        LegRole::StopLoss,
-        LegRole::Other,
-    ];
-    // A new variant fails to compile here until `every` and the fixture name it.
-    for role in every {
-        match role {
-            LegRole::Entry | LegRole::TakeProfit | LegRole::StopLoss | LegRole::Other => {}
-        }
+    // A new variant fails to compile here; its arm must give its place in `ALL`.
+    let position = |role: LegRole| match role {
+        LegRole::Entry => 0,
+        LegRole::TakeProfit => 1,
+        LegRole::StopLoss => 2,
+        LegRole::Other => 3,
+    };
+    const VARIANTS: usize = 4; // the number of arms above
+    assert_eq!(LegRole::ALL.len(), VARIANTS);
+    for (index, role) in LegRole::ALL.into_iter().enumerate() {
+        assert_eq!(position(role), index, "{role:?}");
     }
     let fixture: Vec<String> =
         serde_json::from_str(include_str!("fixtures/leg-roles.json")).unwrap();
-    let names: Vec<String> = every
+    let names: Vec<String> = LegRole::ALL
         .iter()
         .map(|role| {
             serde_json::to_value(role)

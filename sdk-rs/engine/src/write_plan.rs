@@ -27,6 +27,9 @@ pub enum LegRole {
 }
 
 impl LegRole {
+    /// Every role, in wire-name fixture order (`tests/fixtures/leg-roles.json`).
+    pub const ALL: [Self; 4] = [Self::Entry, Self::TakeProfit, Self::StopLoss, Self::Other];
+
     /// A split bracket's element by the order kind the venue places it as.
     pub fn of_kind(kind: OrderType) -> Self {
         match kind {

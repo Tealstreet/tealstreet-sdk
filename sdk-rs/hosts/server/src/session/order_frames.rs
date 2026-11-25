@@ -683,15 +683,11 @@ mod tests {
     #[test]
     fn the_box_reads_every_engine_leg_role() {
         use safe_cex_engine::write_plan::LegRole;
-        let names: Vec<Value> = [
-            LegRole::Entry,
-            LegRole::TakeProfit,
-            LegRole::StopLoss,
-            LegRole::Other,
-        ]
-        .iter()
-        .map(|role| serde_json::to_value(role).unwrap())
-        .collect();
+        // `LegRole::ALL` is pinned to every variant by the engine's fixture test.
+        let names: Vec<Value> = LegRole::ALL
+            .iter()
+            .map(|role| serde_json::to_value(role).unwrap())
+            .collect();
         assert_eq!(names, LEG_ROLES.map(Value::from));
     }
 

@@ -1140,7 +1140,7 @@ impl Woo {
                         }
                     }
                     if let Step::Write {
-                        accepted: Accepted::Regular(Some(receipt), None),
+                        accepted: Accepted::Regular(Some(receipt), _),
                         ..
                     } = &outbound
                     {

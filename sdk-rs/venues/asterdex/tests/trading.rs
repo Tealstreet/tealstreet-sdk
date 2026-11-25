@@ -1667,3 +1667,60 @@ fn a_split_bracket_names_each_leg_when_its_take_profit_is_unconfirmed() {
         rows[2].result
     );
 }
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = Harness::new();
+    let mut bracket = limit();
+    bracket["stopLoss"] = json!(9000);
+    bracket["takeProfit"] = json!(9800);
+    let mut close = limit();
+    close["side"] = json!("sell");
+    close["price"] = json!(9900);
+    close["reduceOnly"] = json!(true);
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![
+            serde_json::from_value(bracket).unwrap(),
+            serde_json::from_value(close).unwrap(),
+        ],
+    });
+    for id in 1..=2 {
+        let request = h.take(Method::Post);
+        h.reply(request, &format!(r#"{{"orderId":{id}}}"#));
+    }
+    let tp = h.take(Method::Post);
+    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET"), "{}", tp.url);
+    h.engine.handle(
+        1700000000000.0,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "connection lost",
+        },
+    );
+    h.collect();
+    let rows = h
+        .failures
+        .last()
+        .expect("an unconfirmed placement")
+        .1
+        .elements
+        .as_ref();
+    let roles: Vec<_> = rows
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit),
+            None
+        ]
+    );
+}

@@ -1805,7 +1805,13 @@ impl AsterDex {
                 )));
                 continue;
             }
-            for child in children {
+            // Only an entry that was actually split names its rows (AGT-214).
+            let split = children.len() > 1;
+            for (row, child) in children.into_iter().enumerate() {
+                let role = split.then(|| match row {
+                    0 => LegRole::Entry,
+                    _ => LegRole::of_kind(child.kind),
+                });
                 let position_side = hedge_position_side(cx, &child, position_side);
                 match self.format_order(cx, &child, builder.as_ref(), position_side) {
                     Ok(queries) => {
@@ -1818,9 +1824,7 @@ impl AsterDex {
                                     symbol: child.symbol.clone(),
                                     position_side,
                                 },
-                                role: opts
-                                    .has_attached_legs()
-                                    .then_some(LegRole::of_kind(child.kind)),
+                                role,
                             });
                         }
                     }

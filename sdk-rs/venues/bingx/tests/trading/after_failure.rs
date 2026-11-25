@@ -395,3 +395,40 @@ fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
     let rows = h.failures[0].elements.as_ref().expect("each lot's result");
     assert!(rows.iter().all(|row| row.element.role.is_none()));
 }
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = Harness::new(None);
+    h.place(vec![
+        PlaceOrderOpts {
+            stop_loss: Some(0.1),
+            take_profit: Some(110.),
+            ..opts()
+        },
+        PlaceOrderOpts {
+            side: OrderSide::Sell,
+            price: Some(120.),
+            reduce_only: Some(true),
+            ..opts()
+        },
+    ]);
+    accept_parity_payload(&mut h, "entry");
+    accept_parity_payload(&mut h, "sl");
+    h.reply(r#"{"code":100400,"msg":"scripted take-profit refusal"}"#);
+    accept_parity_payload(&mut h, "close");
+    assert!(h.requests.is_empty());
+    let rows = h.failures[0].elements.as_ref().expect("each row's result");
+    let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit),
+            None
+        ]
+    );
+}

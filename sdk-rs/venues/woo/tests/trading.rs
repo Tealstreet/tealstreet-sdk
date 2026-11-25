@@ -31,10 +31,13 @@ fn placed(e: &mut TestEngine, orders: Vec<PlaceOrderOpts>) -> Vec<Action> {
 
 #[test]
 fn caller_identity_precedes_write_and_omission_is_preserved() {
-    for supplied in [false, true] {
+    // AGT-214: a bracketed entry lot carries role `entry`; it still sends no identity it
+    // was not given. A caller ID on a bracket is refused before any write (below).
+    for (supplied, bracketed) in [(false, false), (true, false), (false, true)] {
         let mut e = engine();
         let mut o = opts();
         o.client_order_id = supplied.then(|| "123456789".into());
+        o.take_profit = bracketed.then_some(62000.0);
         let out = placed(&mut e, vec![o]);
         let http = out
             .iter()
@@ -85,6 +88,23 @@ fn caller_identity_precedes_write_and_omission_is_preserved() {
             );
         }
     }
+}
+
+// AGT-214 review: the bracketed-with-caller-ID identity path cannot be reached today,
+// because WOO refuses a caller client order ID on a bracket before any write.
+#[test]
+fn a_caller_identity_on_a_bracket_is_refused_before_any_write() {
+    let mut e = engine();
+    let mut o = opts();
+    o.client_order_id = Some("123456789".into());
+    o.take_profit = Some(62000.0);
+    let out = placed(&mut e, vec![o]);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        result(&out)
+            .unwrap_err()
+            .contains("WOO client order ID requires exactly one plain native order")
+    );
 }
 fn req(actions: &[Action], method: Method, path: &str) -> HttpRequest {
     actions

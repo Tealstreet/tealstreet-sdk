@@ -3606,3 +3606,53 @@ fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
     assert_eq!(rows[2]["status"], "notSent");
     assert_eq!(rows[2]["error"]["outcome"], "rejected");
 }
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and children are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    let mut e = boot();
+    let mut bracket = opts();
+    bracket.client_order_id = None;
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(120.);
+    let mut close = opts();
+    close.client_order_id = None;
+    close.side = OrderSide::Sell;
+    close.price = Some(130.);
+    close.reduce_only = Some(true);
+    let entry = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 5,
+                orders: vec![bracket, close],
+            },
+        ),
+        "create_order",
+    );
+    let sl = http(
+        reply(&mut e, &entry, 200, r#"{"r":{"oi":"0x00"}}"#),
+        "create_order",
+    );
+    let tp = http(
+        reply(&mut e, &sl, 200, r#"{"r":{"oi":"0x01"}}"#),
+        "create_order",
+    );
+    let actions = reply(&mut e, &tp, 400, r#"{"c":2001,"m":"rejected"}"#);
+    let rows = serde_json::to_value(failure(&actions).elements.as_ref().unwrap()).unwrap();
+    let roles: Vec<_> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row.get("role").cloned())
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some("entry".into()),
+            Some("stopLoss".into()),
+            Some("takeProfit".into()),
+            None
+        ]
+    );
+}
