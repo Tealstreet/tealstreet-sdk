@@ -1677,6 +1677,8 @@ impl Venue for BinanceFutures {
                         for state in self.books.values_mut() {
                             state.book.clear();
                             state.sync = Sync::Idle;
+                            // A new socket may restart the venue's update-id sequence.
+                            state.quote_update_id = 0;
                         }
                     }
                     Channel::Private => self.on_private_open(cx),
