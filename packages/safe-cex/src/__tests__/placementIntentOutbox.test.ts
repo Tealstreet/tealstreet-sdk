@@ -2,6 +2,7 @@ import type { DelegatedIntent, OutboxOptions, OutboxSnapshot } from '../delegate
 
 import { describe, expect, it } from 'vitest';
 
+import { delegatedIntentTime } from '../delegatedOrderFrames';
 import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
 
 const params = { symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 1000 };
@@ -46,6 +47,10 @@ function fixture(version: 1 | 2 = 2) {
     floor: () => floor,
     setFloor: (value: number) => {
       floor = value;
+    },
+    /** A host upgrading its adapter to the version-2 checkpoint (floor starts at 0). */
+    setVersion: (value: 1 | 2) => {
+      version = value;
     },
     id: () => createDelegatedIntentId(now++ + skew, options.random),
     /** Distinct UUIDs that share one timestamp, as `placementLegIntent` children do. */
@@ -362,6 +367,172 @@ describe('retirement floor against the box key window', () => {
       expect(f.rows.size).toBe(0);
       const edge = createDelegatedIntentId(f.now() + 5_000, f.options.random);
       expect(await box.enqueue(params, { intentId: edge })).toBe(edge);
+    } finally {
+      box.close();
+    }
+  });
+});
+
+// AGT-106 item 1: caller-keyed rows (the action intent as the outbox key) must not exhaust the
+// 1,056-row total. Settled ones retire once past the key window; pending and Unknown ones never
+// do, and the timers stay off here so nothing settles behind the test's back.
+describe('caller-keyed row retention', () => {
+  function connection(f: ReturnType<typeof fixture>, send: () => boolean) {
+    const { owner, accountName, venue, accountId } = f.options;
+    return {
+      owner,
+      accountName,
+      venue,
+      accountId,
+      instanceId: 'registration',
+      signingMode: 'delegated' as const,
+      ready: true,
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+      send,
+    };
+  }
+
+  it('a total full of settled caller rows does not block trading after a relaunch', async () => {
+    const f = fixture();
+    let box = await DelegatedOutbox.open(f.options);
+    for (let i = 0; i < 1056; i++) await completed(box, f.id());
+    await expect(box.enqueue(params, { intentId: f.id() })).rejects.toThrow('Outbox is closed or full');
+    box.close();
+    expect(f.rows.size).toBe(1056);
+    f.advance(16_000);
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      expect(box.entries()).toHaveLength(32);
+      // Settled history holds none of the pending capacity: a full pending burst still fits.
+      for (let i = 0; i < 1024; i++) await box.enqueue(params, { intentId: f.id() });
+      await expect(box.enqueue(params)).rejects.toThrow('Outbox is closed or full');
+      expect(box.entries().filter((row) => row.state === 'queued')).toHaveLength(1024);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('never evicts a pending or Unknown caller row to make room, and never resends it', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    let writes = 0;
+    const live = box.connect(
+      connection(f, () => {
+        writes++;
+        return true;
+      }),
+    );
+    const unknown = f.id();
+    await box.enqueue(params, { intentId: unknown });
+    box.disconnect(live);
+    const pending = f.id();
+    await box.enqueue(params, { intentId: pending });
+    try {
+      for (let i = 0; i < 1100; i++) {
+        await completed(box, f.id());
+        f.advance(100);
+      }
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(pending));
+      expect(box.entries().length).toBeLessThanOrEqual(2 + 32 + 151);
+      const kept = box.entries().filter((row) => row.intentId === unknown || row.intentId === pending);
+      expect(kept.map((row) => [row.intentId, row.state, row.retentionExpired])).toEqual([
+        [unknown, 'unknown', undefined],
+        [pending, 'queued', undefined],
+      ]);
+      expect(f.rows.has(unknown) && f.rows.has(pending)).toBe(true);
+      expect(await box.retire(unknown)).toBe(false);
+      expect(await box.retire(pending)).toBe(false);
+      // Below the floor, both still join their own rows instead of refusing or sending again.
+      box.connect(connection(f, () => ++writes > 0));
+      expect(await box.enqueue(params, { intentId: unknown })).toBe(unknown);
+      expect(await box.enqueue(params, { intentId: pending })).toBe(pending);
+      expect(writes).toBe(1);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('a relaunch keeps the key window, the floor and 24 h Unknown retention', async () => {
+    const f = fixture();
+    const states: [string, boolean | undefined][] = [];
+    let box = await DelegatedOutbox.open(f.options);
+    let writes = 0;
+    box.connect(
+      connection(f, () => {
+        writes++;
+        return true;
+      }),
+    );
+    const unknown = f.id();
+    await box.enqueue(params, { intentId: unknown });
+    box.close(); // Handed off: it restores Unknown.
+    box = await DelegatedOutbox.open(f.options);
+    const settled: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      f.advance(1_000);
+      settled.push(f.id());
+      await completed(box, settled[i]);
+    }
+    box.close();
+
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      const ids = new Set(box.entries().map((row) => row.intentId));
+      expect(box.entries().find((row) => row.intentId === unknown)?.state).toBe('unknown');
+      // Rows inside the key window survive the reopen; only older settled rows retire.
+      const inWindow = settled.filter((id) => delegatedIntentTime(id) >= f.now() - 15_000);
+      expect(inWindow.length).toBeGreaterThan(0);
+      expect(inWindow.every((id) => ids.has(id))).toBe(true);
+      expect(ids.size).toBe(1 + Math.max(32, inWindow.length));
+      expect(f.floor()).toBeGreaterThan(0);
+      expect(f.floor()).toBeLessThanOrEqual(f.now() - 15_000);
+      await expect(box.enqueue(params, { intentId: settled[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+    } finally {
+      box.close();
+    }
+
+    f.advance(24 * 60 * 60 * 1000);
+    f.options.changed = (row) => {
+      if (row.intentId === unknown) states.push([row.state, row.retentionExpired]);
+    };
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      await completed(box, f.id()); // Drains the expiry write queued by the reopen.
+      // Expired Unknown history is surfaced as such, never as not sent, then retires.
+      expect(states).toContainEqual(['unknown', true]);
+      expect(states.every(([state]) => state === 'unknown')).toBe(true);
+      expect(f.rows.has(unknown)).toBe(false);
+      await expect(box.enqueue(params, { intentId: unknown })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      expect(writes).toBe(1);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('upgrading legacy storage to the checkpoint frees caller rows that had filled it', async () => {
+    const f = fixture(1);
+    let box = await DelegatedOutbox.open(f.options);
+    const first = f.id();
+    await completed(box, first);
+    for (let i = 1; i < 1056; i++) await completed(box, f.id());
+    f.advance(16_000);
+    await expect(box.enqueue(params, { intentId: f.id() })).rejects.toThrow('Outbox is closed or full');
+    box.close();
+
+    f.setVersion(2);
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      expect(box.entries()).toHaveLength(32);
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(first));
+      const id = f.id();
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      await expect(box.enqueue(params, { intentId: first })).rejects.toMatchObject({ code: 'intentRetired' });
     } finally {
       box.close();
     }
