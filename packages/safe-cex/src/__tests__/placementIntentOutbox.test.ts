@@ -242,6 +242,9 @@ describe('durable caller-intent retirement', () => {
     await completed(box, first);
     for (let i = 0; i < 34; i++) await completed(box, f.id());
     expect(f.rows.has(first)).toBe(true);
+    f.advance(16_000);
+    // No durable floor: even past the key window the host cannot drop the reservation.
+    expect(await box.retire(first)).toBe(false);
     expect(await box.enqueue(params, { intentId: first })).toBe(first);
     expect(f.floor()).toBe(0);
     box.close();
@@ -375,9 +378,10 @@ describe('retirement floor against the box key window', () => {
 
 // AGT-106 item 1: caller-keyed rows (the action intent as the outbox key) must not exhaust the
 // 1,056-row total. Settled ones retire once past the key window; pending and Unknown ones never
-// do, and the timers stay off here so nothing settles behind the test's back.
+// do for capacity, and the timers stay off here so nothing settles behind the test's back.
 describe('caller-keyed row retention', () => {
-  function connection(f: ReturnType<typeof fixture>, send: () => boolean) {
+  /** Records every frame handed to the socket, so a resend of any intent is visible. */
+  function connection(f: ReturnType<typeof fixture>, frames: string[]) {
     const { owner, accountName, venue, accountId } = f.options;
     return {
       owner,
@@ -388,9 +392,17 @@ describe('caller-keyed row retention', () => {
       signingMode: 'delegated' as const,
       ready: true,
       capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
-      send,
+      send: (frame: string) => {
+        frames.push(frame);
+        return true;
+      },
     };
   }
+  const submits = (frames: string[], id: string) =>
+    frames.filter((frame) => {
+      const { t, d } = JSON.parse(frame) as { t: string; d: { intentId: string } };
+      return t === 'order.submit' && d.intentId === id;
+    }).length;
 
   it('a total full of settled caller rows does not block trading after a relaunch', async () => {
     const f = fixture();
@@ -415,13 +427,8 @@ describe('caller-keyed row retention', () => {
   it('never evicts a pending or Unknown caller row to make room, and never resends it', async () => {
     const f = fixture();
     const box = await DelegatedOutbox.open(f.options);
-    let writes = 0;
-    const live = box.connect(
-      connection(f, () => {
-        writes++;
-        return true;
-      }),
-    );
+    const frames: string[] = [];
+    const live = box.connect(connection(f, frames));
     const unknown = f.id();
     await box.enqueue(params, { intentId: unknown });
     box.disconnect(live);
@@ -440,13 +447,13 @@ describe('caller-keyed row retention', () => {
         [pending, 'queued', undefined],
       ]);
       expect(f.rows.has(unknown) && f.rows.has(pending)).toBe(true);
-      expect(await box.retire(unknown)).toBe(false);
       expect(await box.retire(pending)).toBe(false);
       // Below the floor, both still join their own rows instead of refusing or sending again.
-      box.connect(connection(f, () => ++writes > 0));
+      const again = box.connect(connection(f, frames));
       expect(await box.enqueue(params, { intentId: unknown })).toBe(unknown);
       expect(await box.enqueue(params, { intentId: pending })).toBe(pending);
-      expect(writes).toBe(1);
+      await box.flush(again);
+      expect(submits(frames, unknown)).toBe(1);
     } finally {
       box.close();
     }
@@ -456,13 +463,8 @@ describe('caller-keyed row retention', () => {
     const f = fixture();
     const states: [string, boolean | undefined][] = [];
     let box = await DelegatedOutbox.open(f.options);
-    let writes = 0;
-    box.connect(
-      connection(f, () => {
-        writes++;
-        return true;
-      }),
-    );
+    const frames: string[] = [];
+    box.connect(connection(f, frames));
     const unknown = f.id();
     await box.enqueue(params, { intentId: unknown });
     box.close(); // Handed off: it restores Unknown.
@@ -479,6 +481,8 @@ describe('caller-keyed row retention', () => {
     try {
       const ids = new Set(box.entries().map((row) => row.intentId));
       expect(box.entries().find((row) => row.intentId === unknown)?.state).toBe('unknown');
+      await box.flush(box.connect(connection(f, frames)));
+      expect(submits(frames, unknown)).toBe(1);
       // Rows inside the key window survive the reopen; only older settled rows retire.
       const inWindow = settled.filter((id) => delegatedIntentTime(id) >= f.now() - 15_000);
       expect(inWindow.length).toBeGreaterThan(0);
@@ -509,7 +513,54 @@ describe('caller-keyed row retention', () => {
         code: 'intentRetired',
         outcome: 'unknown',
       });
-      expect(writes).toBe(1);
+      await box.flush(box.connect(connection(f, frames)));
+      expect(submits(frames, unknown)).toBe(1);
+    } finally {
+      box.close();
+    }
+  });
+
+  // NX retires Unknown rows it has reconciled (and algo actions answered "dispatched"); caller
+  // keys must not make those calls no-ops, or 1,024 of them block every write for 24 h.
+  it('the host can retire caller-keyed Unknown rows that fill the pending cap', async () => {
+    const f = fixture();
+    let box = await DelegatedOutbox.open(f.options);
+    const frames: string[] = [];
+    const live = box.connect(connection(f, frames));
+    const unknowns: string[] = [];
+    for (let i = 0; i < 1024; i++) {
+      unknowns.push(f.id());
+      await box.enqueue(params, { intentId: unknowns[i] });
+    }
+    box.disconnect(live);
+    try {
+      await expect(box.enqueue(params)).rejects.toThrow('Outbox is closed or full');
+      // Inside the key window the box could still admit a replay, so the row stays.
+      expect(await box.retire(unknowns[1023])).toBe(false);
+      f.advance(16_000);
+      for (const id of unknowns) expect(await box.retire(id)).toBe(true);
+      expect(f.rows.size).toBe(0);
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(unknowns[1023]));
+      const again = box.connect(connection(f, frames));
+      const id = f.id();
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      expect(await box.enqueue(params)).toEqual(expect.any(String));
+      await expect(box.enqueue(params, { intentId: unknowns[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      await box.flush(again);
+    } finally {
+      box.close();
+    }
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      await expect(box.enqueue(params, { intentId: unknowns[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      await box.flush(box.connect(connection(f, frames)));
+      expect(unknowns.every((id) => submits(frames, id) === 1)).toBe(true);
     } finally {
       box.close();
     }
