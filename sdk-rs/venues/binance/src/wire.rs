@@ -143,7 +143,7 @@ pub struct MarkPriceEvent<'a> {
 
 #[derive(Deserialize)]
 pub struct BookTickerEvent<'a> {
-    /// Order-book update id; absent on Spot.
+    /// Order-book update id; only PM book symbols compare it.
     #[serde(default)]
     pub u: u64,
     #[serde(borrow)]
