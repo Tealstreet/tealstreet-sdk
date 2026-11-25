@@ -3,12 +3,15 @@
 //! (docs/plans/RUST_EXECUTION_GROUPS.md, "Settled API choices for review").
 use crate::request_context::{Error, Operation};
 use crate::{CommandId, ErrorKind, OrderIdentityReceipt, Outcome, VenueError};
+use std::ops::Range;
 
 pub(crate) const MAX_OBSERVERS: usize = 64;
 const MAX_MEMBERS: usize = 256;
 #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
 const MAX_PROGRESS: usize = 256;
 const MAX_KEY: usize = 128;
+/// Declared rows across one row-attributed execution's single write.
+const MAX_ROWS: usize = 256;
 
 /// Opaque and never reused, so an old handle cannot reach a newer execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -28,6 +31,9 @@ pub(crate) struct Member {
     pub operation: Operation,
     pub deadline: f64,
     pub key: String,
+    /// Rows of a row-attributed planned execution's one write this member
+    /// owns; `None` everywhere else.
+    pub rows: Option<Range<usize>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,6 +92,7 @@ struct Entry {
     generation: u64,
     deadline: f64,
     key: String,
+    rows: Option<Range<usize>>,
 }
 
 struct Group {
@@ -104,6 +111,9 @@ struct Group {
     truncated: bool,
     /// A successor adopted this execution's queue; it admits no more joiners.
     succeeded: bool,
+    /// Row-attributed: the end of the last declared row range; only adopted
+    /// observers with the next contiguous range may join.
+    next_row: Option<usize>,
 }
 
 #[derive(Default)]
@@ -127,6 +137,7 @@ impl Entry {
             generation: member.generation,
             deadline: member.deadline.min(cap),
             key: member.key,
+            rows: member.rows,
         })
     }
 }
@@ -228,6 +239,21 @@ impl Groups {
         }
         let bound = now + f64::from(timeout_ms);
         let planned = matches!(root, Root::Planned { .. });
+        let next_row = match &root {
+            Root::Planned { founder, .. } => founder
+                .rows
+                .as_ref()
+                .map(|rows| {
+                    if rows.start != 0 || rows.is_empty() || rows.end > MAX_ROWS {
+                        Err(Error::Invalid)
+                    } else {
+                        Ok(rows.end)
+                    }
+                })
+                .transpose()?,
+            Root::Command(member) if member.rows.is_some() => return Err(Error::Invalid),
+            _ => None,
+        };
         let (deadline, founder, background) = match root {
             Root::Command(member) => {
                 if member.operation != operation {
@@ -289,6 +315,7 @@ impl Groups {
                 progress: Vec::new(),
                 truncated: false,
                 succeeded: false,
+                next_row,
             },
         );
         Ok((execution, observer))
@@ -362,6 +389,10 @@ impl Groups {
         if group.succeeded {
             return Err(Error::State);
         }
+        // Row attribution is declared only by adoption before the write.
+        if group.next_row.is_some() || member.rows.is_some() {
+            return Err(Error::Invalid);
+        }
         if member.operation != group.operation {
             return Err(Error::Invalid);
         }
@@ -388,6 +419,80 @@ impl Groups {
         }
         group.observers.push(entry);
         Ok((observer, Joined::Live(group.progress.clone())))
+    }
+
+    /// The checks `adopt` makes, without state.
+    #[cfg_attr(not(feature = "serial-plans"), allow(dead_code))]
+    pub(crate) fn adoptable(
+        &self,
+        execution: Execution,
+        member: &Member,
+        now: f64,
+    ) -> Result<(), Error> {
+        let group = self.group(execution)?;
+        if group.terminal {
+            return Err(Error::Revoked);
+        }
+        let (Some(next), Some(rows)) = (group.next_row, member.rows.as_ref()) else {
+            return Err(Error::Invalid);
+        };
+        if !group.planned
+            || member.operation != group.operation
+            || rows.start != next
+            || rows.is_empty()
+            || rows.end > MAX_ROWS
+        {
+            return Err(Error::Invalid);
+        }
+        Entry::new(member.clone(), execution, group.deadline, now)?;
+        self.admit(member)?;
+        if group.live() >= MAX_OBSERVERS {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
+    /// Add one declared-row observer to a row-attributed planned execution;
+    /// its rows directly follow the last declared range.
+    #[cfg_attr(not(feature = "serial-plans"), allow(dead_code))]
+    pub(crate) fn adopt(
+        &mut self,
+        execution: Execution,
+        member: Member,
+        now: f64,
+    ) -> Result<Observer, Error> {
+        self.adoptable(execution, &member, now)?;
+        let group = self.groups.get_mut(&execution.0).expect("adoptable above");
+        let entry = Entry::new(member, execution, group.deadline, now)?;
+        group.next_row = entry.rows.as_ref().map(|rows| rows.end);
+        self.members
+            .insert(entry.command, (execution.0, entry.generation));
+        let observer = Observer {
+            execution,
+            command: entry.command,
+            generation: entry.generation,
+        };
+        group.observers.push(entry);
+        Ok(observer)
+    }
+
+    /// Each live observer's declared rows, in seal order; `None` unless the
+    /// execution is row-attributed.
+    #[cfg_attr(not(feature = "serial-plans"), allow(dead_code))]
+    pub(crate) fn observer_rows(&self, execution: Execution) -> Option<Vec<Range<usize>>> {
+        let group = self.group(execution).ok()?;
+        group.next_row?;
+        group
+            .observers
+            .iter()
+            .map(|entry| entry.rows.clone())
+            .collect()
+    }
+
+    /// Total declared rows of a row-attributed execution.
+    #[cfg_attr(not(feature = "serial-plans"), allow(dead_code))]
+    pub(crate) fn declared_rows(&self, execution: Execution) -> Option<usize> {
+        self.group(execution).ok()?.next_row
     }
 
     pub(crate) fn is_empty(&self) -> bool {

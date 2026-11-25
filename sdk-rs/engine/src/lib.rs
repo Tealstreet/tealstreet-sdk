@@ -16,6 +16,8 @@ pub mod entropy;
 pub mod error;
 pub mod execution;
 pub mod execution_group;
+#[cfg(feature = "serial-plans")]
+mod execution_rows;
 pub mod fence;
 pub mod fresh_positions;
 pub mod history;

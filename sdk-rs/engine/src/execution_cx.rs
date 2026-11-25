@@ -426,7 +426,7 @@ impl<P> Cx<'_, P> {
             .io
             .core
             .request_contexts
-            .begin_planned_execution(&plan, &shared, &founder_root, key, self.now)
+            .begin_planned_execution(&plan, &shared, &founder_root, key, None, self.now)
             .expect("reserved before Plan admission");
         self.io.core_io().rearm_execution_timer();
         Ok((plan, ExecutionHandle(root), founder_root))
@@ -495,5 +495,143 @@ impl crate::engine::CoreCx<'_> {
             }
         }
         self.finish_sealed(sealed);
+    }
+}
+
+#[cfg(feature = "serial-plans")]
+impl<P> Cx<'_, P> {
+    /// `admit_serial_plan` as the physical Plan of a new row-attributed
+    /// execution whose founder owns rows `0..rows` of its first write. Before
+    /// that write is issued, `adopt_planned_observer` adds parked commands'
+    /// rows; every observer is sealed with only its own rows' outcomes.
+    pub fn begin_serial_row_execution(
+        &mut self,
+        preflight: &crate::request_context::Preflight,
+        first: crate::request_context::plan::SerialCall,
+        policy: crate::request_context::plan::SerialPolicy,
+        key: &str,
+        rows: usize,
+    ) -> Result<
+        (
+            crate::request_context::Plan,
+            crate::request_context::plan::Slot,
+            ExecutionHandle,
+            Context,
+        ),
+        Error,
+    > {
+        let Owner::Command { id: founder, .. } = preflight.owner() else {
+            return Err(Error::Invalid);
+        };
+        if rows == 0
+            || self
+                .io
+                .core
+                .request_contexts
+                .preflight_receipt_cap(preflight)?
+                .is_some()
+            || self.io.core.request_contexts.inherits_uncertainty(founder)
+        {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .prepare_planned_execution(founder, key)?;
+        let (plan, slot, moved) = self.admit_serial_plan_owned(preflight, first, policy, true)?;
+        let (_, founder_root) = moved.expect("physical admission");
+        let shared = self
+            .io
+            .core
+            .request_contexts
+            .unissued_plan_policy(&plan, self.now)
+            .expect("admitted above");
+        let root = self
+            .io
+            .core
+            .request_contexts
+            .begin_planned_execution(&plan, &shared, &founder_root, key, Some(0..rows), self.now)
+            .expect("reserved before Plan admission");
+        self.io.core_io().rearm_execution_timer();
+        Ok((plan, slot, ExecutionHandle(root), founder_root))
+    }
+
+    /// In the founder's custody, before the Plan's first write is issued:
+    /// move `follower`'s exact parked write Preflight (holding nothing, same
+    /// credential and intent, no earlier evidence) into this execution as the
+    /// observer of the next `rows`. Its returned root completes nothing itself.
+    pub fn adopt_planned_observer(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        follower: &crate::request_context::Preflight,
+        key: &str,
+        rows: std::ops::Range<usize>,
+    ) -> Result<Context, Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
+        if self.io.core.http_delivery.is_some() || !self.now.is_finite() {
+            return Err(Error::Revoked);
+        }
+        // Every refusal precedes the root's identity.
+        self.io.core.request_contexts.adoptable_observer(
+            plan,
+            follower,
+            key,
+            rows.clone(),
+            self.now,
+        )?;
+        if !self.io.core.next_id.available(1) {
+            return Err(Error::Capacity);
+        }
+        let leg = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        let (root, timer) = self
+            .io
+            .core
+            .request_contexts
+            .adopt_observer(plan, follower, key, rows, leg, self.now)?;
+        if let Some(timer) = timer {
+            self.io
+                .core
+                .actions
+                .push(crate::Action::ClearTimer { timer });
+        }
+        self.io.core_io().rearm_execution_timer();
+        Ok(root)
+    }
+
+    /// `done_plan` for a row-attributed Plan: the venue's complete per-row
+    /// outcomes, each accepted, from which every observer takes its own IDs.
+    pub fn done_row_plan(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        rows: Vec<crate::write_plan::ElementOutcome>,
+    ) -> Result<(), Error> {
+        let total = self
+            .io
+            .core
+            .request_contexts
+            .planned_observer_rows(plan)
+            .map(|(_, total)| total)
+            .ok_or(Error::Invalid)?;
+        let mut ids = Vec::new();
+        for row in &rows {
+            match &row.result {
+                crate::write_plan::ElementResult::Placed { order_ids } => {
+                    ids.extend(order_ids.iter().cloned())
+                }
+                crate::write_plan::ElementResult::Applied { .. } => {}
+                _ => return Err(Error::Invalid),
+            }
+        }
+        if rows.len() != total {
+            return Err(Error::Invalid);
+        }
+        let data = serde_json::to_string(&ids).map_err(|_| Error::Invalid)?;
+        self.io
+            .core
+            .request_contexts
+            .stage_row_success(plan, Some(rows));
+        let result = self.done_plan(plan, data);
+        self.io.core.request_contexts.stage_row_success(plan, None);
+        result
     }
 }
