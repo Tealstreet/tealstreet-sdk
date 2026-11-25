@@ -251,6 +251,23 @@ fn hosted_hyperliquid_identity_uses_signer_and_vault_scope() {
         wallet.key = "0x2222222222222222222222222222222222222222".into();
         assert_eq!(digest(&wallet), original);
         assert_ne!(wallet.fingerprint(), first.fingerprint());
+        // Master accepted a `key` saved without `0x`; so does identity.
+        let mut bare = first.clone();
+        bare.key = "1111111111111111111111111111111111111111".into();
+        assert_eq!(digest(&bare), original, "{venue}: bare-hex key");
+        for invalid in [
+            "",
+            "0x",
+            "not-an-address",
+            "11111111111111111111111111111111111111",
+        ] {
+            let mut refused = first.clone();
+            refused.key = invalid.into();
+            assert!(
+                identity::digest("alice", &refused).is_err(),
+                "{venue}: {invalid}"
+            );
+        }
     }
 }
 

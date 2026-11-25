@@ -308,6 +308,14 @@ fn wallet_paradex_ethereum_derived_key_goes_through_the_sealed_signer_check() {
             "{other}"
         );
     }
+    // Testnet derives on Sepolia (11155111); the mainnet derivation is another key there.
+    let on_testnet = |subkey: &str| InitPayload {
+        testnet: Some(true),
+        ..paradex_init(subkey)
+    };
+    let testnet = subkey_on("11155111");
+    assert!(prepare_delegated(&on_testnet(&testnet), pair(&testnet)).is_ok());
+    assert!(prepare_delegated(&on_testnet(&mainnet), pair(&mainnet)).is_err());
 }
 
 #[test]

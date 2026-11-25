@@ -210,13 +210,18 @@ row saved by one build is not restored by the other, so that release rolls, and
 rolls back, only with zero TWAPs on the box being restarted. There is no
 dual-owner path.
 
-**Pre-roll check.** From the jump box, for the box about to roll (forward or back),
-immediately before rolling it:
+**Pre-roll check.** On the jump box (`ssh jumpbox`; the fleet trusts only its key,
+and `ssh -J` or host aliases do not reach the boxes), for the box about to roll
+(forward or back), immediately before rolling it:
 
 ```bash
 twap_preroll() { ssh "root@$1" 'curl -sS --max-time 10 http://localhost:23456/health' | jq -e '.algos.twaps == 0'; }
-twap_preroll exchange-01   # then exchange-02 before its own roll
+twap_preroll <private address of the box>   # exchange-01, then exchange-02 before its own roll
 ```
+
+The boxes' private `10.20.0.x` addresses are `exchange-roll`'s `BOX_IP` map in
+the monorepo's `infra/tofu/jumpbox/exchange-roll.sh` (see `infra/tofu/CLAUDE.md`,
+"SSH: the fleet trusts only the jump box"); they are not repeated in this mirror.
 
 Roll a box only when its check prints `true` (exit 0). `false`, or an unreadable
 body, means do not roll it. The deployed build cannot tell owners apart, and on the

@@ -187,7 +187,14 @@ pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
         // `key` is the API-wallet field: the venue binds the agent to one master, so
         // it is a setting (in the fingerprint), never part of the agent's identity.
         "hyperliquid" | "hyperliquidspot" => {
-            address(Some(&init.key))?;
+            // Master ran a `key` saved without `0x` (with the venue's warning): accept it.
+            let key = init.key.as_str();
+            let prefixed = key.starts_with("0x") || key.starts_with("0X");
+            address(Some(&if prefixed {
+                key.to_owned()
+            } else {
+                format!("0x{key}")
+            }))?;
             Ok(tuple(&[
                 address(init.hyperliquid_signer_address.as_deref())?,
                 init.vault
