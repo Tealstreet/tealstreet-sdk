@@ -25,6 +25,7 @@ import {
   type AccountConfig,
 } from './config';
 import { interceptConsole, logger, printOutput } from './logger';
+import { formatAccountKeyLine } from './account-key-display';
 
 import { cleanupStaleUpdate } from './windows-update';
 import { fireCheckin } from './checkin';
@@ -194,7 +195,7 @@ accountCmd
       const prefix = isDefault ? chalk.green('* ') : '  ';
       const suffix = isDefault ? chalk.gray(' (default)') : '';
       printOutput(`${prefix}${chalk.bold(account.name)} - ${account.exchange}${suffix}`);
-      printOutput(chalk.gray(`    API Key: ${maskSecret(account.apiKey || '')}`));
+      printOutput(chalk.gray(`    ${formatAccountKeyLine(account)}`));
       if (account.testnet) {
         printOutput(chalk.yellow('    [testnet]'));
       }
@@ -965,11 +966,4 @@ if (args.includes('--update')) {
   });
 } else {
   program.parse();
-}
-
-// ============ Helpers ============
-function maskSecret(secret: string): string {
-  if (!secret) return '(not set)';
-  if (secret.length <= 8) return '****';
-  return secret.slice(0, 4) + '****' + secret.slice(-4);
 }
