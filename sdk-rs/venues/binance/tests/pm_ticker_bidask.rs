@@ -175,7 +175,9 @@ fn pm_catalogue_retry_adds_markets_without_new_quote_subscriptions() {
     h.respond("/fapi/v1/exchangeInfo", 200, &info.to_string());
     assert_eq!(h.engine.store().markets().len(), 2);
     assert!(
-        !h.sent.iter().any(|(s, text)| *s == socket && text.contains("SUBSCRIBE")),
+        !h.sent
+            .iter()
+            .any(|(s, text)| *s == socket && text.contains("SUBSCRIBE")),
         "the all-market stream already covers new markets"
     );
 

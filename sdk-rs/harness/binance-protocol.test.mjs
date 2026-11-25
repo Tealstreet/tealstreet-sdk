@@ -18,26 +18,22 @@ const send = (audit, message, generation = 1) => audit.sent(URL, JSON.stringify(
 const receive = (audit, message, generation = 1) => audit.received(URL, JSON.stringify(message), generation);
 const ack = (audit, generation = 1) => receive(audit, { id: 'subscribe', status: 200, result: { subscriptionId: 7 } }, generation);
 
-test('PM replay subscribes real-time quotes from its own catalogue on every open', () => {
-  for (const publicDataOnly of [true, false]) {
-    const sent = []; let resets = 0; let books = 0;
-    const onMessage = () => {};
-    const feed = { send: (text) => sent.push(JSON.parse(text)), onMessage,
-      resetOrderbook: () => resets++, subscribe: () => books++ };
-    const exchange = { publicWebsocket: feed, options: { publicDataOnly },
-      store: { markets: [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }] } };
-    venueOf('binancepm').prepareTs(exchange);
-    feed.onOpen();
-    assert.deepEqual(sent, [{ id: 1, method: 'SUBSCRIBE', params: ['btcusdt@bookTicker', 'ethusdt@bookTicker'] }]);
-    assert.equal(resets, 1); assert.equal(books, 1); assert.equal(feed.onMessage, onMessage);
-    const keys = subscriptionKeys('wss://fstream.binance.com/public/ws', sent[0], new Set(), venueOf('binancepm'));
-    assert.notDeepEqual(keys, subscriptionKeys('wss://fstream.binance.com/public/ws',
-      { ...sent[0], params: ['btcusdt@bookTicker'] }, new Set(), venueOf('binancepm')));
-    exchange.store.markets.push({ symbol: 'SOLUSDT' });
-    feed.onOpen();
-    assert.deepEqual(sent[1].params, ['btcusdt@bookTicker', 'ethusdt@bookTicker', 'solusdt@bookTicker']);
-    feed.isDisposed = true; feed.onOpen(); assert.equal(sent.length, 2);
-  }
+test('PM replay pairs each order book with its real-time quote topic', () => {
+  const sent = [];
+  const feed = { send: (text) => sent.push(text) };
+  venueOf('binancepm').prepareTs({ publicWebsocket: feed });
+  feed.send(JSON.stringify({ id: 1, method: 'SUBSCRIBE', params: ['!bookTicker'] }));
+  feed.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['btcusdt@depth'], id: 3 }));
+  feed.send(JSON.stringify({ method: 'UNSUBSCRIBE', params: ['btcusdt@depth'], id: 4 }));
+  feed.send('ping');
+  assert.deepEqual(sent.slice(0, 3).map((text) => JSON.parse(text)), [
+    { id: 1, method: 'SUBSCRIBE', params: ['!bookTicker'] },
+    { method: 'SUBSCRIBE', params: ['btcusdt@depth', 'btcusdt@bookTicker'], id: 3 },
+    { method: 'UNSUBSCRIBE', params: ['btcusdt@depth', 'btcusdt@bookTicker'], id: 4 },
+  ]);
+  assert.equal(sent[3], 'ping');
+  const keys = subscriptionKeys('wss://fstream.binance.com/public/ws', sent[1], new Set(), venueOf('binancepm'));
+  assert.equal(keys.length, 2);
   for (const venue of ['binance', 'binanceinverse']) assert.equal(venueOf(venue).prepareTs, undefined);
 });
 

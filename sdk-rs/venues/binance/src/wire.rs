@@ -143,6 +143,9 @@ pub struct MarkPriceEvent<'a> {
 
 #[derive(Deserialize)]
 pub struct BookTickerEvent<'a> {
+    /// Order-book update id; absent on Spot.
+    #[serde(default)]
+    pub u: u64,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(borrow)]

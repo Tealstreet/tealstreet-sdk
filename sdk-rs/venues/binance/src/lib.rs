@@ -220,6 +220,8 @@ struct BookState {
     sync: Sync,
     generation: u64,
     failures: u32,
+    /// PM only: the newest quote update applied from either book-ticker stream.
+    quote_update_id: u64,
 }
 
 /// Diffs buffered while a snapshot is in flight; beyond this the snapshot is stale.
@@ -622,19 +624,14 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
+                    // Bid and ask are public: a guest account without this
+                    // stream would keep the startup REST quote forever.
+                    topics.push("!bookTicker".to_owned());
                     if self.options.portfolio_margin {
-                        // USD-M's all-market book ticker is sampled every 5s.
-                        // PM needs real-time best quotes, even without a book
-                        // subscription or private account stream.
-                        topics.extend(
-                            cx.store.markets().iter().map(|market| {
-                                format!("{}@bookTicker", market.symbol.to_lowercase())
-                            }),
-                        );
-                    } else {
-                        // Bid and ask are public: a guest account without this
-                        // stream would keep the startup REST quote forever.
-                        topics.push("!bookTicker".to_owned());
+                        // The all-market stream is sampled every 5s; an open book's
+                        // quote streams in real time. Every market's own stream was
+                        // one stale topic per quiet market (AGT-175).
+                        topics.extend(self.books.keys().map(|symbol| quote_topic(symbol)));
                     }
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
@@ -768,8 +765,6 @@ impl BinanceFutures {
                 for shard in previous_len / 1_024..self.spot_tickers.len() {
                     self.sync_interests(cx, Channel::SpotTicker(shard));
                 }
-            } else if self.options.portfolio_margin && previous_len < cx.store.markets().len() {
-                self.sync_interests(cx, Channel::Public);
             }
         }
         if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
@@ -931,10 +926,22 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
-                    if !self.is_spot() && !self.options.portfolio_margin {
-                        cx.record_socket_topic(&["!bookTicker"]);
-                    } else {
+                    let book = self
+                        .options
+                        .portfolio_margin
+                        .then(|| self.books.get_mut(&*event.s))
+                        .flatten();
+                    if let Some(state) = book {
+                        // Both streams carry this symbol; a 5s sample can be older.
+                        if event.u < state.quote_update_id {
+                            return;
+                        }
+                        state.quote_update_id = event.u;
                         cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    } else if self.is_spot() {
+                        cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    } else {
+                        cx.record_socket_topic(&["!bookTicker"]);
                     }
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
@@ -1230,6 +1237,7 @@ impl BinanceFutures {
                 sync: Sync::Idle,
                 generation: 0,
                 failures: 0,
+                quote_update_id: 0,
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
@@ -1349,6 +1357,10 @@ fn market_from_wire(m: &SymbolInfo<'_>, variant: Variant) -> Market {
 
 fn depth_topic(symbol: &str) -> String {
     format!("{}@depth", symbol.to_lowercase())
+}
+
+fn quote_topic(symbol: &str) -> String {
+    format!("{}@bookTicker", symbol.to_lowercase())
 }
 
 fn kline_topic(symbol: &str, interval: Interval) -> String {

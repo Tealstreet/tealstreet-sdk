@@ -337,8 +337,14 @@ fn portfolio_book_symbol_receipt_lands_on_its_own_quote_topic() {
         text: r#"{"e":"bookTicker","u":5,"s":"BTCUSDT","b":"98","a":"102"}"#,
     });
     let rows = subscription_receipts(h.engine.snapshot_frame(h.now + 1.));
-    let symbol = rows.iter().find(|r| r.0.ends_with("btcusdt@bookTicker")).unwrap();
+    let symbol = rows
+        .iter()
+        .find(|r| r.0.ends_with("btcusdt@bookTicker"))
+        .unwrap();
     assert_eq!((symbol.1, symbol.2), (3, 1.));
     let aggregate = rows.iter().find(|r| r.0.ends_with("!bookTicker")).unwrap();
-    assert!(aggregate.2.is_nan(), "a book symbol's quote is its own topic");
+    assert!(
+        aggregate.2.is_nan(),
+        "a book symbol's quote is its own topic"
+    );
 }
