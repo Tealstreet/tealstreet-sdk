@@ -337,7 +337,11 @@ pub enum Notice {
     /// child), with every identity the venue gave that algo: its id and client
     /// id. Sent with the child's fills, so a host can tie them to whoever placed
     /// the algo even when no row for the child was ever stored (AGT-196).
+    /// Both are on `symbol`: venue ids can repeat across symbols. Native hosts
+    /// only: a page needs no claim, so WASM bundles carry none of it.
+    #[cfg(not(target_arch = "wasm32"))]
     OrderTriggered {
+        symbol: String,
         order_id: String,
         by: Vec<String>,
     },
@@ -3263,18 +3267,37 @@ impl<P> Cx<'_, P> {
     }
 
     /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is
+    /// sent when none remain. A no-op on WASM, which has no such notice.
+    #[cfg(target_arch = "wasm32")]
+    #[inline(always)]
+    pub fn order_triggered<'a>(
+        &mut self,
+        _symbol: &str,
+        _order_id: &str,
+        _by: impl IntoIterator<Item = &'a str>,
+    ) {
+    }
+
+    /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is
     /// sent when none remain.
-    pub fn order_triggered<'a>(&mut self, order_id: &str, by: impl IntoIterator<Item = &'a str>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn order_triggered<'a>(
+        &mut self,
+        symbol: &str,
+        order_id: &str,
+        by: impl IntoIterator<Item = &'a str>,
+    ) {
         let by: Vec<String> = by
             .into_iter()
             .filter(|id| !id.is_empty())
             .map(str::to_owned)
             .collect();
-        if !order_id.is_empty() && !by.is_empty() {
+        if !symbol.is_empty() && !order_id.is_empty() && !by.is_empty() {
             self.io
                 .core
                 .actions
                 .push(Action::Notice(Notice::OrderTriggered {
+                    symbol: symbol.to_owned(),
                     order_id: order_id.to_owned(),
                     by,
                 }));

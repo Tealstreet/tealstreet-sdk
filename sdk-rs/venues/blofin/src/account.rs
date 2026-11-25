@@ -2521,9 +2521,9 @@ impl Blofin {
         self.account.observe_live_order(&fill.order_id);
         fill.price = prepared.price();
         fill.amount = prepared.amount();
-        let order_id = fill.order_id.clone();
+        let (symbol, order_id) = (fill.symbol.clone(), fill.order_id.clone());
         cx.fill(fill);
-        cx.order_triggered(&order_id, triggered_by.iter().map(String::as_str));
+        cx.order_triggered(&symbol, &order_id, triggered_by.iter().map(String::as_str));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.account.fresh_positions_timer == Some(timer) {

@@ -18,7 +18,7 @@ const PLACED_HERE: [&str; 8] = [
 fn tap(delegated: bool, held: bool) -> (Rc<Tap>, HostNotifier) {
     let placements = Placements::default();
     for id in PLACED_HERE {
-        placements.lock().unwrap().record(id);
+        placements.lock().unwrap().record("BTCUSDT", id);
     }
     tap_for("auth0|u1", delegated, held, placements)
 }
@@ -615,7 +615,10 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
 #[tokio::test(start_paused = true)]
 async fn a_shared_venue_accounts_fill_carries_one_key_and_only_the_placer_claims_it() {
     let placer_orders = Placements::default();
-    placer_orders.lock().unwrap().record("shared-order");
+    placer_orders
+        .lock()
+        .unwrap()
+        .record("BTCUSDT", "shared-order");
     let (placer, placer_sent) = tap_for("auth0|placer", true, false, placer_orders);
     let (other, other_sent) = tap_for("auth0|other", true, false, Placements::default());
     let venue_account = store(vec![order("shared-order", 1.0, 1.0)]);
@@ -665,9 +668,12 @@ async fn an_unplaced_fill_such_as_a_liquidation_is_still_reported_unclaimed() {
 async fn placed_here_covers_client_ids_parents_and_linked_triggered_children() {
     let placements = Placements::default();
     for id in ["client-secret", "entry", "algo9"] {
-        placements.lock().unwrap().record(id);
+        placements.lock().unwrap().record("BTCUSDT", id);
     }
-    placements.lock().unwrap().link("900", &["algo9".into()]);
+    placements
+        .lock()
+        .unwrap()
+        .link("BTCUSDT", "900", &["algo9".into()]);
     let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
     let mut by_client = order("venue-assigned", 1.0, 1.0);
     by_client.client_order_id = Some("client-secret".into());
@@ -700,6 +706,50 @@ async fn placed_here_covers_client_ids_parents_and_linked_triggered_children() {
         })
         .collect();
     assert_eq!(claimed, [true, true, true, false]);
+}
+
+/// Review B finding 2: Binance USDⓈ-M order ids repeat across symbols. This
+/// resident's BTCUSDT order 7 does not claim another login's ETHUSDT order 7,
+/// nor lend that order its BTCUSDT row's client id.
+#[tokio::test(start_paused = true)]
+async fn a_claim_never_crosses_symbols() {
+    let placements = Placements::default();
+    placements.lock().unwrap().record("BTCUSDT", "7");
+    placements
+        .lock()
+        .unwrap()
+        .record("BTCUSDT", "client-secret");
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
+    let mine = order("7", 1.0, 1.0);
+    let mut theirs = order("7", 1.0, 1.0);
+    theirs.symbol = "ETHUSDT".into();
+    theirs.client_order_id = Some("theirs".into());
+    let mut theirs_by_client = order("8", 1.0, 1.0);
+    theirs_by_client.symbol = "ETHUSDT".into();
+    let rows = store(vec![mine, theirs, theirs_by_client]);
+    let on = |symbol: &str, id: &str| Fill {
+        symbol: symbol.into(),
+        ..fill(id, 1.0)
+    };
+    let fills = [on("BTCUSDT", "7"), on("ETHUSDT", "7"), on("ETHUSDT", "8")];
+    tap.record_fills(&fills, &rows);
+    tap.flush_fills(&rows, true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 3, "one report per (symbol, order)");
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let claimed: Vec<bool> = fills
+        .iter()
+        .map(|fill| {
+            let key = crate::host_notify::fill_key(&scope, &fill.symbol, &fill.order_id);
+            queued
+                .iter()
+                .find(|n| n["fillKey"] == key.as_str())
+                .unwrap()["placedHere"]
+                .as_bool()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(claimed, [true, false, false]);
 }
 
 /// One fill's key on a tap for `user` connected to `venue_account`.

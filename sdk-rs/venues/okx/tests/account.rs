@@ -1304,11 +1304,17 @@ fn triggered_order_row_survives_its_parent_algo_going_effective() {
 // live capture of such a child exists in this repo.
 const TRIGGERED_STOP_MARKET_FILLED: &str = r#"{"arg":{"channel":"orders","instType":"SWAP","instId":"BTC-USDT-SWAP","uid":"614488474791936"},"data":[{"accFillSz":"1","algoClOrdId":"0f6b1d2c3e4a5b6c7d8e9f0a1b2c3d4e","algoId":"452197707845865000","amendResult":"","amendSource":"","avgPx":"31527.1","cancelSource":"","category":"normal","ccy":"","clOrdId":"","code":"0","cTime":"1654084334977","execType":"T","fee":"-0.02522168","feeCcy":"USDT","fillFee":"-0.02522168","fillFeeCcy":"USDT","fillNotionalUsd":"31.50818374","fillPx":"31527.1","fillSz":"1","fillPnl":"0.01","fillTime":"1654084353263","fillPxVol":"","fillPxUsd":"","fillMarkVol":"","fillFwdPx":"","fillMarkPx":"","fillIdxPx":"","instId":"BTC-USDT-SWAP","instType":"SWAP","lever":"10","msg":"","notionalUsd":"31.50818374","ordId":"452197707845865472","ordType":"market","pnl":"0","posSide":"net","px":"","pxUsd":"","pxVol":"","pxType":"","quickMgnType":"","rebate":"0","rebateCcy":"USDT","reduceOnly":"true","reqId":"","side":"sell","attachAlgoClOrdId":"","slOrdPx":"","slTriggerPx":"","slTriggerPxType":"last","source":"7","state":"filled","stpId":"","stpMode":"","sz":"1","tag":"","tdMode":"cross","tgtCcy":"","tpOrdPx":"","tpTriggerPx":"","tpTriggerPxType":"last","attachAlgoOrds":[],"tradeId":"242589207","tradeQuoteCcy":"USDT","lastPx":"38892.2","uTime":"1654084353264","isTpLimit":"false","riskBypassResult":"","linkedAlgoOrd":{"algoId":""}}]}"#;
 
+/// (order id, its algo's identities), each on the fill's own symbol.
 fn triggered(actions: &[Action]) -> Vec<(String, Vec<String>)> {
     actions
         .iter()
         .filter_map(|action| match action {
-            Action::Notice(Notice::OrderTriggered { order_id, by }) => {
+            Action::Notice(Notice::OrderTriggered {
+                symbol,
+                order_id,
+                by,
+            }) => {
+                assert_eq!(symbol, "BTCUSDT", "the child's symbol");
                 Some((order_id.clone(), by.clone()))
             }
             _ => None,

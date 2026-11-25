@@ -815,8 +815,9 @@ struct Peer {
 struct Pending {
     client: Option<u64>,
     original: u32,
-    /// A placement or amend: its receipts and result ids are this account's own orders.
-    placement: bool,
+    /// A placement, or an amend of an order this account placed: the symbols
+    /// its completion ids are recorded under as this account's own orders.
+    own: Option<Vec<String>>,
 }
 
 struct StartupFailure {
@@ -1106,13 +1107,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
             match notice {
                 Notice::CommandDone { command, result } => {
                     let pending = self.pending.remove(&command);
-                    if let Some(pending) = &pending
-                        && pending.placement
+                    if let Some(symbols) = pending.as_ref().and_then(|pending| pending.own.as_ref())
                     {
-                        let mut placements = crate::own_placements::lock(&self.placements);
-                        for id in crate::own_placements::result_ids(&result) {
-                            placements.record(&id);
-                        }
+                        crate::own_placements::lock(&self.placements)
+                            .record_completion(symbols, &result);
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1145,12 +1143,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     if self
                         .pending
                         .get(&command)
-                        .is_some_and(|pending| pending.placement)
+                        .is_some_and(|pending| pending.own.is_some())
                     {
-                        let mut placements = crate::own_placements::lock(&self.placements);
-                        for receipt in &receipts {
-                            placements.record(&receipt.identity);
-                        }
+                        crate::own_placements::lock(&self.placements).record_receipts(&receipts);
                     }
                     if let Some(pending) = self.pending.get(&command)
                         && let Some(client) = pending.client
@@ -1163,8 +1158,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 // Not sent to clients: it only labels this account's own fills.
-                Notice::OrderTriggered { order_id, by } => {
-                    crate::own_placements::lock(&self.placements).link(&order_id, &by);
+                Notice::OrderTriggered {
+                    symbol,
+                    order_id,
+                    by,
+                } => {
+                    crate::own_placements::lock(&self.placements).link(&symbol, &order_id, &by);
                 }
                 Notice::AccountAuth {
                     credential,
@@ -1802,23 +1801,47 @@ impl<V: Venue, T: Transport> Account<V, T> {
         };
         self.next_command = internal;
         *id = internal;
-        // Amends too: Hyperliquid and BingX replace the order under a new id.
-        // Never cancels, whose receipts can name another user's orders.
-        let placement = matches!(
-            command,
-            Command::PlaceOrders { .. }
-                | Command::AmendOrder { .. }
-                | Command::AmendOrderWithSymbol { .. }
-        );
+        let own = self.own_symbols(&command);
         self.pending.insert(
             internal,
             Pending {
                 client: Some(client),
                 original,
-                placement,
+                own,
             },
         );
         self.handle(command);
+    }
+
+    /// AGT-196: whose ids a command's receipts and completion may record. A
+    /// placement's are this account's, on its orders' symbols. An amend's are
+    /// only when the amended order already is (Hyperliquid and BingX replace it
+    /// under new ids): another login sharing the venue account can amend this
+    /// one's orders, and must not take over their fills. Never cancels.
+    fn own_symbols(&self, command: &Command) -> Option<Vec<String>> {
+        let (id, symbol) = match command {
+            Command::PlaceOrders { orders, .. } => {
+                let mut symbols: Vec<String> =
+                    orders.iter().map(|order| order.symbol.clone()).collect();
+                symbols.sort_unstable();
+                symbols.dedup();
+                return Some(symbols);
+            }
+            Command::AmendOrder { id, .. } => (id, None),
+            Command::AmendOrderWithSymbol { id, symbol, .. } => (id, Some(symbol)),
+            _ => return None,
+        };
+        let order =
+            self.host.engine.store().orders().iter().find(|order| {
+                order.id == *id && symbol.is_none_or(|symbol| order.symbol == *symbol)
+            })?;
+        let placements = crate::own_placements::lock(&self.placements);
+        let ours = placements.placed(&order.symbol, &order.id)
+            || order
+                .client_order_id
+                .as_deref()
+                .is_some_and(|client| placements.placed(&order.symbol, client));
+        ours.then(|| vec![order.symbol.clone()])
     }
 
     fn subscription_allowed(&self, client: u64, command: &Command) -> bool {
@@ -2536,17 +2559,6 @@ mod tests {
                 cx.done(command, format!(r#"["venue-{command}"]"#));
                 return;
             }
-            // Hyperliquid's amend completion: its replacement's object.
-            if let Some(command) = text.strip_prefix("amended:") {
-                let command: u32 = command.parse().expect("amended command");
-                cx.done(
-                    command,
-                    format!(
-                        r#"{{"orderIds":["venue-{command}"],"clientOrderId":"0xamend-{command}"}}"#
-                    ),
-                );
-                return;
-            }
             let command: u32 = text.parse().expect("receipt command");
             cx.command_progress(
                 command,
@@ -3100,10 +3112,11 @@ mod tests {
         assert!(receivers[1].try_recv().is_err());
     }
 
-    /// AGT-196: placement and amend dispatch receipts and completion ids are
-    /// recorded as this account's own orders; other commands' receipts are not.
+    /// AGT-196: placement dispatch receipts and completion ids are recorded as
+    /// this account's own orders; other commands' receipts are not. Amends are
+    /// covered in `server_ledger_tests.rs`.
     #[test]
-    fn placements_and_amends_record_their_receipts_and_result_ids_only() {
+    fn placements_record_their_receipts_and_result_ids_only() {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let mut actor = Account::new(
             Host::new(
@@ -3166,38 +3179,11 @@ mod tests {
         for text in ["1", "2", "placed:1"] {
             reply(&mut actor, text);
         }
-        actor.command(
-            1,
-            Command::AmendOrder {
-                command: 42,
-                id: "venue-1".into(),
-                price: Some(2.0),
-                amount: None,
-            },
-        );
-        actor.execute();
-        for text in ["3", "amended:3"] {
-            reply(&mut actor, text);
-        }
-        assert!(
-            commands
-                .borrow()
-                .iter()
-                .any(|command| matches!(command, Command::AmendOrder { command: 3, .. })),
-            "the amend reached the venue as internal command 3: {:?}",
-            commands.borrow()
-        );
         let placements = crate::own_placements::lock(&placements);
-        assert!(placements.placed("native-1"), "dispatch receipt");
-        assert!(placements.placed("venue-1"), "completion id");
+        assert!(placements.placed("BTC-USD", "native-1"), "dispatch receipt");
+        assert!(placements.placed("BTC-USD", "venue-1"), "completion id");
         assert!(
-            placements.placed("native-3")
-                && placements.placed("venue-3")
-                && placements.placed("0xamend-3"),
-            "an amend's replacement identities, from Hyperliquid's real result object"
-        );
-        assert!(
-            !placements.placed("native-2"),
+            !placements.placed("BTC-USD", "native-2"),
             "a read's receipt is not a placement"
         );
     }
@@ -4382,3 +4368,7 @@ mod tests {
             .await;
     }
 }
+
+#[cfg(test)]
+#[path = "server_ledger_tests.rs"]
+mod ledger_tests;

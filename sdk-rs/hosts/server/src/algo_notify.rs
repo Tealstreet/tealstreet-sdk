@@ -128,7 +128,8 @@ pub(crate) struct Tap {
     /// The main loop ended: disposal's stops are not ordinary ends. Only a box
     /// stop reports them (`server_stopped`).
     ended: Cell<bool>,
-    fills: RefCell<HashMap<String, PendingFill>>,
+    /// By (symbol, order id): venue order ids can repeat across symbols.
+    fills: RefCell<HashMap<(String, String), PendingFill>>,
     pub(crate) wake: tokio::sync::Notify,
     twaps: RefCell<HashMap<String, TwapSeen>>,
     /// TWAPs a client stop was dispatched for; removed when it is refused.
@@ -144,8 +145,11 @@ pub(crate) struct Tap {
 #[derive(Default)]
 struct Identities(Vec<String>);
 
-fn identities(store: &AlgoStore, order_id: &str) -> Option<Identities> {
-    let order = store.orders.iter().find(|order| order.id == order_id)?;
+fn identities(store: &AlgoStore, symbol: &str, order_id: &str) -> Option<Identities> {
+    let order = store
+        .orders
+        .iter()
+        .find(|order| order.symbol == symbol && order.id == order_id)?;
     Some(Identities(
         [order.client_order_id.clone(), order.parent_id.clone()]
             .into_iter()
@@ -154,11 +158,11 @@ fn identities(store: &AlgoStore, order_id: &str) -> Option<Identities> {
     ))
 }
 
-fn row(store: &AlgoStore, order_id: &str) -> Option<(f64, f64)> {
+fn row(store: &AlgoStore, symbol: &str, order_id: &str) -> Option<(f64, f64)> {
     store
         .orders
         .iter()
-        .find(|order| order.id == order_id)
+        .find(|order| order.symbol == symbol && order.id == order_id)
         .map(|order| (order.amount, order.filled))
 }
 
@@ -263,7 +267,7 @@ impl Tap {
         let mut pending = self.fills.borrow_mut();
         for fill in fills {
             let entry = pending
-                .entry(fill.order_id.clone())
+                .entry((fill.symbol.clone(), fill.order_id.clone()))
                 .or_insert_with(|| PendingFill {
                     symbol: fill.symbol.clone(),
                     side: fill.side,
@@ -275,8 +279,8 @@ impl Tap {
             if fill.amount.is_finite() && fill.amount > 0.0 {
                 entry.filled += fill.amount;
             }
-            entry.row = row(store, &fill.order_id);
-            if let Some(identities) = identities(store, &fill.order_id) {
+            entry.row = row(store, &fill.symbol, &fill.order_id);
+            if let Some(identities) = identities(store, &fill.symbol, &fill.order_id) {
                 entry.identities = identities;
             }
             entry.due = due;
@@ -292,7 +296,7 @@ impl Tap {
     /// Sends every order whose debounce has elapsed, or all of them.
     pub(crate) fn flush_fills(&self, store: &AlgoStore, all: bool) {
         let now = Instant::now();
-        let mut ready: Vec<(String, PendingFill)> = {
+        let mut ready: Vec<((String, String), PendingFill)> = {
             let mut pending = self.fills.borrow_mut();
             let mut ids: Vec<_> = pending
                 .iter()
@@ -315,14 +319,14 @@ impl Tap {
                 .collect()
         };
         ready.sort_by_key(|(_, fill)| fill.due);
-        for (order_id, mut fill) in ready {
-            if let Some(identities) = identities(store, &order_id) {
+        for ((symbol, order_id), mut fill) in ready {
+            if let Some(identities) = identities(store, &symbol, &order_id) {
                 fill.identities = identities;
             }
-            let placed_here = self.placed_here(&order_id, &fill.identities);
+            let placed_here = self.placed_here(&symbol, &order_id, &fill.identities);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
-            let (verb, natural_key) = match row(store, &order_id).or(fill.row) {
+            let (verb, natural_key) = match row(store, &symbol, &order_id).or(fill.row) {
                 Some(row) if size_met(row) => (Verb::Filled, format!("{order_id}\0filled")),
                 Some((_, filled)) => (
                     Verb::PartiallyFilled,
@@ -355,12 +359,13 @@ impl Tap {
         }
     }
 
-    /// AGT-196: whether this account placed the order, by its id (which covers
-    /// a triggered child its algo linked), client order id or parent. False is
-    /// "not known here", never "foreign".
-    fn placed_here(&self, order_id: &str, identities: &Identities) -> bool {
+    /// AGT-196: whether this account placed the order on `symbol`, by its id
+    /// (which covers a triggered child its algo linked), client order id or
+    /// parent. False is "not known here", never "foreign".
+    fn placed_here(&self, symbol: &str, order_id: &str, identities: &Identities) -> bool {
         let placements = safe_cex_native::own_placements::lock(&self.placements);
-        placements.placed(order_id) || identities.0.iter().any(|id| placements.placed(id))
+        placements.placed(symbol, order_id)
+            || identities.0.iter().any(|id| placements.placed(symbol, id))
     }
 
     /// A server-initiated placement the venue refused outright.
