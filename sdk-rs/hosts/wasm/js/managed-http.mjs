@@ -27,6 +27,35 @@ function preparationReason(error, fallback) {
   }
 }
 
+// Closed /info admission state a host attaches to its refusal; anything else is dropped.
+const admissionCounts = Object.freeze(['info_weight', 'info_queue_depth', 'info_queue_ahead', 'info_debt_ms', 'info_pause_ms']);
+const admissionLabels = Object.freeze({
+  info_read_class: new Set(['normal', 'critical', 'bulk', 'reconciliation']),
+  info_admission_stage: new Set(['prepare', 'dispatch']),
+  info_storage: new Set(['shared', 'fallback', 'memory']),
+});
+function admissionFields(error) {
+  let facts;
+  try {
+    facts = Object.getOwnPropertyDescriptor(error, 'admission')?.value;
+  } catch { return {}; }
+  if (!facts || typeof facts !== 'object') return {};
+  const fields = {};
+  try {
+    for (const name of admissionCounts) {
+      const value = Object.getOwnPropertyDescriptor(facts, name)?.value;
+      if (Number.isFinite(value)) fields[name] = duration(value);
+    }
+    for (const [name, allowed] of Object.entries(admissionLabels)) {
+      const value = Object.getOwnPropertyDescriptor(facts, name)?.value;
+      if (allowed.has(value)) fields[name] = value;
+    }
+    const changed = Object.getOwnPropertyDescriptor(facts, 'info_generation_changed')?.value;
+    if (typeof changed === 'boolean') fields.info_generation_changed = changed;
+  } catch { return {}; }
+  return fields;
+}
+
 // Numeric ABI follows the engine's repr(u8) RequestClass. Strings and formatting
 // stay in the host; labels grant no release, credential or retry authority.
 // #3106 admission ABI: keep these codes independent of deadline classes.
@@ -111,14 +140,14 @@ export class ManagedHttp {
     return `class=${facts.requestClass} budget=${facts.budgetMs}ms elapsed=${facts.elapsedMs}ms`;
   }
 
-  failure(resource, kind, cause) {
+  failure(resource, kind, cause, admission = {}) {
     if (resource.failureReported || this.host.disposed) return;
     resource.failureReported = true;
     try {
       this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed',
         message: cause === 'info_admission' ? 'HTTP admission deadline expired'
           : kind === 'timeout' ? `HTTP request timed out (${this.timeoutMessage(resource)})` : 'HTTP request failed',
-        fields: { ...resource.diagnostic, ...this.preparationFacts(resource), kind, phase: resource.phase, ...(cause ? { cause } : {}), ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
+        fields: { ...resource.diagnostic, ...this.preparationFacts(resource), kind, phase: resource.phase, ...(cause ? { cause, ...admission } : {}), ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
     } catch { /* Diagnostic consumers cannot change request settlement or cleanup. */ }
   }
 
@@ -127,7 +156,8 @@ export class ManagedHttp {
     resource.errorName = failureErrorName(error);
     if (!this.live(token, resource)) return;
     const admission = code === 'infoAdmissionTimedOut';
-    this.failure(resource, admission || code === 'timedOut' ? 'timeout' : code, admission ? 'info_admission' : undefined);
+    this.failure(resource, admission || code === 'timedOut' ? 'timeout' : code, admission ? 'info_admission' : undefined,
+      admission ? admissionFields(error) : {});
     this.cancel(token);
     const { host } = this;
     host.run(host.invoke(host.engine.httpPreparationFailed, token, code, host.transport.now()));

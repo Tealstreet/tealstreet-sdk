@@ -582,6 +582,40 @@ for (const phase of ['prepare', 'admission']) {
   });
 }
 
+// AGT-299: the refusal carries the queue and budget state, but only closed labels and bounded counts.
+test('an info admission refusal reports its closed admission state and drops anything else', async () => {
+  const error = new HttpPreparationError('timedOut', 'info_admission');
+  Object.defineProperty(error, 'admission', { value: {
+    info_weight: 26, info_read_class: 'bulk', info_admission_stage: 'dispatch', info_queue_depth: 39,
+    info_queue_ahead: 38, info_debt_ms: 47_999.6, info_pause_ms: 0, info_generation_changed: false,
+    info_storage: 'fallback', info_key: 'https://api.hyperliquid.xyz|PRIVATE', info_debt_label: 'SECRET',
+  } });
+  const r = rig(() => { throw error; });
+  const events = [];
+  r.host.handlers.onEvent = (event) => events.push(event);
+  r.host.execute(prepare); await tick();
+  const { fields } = events[0];
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(fields).filter(([name]) => name.startsWith('info_'))),
+    { info_weight: 26, info_read_class: 'bulk', info_admission_stage: 'dispatch', info_queue_depth: 39,
+      info_queue_ahead: 38, info_debt_ms: 47_999, info_pause_ms: 0, info_generation_changed: false,
+      info_storage: 'fallback' },
+  );
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE|SECRET/);
+  r.host.dispose();
+});
+
+test('admission state on a generic timeout is never reported', async () => {
+  const error = new HttpPreparationError('timedOut');
+  Object.defineProperty(error, 'admission', { value: { info_weight: 26 } });
+  const r = rig(() => { throw error; });
+  const events = [];
+  r.host.handlers.onEvent = (event) => events.push(event);
+  r.host.execute(prepare); await tick();
+  assert.equal(events[0].fields.info_weight, undefined);
+  r.host.dispose();
+});
+
 test('generic readiness expiry and untrusted admission labels keep the transport diagnosis', async () => {
   for (const cause of [undefined, 'PRIVATE https://venue.invalid?signature=SECRET']) {
     const error = new HttpPreparationError('timedOut', cause);
