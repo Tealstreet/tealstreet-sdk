@@ -163,7 +163,11 @@ completion ids, read through `AccountHandle::placements` (poison-safe
 `own_placements::lock`). An `AmendOrder*` records its receipts and completion
 ids (Hyperliquid's `{orderIds, clientOrderId}` replacement, BingX's new id,
 OKX's unchanged id) only when the amended row's id or client id is already
-recorded: another login sharing the venue account can amend this one's orders.
+recorded: another login sharing the venue account can amend this one's orders,
+and an id-only amend whose id names rows on two symbols records nothing.
+Receipts record only on the symbols the command was checked against, and a
+command the venue definitively refuses (`notSent`, or `rejected` with no
+accepted leg) forgets the ids its receipts added; an Unknown outcome keeps them.
 A venue's `Notice::OrderTriggered` adds a triggered child (an OKX stop's
 `ordId`, a Binance futures algo's `ALGO_UPDATE.ai`) when the algo it names, by
 id or client id, is already recorded. Every identity is keyed by its symbol

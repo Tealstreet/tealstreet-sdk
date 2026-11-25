@@ -799,6 +799,22 @@ enum Control {
     Books(Vec<String>, oneshot::Sender<Vec<BookLevels>>),
 }
 
+/// AGT-196: the whole command was proven not to have placed anything: the
+/// engine's `notSent`, or `rejected` with no accepted leg, element or
+/// protective side effect (the rule `order_frames::settle_intent` applies).
+fn definitively_refused(error: &VenueError) -> bool {
+    use safe_cex_engine::error::Outcome;
+    use safe_cex_engine::write_plan::ElementResult;
+    matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+        && error.partial.is_none()
+        && error.protection.is_none()
+        && error.elements.as_ref().is_none_or(|elements| {
+            elements
+                .iter()
+                .all(|element| matches!(element.result, ElementResult::NotSent { .. }))
+        })
+}
+
 /// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
 /// `accountAuth` notices; the negotiated protocol stays v1.
 pub const ACCOUNT_AUTH_PROTOCOL: &str = "safe-cex-frame.account-auth";
@@ -818,6 +834,8 @@ struct Pending {
     /// A placement, or an amend of an order this account placed: the symbols
     /// its completion ids are recorded under as this account's own orders.
     own: Option<Vec<String>>,
+    /// Identities its receipts newly recorded, forgotten if it is refused.
+    recorded: Vec<crate::own_placements::Key>,
 }
 
 struct StartupFailure {
@@ -1126,7 +1144,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandFailed { command, error } => {
-                    if let Some(pending) = self.pending.remove(&command)
+                    let pending = self.pending.remove(&command);
+                    if let Some(pending) = &pending
+                        && definitively_refused(&error)
+                    {
+                        crate::own_placements::lock(&self.placements).forget(&pending.recorded);
+                    }
+                    if let Some(pending) = pending
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1140,12 +1164,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandProgress { command, receipts } => {
-                    if self
-                        .pending
-                        .get(&command)
-                        .is_some_and(|pending| pending.own.is_some())
+                    if let Some(pending) = self.pending.get_mut(&command)
+                        && let Some(symbols) = &pending.own
                     {
-                        crate::own_placements::lock(&self.placements).record_receipts(&receipts);
+                        let added = crate::own_placements::lock(&self.placements)
+                            .record_receipts(symbols, &receipts);
+                        pending.recorded.extend(added);
                     }
                     if let Some(pending) = self.pending.get(&command)
                         && let Some(client) = pending.client
@@ -1808,6 +1832,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 client: Some(client),
                 original,
                 own,
+                recorded: Vec::new(),
             },
         );
         self.handle(command);
@@ -1831,10 +1856,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
             Command::AmendOrderWithSymbol { id, symbol, .. } => (id, Some(symbol)),
             _ => return None,
         };
-        let order =
-            self.host.engine.store().orders().iter().find(|order| {
+        let mut rows =
+            self.host.engine.store().orders().iter().filter(|order| {
                 order.id == *id && symbol.is_none_or(|symbol| order.symbol == *symbol)
-            })?;
+            });
+        let order = rows.next()?;
+        // Venue ids repeat across symbols: which order an id-only amend edits
+        // is then unknown, so nothing is recorded (fail open).
+        if rows.any(|other| other.symbol != order.symbol) {
+            return None;
+        }
         let placements = crate::own_placements::lock(&self.placements);
         let ours = placements.placed(&order.symbol, &order.id)
             || order

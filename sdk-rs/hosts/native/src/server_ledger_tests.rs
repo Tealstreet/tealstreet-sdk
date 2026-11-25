@@ -5,6 +5,7 @@
 use super::*;
 use crate::Events;
 use safe_cex_engine::book::Book;
+use safe_cex_engine::error::Outcome;
 use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::{
     Cx, HttpRequest, OrderIdentityKind, OrderIdentityReceipt, Response, SocketId, TimerId,
@@ -26,8 +27,10 @@ enum AmendShape {
 }
 
 /// The shared venue account as one actor's engine sees it. A placement rests
-/// as `<n>` with client id `cl-<n>`; `row:<id>:<client>` is another login's
-/// order arriving on this actor's private stream.
+/// as `<n>` with client id `cl-<n>`, unless its client id is `rejected` or
+/// `unknown`: then it reports that id and fails with that outcome.
+/// `row:<symbol>:<id>:<client>` is another login's order arriving on this
+/// actor's private stream.
 struct SharedAccount {
     amend: AmendShape,
     prefix: &'static str,
@@ -71,11 +74,21 @@ impl Venue for SharedAccount {
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
-        let (id, client) = text
+        let fields: Vec<&str> = text
             .strip_prefix("row:")
-            .and_then(|row| row.split_once(':'))
-            .expect("row:<id>:<client>");
-        cx.store.upsert_order(resting(id, client));
+            .expect("row:<symbol>:<id>:<client>")
+            .split(':')
+            .collect();
+        let [symbol, id, client] = fields[..] else {
+            panic!("row:<symbol>:<id>:<client>")
+        };
+        // An open-orders snapshot: venue ids can repeat across its symbols.
+        let mut orders = cx.store.orders().to_vec();
+        orders.push(Order {
+            symbol: symbol.into(),
+            ..resting(id, client)
+        });
+        cx.store.set_orders(orders);
     }
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
@@ -86,6 +99,18 @@ impl Venue for SharedAccount {
         let fresh = format!("{}{}", self.prefix, self.next);
         match command {
             Command::PlaceOrders { command, orders } => {
+                if let Some(caller) = orders[0].client_order_id.clone() {
+                    // A caller-chosen id (`desk`), as Binance reports it before
+                    // its venue refuses a duplicate or the response is lost.
+                    cx.command_progress(command, receipt(&orders[0].symbol, &caller));
+                    let outcome = if orders[0].amount > 0.005 {
+                        Outcome::Unknown
+                    } else {
+                        Outcome::Rejected
+                    };
+                    cx.fail(command, VenueError::new("refused").outcome(outcome));
+                    return;
+                }
                 let client = format!("cl-{fresh}");
                 cx.command_progress(command, receipt(&orders[0].symbol, &client));
                 cx.store.upsert_order(resting(&fresh, &client));
@@ -191,11 +216,15 @@ fn amend(actor: &mut Account<SharedAccount, NoTransport>, command: u32, id: &str
 
 /// The other login's row reaches this actor's store on the shared stream.
 fn sees(actor: &mut Account<SharedAccount, NoTransport>, id: &str, client: &str) {
+    sees_on(actor, BTC, id, client);
+}
+
+fn sees_on(actor: &mut Account<SharedAccount, NoTransport>, symbol: &str, id: &str, client: &str) {
     actor.host.engine.handle(
         1.,
         Event::WsMessage {
             socket: SocketId(0),
-            text: &format!("row:{id}:{client}"),
+            text: &format!("row:{symbol}:{id}:{client}"),
         },
     );
     actor.execute();
@@ -262,4 +291,57 @@ fn a_placement_records_its_ids_under_its_own_symbol() {
     assert!(placements.placed(BTC, "a1") && placements.placed(BTC, "cl-a1"));
     assert!(!placements.placed("ETHUSDT", "a1"));
     assert!(!placements.placed("ETHUSDT", "cl-a1"));
+}
+
+fn place_caller(actor: &mut Account<SharedAccount, NoTransport>, command: u32, amount: f64) {
+    let order = serde_json::from_value(serde_json::json!({
+        "symbol": BTC, "type": "limit", "side": "sell", "amount": amount,
+        "price": 78_000.0, "clientOrderId": "desk"
+    }))
+    .unwrap();
+    actor.command(
+        CLIENT,
+        Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        },
+    );
+    actor.execute();
+}
+
+/// Review B (e49c33ac90): a placement the venue definitively refused (a
+/// duplicate caller id) must not keep claiming that id for 24 h, or it claims
+/// the other login's resting `desk`. An Unknown outcome may have placed it, so
+/// its id stays.
+#[test]
+fn a_refused_placement_forgets_its_id_and_an_unknown_one_keeps_it() {
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.001);
+    assert!(!claims(&a, "desk"), "rejected: forgotten");
+    place_caller(&mut a, 2, 0.01);
+    assert!(claims(&a, "desk"), "unknown: kept");
+}
+
+/// A refusal forgets only what its own receipts added: an id this login
+/// already held from an earlier placement stays.
+#[test]
+fn a_refusal_keeps_an_id_recorded_before_it() {
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.01);
+    place_caller(&mut a, 2, 0.001);
+    assert!(claims(&a, "desk"));
+}
+
+/// Review B (e49c33ac90): an id-only amend whose id names rows on two symbols
+/// cannot say which it edits, so it records nothing, even though the BTCUSDT
+/// row is this login's.
+#[test]
+fn an_id_only_amend_of_an_id_on_two_symbols_records_nothing() {
+    let mut a = login(AmendShape::Hyperliquid, "a");
+    place(&mut a, 1, BTC);
+    sees_on(&mut a, "ETHUSDT", "a1", "theirs");
+    amend(&mut a, 2, "a1");
+    for id in ["a2", "0xa2"] {
+        assert!(!claims(&a, id), "{id}");
+    }
 }

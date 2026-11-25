@@ -1353,6 +1353,7 @@ fn a_stop_market_child_filled_in_its_first_frame_names_its_algo_with_the_fill() 
 
 // A trigger-limit child that rests first links on its later fill too, by
 // `algoClOrdId` alone when that is all it carries; a plain order links nothing.
+// Hand-built rows in OKX's documented `orders` field names, not a live capture.
 #[test]
 fn a_resting_triggered_child_links_on_its_fill_and_a_plain_order_never_does() {
     let (mut e, private, _, pending) = startup();

@@ -37,7 +37,7 @@ pub fn lock(placements: &Placements) -> MutexGuard<'_, OwnPlacements> {
 }
 
 /// (symbol, order id or client order id).
-type Key = (String, String);
+pub type Key = (String, String);
 
 #[derive(Debug, Default)]
 pub struct OwnPlacements {
@@ -46,15 +46,17 @@ pub struct OwnPlacements {
 
 impl OwnPlacements {
     /// Remember one identity this account placed on `symbol`. Host-owned: only
-    /// the account actor's placement path (and tests) may call it.
-    pub fn record(&mut self, symbol: &str, identity: &str) {
-        self.record_at(symbol, identity, Instant::now());
+    /// the account actor's placement path (and tests) may call it. True when it
+    /// was not already claimed here, so a refusal may `forget` it again.
+    pub fn record(&mut self, symbol: &str, identity: &str) -> bool {
+        self.record_at(symbol, identity, Instant::now())
     }
 
-    pub fn record_at(&mut self, symbol: &str, identity: &str, now: Instant) {
+    pub fn record_at(&mut self, symbol: &str, identity: &str, now: Instant) -> bool {
         if symbol.is_empty() || identity.is_empty() {
-            return;
+            return false;
         }
+        let fresh = !self.placed_at(symbol, identity, now);
         let key = (symbol.to_owned(), identity.to_owned());
         if !self.recorded.contains_key(&key) && self.recorded.len() >= CAPACITY {
             self.recorded.retain(|_, at| live(*at, now));
@@ -69,13 +71,31 @@ impl OwnPlacements {
             }
         }
         self.recorded.insert(key, now);
+        fresh
     }
 
-    /// A placement's dispatch receipts, each on its own symbol.
-    pub fn record_receipts(&mut self, receipts: &[safe_cex_engine::OrderIdentityReceipt]) {
-        for receipt in receipts {
-            self.record(&receipt.symbol, &receipt.identity);
+    /// Drop identities a placement recorded before the venue definitively
+    /// refused it: a refused caller id must not claim another login's order.
+    pub fn forget(&mut self, keys: &[Key]) {
+        for key in keys {
+            self.recorded.remove(key);
         }
+    }
+
+    /// A command's dispatch receipts on the symbols it was checked against;
+    /// a receipt naming any other symbol records nothing. Returns the keys
+    /// this added, for `forget`.
+    pub fn record_receipts(
+        &mut self,
+        symbols: &[String],
+        receipts: &[safe_cex_engine::OrderIdentityReceipt],
+    ) -> Vec<Key> {
+        receipts
+            .iter()
+            .filter(|receipt| symbols.contains(&receipt.symbol))
+            .filter(|receipt| self.record(&receipt.symbol, &receipt.identity))
+            .map(|receipt| (receipt.symbol.clone(), receipt.identity.clone()))
+            .collect()
     }
 
     /// A placement's completion ids. A result names no symbol, so a batch's ids
@@ -179,6 +199,31 @@ mod tests {
             !placements.placed(BTC, "child-1"),
             "an algo on another symbol links nothing here"
         );
+    }
+
+    /// Review B (e49c33ac90): receipts record only on the symbols the command
+    /// was checked against, and report only what they newly added.
+    #[test]
+    fn receipts_record_only_on_checked_symbols() {
+        let receipt = |symbol: &str, identity: &str| safe_cex_engine::OrderIdentityReceipt {
+            symbol: symbol.into(),
+            kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+            identity: identity.into(),
+        };
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "held");
+        let added = placements.record_receipts(
+            &[BTC.into()],
+            &[
+                receipt(BTC, "new"),
+                receipt(BTC, "held"),
+                receipt("ETHUSDT", "other"),
+            ],
+        );
+        assert_eq!(added, [(BTC.to_owned(), "new".to_owned())]);
+        assert!(!placements.placed("ETHUSDT", "other"));
+        placements.forget(&added);
+        assert!(!placements.placed(BTC, "new") && placements.placed(BTC, "held"));
     }
 
     /// A caller-reused client id, or a portfolio-margin client-keyed id, ages

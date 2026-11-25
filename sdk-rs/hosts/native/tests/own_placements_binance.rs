@@ -40,7 +40,7 @@ fn place(h: &mut Harness, ledger: &mut OwnPlacements, command: u32, order: serde
         orders: vec![order],
     }));
     for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == command) {
-        ledger.record_receipts(receipts);
+        ledger.record_receipts(&[SYMBOL.into()], receipts);
     }
 }
 
