@@ -3344,16 +3344,22 @@ fn proof_matches(expected: Option<&str>, presented: Option<&str>) -> bool {
             == 0
 }
 
-/// Engine/routing settings after possession proof; mode and passphrase are
-/// handled by admission and can differ between COSIGNED and sealed DELEGATED init.
+/// Engine/routing settings after possession proof. Mode and passphrase can differ
+/// between COSIGNED and sealed DELEGATED init; two COSIGNED fingerprints still
+/// compare a captured passphrase digest, whose change needs explicit settings.
 pub(crate) fn same_handover_settings(old: &str, new: &str) -> bool {
-    fn normalized(text: &str) -> Option<Map<String, Value>> {
-        let mut fields: Map<String, Value> = serde_json::from_str(text).ok()?;
+    let parse = |text: &str| serde_json::from_str::<Map<String, Value>>(text).ok();
+    let (Some(mut old), Some(mut new)) = (parse(old), parse(new)) else {
+        return false;
+    };
+    let delegated = old.contains_key("hostedSigningMode") || new.contains_key("hostedSigningMode");
+    for fields in [&mut old, &mut new] {
         fields.remove("hostedSigningMode");
-        fields.remove("passphrase");
-        Some(fields)
+        if delegated {
+            fields.remove("passphrase");
+        }
     }
-    matches!((normalized(old), normalized(new)), (Some(old), Some(new)) if old == new)
+    old == new
 }
 
 /// The top-level init fields (names only) on which two fingerprints differ.

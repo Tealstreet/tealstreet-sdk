@@ -369,6 +369,63 @@ async fn captured_passphrase_explicit_settings_enters_fenced_replacement() {
     }).await;
 }
 
+#[tokio::test]
+async fn captured_passphrase_change_refuses_a_probed_cosigned_join() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in CAPTURED_PASSPHRASE_VENUES {
+                let registry = tests::registry();
+                let original = passphrase_init(venue);
+                let retained = account(&registry, "u", &original);
+                let changed = InitPayload {
+                    passphrase: Some("synthetic-passphrase-B".into()),
+                    ..original.clone()
+                };
+                let sealed = crate::delegated::fingerprint(&changed);
+                assert!(!same_handover_settings(
+                    &retained.fingerprint,
+                    &changed.fingerprint()
+                ));
+                assert!(
+                    same_handover_settings(&retained.fingerprint, &sealed),
+                    "{venue}"
+                );
+                let token = Some(("synthetic-token".into(), now_ms() + 60_000));
+                let join = |init: InitPayload| {
+                    let (registry, token) = (registry.clone(), token.clone());
+                    async move {
+                        let permit = registry
+                            .probe_permit("u", &init)
+                            .unwrap()
+                            .verified_fixture(7);
+                        registry
+                            .obtain_probed_join(
+                                "u",
+                                &init,
+                                7,
+                                token,
+                                Arc::new(|_| true),
+                                None,
+                                permit,
+                            )
+                            .await
+                    }
+                };
+                let Err(refusal) = join(changed).await else {
+                    panic!("{venue}: a passphrase change must not attach the resident");
+                };
+                assert!(refusal.settings.is_some(), "{venue}");
+                assert!(!registry.holds(&retained, 7), "{venue}");
+                let joined = join(original).await.unwrap();
+                assert!(Arc::ptr_eq(&joined, &retained), "control: {venue}");
+                assert!(retained.handle.disposal_cause().is_none());
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&retained, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
 async fn check_okx_environment_alias_settings_gate(base: &str, demo: &str) {
     tokio::task::LocalSet::new()
         .run_until(async {

@@ -690,7 +690,7 @@ fn proof_timeout() -> Duration {
         ))
 }
 
-#[cfg(all(test, feature = "delegated-order-frames"))]
+#[cfg(test)]
 impl ProbePermit {
     pub(crate) fn verified_fixture(mut self, socket: u64) -> Self {
         self.verified_socket = Some(socket);
