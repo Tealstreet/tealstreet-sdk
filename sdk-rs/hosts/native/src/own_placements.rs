@@ -14,16 +14,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 /// Identities kept per account; the oldest are forgotten first.
 const CAPACITY: usize = 4096;
 
-/// Virtual protective legs answer for their parent order's identity.
-const LEG_SUFFIXES: [&str; 6] = [
-    "__stop_loss",
-    "__take_profit",
-    "__trailing_stop_loss",
-    "_tsl",
-    "_sl",
-    "_tp",
-];
-
 /// Shared between the account actor, which records, and its handle's readers.
 pub type Placements = Arc<Mutex<OwnPlacements>>;
 
@@ -55,14 +45,11 @@ impl OwnPlacements {
         self.ids.insert(identity.to_owned());
     }
 
-    /// Whether this account placed the order with this id or client order id,
-    /// or the order a virtual leg id belongs to.
+    /// Whether this account placed the order with exactly this id or client
+    /// order id. Never by prefix: fills carry native ids, and a caller's
+    /// `desk_sl` is not the leg of another user's `desk`.
     pub fn placed(&self, identity: &str) -> bool {
         self.ids.contains(identity)
-            || LEG_SUFFIXES
-                .iter()
-                .filter_map(|suffix| identity.strip_suffix(suffix))
-                .any(|parent| self.ids.contains(parent))
     }
 }
 
@@ -80,16 +67,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn answers_for_recorded_ids_and_their_virtual_legs_only() {
+    fn answers_for_recorded_ids_only() {
         let mut placements = OwnPlacements::default();
         placements.record("o-1");
         assert!(placements.placed("o-1"));
-        assert!(placements.placed("o-1_sl"));
-        assert!(placements.placed("o-1__take_profit"));
         assert!(!placements.placed("o-2"));
         assert!(!placements.placed("o"));
         placements.record("");
         assert!(!placements.placed(""));
+    }
+
+    /// A caller's client id that happens to end in a leg suffix is another
+    /// order: `desk` must never claim `desk_sl` (AGT-196 review).
+    #[test]
+    fn a_leg_suffixed_client_id_is_not_claimed_by_its_prefix() {
+        let mut placements = OwnPlacements::default();
+        placements.record("desk");
+        for other in ["desk_sl", "desk_tp", "desk_tsl", "desk__stop_loss", "desk__take_profit"] {
+            assert!(!placements.placed(other), "{other}");
+        }
     }
 
     #[test]
