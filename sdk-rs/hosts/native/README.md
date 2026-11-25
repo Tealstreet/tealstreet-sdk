@@ -170,11 +170,13 @@ identities its own clients placed, read through `AccountHandle::placements`
   claims, through the native ids its completion returned. A completion's ids
   are recorded only for a single-symbol command; a failed batch claims only the
   legs the venue proved placed, matched by client id to their receipts, never
-  by row index. A recorded id equal to a caller id (Binance portfolio margin
+  by row index (a client id sent on two symbols matches neither). A recorded id equal to a caller id (Binance portfolio margin
   and spot key orders by client id) stops claiming `TERMINAL_GRACE` (60 s)
-  after its order closes, or after its row, once seen, leaves the open orders
-  (a reconnect snapshot after a stream gap), so a reuse elsewhere is not
-  claimed. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
+  after its order closes, or after an order read for its symbol commits
+  without listing it (`Store::orders_reads`), whether or not a row was ever
+  seen: on Binance only the stream creates the row, so an order that fills in
+  a stream gap after its acknowledgement never has one. A reuse elsewhere is
+  then not claimed. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
   id with the existing order's id, which may be another login's, so no
   caller-id placement claims there at all (`set_idempotent_client_ids`).
 - **Amends** record their receipts and completion ids (Hyperliquid's

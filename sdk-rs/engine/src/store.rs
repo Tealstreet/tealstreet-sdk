@@ -80,6 +80,10 @@ pub struct Store {
     read_covers: Covers,
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
+    /// How many order reads have committed: (whole-list snapshots, per symbol).
+    /// Native hosts only: fill claims retire a caller id a read no longer lists.
+    #[cfg(not(target_arch = "wasm32"))]
+    orders_reads: (u64, HashMap<String, u64>),
     positions: Vec<Position>,
     /// Parallel to positions. Frame-fed metadata is authoritative, including
     /// absent values; venue-owned rows compute their metadata at output time.
@@ -851,6 +855,23 @@ impl Store {
             .into_iter()
             .filter(|symbol| !refused.contains(symbol))
             .collect();
+        // An account scope speaks for every market it selects, rows or none:
+        // an empty read still proves those symbols hold no open order.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut spoke: HashSet<&str> = written.iter().map(String::as_str).collect();
+            if matches!(scope, OrderReadScope::Account { .. }) {
+                spoke.extend(
+                    self.markets
+                        .iter()
+                        .map(|market| market.symbol.as_str())
+                        .filter(|symbol| selects(symbol) && !refused.iter().any(|r| r == symbol)),
+                );
+            }
+            for symbol in spoke {
+                *self.orders_reads.1.entry(symbol.to_owned()).or_default() += 1;
+            }
+        }
         let complete = self.read_covers.committed(
             read,
             scope,
@@ -906,7 +927,18 @@ impl Store {
         self.read_covers.mutated_all();
         self.orders = orders;
         self.changes.orders = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.orders_reads.0 += 1;
+        }
         self.set_loaded(|loaded| loaded.orders = true);
+    }
+
+    /// How many order reads that speak for `symbol` have committed: snapshots
+    /// of every order, and reads covering that symbol. It only grows.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn orders_reads(&self, symbol: &str) -> u64 {
+        self.orders_reads.0 + self.orders_reads.1.get(symbol).copied().unwrap_or(0)
     }
 
     /// Insert or replace by id. A closed or canceled row stays, with its

@@ -62,9 +62,9 @@ pub type Row<'a> = (&'a str, &'a str, bool);
 pub struct OwnPlacements {
     /// Each identity's expiry.
     recorded: HashMap<Key, Instant>,
-    /// Recorded identities equal to a caller-chosen client id, and whether a
-    /// store row for them has been seen.
-    caller: HashMap<Key, bool>,
+    /// Recorded identities equal to a caller-chosen client id, and how many
+    /// order reads for their symbol had committed when first checked.
+    caller: HashMap<Key, Option<u64>>,
     /// The venue completes a repeated client id with the existing order's id
     /// (Coinbase), so a caller-id placement proves nothing about who placed it.
     idempotent_client_ids: bool,
@@ -134,6 +134,11 @@ impl OwnPlacements {
         self.idempotent_client_ids = true;
     }
 
+    /// Whether `set_idempotent_client_ids` applies to this account.
+    pub fn idempotent_client_ids(&self) -> bool {
+        self.idempotent_client_ids
+    }
+
     /// Whether a caller-id placement's acknowledgement may name another
     /// login's order, so it must not be claimed.
     fn unprovable(&self, legs: &[Leg]) -> bool {
@@ -176,7 +181,10 @@ impl OwnPlacements {
             let Some(client) = element.element.client_order_id.as_deref() else {
                 continue;
             };
-            let Some((symbol, _)) = sent.iter().find(|(_, identity)| identity == client) else {
+            // An element names no symbol: a client id the batch sent on two
+            // symbols cannot say which leg this is, so it records nothing.
+            let mut named = sent.iter().filter(|(_, identity)| identity == client);
+            let (Some((symbol, _)), None) = (named.next(), named.next()) else {
                 continue;
             };
             let caller = caller_chosen(legs, client);
@@ -189,8 +197,7 @@ impl OwnPlacements {
     fn record_placed(&mut self, symbol: &str, id: &str, caller: bool) {
         self.record(symbol, id);
         if caller {
-            self.caller
-                .insert((symbol.to_owned(), id.to_owned()), false);
+            self.caller.insert((symbol.to_owned(), id.to_owned()), None);
         }
     }
 
@@ -199,11 +206,19 @@ impl OwnPlacements {
         !self.caller.is_empty()
     }
 
-    /// The store's order rows: a caller-chosen id whose order is closed or
-    /// canceled, or whose row was seen and is now gone (an open-orders
-    /// snapshot after a stream gap dropped it), stops claiming after
-    /// `TERMINAL_GRACE`, so its reuse by another login is not claimed.
-    pub fn retire_caller_ids<'a>(&mut self, rows: impl IntoIterator<Item = Row<'a>>, now: Instant) {
+    /// The store's order rows, and how many order reads have committed for a
+    /// symbol (`Store::orders_reads`). A caller-chosen id whose order is closed
+    /// or canceled, or that an order read committed after it was recorded does
+    /// not list, stops claiming after `TERMINAL_GRACE`, so its reuse by another
+    /// login is not claimed. A row need never have been seen: on Binance only
+    /// the stream creates it, and an order can fill and close in a stream gap
+    /// between its acknowledgement and its first frame.
+    pub fn retire_caller_ids<'a>(
+        &mut self,
+        rows: impl IntoIterator<Item = Row<'a>>,
+        reads: impl Fn(&str) -> u64,
+        now: Instant,
+    ) {
         let mut present: HashMap<Key, bool> = HashMap::new();
         for (symbol, identity, terminal) in rows {
             let key = (symbol.to_owned(), identity.to_owned());
@@ -212,11 +227,13 @@ impl OwnPlacements {
             }
         }
         let mut retired = Vec::new();
-        for (key, seen) in &mut self.caller {
+        for (key, baseline) in &mut self.caller {
+            let committed = reads(&key.0);
+            let since = *baseline.get_or_insert(committed);
             match present.get(key) {
                 Some(true) => retired.push(key.clone()),
-                Some(false) => *seen = true,
-                None if *seen => retired.push(key.clone()),
+                Some(false) => {}
+                None if committed > since => retired.push(key.clone()),
                 None => {}
             }
         }
@@ -414,6 +431,20 @@ mod tests {
         }
     }
 
+    /// Review A (5f75821a55): a batch that sent one client id on two symbols
+    /// cannot say which leg a proven element is, so it records nothing for it.
+    #[test]
+    fn a_leg_whose_client_id_names_two_symbols_records_nothing() {
+        let legs: Vec<Leg> = vec![(BTC.into(), None), ("ETHUSDT".into(), None)];
+        let sent: Vec<Key> = vec![
+            (BTC.into(), "same".into()),
+            ("ETHUSDT".into(), "same".into()),
+        ];
+        let mut placements = OwnPlacements::default();
+        placements.record_proven_legs(&sent, &legs, &[placed_leg(0, Some("same"), &["x-1"])]);
+        assert!(!placements.placed(BTC, "x-1") && !placements.placed("ETHUSDT", "x-1"));
+    }
+
     /// Review B (e6e681d490): a completed batch over several symbols cannot say
     /// which id is whose, so it records none; a single-symbol one records all.
     #[test]
@@ -445,20 +476,22 @@ mod tests {
         assert!(placements.placed(BTC, "mine"));
     }
 
-    /// Review B (942d22190f, e6e681d490): an id equal to a caller-chosen client
-    /// id stops claiming shortly after its order closes, or after its row, once
-    /// seen, is gone from the store (a post-gap open-orders snapshot dropped
-    /// it). A row never seen yet (completion before stream) does not retire.
-    /// A generated id keeps its retention. Synthetic rows.
+    /// Review B (942d22190f, e6e681d490) and review A (5f75821a55): an id equal
+    /// to a caller-chosen client id stops claiming shortly after its order
+    /// closes, or after an order read committed since it was recorded does not
+    /// list it, whether or not its row was ever seen. Without a newer read an
+    /// unlisted id (completion before stream) keeps claiming. A generated id
+    /// keeps its retention. Synthetic rows.
     #[test]
-    fn a_caller_id_retires_when_its_order_closes_or_leaves_the_open_orders() {
+    fn a_caller_id_retires_when_its_order_closes_or_a_later_read_omits_it() {
         let start = Instant::now();
         let later = start + TERMINAL_GRACE;
         let mut placements = OwnPlacements::default();
         for (id, caller) in [
             ("closed", true),
-            ("gapped", true),
+            ("gap", true),
             ("pending", true),
+            ("listed", true),
             ("9001", false),
         ] {
             let caller = caller.then(|| id.to_owned());
@@ -468,18 +501,28 @@ mod tests {
                 &format!(r#"["{id}"]"#),
             );
         }
-        placements.retire_caller_ids([(BTC, "closed", false), (BTC, "gapped", false)], start);
-        placements.retire_caller_ids([(BTC, "closed", true), (BTC, "9001", true)], start);
-        assert!(placements.has_caller_ids(), "pending is still unseen");
+        // Recorded with 3 reads committed: nothing listed yet.
+        placements.retire_caller_ids([(BTC, "listed", false)], |_| 3, start);
+        assert_eq!(placements.caller.len(), 4, "no read since recording");
+        // A 4th read lists only `listed`; `closed`'s row is terminal.
+        placements.retire_caller_ids(
+            [
+                (BTC, "listed", false),
+                (BTC, "closed", true),
+                (BTC, "9001", true),
+            ],
+            |symbol| if symbol == BTC { 4 } else { 0 },
+            start,
+        );
         let soon = later - Duration::from_secs(1);
-        for id in ["closed", "gapped"] {
+        for id in ["closed", "gap", "pending"] {
             assert!(
                 placements.placed_at(BTC, id, soon),
                 "{id}: its own last fills"
             );
             assert!(!placements.placed_at(BTC, id, later), "{id}: a later reuse");
         }
-        assert!(placements.placed_at(BTC, "pending", later));
+        assert!(placements.placed_at(BTC, "listed", later));
         assert!(placements.placed_at(BTC, "9001", later));
     }
 

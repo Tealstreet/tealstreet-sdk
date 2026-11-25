@@ -1876,9 +1876,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.handle(command);
     }
 
-    /// AGT-196: a caller-chosen id whose order is now closed, canceled or gone
-    /// from the open orders stops claiming shortly after, so another login
-    /// reusing it is not claimed.
+    /// AGT-196: a caller-chosen id whose order is now closed or canceled, or
+    /// that an order read committed since it was recorded omits, stops
+    /// claiming shortly after, so another login reusing it is not claimed.
     fn retire_closed_caller_ids(&self) {
         use safe_cex_engine::model::OrderStatus;
         let mut placements = crate::own_placements::lock(&self.placements);
@@ -1891,7 +1891,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 .chain(order.client_order_id.as_deref())
                 .map(move |identity| (order.symbol.as_str(), identity, terminal))
         });
-        placements.retire_caller_ids(rows, std::time::Instant::now());
+        let store = self.host.engine.store();
+        placements.retire_caller_ids(
+            rows,
+            |symbol| store.orders_reads(symbol),
+            std::time::Instant::now(),
+        );
     }
 
     /// AGT-196: whose ids a command's receipts and completion may record. A
@@ -2695,6 +2700,38 @@ mod tests {
             Box::new(std::iter::empty())
         }
     }
+    /// AGT-196 review A (5f75821a55): Coinbase answers a repeated client id
+    /// with the existing order's id, so its accounts never claim a caller-id
+    /// placement; other venues do.
+    #[cfg(feature = "venues")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn coinbase_accounts_never_claim_caller_id_placements() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for (venue, idempotent) in
+                    [("coinbase", true), ("coinbasespot", true), ("bybit", false)]
+                {
+                    let options = serde_json::json!({"publicDataOnly": true}).to_string();
+                    let (handle, task) = spawn_venue_account(
+                        venue,
+                        &options,
+                        NoTransport,
+                        None,
+                        ServerConfig::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        crate::own_placements::lock(&handle.placements).idempotent_client_ids(),
+                        idempotent,
+                        "{venue}"
+                    );
+                    handle.dispose();
+                    task.await.unwrap().unwrap();
+                }
+            })
+            .await;
+    }
+
     #[cfg(feature = "venues")]
     #[tokio::test(flavor = "current_thread")]
     async fn hosted_constructor_supplies_display_metadata_and_user_tuning() {

@@ -34,7 +34,8 @@ enum AmendShape {
 /// as `<n>` with a generated client id `cl-<n>`. Its amount picks an outcome:
 /// - with a caller-chosen client id: 0.001 rejected; 0.01 Unknown (as Bybit,
 ///   BingX and BloFin classify a duplicate id); 0.02 placed under that id, as
-///   Binance portfolio margin keys orders by client id;
+///   Binance portfolio margin keys orders by client id; 0.025 acked the same
+///   way but with no row yet (on Binance only the stream creates it);
 /// - without one: 0.03 rejected and 0.04 Unknown, after its receipt.
 ///
 /// A two-order batch reports both legs' generated client ids, then fails
@@ -163,7 +164,9 @@ impl Venue for SharedAccount {
                 if let Some(caller) = orders[0].client_order_id.clone() {
                     cx.command_progress(command, receipt(&symbol, &caller));
                     if amount > 0.015 {
-                        cx.store.upsert_order(resting(&caller, &caller));
+                        if amount < 0.022 {
+                            cx.store.upsert_order(resting(&caller, &caller));
+                        }
                         cx.done(command, format!(r#"["{caller}"]"#));
                     } else {
                         let outcome = if amount > 0.005 {
@@ -497,6 +500,33 @@ fn a_caller_id_retires_when_a_snapshot_drops_its_order() {
     sees(&mut a, "unrelated", "x");
     let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
     assert!(crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later));
+    a.host.engine.handle(
+        1.,
+        Event::WsMessage {
+            socket: SocketId(0),
+            text: "drop:desk",
+        },
+    );
+    a.execute();
+    let placements = crate::own_placements::lock(&a.placements);
+    assert!(placements.placed(BTC, "desk"), "its own last fills");
+    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
+}
+
+/// Review A (5f75821a55), synthetic venue: the stream drops between the ack
+/// and the order's first frame, so no row is ever stored; the order fills and
+/// closes in the gap and the reconnect snapshot omits it. The caller id still
+/// retires on that first read after it was recorded, not after 24 h.
+#[test]
+fn a_caller_id_with_no_row_retires_when_the_next_snapshot_omits_it() {
+    use crate::own_placements::TERMINAL_GRACE;
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.025);
+    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
+    assert!(
+        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
+        "no read since the ack: still claimed"
+    );
     a.host.engine.handle(
         1.,
         Event::WsMessage {

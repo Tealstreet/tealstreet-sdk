@@ -238,18 +238,22 @@ fn retire(h: &Harness, ledger: &mut OwnPlacements, now: std::time::Instant) {
                 .map(move |identity| (order.symbol.clone(), identity, terminal))
         })
         .collect();
+    let store = h.engine.store();
     ledger.retire_caller_ids(
         rows.iter()
             .map(|(symbol, identity, terminal)| (symbol.as_str(), identity.as_str(), *terminal)),
+        |symbol| store.orders_reads(symbol),
         now,
     );
 }
 
-/// Review B (e6e681d490) through real Binance portfolio-margin frame shapes:
-/// PM keys orders by client id and allows reuse after close. A caller's `desk`
-/// claims once the venue acks it; when the order closes during a stream gap,
-/// the reconnect's open-orders read drops it, and the id stops claiming after
-/// `TERMINAL_GRACE` instead of 24 h.
+/// Review B (e6e681d490) and review A (5f75821a55) through real Binance
+/// portfolio-margin frame shapes: PM keys orders by client id and allows reuse
+/// after close. A caller's `desk` claims once the venue acks it. Only the
+/// stream creates its row, and the stream drops between the ack and the NEW
+/// frame: the order fills and closes in the gap, and the reconnect's
+/// open-orders read omits it. The id stops claiming after `TERMINAL_GRACE`
+/// instead of 24 h, though no row was ever seen.
 #[test]
 fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
     use safe_cex_native::own_placements::TERMINAL_GRACE;
@@ -288,19 +292,20 @@ fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
         "acked: PM's order id is `desk`"
     );
 
-    h.message(
-        "/pm/ws",
-        r#"{"fs":"UM","e":"ORDER_TRADE_UPDATE","T":1,"E":1,"o":{"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","q":"0.002","p":"91000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":8886774,"l":"0","z":"0","L":"0","T":1,"t":0,"b":"0","a":"0","m":false,"R":false,"ps":"BOTH","rp":"0"}}"#,
+    assert!(
+        h.engine.store().order("desk").is_none(),
+        "the REST ack stores no row"
     );
     let now = std::time::Instant::now();
     retire(&h, &mut ledger, now);
     let later = now + TERMINAL_GRACE;
     assert!(
         ledger.placed_at(SYMBOL, "desk", later),
-        "resting: still claimed"
+        "no read since the ack: still claimed"
     );
 
-    // The stream drops; `desk` fills and closes unseen; the reconnect re-reads.
+    // The stream drops before `desk`'s NEW frame; it fills and closes unseen;
+    // the reconnect re-reads.
     let old = h.socket("/pm/ws").unwrap();
     h.event(Event::WsClosed {
         socket: old,
@@ -329,7 +334,134 @@ fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
     }
     assert!(
         h.engine.store().order("desk").is_none(),
-        "the snapshot dropped it"
+        "the snapshot omits it"
+    );
+    retire(&h, &mut ledger, now);
+    assert!(ledger.placed_at(SYMBOL, "desk", now), "its own last fills");
+    assert!(
+        !ledger.placed_at(SYMBOL, "desk", later),
+        "a later reuse of `desk`"
+    );
+}
+
+/// Binance spot's documented startup payloads (`venues/binance/tests/
+/// spot_execution_delivery.rs`): one BTCUSDT market, the WebSocket API user
+/// stream, no balances.
+fn spot_ready() -> Harness {
+    let mut h = Harness::started(Options {
+        variant: safe_cex_venue_binance::Variant::Spot,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    h.respond("/api/v3/exchangeInfo", 200, r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}]}"#);
+    h.respond("/api/v3/ticker/24hr", 200, r#"[{"symbol":"BTCUSDT","lastPrice":"10000","bidPrice":"9999","askPrice":"10001","priceChangePercent":"0","volume":"1","quoteVolume":"10000"}]"#);
+    let socket = h.socket("ws-api/v3").unwrap();
+    h.event(Event::WsOpened { socket });
+    spot_reads(&mut h);
+    h
+}
+
+/// Answer the spot user stream's subscribe and its account and open-orders
+/// reads (none open), however many rounds the engine asks for.
+fn spot_reads(h: &mut Harness) {
+    for _ in 0..8 {
+        h.advance(5_000.0);
+        for path in ["/api/v3/account", "/api/v3/openOrders"] {
+            if h.has_request(path) {
+                let body = if path.ends_with("account") {
+                    r#"{"balances":[]}"#
+                } else {
+                    "[]"
+                };
+                h.respond(path, 200, body);
+            }
+        }
+        let pending = h.sent.iter().rev().find_map(|(_, text)| {
+            text.contains("userDataStream.subscribe.signature")
+                .then(|| serde_json::from_str::<serde_json::Value>(text).ok())
+                .flatten()
+        });
+        if let Some(id) = pending.as_ref().and_then(|sent| sent["id"].as_str()) {
+            let reply = format!(r#"{{"id":"{id}","status":200,"result":{{"subscriptionId":0}}}}"#);
+            h.sent.retain(|(_, text)| !text.contains(id));
+            h.message("ws-api/v3", &reply);
+        }
+    }
+}
+
+/// Review A (5f75821a55) through real Binance spot frame shapes: spot keys
+/// orders by client id and allows reuse after close. A caller's `desk` claims
+/// once acked; the user stream drops before its `executionReport`, the order
+/// fills and closes in the gap, and the reconnect's open-orders read omits it.
+/// The id stops claiming after `TERMINAL_GRACE`.
+#[test]
+fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
+    use safe_cex_native::own_placements::TERMINAL_GRACE;
+    let mut h = spot_ready();
+    let mut ledger = OwnPlacements::default();
+    let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_value(serde_json::json!({
+        "symbol": SYMBOL, "type": "limit", "side": "buy", "amount": 1.0,
+        "price": 9000.0, "clientOrderId": "desk"
+    }))
+    .unwrap();
+    let legs = [(SYMBOL.to_owned(), Some("desk".to_owned()))];
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![order],
+    }));
+    for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == 1) {
+        assert!(
+            ledger
+                .record_receipts(&[SYMBOL.into()], &legs, receipts)
+                .is_empty()
+        );
+    }
+    let sent = h.take("/api/v3/order");
+    assert_eq!(query(&sent.url, "newClientOrderId"), "desk");
+    h.reply(
+        sent.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":28,"orderListId":-1,"clientOrderId":"desk","transactTime":1507725176595,"price":"9000.00000000","origQty":"1.00000000","executedQty":"0.00000000","cummulativeQuoteQty":"0.00000000","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"BUY","workingTime":1507725176595,"selfTradePreventionMode":"NONE"}"#,
+    );
+    let result = h.result(1).cloned().expect("completed").expect("placed");
+    ledger.record_completion(&[SYMBOL.into()], &legs, &result);
+    assert!(
+        ledger.placed(SYMBOL, "desk"),
+        "acked: spot's order id is `desk`"
+    );
+    assert!(
+        h.engine.store().order("desk").is_none(),
+        "the REST ack stores no row"
+    );
+    let now = std::time::Instant::now();
+    let later = now + TERMINAL_GRACE;
+    retire(&h, &mut ledger, now);
+    assert!(
+        ledger.placed_at(SYMBOL, "desk", later),
+        "no read since the ack"
+    );
+
+    let old = h.socket("ws-api/v3").unwrap();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    // The reconnect backs off before it dials again.
+    for _ in 0..60 {
+        if h.socket("ws-api/v3") != Some(old) {
+            break;
+        }
+        h.advance(1_000.0);
+    }
+    let fresh = h.socket("ws-api/v3").unwrap();
+    assert_ne!(old, fresh, "the user stream reconnected");
+    h.event(Event::WsOpened { socket: fresh });
+    spot_reads(&mut h);
+    assert!(
+        h.engine.store().order("desk").is_none(),
+        "the read omits it"
     );
     retire(&h, &mut ledger, now);
     assert!(ledger.placed_at(SYMBOL, "desk", now), "its own last fills");
