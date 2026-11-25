@@ -78,7 +78,7 @@ export interface DelegatedIntent extends OutboxScope {
   result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
-  /** Caller keys remain reserved after their completed history ages. */
+  /** On version-1 storage, caller keys remain reserved after their completed history ages. */
   callerSuppliedIntentId?: true;
   seq: number;
   params: Record<string, unknown>;
@@ -932,8 +932,9 @@ export class DelegatedOutbox {
 
   /**
    * Removes an entry the host has settled (applied, not sent or venue-rejected)
-   * instead of retaining it as completed history or 24 h unknown work. In-flight,
-   * cancel-pending and caller-reserved intents stay. Resolves whether it was removed.
+   * instead of retaining it as completed history or 24 h unknown work. In-flight and
+   * cancel-pending intents stay, and so do caller keys on version-1 storage, which has
+   * no floor to refuse their replay. Resolves whether it was removed.
    */
   retire(intentId: string): Promise<boolean> {
     return this.serial(async () => {
@@ -942,11 +943,12 @@ export class DelegatedOutbox {
         !this.active ||
         !row ||
         row.cancelPending ||
-        row.callerSuppliedIntentId ||
+        (row.callerSuppliedIntentId && this.checkpointVersion === 1) ||
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
-      // Inside the key window it stays as completed history; compaction retires it later.
+      // Inside the key window it stays (the box could still admit a replay); past it, the
+      // raised floor refuses a reused caller key as intentRetired / Unknown.
       if (this.checkpointVersion === 2 && !this.pastKeyWindow(intentId)) return false;
       const floor =
         this.checkpointVersion === 2

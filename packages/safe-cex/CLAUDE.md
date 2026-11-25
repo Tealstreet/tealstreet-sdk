@@ -335,8 +335,11 @@ deletes the row through `compact` with the current sequence, then removes it fro
 memory, so its seq is never reused; a failed delete leaves the stored and in-memory
 row as before. On version-2 storage a row still inside the key window resolves false
 and stays as completed history for compaction to retire later. It refuses (resolves false) queued, sending, acknowledged
-and cancel-pending intents, and caller-supplied keys, whose reservation must
-survive. Retirement is the host's assertion, never evidence: the SDK still
+and cancel-pending intents, and caller-supplied keys on version-1 storage, whose reservation must
+survive there. On version 2 a caller-keyed row past the key window retires like any other, Unknown
+included, and the raised floor refuses its reuse as `intentRetired` / Unknown: unexpired Unknown rows
+hold pending capacity for 24 h, so without this 1,024 reconciled caller-keyed Unknowns block every
+write (AGT-106). Retirement is the host's assertion, never evidence: the SDK still
 never resends, and a later receipt for that ID finds no entry.
 
 ## DELEGATED account actions
@@ -359,7 +362,8 @@ original put rejects an identity retry as `intentNotDurable`. A later state-put
 failure never erases the original identity's durability or authorizes replay.
 The additive
 `callerSuppliedIntentId: true` reservation survives completed-history retirement
-and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+and restore under the same 1,056-record bound on version-1 storage; version 2 retires it past
+the key window behind the floor. `enqueueAction` shares placement's
 not-sent and replay evidence constructors; no direct not-sent assignment is
 permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
 action unknown; queue cancellation is explicit, never a venue cancel.
