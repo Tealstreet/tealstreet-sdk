@@ -109,6 +109,10 @@ Hyperliquid `/info` admission falls back after bounded IndexedDB failures to
 half-rate memory admission per JavaScript realm (500 weight/minute; burst 500
 for critical/reconciliation, 400 for normal/bulk). Known debt and 429 pauses remain;
 the existing 30-second cooldown retries shared storage and max-merges local spend.
+Recovery keeps the token generation unless a fallback 429 never reached the shared
+row; then it bumps past both, so a locally charged grant cannot refund against
+shared post-429 debt. Each fallback and recovery leaves a console breadcrumb with
+closed labels only (`storage_failure`, `local_429`).
 Independent fallback realms can exceed the shared cap: the maintainer chose chart
 availability over a perfect shared cap. A realm that never opened IndexedDB keeps
 its existing local policy; request deadlines, cancellation and single-send guards remain.
@@ -2526,9 +2530,14 @@ interval set, which excludes seconds and 6h; neither may reach a candle subscrip
 ### Candle history across account-worker replacement
 
 `fetchOHLCVInWorker` is authoritative for Rust mirrors as well as CandleCache.
-Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors lazily own a
-credential-free public source using the same endpoint/routing options, disposed
-with the mirror. Frame-fed account engines execute only writes; candle reads
+Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors share one
+credential-free public source per JavaScript realm and venue configuration
+(`pageCandleSources.ts`, AGT-299), so replaced mirrors and several accounts run one
+market discovery. Its options drop credentials, signing callbacks and account
+identity; the key hashes the remaining endpoint/routing options, and host objects
+such as a transport provider by identity. The source lingers 30 s after its last
+mirror for a replacement; its rebuild backoff is shared. Each tab is its own realm.
+Frame-fed account engines execute only writes; candle reads
 never run on them. The real-WASM candle-routing test pins this boundary.
 Candle reads do not wait for private reconciliation or lift an order fence.
 
@@ -2567,6 +2576,10 @@ storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
 A proven pre-send `/info` admission deadline keeps `HTTP_PREPARATION_TIMED_OUT`
 and carries only closed cause `info_admission` / `HTTP admission deadline expired`.
+The refusal also carries closed `admission` facts (weight, read class, stage,
+queue depth and position, debt and pause milliseconds, generation change, storage
+mode), logged as a console breadcrumb and merged into `http.request_failed` fields
+by the WASM host's allowlist. Facts never include keys, origins or bodies.
 After handoff begins, errors retain their original classification and identity;
 this diagnostic distinction cannot extend budgets, change retries or suppress reports.
 Role/mode startup reads
@@ -2579,6 +2592,8 @@ slots; promoting a queued intent preserves its captured census epoch. Caller-own
 history, positions and settings retain their independent admission and original
 quota/root deadlines. Only completion of a slotted read releases its slot. Shared
 dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
+a `candleSnapshot` waiter queued 5 s ranks ahead of normal reads (discovery), never
+ahead of reconciliation or critical, so discovery cannot starve a chart (AGT-299);
 100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
 its abandoned work.
 

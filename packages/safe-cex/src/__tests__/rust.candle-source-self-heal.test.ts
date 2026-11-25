@@ -1,10 +1,11 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
+import type { ExchangeOptions } from '../types';
 
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import { disposePageCandleSources, RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { FrameStore } from '../store/frameStore';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
@@ -71,18 +72,22 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
     { frameFedSupported: () => false },
   );
   setWasmEngineLoader(async () => ({ WasmEngine: Constructor as unknown as WasmEngineModule['WasmEngine'] }));
-  const exchange = new RustEngineExchange(
-    'bybit',
-    { key: 'k', secret: 's', workerMirror: true, testnet: true },
-    new FrameStore(),
-  );
-  exchanges.push(exchange);
-  exchange.on('callMethod', vi.fn());
-  return { exchange, built };
+  const mirror = (options: Partial<ExchangeOptions> = {}) => {
+    const exchange = new RustEngineExchange(
+      'bybit',
+      { key: 'k', secret: 's', workerMirror: true, testnet: true, ...options },
+      new FrameStore(),
+    );
+    exchanges.push(exchange);
+    exchange.on('callMethod', vi.fn());
+    return exchange;
+  };
+  return { exchange: mirror(), mirror, built };
 };
 
 afterEach(() => {
   exchanges.splice(0).forEach((exchange) => exchange.dispose());
+  disposePageCandleSources();
   setWasmEngineLoader(loadNodeEngine);
   vi.useRealTimers();
 });
@@ -160,4 +165,55 @@ it('a source that fails to start is replaced, and backoff doubles while the venu
   await vi.advanceTimersByTimeAsync(2_000);
   expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
   expect(built).toHaveLength(3);
+});
+
+// AGT-299: each mirror used to build its own source, so every account and replacement ran a full
+// market discovery against one shared /info budget.
+describe('one page candle source per realm and venue configuration', () => {
+  it('mirrors of different accounts share one source', async () => {
+    vi.useFakeTimers();
+    const { exchange, mirror, built } = fixture(['ok']);
+    const other = mirror({ key: 'k2', secret: 's2', applicationId: '0xother', subaccount: 'second' });
+    expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+    expect(await settle(other.fetchOHLCV(opts))).toEqual({ value: candles });
+    expect(built).toHaveLength(1);
+    expect(built[0].commands.filter((command) => command.op === 'fetchCandles')).toHaveLength(2);
+  });
+
+  it('a different venue configuration gets its own source', async () => {
+    vi.useFakeTimers();
+    const { exchange, mirror, built } = fixture(['ok', 'ok']);
+    const livenet = mirror({ testnet: false });
+    await settle(exchange.fetchOHLCV(opts));
+    await settle(livenet.fetchOHLCV(opts));
+    expect(built).toHaveLength(2);
+  });
+
+  it('a replacement mirror reuses the source, which outlives its last holder only briefly', async () => {
+    vi.useFakeTimers();
+    const { exchange, mirror, built } = fixture(['ok', 'ok']);
+    await settle(exchange.fetchOHLCV(opts));
+    exchange.dispose();
+    expect(built[0].freed).not.toHaveBeenCalled();
+    const replacement = mirror();
+    expect(await settle(replacement.fetchOHLCV(opts), 1_000)).toEqual({ value: candles });
+    expect(built).toHaveLength(1);
+    replacement.dispose();
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(built[0].freed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(built[0].freed).toHaveBeenCalled();
+    expect(await settle(mirror().fetchOHLCV(opts))).toEqual({ value: candles });
+    expect(built).toHaveLength(2);
+  });
+
+  it('the rebuild backoff is shared, so another mirror cannot spin a failing venue', async () => {
+    vi.useFakeTimers();
+    const { exchange, mirror, built } = fixture(['fails', 'ok']);
+    expect(await settle(exchange.fetchOHLCV(opts), 100)).toHaveProperty('error');
+    expect(await settle(mirror().fetchOHLCV(opts), 0)).toMatchObject({
+      error: expect.objectContaining({ message: expect.stringMatching(/recovering/) }),
+    });
+    expect(built).toHaveLength(1);
+  });
 });

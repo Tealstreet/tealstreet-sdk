@@ -107,7 +107,10 @@ explicit critical; account State/Orders, reconnect snapshots and Role/Mode/Spot
 are financial reconciliation, below explicit critical but above normal work.
 Both classes may use the same 200-weight reserve. Caller history and candles are bulk. Noncritical work has an 800-weight
 ceiling, leaving 200 for critical work within the same total. Native and shared
-queues keep FIFO within each class, and native refill is continuous. Queued
+queues keep FIFO within each class, and native refill is continuous. A shared
+`candleSnapshot` waiter queued 5 s ranks ahead of normal reads but behind
+reconciliation and critical, so queued discovery cannot starve a chart read
+past its bound (AGT-299); history reads stay bulk. Queued
 candles retain their original 20 s bound, shortened by a smaller caller wait.
 **A candle read reserves its requested span, not the venue maximum**: 20 plus one
 per 60 candles, counting ceil(span/step)+1 because both boundary candles return
@@ -136,8 +139,13 @@ keeps normal speed until IndexedDB has opened successfully in this realm; later
 storage failures use one-quarter speed because shared and local budgets may split.
 After a 30-second cooldown, reads retry IndexedDB and max-merge local
 reservations and 429 pauses back into shared state. Recovery keeps the token
-generation: grants reserve nothing, and only a 429 (merged by max) retires one.
-Bumping it refused every waiter on the row as an admission expiry (AGT-299).
+generation: grants reserve nothing, and only a 429 retires one. Bumping it on
+every recovery refused every waiter on the row as an admission expiry (AGT-299).
+A fallback 429 the shared row never saw does bump it past both generations, as
+that 429 would have: otherwise a grant charged locally could refund its cost from
+another realm's post-429 debt. A refund after a recovery without a 429 can still
+return a charge the max-merge absorbed; that leak is bounded by the read's cost.
+Fallback and recovery each leave a closed-label console breadcrumb.
 While storage is unavailable, independent realms cannot share their 429 pauses.
 If IDB never opens, each realm has its own full 1,000-weight initial bucket.
 Only pacing timestamps and retry counters are stored, never account or request
@@ -145,7 +153,11 @@ data. Persisted pauses/reservations are
 bounded relative to the current clock, and Retry-After pauses cap at five minutes.
 Admission and pauses spend the existing HTTP deadline and abort signal before
 managed send claim. Response bookkeeping never rejects a received answer; a
-successful response does not wait for it. Storage degradation logs once per realm.
+successful response does not wait for it. Storage degradation warns once per realm
+and breadcrumbs every fallback/recovery. An admission refusal carries closed
+`admission` facts (weight, class, stage, queue depth/position, debt, pause,
+generation change, storage mode) and breadcrumbs them; the WASM host allowlists
+them into `http.request_failed`.
 
 The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
 startup time, the original 60-second warning threshold, the 20-second read timeout
