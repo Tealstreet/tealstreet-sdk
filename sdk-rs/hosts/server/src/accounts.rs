@@ -1201,9 +1201,14 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
     let captured_passphrase = safe_cex_venues::remote_signing_policy(&init.exchange_name)
         .passphrase_header
         .is_some();
+    // GRVT's login key and Hyperliquid's API-wallet `key` are settings, not identity.
+    let settings_key = matches!(
+        init.exchange_name.as_str(),
+        "grvt" | "hyperliquid" | "hyperliquidspot"
+    );
     for field in ["key", "passphrase"] {
-        let provider_bound = (field == "key" && init.exchange_name == "grvt")
-            || (field == "passphrase" && captured_passphrase);
+        let provider_bound =
+            (field == "key" && settings_key) || (field == "passphrase" && captured_passphrase);
         if identity::enabled(init) && !provider_bound {
             fields.remove(field);
             continue;

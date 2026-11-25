@@ -288,6 +288,29 @@ fn wallet_delegated_identity_claims_must_be_the_sealed_key() {
 }
 
 #[test]
+fn wallet_paradex_ethereum_derived_key_goes_through_the_sealed_signer_check() {
+    // 64 hex digits is an Ethereum key; a 66-character key would be a Stark scalar.
+    let ethereum = "11".repeat(32);
+    let subkey_on = |chain: &str| {
+        let scalar = safe_cex_crypto::starknet::derive_from_ethereum(&ethereum, chain).unwrap();
+        let public = safe_cex_crypto::starknet::public_key_bytes(&scalar);
+        format!("0x{}", safe_cex_crypto::hex(&public))
+    };
+    let pair = |subkey: &str| {
+        DelegatedPair::new(subkey.into(), String::new(), None).with_signing_key(ethereum.clone())
+    };
+    // Mainnet derives on chain 1 (`safe_cex_venue_paradex::sign::ethereum_chain(false)`).
+    let mainnet = subkey_on("1");
+    assert!(prepare_delegated(&paradex_init(&mainnet), pair(&mainnet)).is_ok());
+    for other in [subkey_on("11155111"), stark_public(1)] {
+        assert!(
+            prepare_delegated(&paradex_init(&other), pair(&other)).is_err(),
+            "{other}"
+        );
+    }
+}
+
+#[test]
 fn wallet_key_only_support_does_not_admit_empty_hmac_material() {
     for venue in ["bybit", "binance"] {
         let init = InitPayload {

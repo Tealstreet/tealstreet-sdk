@@ -184,16 +184,20 @@ fn decimal(text: Option<&str>, max: u64) -> Result<u64, String> {
 pub(super) fn key_id(init: &InitPayload) -> Result<String, String> {
     let tuple = |fields: &[String]| serde_json::to_string(fields).expect("identity strings");
     match init.exchange_name.as_str() {
-        "hyperliquid" | "hyperliquidspot" => Ok(tuple(&[
-            address(Some(&init.key))?,
-            address(init.hyperliquid_signer_address.as_deref())?,
-            init.vault
-                .as_deref()
-                .filter(|v| !v.is_empty())
-                .map(|v| address(Some(v)))
-                .transpose()?
-                .unwrap_or_default(),
-        ])),
+        // `key` is the API-wallet field: the venue binds the agent to one master, so
+        // it is a setting (in the fingerprint), never part of the agent's identity.
+        "hyperliquid" | "hyperliquidspot" => {
+            address(Some(&init.key))?;
+            Ok(tuple(&[
+                address(init.hyperliquid_signer_address.as_deref())?,
+                init.vault
+                    .as_deref()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| address(Some(v)))
+                    .transpose()?
+                    .unwrap_or_default(),
+            ]))
+        }
         "grvt" => Ok(tuple(&[
             decimal(init.grvt_trading_account_id.as_deref(), u64::MAX)?.to_string(),
             address(init.grvt_signer_address.as_deref())?,
@@ -270,10 +274,12 @@ pub(super) fn actor_digest(user: &str, init: &InitPayload) -> Result<Option<Stri
     let Some(credential) = digest(user, init)? else {
         return Ok(None);
     };
-    let product = match init.exchange_name.as_str() {
-        "okxdemo" => "okx",
-        "okxeudemo" => "okxeu",
-        venue => venue,
+    let product = match (init.exchange_name.as_str(), init.testnet == Some(true)) {
+        ("okxdemo", _) => "okx",
+        ("okxeudemo", _) => "okxeu",
+        // Bybit demo with `testnet` routes to ordinary Bybit testnet.
+        ("bybitdemo", true) => "bybit",
+        (venue, _) => venue,
     };
     if product == family(product) {
         return Ok(Some(credential));

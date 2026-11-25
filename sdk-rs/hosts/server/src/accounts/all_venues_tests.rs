@@ -219,7 +219,7 @@ fn captured_passphrases_change_settings_but_not_public_identity() {
 }
 
 #[test]
-fn hosted_hyperliquid_identity_uses_signer_and_main_or_vault_scope() {
+fn hosted_hyperliquid_identity_uses_signer_and_vault_scope() {
     for venue in ["hyperliquid", "hyperliquidspot"] {
         let first: InitPayload = serde_json::from_value(json!({
             "accountName":"desktop", "exchangeName":venue,
@@ -236,7 +236,6 @@ fn hosted_hyperliquid_identity_uses_signer_and_main_or_vault_scope() {
                 "hyperliquidSignerAddress",
                 "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             ),
-            ("key", "0x2222222222222222222222222222222222222222"),
             ("vault", "0x3333333333333333333333333333333333333333"),
         ] {
             let mut changed = serde_json::to_value(&first).unwrap();
@@ -247,6 +246,11 @@ fn hosted_hyperliquid_identity_uses_signer_and_main_or_vault_scope() {
                 "{field}"
             );
         }
+        // The API-wallet `key` is a setting: it never selects another identity.
+        let mut wallet = first.clone();
+        wallet.key = "0x2222222222222222222222222222222222222222".into();
+        assert_eq!(digest(&wallet), original);
+        assert_ne!(wallet.fingerprint(), first.fingerprint());
     }
 }
 

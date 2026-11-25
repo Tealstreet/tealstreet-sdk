@@ -268,6 +268,66 @@ fn account(registry: &Registry, user: &str, init: &InitPayload) -> Arc<Account> 
     account
 }
 
+#[tokio::test]
+async fn hyperliquid_agent_with_another_api_wallet_key_cannot_split_its_actor() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                let registry = tests::registry();
+                let agent = InitPayload {
+                    exchange_name: venue.into(),
+                    key: "0x1111111111111111111111111111111111111111".into(),
+                    hyperliquid_signer_address: Some(
+                        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                    ),
+                    ..init()
+                };
+                let other_key = InitPayload {
+                    key: "0x2222222222222222222222222222222222222222".into(),
+                    ..agent.clone()
+                };
+                assert_eq!(
+                    identity::actor_digest("u", &agent).unwrap(),
+                    identity::actor_digest("u", &other_key).unwrap(),
+                    "{venue}: one agent is one actor"
+                );
+                assert_ne!(agent.fingerprint(), other_key.fingerprint(), "{venue}");
+                let resident = account(&registry, "u", &agent);
+                for holder in [7, 8] {
+                    let result = registry
+                        .obtain("u", &other_key, false, holder, None, Arc::new(|_| true))
+                        .await;
+                    assert!(
+                        matches!(result, Err(error) if error.contains("apply-settings")),
+                        "{venue}: another API wallet needs an explicit settings change"
+                    );
+                }
+                assert!(resident.handle.disposal_cause().is_none());
+                assert_eq!(registry.account_count(), 1);
+                registry.dispose(&resident, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
+#[test]
+fn bybit_demo_on_testnet_shares_the_bybit_testnet_actor() {
+    let on = |venue: &str, testnet| InitPayload {
+        exchange_name: venue.into(),
+        testnet: Some(testnet),
+        ..init()
+    };
+    let actor = |init: &InitPayload| identity::actor_digest("u", init).unwrap().unwrap();
+    assert_eq!(actor(&on("bybitdemo", true)), actor(&on("bybit", true)));
+    assert_ne!(actor(&on("bybitdemo", false)), actor(&on("bybit", true)));
+    assert_ne!(actor(&on("bybitdemo", false)), actor(&on("bybit", false)));
+    // The venue still differs, so the settings gate applies between the aliases.
+    assert_ne!(
+        on("bybitdemo", true).fingerprint(),
+        on("bybit", true).fingerprint()
+    );
+}
+
 const CAPTURED_PASSPHRASE_VENUES: [&str; 9] = [
     "okx",
     "okxeu",
