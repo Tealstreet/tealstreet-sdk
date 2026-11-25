@@ -1326,7 +1326,10 @@ fn a_stop_market_child_filled_in_its_first_frame_names_its_algo_with_the_fill() 
     e.take_frame(6.0);
     ws(&mut e, private, TRIGGERED_STOP_MARKET_FILLED);
     let actions = prepared(&mut e, 7.0);
-    assert!(e.store().order("452197707845865472").is_none(), "no row stored");
+    assert!(
+        e.store().order("452197707845865472").is_none(),
+        "no row stored"
+    );
     let fills = safe_cex_engine::wire::fills(e.take_frame(8.0).unwrap()).unwrap();
     assert_eq!(fills.len(), 1);
     assert_eq!(fills[0].order_id, "452197707845865472");
@@ -1351,7 +1354,11 @@ fn a_resting_triggered_child_links_on_its_fill_and_a_plain_order_never_does() {
     let child = r#"{"instId":"BTC-USDT-SWAP","ordId":"900","clOrdId":"","algoId":"","algoClOrdId":"tsalgo900","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}"#;
     let plain = r#"{"instId":"BTC-USDT-SWAP","ordId":"901","clOrdId":"caller901","algoId":"","algoClOrdId":"","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"38000"}"#;
     for row in [child, plain] {
-        ws(&mut e, private, &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#));
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
     }
     assert!(triggered(&prepared(&mut e, 6.0)).is_empty(), "no fill yet");
     for row in [child, plain] {
@@ -1359,7 +1366,11 @@ fn a_resting_triggered_child_links_on_its_fill_and_a_plain_order_never_does() {
             "\"accFillSz\":\"0\"",
             "\"accFillSz\":\"4\",\"fillSz\":\"4\",\"fillPx\":\"39000\",\"tradeId\":\"t\"",
         );
-        ws(&mut e, private, &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#));
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#),
+        );
     }
     assert_eq!(
         triggered(&prepared(&mut e, 7.0)),

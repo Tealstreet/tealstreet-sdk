@@ -107,7 +107,13 @@ mod tests {
     fn a_leg_suffixed_client_id_is_not_claimed_by_its_prefix() {
         let mut placements = OwnPlacements::default();
         placements.record("desk");
-        for other in ["desk_sl", "desk_tp", "desk_tsl", "desk__stop_loss", "desk__take_profit"] {
+        for other in [
+            "desk_sl",
+            "desk_tp",
+            "desk_tsl",
+            "desk__stop_loss",
+            "desk__take_profit",
+        ] {
             assert!(!placements.placed(other), "{other}");
         }
     }
@@ -123,7 +129,10 @@ mod tests {
         assert!(placements.placed("child-1"), "by algoId");
         assert!(placements.placed("child-2"), "by algoClOrdId alone");
         assert!(!placements.placed("child-3"));
-        assert!(!placements.placed("someone-elses-algo"), "never the reverse");
+        assert!(
+            !placements.placed("someone-elses-algo"),
+            "never the reverse"
+        );
     }
 
     #[test]

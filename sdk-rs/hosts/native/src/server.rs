@@ -2541,7 +2541,9 @@ mod tests {
                 let command: u32 = command.parse().expect("amended command");
                 cx.done(
                     command,
-                    format!(r#"{{"orderIds":["venue-{command}"],"clientOrderId":"0xamend-{command}"}}"#),
+                    format!(
+                        r#"{{"orderIds":["venue-{command}"],"clientOrderId":"0xamend-{command}"}}"#
+                    ),
                 );
                 return;
             }

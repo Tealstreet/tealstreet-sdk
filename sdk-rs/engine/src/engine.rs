@@ -337,7 +337,10 @@ pub enum Notice {
     /// child), with every identity the venue gave that algo: its id and client
     /// id. Sent with the child's fills, so a host can tie them to whoever placed
     /// the algo even when no row for the child was ever stored (AGT-196).
-    OrderTriggered { order_id: String, by: Vec<String> },
+    OrderTriggered {
+        order_id: String,
+        by: Vec<String>,
+    },
     /// Startup cannot complete without intervention (bad configuration or an
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
