@@ -45,6 +45,15 @@ impl OwnPlacements {
         self.ids.insert(identity.to_owned());
     }
 
+    /// A venue order an algo's trigger created is this account's when the algo
+    /// is, by its id or its client id (an Unknown placement records only the
+    /// latter). Never the reverse: a child cannot make its algo ours.
+    pub fn link(&mut self, order_id: &str, triggered_by: &[String]) {
+        if triggered_by.iter().any(|algo| self.placed(algo)) {
+            self.record(order_id);
+        }
+    }
+
     /// Whether this account placed the order with exactly this id or client
     /// order id. Never by prefix: fills carry native ids, and a caller's
     /// `desk_sl` is not the leg of another user's `desk`.
@@ -101,6 +110,20 @@ mod tests {
         for other in ["desk_sl", "desk_tp", "desk_tsl", "desk__stop_loss", "desk__take_profit"] {
             assert!(!placements.placed(other), "{other}");
         }
+    }
+
+    #[test]
+    fn a_triggered_order_is_ours_when_its_algo_is_by_id_or_client_id() {
+        let mut placements = OwnPlacements::default();
+        placements.record("algo-1");
+        placements.record("algo-client-2");
+        placements.link("child-1", &["algo-1".into(), String::new()]);
+        placements.link("child-2", &["unknown-algo".into(), "algo-client-2".into()]);
+        placements.link("child-3", &["someone-elses-algo".into()]);
+        assert!(placements.placed("child-1"), "by algoId");
+        assert!(placements.placed("child-2"), "by algoClOrdId alone");
+        assert!(!placements.placed("child-3"));
+        assert!(!placements.placed("someone-elses-algo"), "never the reverse");
     }
 
     #[test]

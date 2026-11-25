@@ -93,8 +93,8 @@ struct PendingFill {
     /// The order row (amount, filled) right after its latest fill applied, if
     /// the store still held it. Only the order's own fields share a unit.
     row: Option<(f64, f64)>,
-    /// The row's identities (client order id, parent, triggering algo), kept
-    /// for the placement claim after the venue may have removed a filled row.
+    /// The row's identities (client order id, parent), kept for the placement
+    /// claim after the venue may have removed a filled row.
     identities: Identities,
     due: Instant,
 }
@@ -138,26 +138,19 @@ pub(crate) struct Tap {
     chases: RefCell<Option<ActiveChases>>,
 }
 
-/// The other ids a stored order answers to: its client order id, its parent,
-/// and the venue algo order that triggered it (OKX, BloFin).
+/// The other ids a stored order answers to: its client order id and parent.
+/// A triggered child needs no row: the native host links it to its algo from
+/// the fill's own frame (`Notice::OrderTriggered`).
 #[derive(Default)]
 struct Identities(Vec<String>);
 
 fn identities(store: &AlgoStore, order_id: &str) -> Option<Identities> {
     let order = store.orders.iter().find(|order| order.id == order_id)?;
-    let triggered_by = order
-        .extra
-        .as_ref()
-        .and_then(|extra| extra.triggered_by.clone());
     Some(Identities(
-        [
-            order.client_order_id.clone(),
-            order.parent_id.clone(),
-            triggered_by,
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
+        [order.client_order_id.clone(), order.parent_id.clone()]
+            .into_iter()
+            .flatten()
+            .collect(),
     ))
 }
 
@@ -362,8 +355,9 @@ impl Tap {
         }
     }
 
-    /// AGT-196: whether this account placed the order, a parent of it or the
-    /// algo order that triggered it. False is "not known here", never "foreign".
+    /// AGT-196: whether this account placed the order, by its id (which covers
+    /// a triggered child its algo linked), client order id or parent. False is
+    /// "not known here", never "foreign".
     fn placed_here(&self, order_id: &str, identities: &Identities) -> bool {
         let placements = safe_cex_native::own_placements::lock(&self.placements);
         placements.placed(order_id) || identities.0.iter().any(|id| placements.placed(id))

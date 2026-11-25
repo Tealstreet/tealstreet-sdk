@@ -2179,6 +2179,9 @@ impl Okx {
                 price,
                 amount,
             });
+            // A triggered child may fill in its first frame, before any row is
+            // stored: its fill names the algo itself (AGT-196).
+            cx.order_triggered(row.ord_id, [row.algo_id, row.algo_cl_ord_id]);
         }
     }
 
@@ -2734,10 +2737,6 @@ impl Okx {
                     extra: Some(OrderExtra {
                         remaining_native: Some(remaining_native),
                         filled_in_placement_units: (!algo).then_some(filled),
-                        // A triggered child is its own order and carries its
-                        // parent's algoId; keep the link for its fill (AGT-196).
-                        triggered_by: (!algo && !o.algo_id.is_empty())
-                            .then(|| o.algo_id.to_owned()),
                         conditional_order_price: if o.ord_type == "trigger" {
                             let p = num::parse(if o.ord_px.is_empty() {
                                 o.order_px

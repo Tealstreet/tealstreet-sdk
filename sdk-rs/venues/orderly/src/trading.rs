@@ -56,8 +56,6 @@ struct Step {
     body: Option<String>,
     effect: Effect,
 }
-// One per in-flight write; `Order` grew with `extra.triggered_by` (AGT-196).
-#[allow(clippy::large_enum_variant)]
 enum Effect {
     Place(Order),
     Pair {

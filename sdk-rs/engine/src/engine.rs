@@ -333,6 +333,11 @@ pub enum Notice {
         command: CommandId,
         receipts: Vec<OrderIdentityReceipt>,
     },
+    /// A venue order that an algo order's trigger created (an OKX stop's
+    /// child), with every identity the venue gave that algo: its id and client
+    /// id. Sent with the child's fills, so a host can tie them to whoever placed
+    /// the algo even when no row for the child was ever stored (AGT-196).
+    OrderTriggered { order_id: String, by: Vec<String> },
     /// Startup cannot complete without intervention (bad configuration or an
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
@@ -3252,6 +3257,25 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
         self.core().command_progress(command, receipts)
+    }
+
+    /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is
+    /// sent when none remain.
+    pub fn order_triggered<'a>(&mut self, order_id: &str, by: impl IntoIterator<Item = &'a str>) {
+        let by: Vec<String> = by
+            .into_iter()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if !order_id.is_empty() && !by.is_empty() {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::OrderTriggered {
+                    order_id: order_id.to_owned(),
+                    by,
+                }));
+        }
     }
 
     #[inline]

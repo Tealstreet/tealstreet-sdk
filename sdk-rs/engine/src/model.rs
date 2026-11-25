@@ -496,11 +496,6 @@ pub struct OrderExtra {
     /// it as bit 16 of the trigger word, which older decoders mask away.
     #[serde(skip)]
     pub native_algo: bool,
-    /// The venue algo order whose trigger created this order (an OKX `algoId`,
-    /// a BloFin `algoId`/`tpslId`). In memory only: a host uses it to tie a
-    /// triggered child's fill to the stop it placed (AGT-196).
-    #[serde(skip)]
-    pub triggered_by: Option<String>,
 }
 
 /// ORDERS' per-row trigger word: bits 0-7 the take-profit trigger and 8-15 the

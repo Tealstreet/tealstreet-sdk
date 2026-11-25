@@ -1162,6 +1162,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         self.send(client, Outgoing::Text(text));
                     }
                 }
+                // Not sent to clients: it only labels this account's own fills.
+                Notice::OrderTriggered { order_id, by } => {
+                    crate::own_placements::lock(&self.placements).link(&order_id, &by);
+                }
                 Notice::AccountAuth {
                     credential,
                     scope,

@@ -131,10 +131,11 @@ never from a snapshot or a rejoin replay:
   Tealstreet user; a second API key on the same venue account is another
   digest, so its fills stay unclaimed there. No id or key leaves the box. `placedHere` is true when the native host's per-actor ledger
   (`safe_cex_native::own_placements`: dispatch `commandProgress` receipts and
-  completion ids of this actor's placements and amends) names the order id,
-  the row's client order id or parent, or the venue algo order that triggered
-  it (`OrderExtra::triggered_by`: OKX `algoId`; BloFin `algoId`/`tpslId`,
-  unverified live). False means "not known here", never "someone else's":
+  completion ids of this actor's placements and amends) names exactly the
+  order id, or the row's client order id or parent. A triggered child is
+  linked at fill time from its own frame (`Notice::OrderTriggered`), so it is
+  claimed even when it filled before any row was stored: OKX by `algoId` or
+  `algoClOrdId`; BloFin by `algoId`/`tpslId`, unverified live. False means "not known here", never "someone else's":
   the ledger is memory-only (4096 newest identities), so orders from before a
   box roll, the venue UI, bots and liquidations are all unclaimed. The gateway
   withholds a fill only when ANOTHER user's resident claimed the same key;

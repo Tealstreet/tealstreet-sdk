@@ -659,29 +659,25 @@ async fn an_unplaced_fill_such_as_a_liquidation_is_still_reported_unclaimed() {
 }
 
 /// An order placed here is claimed by its client order id (the dispatch
-/// receipt), its parent, or the venue algo order that triggered it: OKX files
-/// a triggered stop's fill under a new `ordId` with an empty `clOrdId`.
+/// receipt), its parent, or its own id once the native host linked it to an
+/// algo placed here (an OKX triggered stop files under a new `ordId`).
 #[tokio::test(start_paused = true)]
-async fn placed_here_covers_client_ids_parents_and_triggering_algos() {
+async fn placed_here_covers_client_ids_parents_and_linked_triggered_children() {
     let placements = Placements::default();
     for id in ["client-secret", "entry", "algo9"] {
         placements.lock().unwrap().record(id);
     }
+    placements.lock().unwrap().link("900", &["algo9".into()]);
     let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
     let mut by_client = order("venue-assigned", 1.0, 1.0);
     by_client.client_order_id = Some("client-secret".into());
     let mut leg = order("venue-leg", 1.0, 1.0);
     leg.client_order_id = None;
     leg.parent_id = Some("entry".into());
-    let mut triggered = order("900", 1.0, 1.0);
-    triggered.client_order_id = None;
-    triggered.extra = Some(safe_cex_engine::model::OrderExtra {
-        triggered_by: Some("algo9".into()),
-        ..Default::default()
-    });
     let mut foreign = order("foreign", 1.0, 1.0);
     foreign.client_order_id = Some("someone-else".into());
-    let rows = store(vec![by_client, leg, triggered, foreign]);
+    // The triggered child "900" has no row: it filled in its first frame.
+    let rows = store(vec![by_client, leg, foreign]);
     let ids = ["venue-assigned", "venue-leg", "900", "foreign"];
     tap.record_fills(&ids.map(|id| fill(id, 1.0)), &rows);
     tap.flush_fills(&rows, true);

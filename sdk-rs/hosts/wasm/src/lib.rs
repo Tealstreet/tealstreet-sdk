@@ -550,6 +550,8 @@ fn encode(actions: &[Action]) -> String {
     }
     let out: Vec<ActionOut<'_>> = actions
         .iter()
+        // Host-only (AGT-196): a page needs no claim for its own placements.
+        .filter(|action| !matches!(action, Action::Notice(Notice::OrderTriggered { .. })))
         .map(|action| match action {
             #[cfg(feature = "address-nonce")]
             Action::RetireAddressSetup { task, token } => ActionOut::RetireAddressSetup {
@@ -644,8 +646,12 @@ fn encode(actions: &[Action]) -> String {
                     receipts,
                 }
             }
+            Action::Notice(Notice::OrderTriggered { .. }) => unreachable!("filtered above"),
         })
         .collect();
+    if out.is_empty() {
+        return String::new();
+    }
     serde_json::to_string(&out).unwrap_or_default()
 }
 

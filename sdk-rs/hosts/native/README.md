@@ -159,10 +159,14 @@ See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
 
 Each account actor also keeps a bounded, memory-only ledger of the order
 identities its own clients placed or amended: `PlaceOrders`/`AmendOrder*`
-dispatch receipts and completion ids, read through `AccountHandle::placements`
-(poison-safe `own_placements::lock`). It is how a host says which of a shared
-venue account's orders it placed (the exchange server's fill claims, AGT-196);
-a miss proves nothing, and it grants no command authority.
+dispatch receipts and completion ids (including Hyperliquid's amend
+`{orderIds, clientOrderId}` object), read through `AccountHandle::placements`
+(poison-safe `own_placements::lock`). A venue's `Notice::OrderTriggered` adds a
+triggered child (an OKX stop's `ordId`) when the algo it names, by id or client
+id, is already recorded. Matching is exact, never by leg suffix. It is how a
+host says which of a shared venue account's orders it placed (the exchange
+server's fill claims, AGT-196); a miss proves nothing, and it grants no command
+authority. The notice never reaches clients, and the WASM host drops it.
 
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with

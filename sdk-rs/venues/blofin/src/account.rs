@@ -92,6 +92,9 @@ struct Execution {
     value: f64,
     contract: f64,
     updated: f64,
+    /// The algo or TP/SL ids a plain order names: what triggered it (AGT-196).
+    /// UNVERIFIED: no live BloFin triggered-order sample confirms these ids.
+    triggered_by: [String; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -1049,17 +1052,6 @@ impl Blofin {
         // `pre_tp_sl` is an ordinary order with its bracket attached.
         if o.order_id.is_empty() || !matches!(o.order_category.as_ref(), "normal" | "pre_tp_sl") {
             return vec![];
-        }
-        // A plain order that names an algo/TP-SL id was triggered by it; keep the
-        // link for its fill (AGT-196). Unverified against a live triggered sample.
-        let triggered_by = [&o.algo_id, &o.tpsl_id]
-            .into_iter()
-            .find(|id| !id.is_empty())
-            .filter(|_| o.order_category.as_ref() == "normal")
-            .map(|id| id.to_string());
-        let mut base = base;
-        if let Some(extra) = base.extra.as_mut() {
-            extra.triggered_by = triggered_by;
         }
         vec![Order {
             kind: if matches!(o.order_type.as_ref(), "market" | "optimal_limit_ioc") {
@@ -2312,6 +2304,11 @@ impl Blofin {
             value,
             contract,
             updated,
+            triggered_by: if row.order_category.as_ref() == "normal" {
+                [row.algo_id.to_string(), row.tpsl_id.to_string()]
+            } else {
+                Default::default()
+            },
         };
         let session_order = self.account.execution_order_is_new(cx, created, updated);
         let known_prefix = self.account.execution_baseline(id.as_ref()).is_some();
@@ -2450,6 +2447,7 @@ impl Blofin {
             value,
             contract,
             updated,
+            triggered_by,
         } = execution;
         let previous = self
             .account
@@ -2523,7 +2521,9 @@ impl Blofin {
         self.account.observe_live_order(&fill.order_id);
         fill.price = prepared.price();
         fill.amount = prepared.amount();
+        let order_id = fill.order_id.clone();
         cx.fill(fill);
+        cx.order_triggered(&order_id, triggered_by.iter().map(String::as_str));
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.account.fresh_positions_timer == Some(timer) {
