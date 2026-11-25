@@ -50,7 +50,7 @@ function formatOrderTypeLabel(type: OrderType): string {
 /**
  * Format positions table - reusable formatter for CLI watch modes
  */
-export function formatPositionsTable(exchange: ExchangeLike): string {
+export function formatPositionsTable(exchange: Pick<ExchangeLike, 'store'>): string {
   const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
 
   if (positions.length === 0) {
@@ -114,7 +114,7 @@ export function formatPositionsTable(exchange: ExchangeLike): string {
 /**
  * Format orders table - reusable formatter for CLI watch modes
  */
-export function formatOrdersTable(exchange: ExchangeLike): string {
+export function formatOrdersTable(exchange: Pick<ExchangeLike, 'store'>): string {
   const orders = exchange.store?.orders?.filter(
     (o) => o.status === OrderStatus.Open || o.status === OrderStatus.Creating,
   ) ?? [];
@@ -165,7 +165,7 @@ export function formatOrdersTable(exchange: ExchangeLike): string {
 /**
  * Format margin/balance table - reusable formatter for CLI watch modes
  */
-export function formatMarginTable(exchange: ExchangeLike): string {
+export function formatMarginTable(exchange: Pick<ExchangeLike, 'store'>): string {
   const balance = exchange.store?.balance;
   const positions = exchange.store?.positions?.filter((pos) => pos.contracts !== 0) ?? [];
 

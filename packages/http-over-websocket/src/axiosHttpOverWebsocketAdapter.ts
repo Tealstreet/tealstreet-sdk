@@ -596,7 +596,14 @@ const createAxiosHttpOverWebsocketAdapter = (
             (value) => {
               clearTimeout(timer);
               removeAbort(onAbort);
-              resolve(value);
+              // After suspension, a token/poll microtask can beat its overdue timer.
+              // Recheck this request's clock and cancellation before accepting it.
+              try {
+                if (remainingTime() <= 0 || (readying && Date.now() >= readinessDeadline)) reject(expire());
+                else resolve(value);
+              } catch (error) {
+                reject(error);
+              }
             },
             (error) => {
               clearTimeout(timer);

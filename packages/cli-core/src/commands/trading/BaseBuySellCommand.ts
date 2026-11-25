@@ -4,6 +4,10 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 import { prepareCliOrders } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
 
+/** The Rust engine's `REDUCE_ONLY_LEGS_REFUSAL` (sdk-rs/engine/src/model.rs), word for word. */
+export const REDUCE_ONLY_LEGS_REFUSAL =
+  "A stop-loss or take-profit can't be attached to a reduce-only order. Place it as its own order.";
+
 /**
  * Base class for buy/sell commands
  */
@@ -52,6 +56,10 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     const args = this.getRawArgs(ctx);
     if (args.includes('po') && !args.includes('at') && !args.includes('best')) {
       return this.error('po requires a limit order: use at PRICE or best. Nothing was sent.');
+    }
+    // AGT-135: the engine refuses a reduce-only order carrying legs (AGT-120); say so first.
+    if (args.includes('reduce') && (args.includes('stop') || args.includes('tp'))) {
+      return this.error(REDUCE_ONLY_LEGS_REFUSAL);
     }
     const leadingSymbol = this.validateSymbols(exchange, args[1]?.split(',') || []).length > 0;
     const consumed = leadingSymbol ? [1, 2] : [1];

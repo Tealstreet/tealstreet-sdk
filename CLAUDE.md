@@ -10,16 +10,29 @@ context.
 The host ownership observation/teardown contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#host-ownership-observation-and-teardown).
 
+Native hosted diagnostic owner attribution is documented in
+`sdk-rs/hosts/server/DESIGN.md` under the Sentry event allowlist.
+
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
+Ticker seen-times survive `Store::set_tickers` for unchanged prices; see
+[`sdk-rs/README.md`](sdk-rs/README.md#ticker-reference-seen-times-across-table-replacement).
+
+Bitget login-only timestamp-expiry recovery samples a bounded public clock and
+re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`.
 
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
-Bybit REST mutation release budgets and their conservative batch fallback cost
+Bybit REST mutation release budgets and their per-order batch floor
 are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.md#bybit-rest-write-pacing).
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.
+
+Hyperliquid candle reads retain their original deadline while a requested public
+catalogue row is pending and its discovery is reading or retrying; stalled
+discovery refuses at once as unavailable. Known markets stay immediate; settled
+missing or explicitly excluded rows refuse. See `sdk-rs/venues/hyperliquid/README.md`.
 
 DELEGATED is venue-generic under the same hosted eligibility as COSIGNED. Use
 one runtime `DELEGATED` kill switch/per-user pin; `DELEGATED_BYBIT` is only its
@@ -30,14 +43,123 @@ older mode/transport discussions are explicitly superseded where they disagree.
 
 OKX EEA config-before-catalogue startup and bounded signature refusals are
 documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-private-startup).
+OKX's native write-diagnostic section also documents empty-envelope cancellation
+reasons and passive per-order reporting; neither grants retry or continuation authority.
 
 Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
 
+A reduce-only or `close` order carrying a non-zero stop-loss or take-profit is refused
+`NotSent` by the engine, for every venue, before any lock, fence or venue sees it
+(`PlaceOrderOpts::reduce_only_with_attached_legs`, AGT-120). The TS reference mirrors it in
+every `placeOrder`/`placeOrders` with `reduceOnlyWithAttachedLegs`.
+
+Lighter placements complete only on venue proof (an `accountOrders` row or a
+failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
+modify, completed only by its executed `tx`. A failed or unproven transaction
+resyncs the nonce. See `sdk-rs/venues/lighter/README.md` (AGT-45, AGT-77).
+
+Bitunix keeps one position TP/SL order per position, both legs under one id, and
+a placement without a leg replaces it. The REST pending list has no `type`, so
+`full_position_ids` remembers ids learned from `POSITION_TPSL` pushes and position
+placements; a push that adds a leg lists both legs under derived ids (AGT-71).
+
+OKX keeps one entire-position TP/SL algo per position. A lone full leg beside a
+held one-leg full algo joins it through amend-algos (OKX makes it an `oco`), and
+cancelling one leg of a two-leg algo deletes only that leg. See
+`sdk-rs/venues/okx/README.md` "Entire-position TP/SL" (AGT-68, AGT-98).
+
 ## Shared artifact census
 
 Shared WASM budget and construction-policy memberships are checked against
 `sdk-rs/artifact-census.json`. Registry builds reject duplicate, missing or unknown
 policy venues; synthetic codegen fixtures use the test-only renderer seam.
+
+## Rust SDK CPU checks: removed by Sam 2026-11-17
+
+The CPU gate matrix, shared certification, their planner, Bitget paired ratio gate
+and nightly gate monitor were removed by Sam 2026-11-17. Replay measurements and retained evidence remain;
+required coverage and combined consumers are unchanged. The measurement below
+is historical, not a current job inventory.
+
+Measured 2026-11-16 using `gh api` for `rust.yml` runs/jobs, commit check-runs,
+PR merge times and branch protection. Validate response shapes, use
+`--paginate --slurp` on paged endpoints, and count the latest check per name.
+Keep cancelled and incomplete runs separate from failures; `updated_at` alone
+does not establish completion. These are observations, not fixed job counts:
+
+| Evidence                                                                                                                                                                                                   | Observed result                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4`                                                                                     | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`.                                |
+| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417`                                                                                      | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded.                                                  |
+| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress.                                                          |
+| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures.                              |
+| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4`                                                                                     | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
+
+At measurement time, the source condition in [rust.yml](.github/workflows/rust.yml) was
+`always() && needs.selection.outputs.replayRequired == 'true'`.
+[ci-selection.mjs](sdk-rs/harness/ci-selection.mjs) selects `full: !isPr`, so
+those jobs ran on selected PRs **and master**, not PRs alone. Their cardinality
+tracked `cpu-final.strategy.matrix.suite`; the measured matrix had 31 entries.
+
+Branch protection requires `ci` and `Rust / required coverage`, not these CPU
+checks. The required-coverage job does not depend on the CPU jobs, and
+`beta-wasm-release` depends on required coverage rather than CPU certification.
+Historically, CPU failures could coexist with a merge/release and conclude after
+a PR merged. The dated observations above explain those aggregate red runs.
+The retained replay measurements still record CPU and memory results; they do
+not publish the removed CPU checks. Required coverage and release dependencies
+are unchanged.
+
+Decision: removed by Sam 2026-11-17, on master and pull requests. The shared
+measurement helpers remain for replay collection and offline evidence inspection;
+CI no longer plans, certifies or publishes CPU gate statuses.
+
+Update `sdk-rs/harness/CLAUDE.md` with the next real fingerprint mover; its CPU gate policy is superseded by this decision.
+
+Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with the
+closed `info_admission` cause. The relay/post-handoff boundary is documented in
+`sdk-rs/README.md` under Browser request-failure diagnostics.
+
+Bybit's closed later-page read diagnostics and owning-result completeness bridge
+are documented in `sdk-rs/venues/bybit/README.md` under Later-page history failure
+diagnostics. They add no pagination, retry or write authority.
+
+BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
+its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.
+
+OKX ordinary historical orders retain native gross close PnL and signed aggregate
+fee/credit totals with their currencies. Unknown money remains absent; this does
+not promote the orders axis grade. The projection and limits are documented in
+[`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#order-history-financial-projection).
+
+## Native server image PR checks
+
+`docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
+It imports the master image caches with a read-only automatic token; it never publishes images or caches.
+The existing master-only workflows remain the sole image publishers and signers.
+
+The wrapper-owned SDK staging signal and narrow automatic supersession exception
+are documented in `docs/plans/callers/beta-wasm-auto-release.md`.
+
+## User-facing notification wording
+
+Messages shown in the UI use calm, plain language: what happened, then at most
+one short action. Unconfirmed changes still ask users to check before retrying;
+missing protection remains explicit. Keep structured outcomes, retries and
+severity unchanged, including recognition of retained older messages.
+Venue display decorators preserve retained and current check-open-orders guidance
+without adding a second action.
+Summary formatting retains diagnostic context and checks each warning separately
+from the terminal error when omitting repeated guidance.
+**Order-risk notices must keep the phrase "may still be open"** (or another phrase
+in NX `apps/web/src/components/toasts/unmanagedOrderRisk.ts`): NX keeps those
+toasts on screen by matching text, so a calmer rewrite without it lets an
+order-risk warning auto-dismiss. Native detail goes before a trailing "Check …"
+action (`safe_cex_engine::error::with_detail`), never after it.
+**The LOCAL lost-chase notice (`algoControlWatch.ts` `unendedChase`) must start
+"Chase on X ended without a result: "**: NX `isPageEngineLostChaseNotice`
+(`apps/web/src/order/hostedAlgoInterruption.ts`) matches that prefix to drop it on
+Hosted accounts, whose own notice replaces it.

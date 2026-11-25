@@ -47,7 +47,7 @@ export class OrdersCommand extends BaseCommand {
     };
 
     // Use shared formatter from MonitorCommand
-    const output = formatOrdersTable(filteredExchange as any);
+    const output = formatOrdersTable(filteredExchange);
     this.print(ctx, [output]);
     return this.success();
   }

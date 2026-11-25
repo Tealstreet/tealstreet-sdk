@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -203,7 +204,7 @@ describe('a Rust start on a slow link', () => {
     void send(init);
     await vi.advanceTimersByTimeAsync(5 * 120_000 + 130_000 + 1_000);
     expect(built).toHaveLength(5);
-    expect(messages.filter((message) => message.op === 'warning').at(-1)?.data[0]).toContain('recovery failed');
+    expect(messages.filter((message) => message.op === 'warning').at(-1)?.data[0]).toContain('Trading couldn’t reconnect. Reload the account.');
     await send(read('late'));
     expect(reply(messages, 'late')[0].data.success).toBe(false);
     await vi.advanceTimersByTimeAsync(600_000);

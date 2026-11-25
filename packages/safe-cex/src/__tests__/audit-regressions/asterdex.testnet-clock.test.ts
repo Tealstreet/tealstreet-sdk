@@ -1,10 +1,10 @@
 import axios from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { ASTERDEX_ENDPOINTS } from '../../exchanges/asterdex/asterdex.types';
 import { asterDEXVirtualClock } from '../../exchanges/asterdex/asterdex.virtualClock';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 vi.mock('axios', async () => {
   const actual = await vi.importActual<typeof import('axios')>('axios');
@@ -29,7 +29,7 @@ describe('audit regression: AsterDEX testnet endpoints and worker clock', () => 
     const exchange = new AsterDEXExchange(
       'asterdex',
       { key: 'test-key', secret: 'test-secret', testnet: true },
-      new DefaultStore(),
+      new FrameStore(),
     );
     expect(exchange.publicWebsocket.connectionURL).toMatch(/^wss:\/\/fstream5\.asterdex-testnet\.com\/stream\?/);
 

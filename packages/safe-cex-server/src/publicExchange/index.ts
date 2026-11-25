@@ -9,7 +9,6 @@ export {
   type MarketCacheKeys,
   type UtcHourMarketBucket,
 } from './buckets';
-export { hydrateMarketStore, type HydratableMarketStore } from './hydrateStore';
 export { InProcessFallbackMarketLock, type InProcessFallbackLockOptions, type MarketLockAcquisition } from './lock';
 export {
   DEFAULT_MARKET_CACHE_TTL_MS,

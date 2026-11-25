@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { BYBIT_BRAZIL_SITE_ID } from '../exchanges/bybit/bybit.site';
+import { FrameStore } from '../store/frameStore';
+import { nativeOrder } from './cutover/nativeOrder';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 
 /**
  * Brazil accounts write order rows locally after a REST write. An inverse row holds `remaining` in the coin and
@@ -9,15 +11,7 @@ import { BYBIT_BRAZIL_SITE_ID } from '../exchanges/bybit/bybit.site';
  * made the chart draw contracts x price ("2,600,192 USD" for a $1,000 ETHUSD leg).
  */
 const create = () => {
-  const store = {
-    subscribe: vi.fn(),
-    markets: [],
-    marketsBySymbol: {},
-    tickersBySymbol: {},
-    orders: [],
-    positions: [],
-    addOrUpdateOrders: vi.fn(),
-  } as any;
+  const store = new FrameStore();
   const exchange = new BybitExchange(
     'bybit',
     {
@@ -33,7 +27,7 @@ const create = () => {
   return { exchange: exchange as any, store };
 };
 
-const inverseOrder = {
+const inverseOrder = nativeOrder({
   id: 'oid-1',
   symbol: 'ETHUSD',
   price: 2600,
@@ -41,15 +35,15 @@ const inverseOrder = {
   filled: 400,
   remaining: 600 / 2600,
   extra: { remainingNative: 600 },
-};
+});
 
 describe('Bybit Brazil local order rows for inverse amends', () => {
   it('keeps remaining in the coin and the USD contracts native after a size amend', () => {
     const { exchange, store } = create();
     exchange.applyLocalOrderUpdateAfterRestWrite(inverseOrder, { amount: 1500 });
 
-    const [[[updated]]] = store.addOrUpdateOrders.mock.calls;
-    expect(updated.extra.remainingNative).toBe(1100);
+    const updated = store.orders[0];
+    expect(updated.extra?.remainingNative).toBe(1100);
     expect(updated.remaining).toBeCloseTo(1100 / 2600, 8);
   });
 
@@ -57,19 +51,20 @@ describe('Bybit Brazil local order rows for inverse amends', () => {
     const { exchange, store } = create();
     exchange.applyLocalOrderUpdateAfterRestWrite(inverseOrder, { price: 2400 });
 
-    const [[[updated]]] = store.addOrUpdateOrders.mock.calls;
-    expect(updated.extra.remainingNative).toBe(600);
+    const updated = store.orders[0];
+    expect(updated.extra?.remainingNative).toBe(600);
     expect(updated.remaining).toBeCloseTo(600 / 2400, 8);
   });
 
   it('leaves a linear amend as it was: remaining from the new size, no extra added', () => {
     const { exchange, store } = create();
-    const linear = { id: 'oid-2', symbol: 'ETHUSDT', price: 2600, amount: 1, filled: 0.4, remaining: 0.6 };
+    const linear = nativeOrder({ id: 'oid-2', symbol: 'ETHUSDT', price: 2600, amount: 1, filled: 0.4, remaining: 0.6 });
 
     exchange.applyLocalOrderUpdateAfterRestWrite(linear, { amount: 1.5 });
+    const sized = store.orders[0];
     exchange.applyLocalOrderUpdateAfterRestWrite(linear, { price: 2400 });
+    const repriced = store.orders[0];
 
-    const [[[sized]], [[repriced]]] = store.addOrUpdateOrders.mock.calls;
     expect(sized.remaining).toBeCloseTo(1.1, 8);
     expect(sized.extra).toBeUndefined();
     expect(repriced.remaining).toBe(0.6);

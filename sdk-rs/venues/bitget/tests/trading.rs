@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Event, Method};
@@ -206,6 +207,83 @@ fn place_honors_caller_id_rounds_and_uses_broker_header() {
     assert_eq!(p["orderList"][0]["reduceOnly"], "NO");
     batch_success(&mut h, request.id, &["42"]);
     assert_eq!(h.done.last().unwrap().1.as_ref().unwrap(), "[\"42\"]");
+}
+
+#[test]
+fn delegated_uuid_encoding_preserves_one_plain_limit_order() {
+    // Bug 69: the hosted encoder (85b32c27469) keeps all UUID bits in 32 hex
+    // characters. A raw 36-character intent must still refuse before any write.
+    let intent = "018bcfe5-6800-7101-8101-010101010101";
+    let compact = "018bcfe5680071018101010101010101";
+    for unified in [false, true] {
+        for client in [intent, compact] {
+            let mut h = if unified { uta() } else { Harness::classic() };
+            place(
+                &mut h,
+                vec![json!({
+                    "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                    "amount":0.001, "price":55000, "clientOrderId":client
+                })],
+            );
+            if client == intent {
+                let error = h.done.last().unwrap().1.as_ref().unwrap_err();
+                assert!(error.contains("clientOrderId cannot be honored verbatim"));
+                assert_eq!(
+                    h.failures.last().unwrap().outcome,
+                    Some(safe_cex_engine::Outcome::NotSent)
+                );
+                assert!(
+                    h.requests
+                        .iter()
+                        .all(|request| request.method == Method::Get)
+                );
+                continue;
+            }
+            assert_eq!(
+                h.requests
+                    .iter()
+                    .filter(|request| request.method == Method::Post)
+                    .count(),
+                1,
+                "one caller ID must address exactly one native order"
+            );
+            let (request, payload) = body(
+                &mut h,
+                if unified {
+                    "/api/v3/trade/place-order"
+                } else {
+                    "/batch-place-order"
+                },
+            );
+            let order = if unified {
+                &payload
+            } else {
+                assert_eq!(payload["orderList"].as_array().unwrap().len(), 1);
+                &payload["orderList"][0]
+            };
+            assert_eq!(order["clientOid"], compact);
+            assert_eq!(order[if unified { "qty" } else { "size" }], "0.001");
+            assert_eq!(order["price"], "55000");
+            if unified {
+                h.reply(
+                    request,
+                    200,
+                    r#"{"code":"00000","data":{"orderId":"fixture-order"}}"#,
+                );
+            } else {
+                batch_success(&mut h, request, &["fixture-order"]);
+            }
+            assert_eq!(
+                h.done.last().unwrap().1.as_ref().unwrap(),
+                r#"["fixture-order"]"#
+            );
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|request| request.method == Method::Get)
+            );
+        }
+    }
 }
 
 #[test]
@@ -646,7 +724,6 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     let mut o = limit();
     o["side"] = json!("sell");
     o["reduceOnly"] = json!(true);
-    o["takeProfit"] = json!(120);
     place(&mut h, vec![o]);
     let (request, p) = body(&mut h, "/api/v3/trade/place-order");
     assert_eq!(p["category"], "USDT-FUTURES");
@@ -654,8 +731,15 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
     assert_eq!(p["posSide"], "long");
     assert_eq!(p["qty"], "0.002");
     assert!(p.get("size").is_none());
-    assert_eq!(p["takeProfit"], "120");
     h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"4"}}"#);
+    // AGT-120: a reduce-only order may not carry legs, so the v3 attached take-profit is
+    // checked on an opening entry.
+    let mut o = limit();
+    o["takeProfit"] = json!(120);
+    place(&mut h, vec![o]);
+    let (request, p) = body(&mut h, "/api/v3/trade/place-order");
+    assert_eq!(p["takeProfit"], "120");
+    h.reply(request, 200, r#"{"code":"00000","data":{"orderId":"5"}}"#);
     place(
         &mut h,
         vec![json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":80})],
@@ -1686,7 +1770,10 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
         r#"{"code":"45110","msg":"less than the minimum amount 5 USDT"}"#,
     );
     let error = h.done[0].1.clone().unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 #[test]

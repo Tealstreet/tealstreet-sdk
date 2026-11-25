@@ -1,4 +1,7 @@
 //! Fresh flat-symbol leverage metadata; no orders or live account actions.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_phemex::PhemexPerpetuals;
@@ -96,7 +99,7 @@ fn flat_signed_margin_and_hedged_legs_match_ts_context_without_mutating_account(
             done(out),
             json!({"buyLeverage":long.abs(),"sellLeverage":short.abs(),"marginType":if long < 0. || cross {"cross"} else {"isolated"},"positionMode":if mode == "Hedged" {"hedged"} else {"oneway"}})
         );
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -172,7 +175,15 @@ fn non_success_http_status_fails_instead_of_returning_empty_context() {
             a,
             Action::Http(_) | Action::Notice(Notice::CommandDone { command: 42, .. })
         )));
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            match status {
+                401 | 403 => [0, 0, 1, 0, 0],
+                418 | 429 => [0, 1, 0, 0, 0],
+                _ => [0, 0, 0, 0, 1],
+            },
+        );
         assert!(reply(&mut e, &r, json!({"code":0})).is_empty());
     }
 }

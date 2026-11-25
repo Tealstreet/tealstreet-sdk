@@ -121,6 +121,37 @@ fn each_execution_emits_once_with_large_ids_intact() {
     panic!("missing fills section");
 }
 
+// AGT-83: the native trade_id is the fill identity; an empty one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::new();
+    h.load();
+    h.engine.take_frame(h.now);
+    for trade in ["9007199254740997", "9007199254740998", r#""""#] {
+        h.ws(
+            "user.trade",
+            &format!(
+                r#"{{"trade_id":{trade},"order_id":9007199254740993,"instrument_name":"BTCUSD-PERP","side":"BUY","traded_price":"100","traded_quantity":"0.1"}}"#
+            ),
+        );
+    }
+    let fills = safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap()).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| (fill.id.as_deref(), fill.order_id.as_str(), fill.amount))
+        .collect();
+    let order = "9007199254740993";
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        [
+            (Some("9007199254740997"), order, 0.1),
+            (Some("9007199254740998"), order, 0.1),
+            (Some(order), order, 0.1),
+        ]
+    );
+}
+
 #[test]
 fn closure_timestamps_fence_late_nonzero_and_zero_frames() {
     let mut h = Harness::new();

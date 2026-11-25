@@ -262,23 +262,32 @@ fn unrelated_orders_trigger_source_is_not_required_for_proven_standalone_put_bac
     assert_applied_restored_partial_failure(&h);
 }
 
+/// AGT-34: was `missing_unrelated_trigger_source_does_not_waive_peer_lineage`, which
+/// pinned NO put-back without lineage and so left no stop. Lineage now only words it.
 #[test]
-fn missing_unrelated_trigger_source_does_not_waive_peer_lineage() {
+fn missing_peer_lineage_still_puts_the_old_stop_back_as_standalone() {
     let mut h = replacement_after_peer_census(true);
     h.respond(
         "/v5/position/trading-stop",
         200,
         r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
     );
-    assert!(!h.has_request("/v5/position/trading-stop"));
+    h.advance(200.0);
+    let restore = h.take("/v5/position/trading-stop");
+    let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
+    assert_eq!(payload["stopLoss"], "90");
+    h.reply(restore.id, 200, OK);
     assert!(h.notices.iter().any(|notice| matches!(notice,
         safe_cex_engine::Notice::CommandFailed { command:91, error }
-        if error.protection == Some(safe_cex_engine::error::Protection::Unprotected)
+        if error.protection == Some(safe_cex_engine::error::Protection::Restored)
+            && error.message.contains("standalone")
     )));
 }
 
+/// AGT-34: was `..._never_authorizes_replacement`. The missing source still fails the
+/// proof, but after the landed cancel the replacement goes out instead of no stop.
 #[test]
-fn cancelled_target_without_its_trigger_source_never_authorizes_replacement() {
+fn cancelled_target_without_its_trigger_source_fails_the_proof_but_sends_the_replacement() {
     let mut h = ready(PROFILES[0]);
     seed(
         &mut h,
@@ -294,11 +303,178 @@ fn cancelled_target_without_its_trigger_source_never_authorizes_replacement() {
     terminal.as_object_mut().unwrap().remove("triggerBy");
     amend(&mut h, Some(95.0), None);
     h.respond(PROFILES[0].cancel_path(), 200, r#"{"retCode":0,"result":{"list":[{"orderId":"partial"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    page(&mut h, "&orderId=partial", vec![terminal.clone()]);
+    // One final orderId read: the old stop's own row, cancelled, proves it gone.
+    h.advance(200.0);
     page(&mut h, "&orderId=partial", vec![terminal]);
-    assert_eq!(h.unknown, vec![91]);
+    h.advance(200.0);
+    assert!(h.unknown.is_empty());
+    let posts: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.method == safe_cex_engine::Method::Post)
+        .map(|r| r.url.clone())
+        .collect();
+    assert_eq!(posts.len(), 1, "{posts:?}");
+    assert!(posts[0].contains("/v5/position/trading-stop"), "{posts:?}");
+}
+
+/// The cursor live Bybit returns beside the single row of an orderId-filtered read.
+fn live_cursor(h: &Harness) -> String {
+    format!("partial%3A{0}%2Cpartial%3A{0}", h.now as u64)
+}
+
+fn cursor_page(h: &mut Harness, path: &str, rows: Vec<serde_json::Value>) {
+    let cursor = live_cursor(h);
+    h.respond(
+        path,
+        200,
+        &serde_json::json!({
+            "retCode":0, "result":{"category":"linear", "list":rows, "nextPageCursor":cursor}
+        })
+        .to_string(),
+    );
+}
+
+/// AGT-108: readiness kept the `target-cursor` refusal AGT-34 removed from the
+/// post-cancel proof. Live Bybit (probed 2026-11-20 on a live Partial stop) sends a
+/// cursor beside the single orderId row, so every frame-fed Partial edit was refused.
+#[test]
+fn live_target_cursor_beside_the_single_row_does_not_refuse_the_edit() {
+    for kind in ["StopLoss", "TakeProfit"] {
+        let mut h = frame_fed(kind);
+        let target = original(&h);
+        start(&mut h, kind);
+        for (path, rows) in [
+            ("&orderId=partial", vec![target.clone()]),
+            ("&openOnly=0&limit=50", vec![target.clone()]),
+            ("/v5/order/history", vec![]),
+        ] {
+            cursor_page(&mut h, path, rows);
+            assert!(h.result(91).is_none(), "{kind}, {path}: {:?}", h.result(91));
+        }
+        assert!(h.has_request(PROFILES[0].cancel_path()), "{kind}");
+        finish(&mut h, kind, None);
+    }
+}
+
+fn refused_with(h: &Harness, kind: &str, expected: &str) {
+    assert!(
+        h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::CommandFailed { command:91, error }
+            if error.message == expected
+                && error.kind == Some(safe_cex_engine::ErrorKind::Network)
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+        )),
+        "{kind}: {:?}",
+        h.result(91)
+    );
+    assert!(!h.has_request(PROFILES[0].cancel_path()), "{kind}");
     assert!(
         !h.requests
             .iter()
-            .any(|r| r.method == safe_cex_engine::Method::Post)
+            .any(|r| r.method == safe_cex_engine::Method::Post),
+        "{kind}"
     );
+}
+
+/// AGT-108: an unreadable or unexpected answer says the stop could not be confirmed.
+#[test]
+fn readiness_without_evidence_says_the_edit_was_not_sent_and_to_try_again() {
+    for (kind, what) in [("StopLoss", "stop"), ("TakeProfit", "take profit")] {
+        let expected = format!(
+            "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+        );
+        for answer in [
+            "http",
+            "empty",
+            "other-order",
+            "two-rows",
+            "missing-trigger-source",
+            "null-trigger-source",
+            "missing-kind",
+        ] {
+            let mut h = frame_fed(kind);
+            start(&mut h, kind);
+            match answer {
+                "http" => h.respond("&orderId=partial", 503, "unavailable"),
+                "empty" => page(&mut h, "&orderId=partial", vec![]),
+                "two-rows" => {
+                    let row = original(&h);
+                    page(&mut h, "&orderId=partial", vec![row.clone(), row]);
+                }
+                "other-order" => {
+                    let mut other = original(&h);
+                    other["orderId"] = "other".into();
+                    page(&mut h, "&orderId=partial", vec![other]);
+                }
+                // The edited order's own live row with a field Bybit left out is missing
+                // evidence, not a change: refreshing would show the same stop.
+                missing => {
+                    let mut own = original(&h);
+                    match missing {
+                        "missing-trigger-source" => {
+                            own.as_object_mut().unwrap().remove("triggerBy");
+                        }
+                        "null-trigger-source" => own["triggerBy"] = serde_json::Value::Null,
+                        _ => own["tpslMode"] = "".into(),
+                    }
+                    page(&mut h, "&orderId=partial", vec![own]);
+                }
+            }
+            refused_with(&h, &format!("{kind} {answer}"), &expected);
+        }
+    }
+}
+
+/// AGT-108: the edited order's own row, no longer live as it was, says it changed;
+/// retrying the same edit cannot succeed, so the copy does not say "try again".
+#[test]
+fn readiness_on_a_changed_or_triggered_stop_says_so_instead_of_try_again() {
+    for (kind, what) in [("StopLoss", "stop"), ("TakeProfit", "take profit")] {
+        let expected = format!(
+            "Your {what} changed or already triggered, so the edit wasn't sent. Refresh and check it before editing."
+        );
+        for (axis, change) in [
+            (0, "Triggered"),
+            (0, "price"),
+            (0, "trigger-source"),
+            (0, "Active"),
+            (1, "Filled"),
+            (1, "size"),
+            (1, "Created"),
+            (2, "Cancelled"),
+            (2, "Active"),
+        ] {
+            let mut h = frame_fed(kind);
+            let healthy = original(&h);
+            let mut changed = healthy.clone();
+            match change {
+                "price" => changed["triggerPrice"] = "89".into(),
+                "trigger-source" => changed["triggerBy"] = "LastPrice".into(),
+                "size" => changed["qty"] = "6".into(),
+                status => changed["orderStatus"] = status.into(),
+            }
+            start(&mut h, kind);
+            for (index, path) in [
+                "&orderId=partial",
+                "&openOnly=0&limit=50",
+                "/v5/order/history",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let row = if index == axis {
+                    changed.clone()
+                } else {
+                    healthy.clone()
+                };
+                page(&mut h, path, vec![row]);
+                if index == axis {
+                    break;
+                }
+            }
+            refused_with(&h, &format!("{kind} axis={axis} {change}"), &expected);
+        }
+    }
 }

@@ -1,5 +1,7 @@
+// Rule 5: pin the refusal wording; NotSent and zero venue writes remain required.
 //! Exercises the wire handover, native probe, account admission and manual write together.
 use super::*;
+use crate::delegated::probe::RefusalStage;
 use crate::delegated::{KeyOffer, Sealed};
 use crate::delegated_e2e_io::MockVenue;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -9,11 +11,11 @@ use hpke::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-const USER: &str = "synthetic-tenant:alice";
-const ACCOUNT: &str = "synthetic-e2e";
-const INSTANCE: &str = "e2e-registration";
+pub(super) const USER: &str = "synthetic-tenant:alice";
+pub(super) const ACCOUNT: &str = "synthetic-e2e";
+pub(super) const INSTANCE: &str = "e2e-registration";
 
-fn vectors() -> Vec<Value> {
+pub(super) fn vectors() -> Vec<Value> {
     let data: Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/delegated-handover-vectors.json"
     ))
@@ -22,7 +24,7 @@ fn vectors() -> Vec<Value> {
 }
 
 /// Use the S5 fixture bytes before sealing the same plaintext to a fresh server offer.
-fn plaintext(vector: &Value) -> Vec<u8> {
+pub(super) fn plaintext(vector: &Value) -> Vec<u8> {
     let input = &vector["input"];
     let sealed: Sealed = serde_json::from_value(vector["sealed"].clone()).unwrap();
     let private = <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(
@@ -82,7 +84,7 @@ fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
     )
 }
 
-async fn wire(session: &mut Session, message: Value) {
+pub(super) async fn wire(session: &mut Session, message: Value) {
     session.handle(&message.to_string()).await.unwrap();
 }
 
@@ -104,11 +106,11 @@ async fn next_text(sent: &mut crate::out::Receiver, op: &str) -> String {
     .expect("bounded test reply")
 }
 
-async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
+pub(super) async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
     serde_json::from_str(&next_text(sent, op).await).unwrap()
 }
 
-async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
+pub(super) async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
     let mut loaded = session.take_loaded();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -126,16 +128,28 @@ async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Val
     .expect("loaded snapshot reaches the connection")
 }
 
-async fn sealed_init(
+pub(super) async fn sealed_init(
     session: &mut Session,
     sent: &mut crate::out::Receiver,
     vector: &Value,
     bytes: &[u8],
     venue: &str,
 ) -> Value {
+    // dfecc8bd2: existing cross-venue refusal fixtures retain their Bybit-bound offer.
+    sealed_init_for_offer(session, sent, vector, bytes, venue, "bybit").await
+}
+
+async fn sealed_init_for_offer(
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    vector: &Value,
+    bytes: &[u8],
+    venue: &str,
+    offer_venue: &str,
+) -> Value {
     wire(
         session,
-        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":"bybit"}}}),
+        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":offer_venue}}}),
     )
     .await;
     let response = next(sent, "delegated-key").await;
@@ -153,7 +167,9 @@ async fn sealed_init(
     json!({"t":"init","d":{"accountName":ACCOUNT,"exchangeName":venue,"key":key,"instanceId":INSTANCE,"signingMode":"delegated","sealed":sealed}})
 }
 
-async fn completed(results: &mut mpsc::UnboundedReceiver<JoinCompletion>) -> JoinCompletion {
+pub(super) async fn completed(
+    results: &mut mpsc::UnboundedReceiver<JoinCompletion>,
+) -> JoinCompletion {
     tokio::time::timeout(Duration::from_secs(5), results.recv())
         .await
         .expect("native probe settles")
@@ -181,7 +197,7 @@ async fn assert_empty(session: &Session, registry: &Registry) {
     .expect("temporary probe is released");
 }
 
-fn mock(vector: &Value) -> MockVenue {
+pub(super) fn mock(vector: &Value) -> MockVenue {
     MockVenue::new(
         vector["input"]["key"].as_str().unwrap().into(),
         vector["input"]["secret"].as_str().unwrap().into(),
@@ -292,7 +308,35 @@ async fn delegated_refusal_case(case: &str) {
         complete(&mut session, &mut results).await;
     }
     let refusal = next_text(&mut sent, "error").await;
-    let expected = envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+    let reason_class = if case == "wrong-pair" {
+        envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+    } else {
+        envelope::InitRefusalReasonClass::Unknown
+    };
+    let expected = envelope::with_instance_id(
+        envelope::init_unverified(
+            ACCOUNT,
+            false,
+            reason_class,
+            match case {
+                "wrong-pair" => envelope::InitRefusalMetadata {
+                    error_kind: Some(safe_cex_engine::ErrorKind::AuthInvalid),
+                    venue_code: Some(10003),
+                    stage: Some(RefusalStage::PrivateRead),
+                },
+                "replay" => envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::HandoverAttempt),
+                    ..Default::default()
+                },
+                "other-venue" => envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::VenuePolicy),
+                    ..Default::default()
+                },
+                _ => unreachable!(),
+            },
+        ),
+        INSTANCE,
+    );
     assert_eq!(refusal, expected);
     assert_empty(&session, &registry).await;
     assert!(
@@ -349,8 +393,18 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     crate::delegated::with_test_declaration(declaration, async {
         wire(&mut session, init).await;
         assert_empty(&session, &registry).await;
-        let expected =
-            envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+        let expected = envelope::with_instance_id(
+            envelope::init_unverified(
+                ACCOUNT,
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+                envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::VenuePolicy),
+                    ..Default::default()
+                },
+            ),
+            INSTANCE,
+        );
         assert_eq!(next_text(&mut sent, "error").await, expected);
         assert!(
             session
@@ -379,4 +433,498 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     assert!(account.delegated().is_some() && account.link.is_none());
     assert!(venue.observed.lock().unwrap().reads > 0);
     session.close();
+}
+
+#[cfg(target_os = "linux")]
+async fn hyperliquid_protected_placement(typed: bool, explicit_id: bool) {
+    hyperliquid_placement(typed, explicit_id, None).await;
+}
+
+/// `caller_id` sends a typed v1 `place` action carrying that caller ID instead.
+#[cfg(target_os = "linux")]
+async fn hyperliquid_placement(typed: bool, explicit_id: bool, caller_id: Option<&str>) {
+    let material = format!("0x{:064x}", 7);
+    let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
+    let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
+    let vector = json!({"input":{"key":signer}});
+    let venue = MockVenue::for_hyperliquid(wallet.clone(), material.clone());
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    session.order_frames_enabled = typed;
+    let mut results = session.take_verified();
+    let bytes = serde_json::to_vec(&json!({"key":signer,"secret":material})).unwrap();
+    let mut init = sealed_init_for_offer(
+        &mut session,
+        &mut sent,
+        &vector,
+        &bytes,
+        "hyperliquid",
+        "hyperliquid",
+    )
+    .await;
+    init["d"]["hyperliquidSignerAddress"] = signer.into();
+    init["d"]["applicationId"] = wallet.into();
+    wire(&mut session, init).await;
+    let result = completed(&mut results).await;
+    assert!(result.candidate.is_ok());
+    assert!(result.probe.as_ref().unwrap().permit.is_ok());
+    session.verification_completed(result).await.unwrap();
+    let account = registry
+        .held(USER, ACCOUNT, session.socket)
+        .expect("proved handover admitted");
+    assert!(account.link.is_none());
+    let resident = account.delegated().unwrap();
+    assert!(
+        resident
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .credential_absent()
+    );
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("real native startup completes before placement");
+    assert!(venue.observed.lock().unwrap().reads > 0);
+    assert!(venue.observed.lock().unwrap().writes.is_empty());
+    if let Some(caller) = caller_id {
+        let epoch = format!("{:012x}", crate::accounts::now_ms());
+        let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
+        let action = json!({"kind":"place","orders":[{"symbol":"BTC-PERP","type":"limit",
+            "side":"buy","amount":0.001,"price":55000,"clientOrderId":caller}]});
+        let fingerprint =
+            crate::order_contract::action_wire_fingerprint(ACCOUNT, &intent, &action, 1).unwrap();
+        wire(
+            &mut session,
+            json!({"t":"order.action","d":{"version":1,"accountName":ACCOUNT,
+            "instanceId":INSTANCE,"intentId":intent,"seq":1,"ageMs":0,"fingerprint":fingerprint,
+            "action":action}}),
+        )
+        .await;
+        let ack = hyperliquid_order_frame(&mut sent, "order.actionAck").await;
+        assert_eq!(ack["d"]["received"], true);
+        let outcome = hyperliquid_order_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(outcome["d"]["outcome"], "applied", "{outcome}");
+        assert_eq!(
+            outcome["d"]["result"],
+            json!({"kind":"place","orderIds":["77"]})
+        );
+        // AGT-42: the signed native order carries the cloid the caller recomputes.
+        assert_eq!(
+            venue.observed.lock().unwrap().writes[0]["action"]["orders"][0]["c"],
+            crate::order_contract::hyperliquid_cloid(caller)
+        );
+    } else if typed {
+        let epoch = format!("{:012x}", crate::accounts::now_ms());
+        let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
+        let mut params =
+            json!({"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000});
+        let cloid = format!("0x{}", intent.replace('-', ""));
+        for (case, message) in [
+            ("conflict", "not sent: client order id differs"),
+            ("venue-id", "not sent: client order id differs"),
+            ("age", "not sent: expired"),
+            ("fingerprint", "not sent: intent fingerprint differs"),
+        ] {
+            let mut refused_params = params.clone();
+            if case == "conflict" {
+                refused_params["clientOrderId"] = "unrelated-id".into();
+            } else if case == "venue-id" {
+                refused_params["clientOrderId"] = cloid.clone().into();
+            }
+            let fingerprint =
+                crate::order_contract::fingerprint(ACCOUNT, &intent, &refused_params, 1).unwrap();
+            if case == "fingerprint" {
+                refused_params["amount"] = json!(0.002);
+            }
+            wire(&mut session, json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+                "intentId":intent,"params":refused_params,"seq":1,"ageMs":if case == "age" {10000} else {0},"fingerprint":fingerprint}})).await;
+            let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["received"], false, "{case}");
+            let refused = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(refused["d"]["error"]["outcome"], "notSent", "{case}");
+            assert_eq!(refused["d"]["error"]["message"], message, "{case}");
+            assert!(venue.observed.lock().unwrap().writes.is_empty(), "{case}");
+        }
+        if explicit_id {
+            params["clientOrderId"] = intent.clone().into();
+        }
+        let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
+        wire(
+            &mut session,
+            json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+            "intentId":intent,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}}),
+        )
+        .await;
+        let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
+        assert_eq!(ack["d"]["received"], true);
+        assert_eq!(ack["d"]["intentId"], intent);
+        let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+        // #3623 pinned UUID refusal; the follow-up must map only the venue cloid.
+        assert_eq!(outcome["d"]["outcome"], "placed", "{outcome}");
+        assert_eq!(outcome["d"]["venueOrderId"], "77");
+        assert_eq!(outcome["d"]["intentId"], intent);
+        assert_eq!(outcome["d"]["clientOrderId"], cloid);
+        assert_eq!(outcome["d"]["instanceId"], INSTANCE);
+        assert_eq!(
+            venue.observed.lock().unwrap().writes[0]["action"]["orders"][0]["c"],
+            cloid
+        );
+    } else {
+        wire(&mut session, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"hl-manual","method":"placeOrders","args":[[{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000}]]}}})).await;
+        let reply = next(&mut sent, "callMethod:done").await;
+        assert_eq!(
+            reply["d"]["data"],
+            json!({"requestId":"hl-manual","success":true,"result":["77"]})
+        );
+    }
+    {
+        let observed = venue.observed.lock().unwrap();
+        assert_eq!(observed.writes.len(), 1, "no fallback or duplicate send");
+        let order = &observed.writes[0]["action"]["orders"][0];
+        assert_eq!(order["a"], 0);
+        assert_eq!(order["b"], true);
+        assert_eq!(order["s"], "0.001");
+        assert_eq!(order["p"], "55000");
+    }
+    session.close();
+}
+
+#[cfg(target_os = "linux")]
+async fn hyperliquid_order_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(frame["t"], "sign-req");
+            if frame["t"] == kind {
+                return frame;
+            }
+        }
+        panic!("missing typed Hyperliquid receipt")
+    })
+    .await
+    .expect("bounded native order receipt")
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn delegated_hyperliquid_protected_identity_survives_session_construction() {
+    hyperliquid_protected_placement(false, false).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_typed_submit_maps_uuid_before_protected_send() {
+    hyperliquid_protected_placement(true, false).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_typed_submit_maps_explicit_intent_id() {
+    hyperliquid_protected_placement(true, true).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_place_action_derives_the_caller_cloid() {
+    hyperliquid_placement(true, false, Some("ts-caller-1")).await;
+    hyperliquid_placement(true, false, Some("0x0123456789abcdef0123456789abcdef")).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+async fn protected_text_venue_placement(name: &'static str) {
+    let (venue, seen) = MockVenue::for_placement(name);
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    session.order_frames_enabled = true;
+    let mut results = session.take_verified();
+    let vector = json!({"input":{"key":"synthetic-key"}});
+    let bytes = serde_json::to_vec(&json!({"key":"synthetic-key","secret":"synthetic-material","passphrase":"synthetic-passphrase"})).unwrap();
+    let init = sealed_init_for_offer(&mut session, &mut sent, &vector, &bytes, name, name).await;
+    wire(&mut session, init).await;
+    let result = completed(&mut results).await;
+    assert!(result.candidate.is_ok());
+    assert!(result.probe.as_ref().unwrap().permit.is_ok(), "{name}");
+    session.verification_completed(result).await.unwrap();
+    let account = registry.held(USER, ACCOUNT, session.socket).unwrap();
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(seen.lock().unwrap().signed_reads > 0);
+    let stamp = format!("{:012x}", crate::accounts::now_ms());
+    let intent = format!("{}-{}-7101-8101-010101010101", &stamp[..8], &stamp[8..]);
+    // 655e5492a isolated BloFin's native contract units; OKX also needs one
+    // contract so size rounding cannot hide the client-ID boundary.
+    let params = json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":if matches!(name, "blofin" | "okx") {1.0} else {0.001},"price":55000});
+    let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
+    wire(
+        &mut session,
+        json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+        "intentId":intent,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}}),
+    )
+    .await;
+    assert_eq!(
+        hyperliquid_order_frame(&mut sent, "order.ack").await["d"]["received"],
+        true
+    );
+    let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+    assert_eq!(outcome["d"]["outcome"], "placed", "{name}: {outcome}");
+    // #3630 retains the adapter's existing result: Binance PM returns its
+    // client identity here, rather than inventing a native ID from the fake ACK.
+    let native_result = if name == "binancepm" {
+        intent.replace('-', "")
+    } else {
+        "77".into()
+    };
+    assert_eq!(outcome["d"]["venueOrderId"], native_result);
+    assert_eq!(outcome["d"]["intentId"], intent);
+    assert_eq!(outcome["d"]["clientOrderId"], intent.replace('-', ""));
+    assert_eq!(outcome["d"]["instanceId"], INSTANCE);
+    assert_eq!(venue.observed.lock().unwrap().writes.len(), 1);
+    session.close();
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_bitget_protected_placement() {
+    protected_text_venue_placement("bitget").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_okx_protected_placement() {
+    protected_text_venue_placement("okx").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_blofin_protected_placement() {
+    protected_text_venue_placement("blofin").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_binancepm_protected_placement() {
+    protected_text_venue_placement("binancepm").await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+async fn mobile_order_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(frame["t"], "sign-req");
+            if frame["d"]["op"] == "error" {
+                println!("SYNTHETIC_MOBILE_NONRECEIPT={frame}");
+            }
+            if frame["t"] == kind {
+                return frame;
+            }
+        }
+        panic!("missing typed mobile receipt")
+    })
+    .await
+    .expect("bounded native mobile receipt")
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+async fn bybit_mobile_receipt(case: &str) {
+    let vector = vectors().remove(0);
+    let bytes = plaintext(&vector);
+    let venue = mock(&vector);
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    session.order_frames_enabled = true;
+    let mut results = session.take_verified();
+    let init = sealed_init(&mut session, &mut sent, &vector, &bytes, "bybit").await;
+    wire(&mut session, init).await;
+    complete(&mut session, &mut results).await;
+    let account = registry.held(USER, ACCOUNT, session.socket).unwrap();
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let stamp = format!("{:012x}", crate::accounts::now_ms());
+    let intent = format!("{}-{}-7101-8101-010101010101", &stamp[..8], &stamp[8..]);
+    let mut params = json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":0.01,"price":55000,"reduceOnly":true});
+    let protective = matches!(case, "stop" | "take-profit");
+    if protective {
+        params["type"] = if case == "stop" {
+            "stop_market"
+        } else {
+            "take_profit_market"
+        }
+        .into();
+        params["triggerPrice"] = 55000.into();
+    }
+    if case == "missing-type" {
+        params.as_object_mut().unwrap().remove("type");
+    }
+    session.order_frames_enabled = case != "disabled";
+    let expired_token = case.starts_with("expired-token");
+    let is_action = !matches!(
+        case,
+        "submit" | "stop" | "take-profit" | "expired-token-submit" | "missing-type"
+    );
+    let action = json!({"kind":"place","orders":[params.clone()]});
+    let fp = if is_action {
+        crate::order_contract::action_wire_fingerprint(ACCOUNT, &intent, &action, 1).unwrap()
+    } else {
+        crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap()
+    };
+    let mut data = json!({"accountName":ACCOUNT,"instanceId":if case=="binding" {"stale-registration"} else {INSTANCE},"intentId":intent,"seq":1,"ageMs":if case=="deadline" {9999.999999} else {0.0},"fingerprint":fp});
+    if is_action {
+        data["version"] = 1.into();
+        data["action"] = action;
+    } else {
+        data["params"] = params;
+    }
+    if expired_token {
+        session.identity.token.as_mut().unwrap().1 = crate::accounts::now_ms().saturating_sub(1);
+    }
+    wire(
+        &mut session,
+        json!({"t":if is_action {"order.action"} else {"order.submit"},"d":data}),
+    )
+    .await;
+    if expired_token {
+        assert!(venue.observed.lock().unwrap().writes.is_empty());
+    }
+    let ack = mobile_order_frame(
+        &mut sent,
+        if is_action {
+            "order.actionAck"
+        } else {
+            "order.ack"
+        },
+    )
+    .await;
+    let receipt = mobile_order_frame(
+        &mut sent,
+        if is_action {
+            "order.actionOutcome"
+        } else {
+            "order.outcome"
+        },
+    )
+    .await;
+    println!("SYNTHETIC_MOBILE_{case}_ACK={ack}");
+    println!("SYNTHETIC_MOBILE_{case}_OUTCOME={receipt}");
+    assert_eq!(receipt["d"]["intentId"], intent);
+    if expired_token || matches!(case, "deadline" | "disabled" | "binding" | "missing-type") {
+        assert_eq!(receipt["d"]["outcome"], "refused", "{case}: {receipt}");
+        assert_eq!(receipt["d"]["error"]["outcome"], "notSent");
+        let reason = receipt["d"]["error"]["message"].as_str().unwrap();
+        assert!(reason.contains(if expired_token {
+            crate::auth::TOKEN_EXPIRED
+        } else if case == "deadline" {
+            "expired"
+        } else if case == "missing-type" {
+            "invalid command"
+        } else {
+            "Order changes aren’t available on this account connection"
+        }));
+        assert!(venue.observed.lock().unwrap().writes.is_empty());
+    } else {
+        assert_eq!(ack["d"]["received"], true);
+        assert_eq!(
+            receipt["d"]["outcome"],
+            if is_action { "applied" } else { "placed" },
+            "{case}: {receipt}"
+        );
+        if is_action {
+            assert_eq!(
+                receipt["d"]["result"]["orderIds"],
+                json!(["synthetic-order"])
+            );
+        } else {
+            assert_eq!(receipt["d"]["venueOrderId"], "synthetic-order");
+        }
+        let observed = venue.observed.lock().unwrap();
+        assert_eq!(observed.writes.len(), 1);
+        if protective {
+            assert!(observed.writes[0].get("orderLinkId").is_none());
+            assert!(receipt["d"]["clientOrderId"].is_null());
+        }
+    }
+    session.close();
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_submit_control() {
+    bybit_mobile_receipt("submit").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_fresh_action_control() {
+    bybit_mobile_receipt("fresh").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_deadline_before_dispatch_is_not_sent() {
+    bybit_mobile_receipt("deadline").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_disabled_control() {
+    bybit_mobile_receipt("disabled").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_binding_control() {
+    bybit_mobile_receipt("binding").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_stop_omits_unsupported_caller_id() {
+    bybit_mobile_receipt("stop").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_take_profit_omits_unsupported_caller_id() {
+    bybit_mobile_receipt("take-profit").await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_expired_token_submit_is_not_sent() {
+    bybit_mobile_receipt("expired-token-submit").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_expired_token_action_is_not_sent() {
+    bybit_mobile_receipt("expired-token-action").await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_missing_type_refuses_without_panic_or_write() {
+    bybit_mobile_receipt("missing-type").await;
 }

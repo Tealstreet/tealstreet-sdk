@@ -1,4 +1,3 @@
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
@@ -6,10 +5,12 @@ import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../t
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 const MARKET: Market = {
   id: 'BTC-USDT',
@@ -51,7 +52,8 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
@@ -62,12 +64,17 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store, () => ({ loaded: nativeLoaded }));
-  store.update({
-    markets: [MARKET],
-    loaded: { ...nativeLoaded },
-  });
+  store.apply(
+    nativeFixture(
+      {
+        markets: [MARKET],
+        loaded: { ...nativeLoaded },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     'apexomni',
     {
@@ -199,7 +206,8 @@ describe('Rust ApeX Omni SDK boundary', () => {
 
   it('fetches identity without an Omni seed or loaded account while sharing concurrent startup', async () => {
     const { exchange, store, commands, result, construct, start, setNativeLoaded } = setup(
-      { omniKeySeed: undefined }, { balance: false, orders: false, positions: false },
+      { omniKeySeed: undefined },
+      { balance: false, orders: false, positions: false },
     );
     const startup = exchange.start();
     void startup.catch(() => {});
@@ -221,7 +229,8 @@ describe('Rust ApeX Omni SDK boundary', () => {
 
   it('fetches identity with API credentials while every account section remains unloaded', async () => {
     const { exchange, store, commands, result, start } = setup(
-      { omniKeySeed: undefined }, { markets: false, tickers: false, balance: false, orders: false, positions: false },
+      { omniKeySeed: undefined },
+      { markets: false, tickers: false, balance: false, orders: false, positions: false },
     );
     result.mockReturnValue({ userId: 'account-id', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });

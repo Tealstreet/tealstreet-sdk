@@ -15,6 +15,11 @@ impl Session {
                 .as_ref()
                 .is_some_and(|id| id.len() > 128)
         {
+            self.audit_order_refusal(
+                &name,
+                request.action["kind"].as_str().unwrap_or("order.action"),
+                "not sent: invalid action binding",
+            );
             out.send(envelope::error(
                 Some(&name),
                 "not sent: invalid action binding",
@@ -24,7 +29,7 @@ impl Session {
         let refused = if request.version != 1 {
             Some("not sent: unsupported action version")
         } else if !self.order_admitted(&name, request.instance_id.as_deref()) {
-            Some("not sent: account not admitted for actions")
+            Some("Order changes aren’t available on this account connection")
         } else if let Err(error) =
             crate::order_contract::check_key(&request.intent_id, crate::accounts::now_ms())
         {
@@ -47,29 +52,61 @@ impl Session {
             }
         };
         if let Some(message) = refused {
+            let reason = if message == "Order changes aren’t available on this account connection"
+            {
+                self.order_admission_refusal(&name, request.instance_id.as_deref())
+                    .unwrap_or(message)
+            } else {
+                message
+            };
+            self.audit_order_refusal(
+                &name,
+                request.action["kind"].as_str().unwrap_or("order.action"),
+                reason,
+            );
             order_actions::refuse(&out, &name, &id, request.seq, message);
             return;
         }
         let Ok(decoded) = order_actions::decode_request(text) else {
+            self.audit_order_refusal(
+                &name,
+                request.action["kind"].as_str().unwrap_or("order.action"),
+                "unsupported action schema",
+            );
             order_actions::unsupported(&out, &name, &id, request.seq);
             return;
         };
         let action = decoded.action;
-        let (method, args) = match action.call() {
+        let (method, mut args) = match action.call() {
             Ok(call) => call,
-            Err(_) => {
-                order_actions::unsupported(&out, &name, &id, request.seq);
+            Err(message) => {
+                self.audit_order_refusal(&name, action.kind(), message);
+                if matches!(&action, order_actions::Action::Algo { op, .. } if matches!(op.as_str(), "chaser:amend" | "twap:amend"))
+                {
+                    order_actions::unsupported_message(&out, &name, &id, request.seq, message);
+                } else {
+                    order_actions::unsupported(&out, &name, &id, request.seq);
+                }
                 return;
             }
         };
+        // After the fingerprint and schema checks: both bind the caller's own ID.
+        if matches!(
+            action,
+            order_actions::Action::Place { .. } | order_actions::Action::Close { .. }
+        ) {
+            crate::order_contract::venue_caller_ids(&self.joined[&name].account.venue, &mut args);
+        }
         let Some(deadline) =
             order_actions::ActionDeadline::new(&request.intent_id, request.age_ms, arrived)
         else {
+            self.audit_order_refusal(&name, action.kind(), "not sent: expired");
             order_actions::refuse(&out, &name, &id, request.seq, "not sent: expired");
             return;
         };
         if let crate::order_actions::Action::Algo { op, data } = &action {
             if !crate::full_writes::algo_account_matches(op, data, &name) {
+                self.audit_order_refusal(&name, action.kind(), "not sent: algo account differs");
                 order_actions::refuse(
                     &out,
                     &name,
@@ -89,6 +126,7 @@ impl Session {
             )
             .with_kind("algo");
             let Some(algos) = self.joined[&name].account.algos.clone() else {
+                self.audit_order_refusal(&name, action.kind(), "Algo host unavailable");
                 receipt.finish(Err(
                     json!({"message":"Algo host unavailable","outcome":"notSent"}),
                 ));
@@ -115,6 +153,7 @@ impl Session {
                 ..
             } = error.0
             {
+                self.audit_order_refusal(&name, action.kind(), "Algo host unavailable");
                 receipt.finish(Err(
                     json!({"message":"Algo host unavailable","outcome":"notSent"}),
                 ));
@@ -147,6 +186,11 @@ impl Session {
             || cancel.intent_id.len() > 128
             || cancel.instance_id.as_ref().is_some_and(|id| id.len() > 128)
         {
+            self.audit_order_refusal(
+                &cancel.account_name,
+                "order.actionCancelQueued",
+                "Invalid action queue cancellation binding",
+            );
             out.send(envelope::error(
                 Some(&cancel.account_name),
                 "Invalid action queue cancellation binding",
@@ -170,6 +214,11 @@ impl Session {
         {
             // Reject this frame, not the original business action. A malformed
             // queue-cancel supplies no whole-intent no-handoff evidence.
+            self.audit_order_refusal(
+                &cancel.account_name,
+                "order.actionCancelQueued",
+                "Invalid action queue cancellation",
+            );
             out.send(envelope::error(
                 Some(&cancel.account_name),
                 "Invalid action queue cancellation",
@@ -185,7 +234,7 @@ impl Session {
             cancel.seq,
             "",
             Err(
-                json!({"message":"Queue cancellation must be resolved by the router","outcome":"unknown"}),
+                json!({"message":"The queued order couldn’t be cancelled here. Cancel it from your pending orders.","outcome":"unknown"}),
             ),
         );
     }
@@ -206,6 +255,10 @@ impl Session {
             return;
         };
         let account = self.joined[name].account.clone();
+        let label = self.joined[name]
+            .out
+            .account_label(&account.name)
+            .to_owned();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
             name.to_owned(),
@@ -216,6 +269,7 @@ impl Session {
         )
         .with_kind(kind);
         let Some(algos) = account.algos.clone() else {
+            self.audit_order_refusal(name, kind, "Nuke is unavailable for this account");
             receipt.finish(Err(
                 json!({"message":"Nuke is unavailable for this account","outcome":"notSent"}),
             ));
@@ -229,21 +283,37 @@ impl Session {
             let loaded =
                 methods::until_nuke_can_see(&account.handle, mode, methods::READ_WAIT).await;
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
+                crate::audit::pre_dispatch_refused(Some(&account.venue), kind, message);
                 receipt.finish(Err(json!({"message":message,"outcome":"unknown"})));
                 return;
             }
             if receipt.expired() {
+                crate::audit::pre_dispatch_refused(
+                    Some(&account.venue),
+                    kind,
+                    "This action expired before it could finish. Check your open orders and positions before trying again.",
+                );
                 receipt.finish(Err(order_actions::expired_outcome()));
                 return;
             }
-            if !receipt.active()
-                || !account.running.io_allowed()
-                || !registry.holds(&account, socket)
-            {
-                receipt.finish(Err(json!({"message":"Action registration retired before dispatch","outcome":"notSent"})));
+            let refusal = if !receipt.active() {
+                Some(
+                    "The account connection changed before this action could finish. Check your open orders and positions before trying again.",
+                )
+            } else if !account.running.io_allowed() {
+                Some("io_fenced")
+            } else if !registry.holds_label(&account, socket, &label) {
+                Some("holder_changed")
+            } else {
+                None
+            };
+            if let Some(reason) = refusal {
+                crate::audit::pre_dispatch_refused(Some(&account.venue), kind, reason);
+                receipt.finish(Err(json!({"message":"This action couldn’t start because the account connection changed","outcome":"notSent"})));
                 return;
             }
             if let Err(error) = loaded {
+                crate::audit::pre_dispatch_refused(Some(&account.venue), kind, &error.message);
                 receipt.finish(Err(json!({"message":error.message,"outcome":"notSent"})));
                 return;
             }
@@ -256,6 +326,11 @@ impl Session {
                 ..
             } = error.0
             {
+                crate::audit::pre_dispatch_refused(
+                    Some(&account.venue),
+                    kind,
+                    "Nuke is unavailable for this account",
+                );
                 receipt.finish(Err(
                     json!({"message":"Nuke is unavailable for this account","outcome":"notSent"}),
                 ));

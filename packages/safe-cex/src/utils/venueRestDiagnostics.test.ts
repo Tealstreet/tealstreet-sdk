@@ -1,19 +1,27 @@
+import type { AxiosAdapter } from 'axios';
+import type { RemoteSigner } from '../types';
+
+import { AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createRemoteSigningAdapter } from '../remoteSigningAdapter';
-
 import {
   drainVenueRestFailureSamples,
   getVenueRestStats,
+  markRestProxyHeader,
   markRestRequestStart,
   markRestSigned,
-  markRestProxyHeader,
   noteRestFailure,
   noteRestSuccess,
   resetVenueRestDiagnostics,
 } from './venueRestDiagnostics';
 
-const statsFor = (exchange: string) => getVenueRestStats()[exchange] as Record<string, any>;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const requireRecord = (value: unknown) => {
+  if (!isRecord(value)) throw new Error('Expected a diagnostics record');
+  return value;
+};
+const statsFor = (exchange: string) => requireRecord(getVenueRestStats()[exchange]);
 
 describe('venueRestDiagnostics', () => {
   beforeEach(() => {
@@ -129,12 +137,12 @@ describe('venueRestDiagnostics', () => {
   // length rule ate the words that tell them apart.
   it('keeps ordinary long words that are not secrets', () => {
     noteRestFailure('bybit', new Error('WebSocket disconnected — signing aborted'));
-    noteRestFailure('bybit', new Error('Remote signer unavailable — WebSocket disconnected'));
+    noteRestFailure('bybit', new Error('Signing isn’t available for this account — WebSocket disconnected'));
 
     const samples = drainVenueRestFailureSamples();
     expect(samples[0].errorMessage).toBe('WebSocket disconnected — signing aborted');
-    expect(Object.keys(statsFor('bybit').errorCounts).sort()).toEqual([
-      'Remote signer unavailable — WebSocket disconnected',
+    expect(Object.keys(requireRecord(statsFor('bybit').errorCounts)).sort()).toEqual([
+      'Signing isn’t available for this account — WebSocket disconnected',
       'WebSocket disconnected — signing aborted',
     ]);
   });
@@ -144,14 +152,14 @@ describe('venueRestDiagnostics', () => {
   it('keeps the discriminator when it falls late in a prefixed message', () => {
     noteRestFailure(
       'bybit',
-      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone <5s)'),
+      new Error('[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone <5s)'),
     );
     noteRestFailure(
       'bybit',
-      new Error('[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone >10m)'),
+      new Error('[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone >10m)'),
     );
 
-    expect(Object.keys(statsFor('bybit').errorCounts)).toHaveLength(2);
+    expect(Object.keys(requireRecord(statsFor('bybit').errorCounts))).toHaveLength(2);
   });
 
   it('still redacts a mixed letter-and-digit token', () => {
@@ -265,14 +273,15 @@ describe('venueRestDiagnostics', () => {
     noteRestFailure('bybit', new Error('Remote signing failed: request 8471 timed out after 15000ms'));
     noteRestFailure('bybit', new Error('Remote signing failed: request 9302 timed out after 15000ms'));
 
-    expect(Object.values(statsFor('bybit').errorCounts)).toEqual([2]);
+    expect(Object.values(requireRecord(statsFor('bybit').errorCounts))).toEqual([2]);
   });
 
   it('bounds the error key map', () => {
-    for (let i = 0; i < 40; i++) noteRestFailure('bybit', new Error(`distinct failure kind ${String.fromCharCode(65 + i)}`));
+    for (let i = 0; i < 40; i++)
+      noteRestFailure('bybit', new Error(`distinct failure kind ${String.fromCharCode(65 + i)}`));
 
-    expect(Object.keys(statsFor('bybit').errorCounts).length).toBeLessThanOrEqual(21);
-    expect(statsFor('bybit').errorCounts.other).toBeGreaterThan(0);
+    expect(Object.keys(requireRecord(statsFor('bybit').errorCounts)).length).toBeLessThanOrEqual(21);
+    expect(requireRecord(statsFor('bybit').errorCounts).other).toBeGreaterThan(0);
   });
 
   // A venue error that DID answer already has a status and a body; counting its
@@ -337,16 +346,31 @@ describe('venueRestDiagnostics through the remote signing adapter', () => {
   });
 
   it('carries the start and signing stamps onto response.config', async () => {
-    const signer = {
-      sign: async (request: any) => ({
-        config: { headers: { 'X-BAPI-TIMESTAMP': '1000' }, url: request.config.url, params: {}, data: undefined },
-      }),
+    const signer: RemoteSigner = {
+      isAvailable: () => true,
+      onAvailabilityChange: () => () => {},
+      sign: async (request) => {
+        if (!request.config) throw new Error('Expected an HTTP signing config');
+        return {
+          id: request.id,
+          config: { headers: { 'X-BAPI-TIMESTAMP': '1000' }, url: request.config.url, params: {}, data: undefined },
+        };
+      },
     };
-    const innerAdapter = async (config: any) => ({ status: 200, data: {}, headers: {}, config });
-    const adapter = createRemoteSigningAdapter(signer as any, 'bybit' as any, () => innerAdapter as any, 'acct');
+    const innerAdapter: AxiosAdapter = async (config) => ({
+      status: 200,
+      statusText: 'OK',
+      data: {},
+      headers: {},
+      config,
+    });
+    const adapter = createRemoteSigningAdapter(signer, 'bybit', () => innerAdapter, 'acct');
 
-    const config = markRestRequestStart({ method: 'GET', url: '/v5/position/list', headers: {} }, 1_000);
-    const response = await adapter(config as any);
+    const config = markRestRequestStart(
+      { method: 'GET', url: '/v5/position/list', headers: new AxiosHeaders() },
+      1_000,
+    );
+    const response = await adapter(config);
 
     noteRestSuccess('bybit', response, 2_000);
 
@@ -357,7 +381,7 @@ describe('venueRestDiagnostics through the remote signing adapter', () => {
   // A backgrounded phone's signer is gone for minutes at a time, and every poll in
   // that window used to file a "venue REST failure" the venue never saw.
   it.each([
-    '[bybit] Request setup error: Remote signer unavailable — WebSocket disconnected (gone <5s)',
+    '[bybit] Request setup error: Signing isn’t available for this account — WebSocket disconnected (gone <5s)',
     'WebSocket disconnected — signing aborted',
     'Signing request abc timed out after 15000ms',
   ])('does not count an unsent signing failure as a venue failure: %s', (message) => {

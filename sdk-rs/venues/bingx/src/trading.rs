@@ -4,6 +4,8 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/diagnostics.rs"]
+mod diagnostics;
 #[path = "trading/reference.rs"]
 mod reference;
 pub use reference::ReferenceRead;
@@ -43,10 +45,12 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
-const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_WORDS: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
+    shape: Option<safe_cex_engine::error::bingx_write_shape::BingxWriteShape>,
     write: usize,
     command: CommandId,
     call: Call,
@@ -201,6 +205,7 @@ struct Observation {
 }
 #[derive(Default)]
 pub struct Trading {
+    replacement_ids: VecDeque<String>,
     jobs: HashMap<CommandId, Run>,
     references: HashMap<String, protection::References>,
     /// Retired settings writes whose metadata custody finishes at the next callback.
@@ -459,7 +464,7 @@ fn unknown(message: impl Into<String>) -> VenueError {
 }
 fn present_unknown(mut error: VenueError, note: Option<&str>) -> VenueError {
     if error.venue_message.is_none() {
-        error.venue_message = Some(error.message.clone().into_boxed_str());
+        error.venue_message = Some(error.message.clone().into_boxed_str().into());
     }
     error.message = match note {
         Some(note) => format!("{UNKNOWN_WORDS}. {note}"),
@@ -766,11 +771,19 @@ impl Trading {
                 && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
                     || run.job.restoring);
             let restoring = run.job.restoring;
+            let shape = diagnostics::capture(
+                cx,
+                &step,
+                run.job.guard.as_ref(),
+                &self.observed,
+                &self.replacement_ids,
+            );
             cx.command_progress(command, step.receipts);
             self.queue(
                 cx,
                 credentials,
                 Request {
+                    shape,
                     write,
                     command,
                     call: step.call,
@@ -1080,11 +1093,11 @@ impl Trading {
         };
         let decoded = if guarded && (rate_limited || half_refused || missing_cancel_proof) {
             Err(unknown(if rate_limited {
-                "BingX outcome unknown, check Open Orders"
+                "BingX didn’t confirm this change. Check your open orders before trying again."
             } else if half_refused {
                 "BingX replacement was refused after its target was canceled"
             } else {
-                "BingX cancellation did not prove the target; outcome unknown, check Open Orders"
+                "BingX didn’t confirm this order’s cancellation. Check your open orders before trying again."
             }))
         } else {
             decoded
@@ -1164,7 +1177,7 @@ impl Trading {
                             )
                     });
                 let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
-                message = format!("{lost}: {message}");
+                message = safe_cex_engine::error::with_detail(&lost, &message);
             }
             let native = if half_refused {
                 Some(Native {
@@ -1228,6 +1241,13 @@ impl Trading {
                     fact.verdict(),
                     Verdict::Refused(_) | Verdict::RefusedResend(_)
                 );
+            let fact = if fact.error().kind == Some(ErrorKind::InvalidInput)
+                || envelope.as_ref().is_ok_and(|e| e.code == 109400)
+            {
+                fact.with_bingx_write_shape(request.shape)
+            } else {
+                fact
+            };
             let error = fact.error().clone();
             let grant = match cx.http_write_fact(
                 &request.context,
@@ -1282,6 +1302,16 @@ impl Trading {
             && cx.validate_http_write_effects(&request.context).is_ok()
         {
             apply(self, cx, &request.call, canceled);
+            if let Ok(ids) = &result
+                && (matches!(request.call, Call::Replace { .. })
+                    || (matches!(request.call, Call::Place)
+                        && self
+                            .jobs
+                            .get(&request.command)
+                            .is_some_and(|run| run.job.replaces_cancelled.is_some() || restoring)))
+            {
+                diagnostics::remember(&mut self.replacement_ids, ids);
+            }
             on_effects(cx, &request);
         }
         let Some(run) = self
@@ -2309,6 +2339,7 @@ pub(crate) fn evidence(
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod reply_tests {
     #[test]

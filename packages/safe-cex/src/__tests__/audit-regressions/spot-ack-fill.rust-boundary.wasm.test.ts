@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -118,8 +118,8 @@ it.each([false, true])(
     };
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => transport);
-    const exchange = new RustEngineExchange('binancespot', { key: 'key', secret: 'secret' }, new DefaultStore());
-    const main = new BaseExchange('binancespot', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new RustEngineExchange('binancespot', { key: 'key', secret: 'secret' }, new FrameStore());
+    const main = new BaseExchange('binancespot', { key: '', secret: '' }, new FrameStore());
     const message = (event: unknown) => {
       const receive = privateMessage;
       if (receive === undefined) throw new Error('Expected the private message handler');
@@ -187,7 +187,8 @@ it.each([false, true])(
         expect(mainFills).toHaveLength(1);
       });
       const expected = [
-        { id: 'maker', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 },
+        // AGT-83: the native trade id `t` is the fill identity; orderId keeps attribution.
+        { id: '100', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 },
       ];
       expect(workerFills).toEqual(expected);
       expect(mainFills).toEqual(expected);

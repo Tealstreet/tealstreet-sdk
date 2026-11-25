@@ -127,15 +127,43 @@ async fn local_proof_other_valid_key_cannot_touch_resident() {
 
 #[tokio::test]
 async fn local_proof_unactivated_venue_stays_unavailable_without_fixture_binding() {
-    assert!(!crate::delegated::probe::cosigned_ready("hyperliquidspot"));
+    // SDK #3578 moves this unactivated-venue negative from Hyperliquid Spot to
+    // TxFlow, which stays excluded while the M32 venue proofs activate.
+    assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+        exchange_name: "txflow".into(),
+        ..init()
+    }));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);
         let mut payload = init();
-        payload.exchange_name = "hyperliquidspot".into();
-        session.init(payload).await.unwrap();
+        payload.exchange_name = "txflow".into();
+        // TxFlow's beta roster refuses wire init earlier; exercise the independent proof gate.
+        session.admission_init(payload);
         let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(frame["d"]["data"][1]["kind"], "proof-unavailable");
+        assert!(session.pending_verifications.is_empty());
+        assert!(session.joined.is_empty());
+        assert_eq!(registry.account_count(), 0);
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn local_proof_txflow_wire_init_keeps_its_earlier_beta_roster_refusal() {
+    assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+        exchange_name: "txflow".into(),
+        ..init()
+    }));
+    for owner in ["alice", "bob"] {
+        let registry = registry(owner == "bob");
+        let (mut session, mut sent) = user_session(registry.clone(), owner);
+        let mut payload = init();
+        payload.exchange_name = "txflow".into();
+        session.init(payload).await.unwrap();
+        let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(frame["d"]["data"][1]["kind"], "unsupported");
+        assert_eq!(frame["d"]["data"][1]["outcome"], "notSent");
         assert!(session.pending_verifications.is_empty());
         assert!(session.joined.is_empty());
         assert_eq!(registry.account_count(), 0);

@@ -178,7 +178,8 @@ test('an owner hook without a current owner starts algos unowned, never legacy',
   for (const owner of [null, { ownerId: 'A', generation: 7 }]) {
     const calls = [];
     const { host } = rig({}, { algoStart: () => calls.push('legacy') });
-    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && /predates TWAP ownership/.test(error.message));
+    // Rule 5 (Sam, 2026-11-20): keep the unsupported/no-start control with plain wording.
+    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && error.message === 'TWAP isn’t available in this version. Update Tealstreet to use it.');
     assert.deepEqual(calls, []);
     host.dispose();
   }
@@ -860,3 +861,72 @@ test('known address setup retirement without negotiated support disposes the hos
   assert.equal(r.host.commands.size, 0);
   assert.equal(r.timers.size, 0);
 });
+
+
+test('later-page closed diagnostics follow only their owning incomplete result', async () => {
+  const r = rig();
+  const partial = r.host.command({ op: 'fetchClosedPositions' });
+  const other = r.host.command({ op: 'fetchClosedPositions' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'PRIVATE_CANARY', fields: {
+      command: 1, reason: 'laterPageFailed', historyOperation: 'bybitClosedPnl',
+      historyFailureKind: 'rateLimited', historyVenueCode: '10006', raw: 'PRIVATE_CANARY',
+    } },
+    { op: 'done', command: 1, result: '[{"id":"accepted"}]' },
+    { op: 'done', command: 2, result: '[]' },
+  ]));
+  const rows = await partial;
+  assert.deepEqual(rows.historyFailure, { operation: 'bybitClosedPnl', kind: 'rateLimited', venueCode: '10006' });
+  assert.equal(rows.incompleteReason, 'laterPageFailed');
+  assert.equal(Object.getOwnPropertyDescriptor(rows, 'historyFailure').enumerable, false);
+  assert.equal(JSON.stringify(rows), '[{"id":"accepted"}]');
+  assert.equal((await other).historyFailure, undefined);
+});
+
+test('malformed later-page metadata cannot smuggle values or mark ordinary results', async () => {
+  for (const fields of [
+    { reason: 'pageBudget', historyOperation: 'bybitClosedPnl', historyFailureKind: 'network' },
+    { reason: 'laterPageFailed', historyOperation: 'PRIVATE_CANARY', historyFailureKind: 'network' },
+    { reason: 'laterPageFailed', historyOperation: 'bybitOrders', historyFailureKind: 'PRIVATE_CANARY' },
+    { reason: 'laterPageFailed', historyOperation: 'bybitOrders', historyFailureKind: 'network', historyVenueCode: 'PRIVATE_CANARY' },
+  ]) {
+    const r = rig();
+    const promise = r.host.command({ op: 'fetchClosedPositions' });
+    r.host.run(JSON.stringify([
+      { op: 'event', level: 'warn', code: 'history.incomplete', message: 'PRIVATE_CANARY', fields: { command: 1, ...fields } },
+      { op: 'done', command: 1, result: '[]' },
+    ]));
+    assert.equal((await promise).historyFailure, undefined);
+  }
+});
+for (const op of ['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
+  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode',
+  'setStpMode', 'setAccountTier', 'scheduleCancel']) {
+  test(`settled write errors retain only the captured command name: ${op}`, async () => {
+    const r = rig();
+    const command = { op, orders: [], ids: [] };
+    const pending = r.host.command(command).catch((error) => error);
+    command.op = 'private-apiKey-canary';
+    r.host.run(JSON.stringify([{ op: 'done', command: r.calls[0].command, error: 'OKX 1: ',
+      detail: { message: 'OKX 1: ', kind: 'rejected', venueCode: '1', command: 'private-apiKey-canary' } }]));
+    const error = await pending;
+    assert.equal(error.command, op);
+    assert.equal(error.message, 'OKX 1: ');
+    assert.equal(error.kind, 'rejected');
+    assert.equal(error.venueCode, '1');
+    assert.equal(error.outcome, undefined);
+    assert.ok(!JSON.stringify(error).includes('private-apiKey-canary'));
+    r.host.dispose();
+  });
+}
+
+for (const op of ['fetchOHLCV', 'private-apiKey-canary']) {
+  test(`settled error does not tag an unlisted caller command: ${op}`, async () => {
+    const r = rig();
+    const pending = r.host.command({ op }).catch((error) => error);
+    r.host.run(JSON.stringify([{ op: 'done', command: r.calls[0].command, error: 'refused',
+      detail: { message: 'refused', command: 'private-apiKey-canary' } }]));
+    assert.equal((await pending).command, undefined);
+    r.host.dispose();
+  });
+}

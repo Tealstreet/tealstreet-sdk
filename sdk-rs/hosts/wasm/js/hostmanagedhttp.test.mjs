@@ -428,7 +428,9 @@ test('a native deadline cancellation names the exact pending endpoint without si
   ]));
   r.host.execute(cancel);
   assert.equal(failures.filter((event) => event.code === 'http.request_failed').length, 1);
-  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing', requestClass: 'discovery', budgetMs: 1000, elapsedMs: 1000 });
+  // Keep the original exact timeout/endpoint contract, adding only the new closed fields.
+  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing', requestClass: 'discovery', budgetMs: 1000, elapsedMs: 1000,
+    preparation_stage: 'route_resolve', error_name: 'other', route_kind: 'unknown', budget_wait_ms: 0, prepare_ms: 1000 });
   assert.match(failures[0].message, /class=discovery budget=1000ms elapsed=1000ms/);
   assert.match(failures[1].message, /class=discovery budget=1000ms elapsed=1000ms/);
   assert.doesNotMatch(JSON.stringify(failures), /SECRET|api\.bybit|signature|apiKey/);
@@ -444,7 +446,9 @@ test('released transport failure templates dynamic path segments and preserves o
   r.host.execute(prepare);
   await tick();
   assert.equal(failures.length, 1);
-  assert.deepEqual(failures[0].fields, { method: 'POST', path: '/api/v1/orders/:segment', kind: 'network', phase: 'released' });
+  // Retain the original transport-failure and redacted-path assertion plus the closed facts.
+  assert.deepEqual(failures[0].fields, { method: 'POST', path: '/api/v1/orders/:segment', kind: 'network', phase: 'released',
+    preparation_stage: 'sent', error_name: 'error', route_kind: 'unknown', budget_wait_ms: 0, prepare_ms: 0 });
   assert.equal(r.events.filter(([name]) => name === 'httpFailed').length, 1);
   assert.doesNotMatch(JSON.stringify(failures), /SECRET|venue\.test|sign=/);
   r.host.dispose();
@@ -549,3 +553,155 @@ for (const [priorityCode, readClass] of ['normal', 'critical', 'bulk', 'reconcil
     });
   }
 }
+
+for (const phase of ['prepare', 'admission']) {
+  test(`proven info admission expiry during ${phase} retains timeout and never claims or sends`, async () => {
+    const error = new HttpPreparationError('timedOut', 'info_admission');
+    const r = rig(() => {
+      if (phase === 'prepare') throw error;
+      return { bind: () => ({ ready: () => true,
+        admitDispatch: () => Promise.reject(error),
+        dispatch() { assert.fail('admission refusal sent'); },
+      }) };
+    });
+    const events = [];
+    r.host.handlers.onEvent = (event) => events.push(event);
+    r.host.execute(prepare); await tick();
+    assert.equal(error.code, 'HTTP_PREPARATION_TIMED_OUT');
+    assert.equal(error.cause, 'info_admission');
+    assert.equal(error.message, 'HTTP admission deadline expired');
+    assert.deepEqual(r.events.filter(([kind]) => kind === 'failed'), [['failed', token, 'infoAdmissionTimedOut']]);
+    assert.equal(r.events.some(([kind]) => kind === 'claim' || kind === 'httpFailed'), false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].message, 'HTTP admission deadline expired');
+    assert.equal(events[0].fields.kind, 'timeout');
+    assert.equal(events[0].fields.cause, 'info_admission');
+    assert.equal(events[0].fields.phase, phase === 'prepare' ? 'preparing' : 'bound');
+    assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  });
+}
+
+test('generic readiness expiry and untrusted admission labels keep the transport diagnosis', async () => {
+  for (const cause of [undefined, 'PRIVATE https://venue.invalid?signature=SECRET']) {
+    const error = new HttpPreparationError('timedOut', cause);
+    const r = rig(() => { throw error; });
+    const events = [];
+    r.host.handlers.onEvent = (event) => events.push(event);
+    r.host.execute(prepare); await tick();
+    assert.equal(error.message, 'Relay or network request timed out');
+    assert.equal(error.cause, undefined);
+    assert.deepEqual(r.events, [['failed', token, 'timedOut']]);
+    assert.equal(events[0].fields.cause, undefined);
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE|SECRET|venue.invalid/);
+    r.host.dispose();
+  }
+});
+
+test('admission marker accessors are not invoked or serialized', async () => {
+  let reads = 0;
+  const error = new HttpPreparationError('timedOut');
+  Object.defineProperty(error, 'cause', { get() { reads++; throw new Error('PRIVATE'); } });
+  const r = rig(() => { throw error; });
+  r.host.execute(prepare); await tick();
+  assert.equal(reads, 0);
+  assert.deepEqual(r.events, [['failed', token, 'timedOut']]);
+  r.host.dispose();
+});
+
+test('an admission-looking error after handoff keeps the post-release failure path', async () => {
+  const r = rig(() => ({ bind: () => ({ ready: () => true,
+    dispatch() { throw new HttpPreparationError('timedOut', 'info_admission'); },
+  }) }));
+  r.host.execute(prepare); await tick();
+  assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 1);
+  assert.equal(r.events.filter(([kind]) => kind === 'httpFailed').length, 1);
+  assert.equal(r.events.some(([kind]) => kind === 'failed'), false);
+  r.host.dispose();
+});
+
+for (const [stage, route] of [['route_resolve', 'direct'], ['proxy_token', 'proxy'], ['tunnel', 'tunnel'], ['budget_wait', 'direct']]) {
+  test(`preparation diagnostics retain ${stage}/${route} without provider text`, async () => {
+    const r = rig(async (request) => {
+      request.onPreparationStage?.('route_resolve', route);
+      r.at(5); request.onPreparationStage?.('budget_wait', route);
+      r.at(17); request.onPreparationStage?.(stage, route);
+      r.at(20); throw new SyntaxError('PRIVATE_INPUT apiKey=PRIVATE_KEY');
+    });
+    const events = [];
+    r.host.handlers.onEvent = event => events.push(event);
+    r.host.execute(prepare); await tick();
+    assert.deepEqual(r.events, [['failed', token, 'network']]);
+    const fields = events[0].fields;
+    assert.equal(fields.preparation_stage, stage);
+    assert.equal(fields.error_name, 'syntax_error');
+    assert.equal(fields.route_kind, route);
+    assert.equal(fields.budget_wait_ms, stage === 'budget_wait' ? 15 : 12);
+    assert.equal(fields.prepare_ms, stage === 'budget_wait' ? 5 : 8);
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE_INPUT|PRIVATE_KEY/);
+    r.host.dispose();
+  });
+}
+
+test('transport failure name is closed and wire time is not preparation time', async () => {
+  let reject;
+  const r = rig(request => {
+    request.onPreparationStage?.('transport_prepare', 'direct');
+    r.at(7);
+    return { bind: () => ({ ready: () => true, dispatch: () => new Promise((_, fail) => { reject = fail; }) }) };
+  });
+  const events = [];
+  r.host.handlers.onEvent = event => events.push(event);
+  r.host.execute(prepare); await tick();
+  r.at(1000); reject(Object.assign(new Error('PRIVATE_ERROR'), { name: 'PRIVATE_NAME' })); await tick();
+  assert.equal(events[0].fields.error_name, 'other');
+  assert.equal(events[0].fields.route_kind, 'direct');
+  assert.equal(events[0].fields.prepare_ms, 7);
+  assert.equal(events[0].fields.budget_wait_ms, 0);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_ERROR|PRIVATE_NAME/);
+  r.host.dispose();
+});
+
+
+test('async dispatch admission preserves the underlying name behind preparationReason', async () => {
+  const r = rig(request => ({ bind: () => ({ ready: () => true,
+    admitDispatch() { request.onPreparationStage?.('budget_wait', 'direct'); return Promise.reject(new SyntaxError('PRIVATE_INPUT')); },
+    dispatch() { assert.fail('local refusal sent'); },
+  }) }));
+  const events = [];
+  r.host.handlers.onEvent = event => events.push(event);
+  r.host.execute(prepare); await tick();
+  assert.deepEqual(r.events, [['prepared', token, '1'], ['failed', token, 'invalid']]);
+  assert.equal(events[0].fields.error_name, 'syntax_error');
+  assert.equal(events[0].fields.preparation_stage, 'budget_wait');
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_INPUT/);
+  r.host.dispose();
+});
+
+test('late or unrecognized observations cannot revive resources or disclose labels', async () => {
+  let observe;
+  const r = rig(request => { observe = request.onPreparationStage; return new Promise(() => {}); });
+  const events = [];
+  r.host.handlers.onEvent = event => events.push(event);
+  r.host.execute(prepare);
+  observe('PRIVATE_STAGE', 'PRIVATE_ROUTE');
+  r.host.managedHttp.fail(token, r.host.managedHttp.resources.get(token), 'network');
+  assert.equal(events[0].fields.preparation_stage, 'route_resolve');
+  assert.equal(events[0].fields.route_kind, 'unknown');
+  observe('budget_wait', 'direct');
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  assert.equal(events.length, 1);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_STAGE|PRIVATE_ROUTE/);
+  r.host.dispose();
+});
+
+test('error-name descriptor reentry cannot settle a retired preparation', async () => {
+  const r = rig(() => new Promise(() => {}));
+  r.host.execute(prepare);
+  const resource = r.host.managedHttp.resources.get(token);
+  const error = new Proxy({}, { getOwnPropertyDescriptor() { r.host.managedHttp.cancel(token); return undefined; } });
+  r.host.managedHttp.fail(token, resource, 'network', error);
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  assert.deepEqual(r.events, []);
+  r.host.dispose();
+});

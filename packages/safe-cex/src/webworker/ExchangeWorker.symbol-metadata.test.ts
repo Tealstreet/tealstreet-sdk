@@ -1,13 +1,17 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, Market, StoreData } from '../types';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
+import { nativeStoreFrame } from '../__tests__/cutover/nativeFixture';
 import { engineCapabilities } from '../__tests__/fixtures/engineCapabilities';
 import { setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { virtualClock } from '../utils/virtualClock';
+import { FrameStore } from '../store/frameStore';
 import { LogSeverity } from '../types';
+import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
 import { setTwapLockManager } from './twap/twapLock';
 
@@ -34,26 +38,33 @@ let venue: ExchangeName = 'bybit';
 const reads: string[] = [];
 const sent: string[] = [];
 let holdFrames = false;
+let nativeLeverage: Record<string, { buyLeverage: number; sellLeverage: number }> = {};
 class ReadEngine implements WasmEngineLike {
   capabilities = () => engineCapabilities(venue);
   start = () => '[]';
   command = (json: string) => {
     const command = JSON.parse(json);
-    if (command.op === 'fetchLeverage') reads.push(command.symbol);
+    if (command.op === 'fetchLeverage') {
+      reads.push(command.symbol);
+      nativeLeverage[command.symbol] = { buyLeverage: 10, sellLeverage: 10 };
+      this.pending = true;
+    }
     sent.push(command.op);
-    const result =
-      command.op === 'fetchLeverage' ? JSON.stringify({ buyLeverage: 10, sellLeverage: 10 }) : '[]';
-    return command.command === undefined
-      ? '[]'
-      : JSON.stringify([{ op: 'done', command: command.command, result }]);
+    const result = command.op === 'fetchLeverage' ? JSON.stringify({ buyLeverage: 10, sellLeverage: 10 }) : '[]';
+    return command.command === undefined ? '[]' : JSON.stringify([{ op: 'done', command: command.command, result }]);
   };
   private pending = true;
   takeFrame = () => {
     if (!this.pending || holdFrames) return undefined;
     this.pending = false;
-    return new Uint8Array(consumerFrame(current, undefined, true));
+    return new Uint8Array(nativeStoreFrame({ ...current, fetchedLeverage: nativeLeverage }));
   };
-  snapshotFrame = () => new Uint8Array(consumerFrame(current));
+  snapshotFrame = () =>
+    new Uint8Array(nativeStoreFrame(holdFrames ? {} : { ...current, fetchedLeverage: nativeLeverage }));
+  accountSnapshotFrame = () =>
+    new Uint8Array(
+      nativeStoreFrame(holdFrames ? {} : { ...current, fetchedLeverage: nativeLeverage }, undefined, true),
+    );
   wsOpen = () => '[]';
   wsMessage = this.wsOpen;
   wsClose = this.wsOpen;
@@ -104,6 +115,7 @@ const select = async (worker: ExchangeWorker, symbol: string) => {
 };
 
 beforeEach(() => {
+  nativeLeverage = {};
   reads.length = 0;
   sent.length = 0;
   holdFrames = false;
@@ -127,8 +139,7 @@ for (const name of ['bybit', 'bitget'] as ExchangeName[]) {
     await select(worker, 'LSKUSDT');
     expect(reads).toEqual(['BTCUSDT', 'LSKUSDT']);
     expect(Object.keys(worker.store.fetchedLeverage)).toEqual(expect.arrayContaining(['BTCUSDT', 'LSKUSDT']));
-    const posted = messages.filter((message) => message.data?.fetchedLeverage).at(-1);
-    expect(posted?.data.fetchedLeverage.LSKUSDT).toMatchObject({ buyLeverage: 10 });
+    expect(postedNativeStore(messages).fetchedLeverage.LSKUSDT).toMatchObject({ buyLeverage: 10 });
   });
 }
 
@@ -166,9 +177,7 @@ it('a selection that beats the engine markets is read once they load', async () 
   await vi.advanceTimersByTimeAsync(500);
   await started;
   expect(reads).toEqual(['LSKUSDT']);
-  expect(messages.filter((message) => message.data?.fetchedLeverage).at(-1)?.data.fetchedLeverage.LSKUSDT).toMatchObject({
-    buyLeverage: 10,
-  });
+  expect(postedNativeStore(messages).fetchedLeverage.LSKUSDT).toMatchObject({ buyLeverage: 10 });
 });
 
 it('calls during a cold wasm fetch wait for the engine instead of failing or being lost', async () => {
@@ -243,19 +252,23 @@ it('writes during a cold wasm fetch fail at once and are never sent; placeOrders
   for (const [method, args] of writes) {
     worker.handlePayload({ op: 'callMethod', data: { requestId: method, method, args } } as never);
   }
-  worker.handlePayload({ op: 'callMethod', data: { requestId: 'place', method: 'placeOrders', args: [[order]] } } as never);
+  worker.handlePayload({
+    op: 'callMethod',
+    data: { requestId: 'place', method: 'placeOrders', args: [[order]] },
+  } as never);
   await vi.advanceTimersByTimeAsync(50);
   for (const [method] of writes) {
     const reply = messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === method);
     expect(reply?.data.success, method).toBe(false);
-    expect(reply?.data.result.message, method).toContain('not started');
+    expect(reply?.data.result.message, method).toContain('is still loading');
   }
   expect(messages.some((message) => message.data?.requestId === 'place')).toBe(false);
   loaded();
   await vi.advanceTimersByTimeAsync(500);
   await started;
   await vi.advanceTimersByTimeAsync(500);
-  for (const op of ['setLeverage', 'cancelOrders', 'setMarginType', 'setPositionMode', 'scheduleCancel', 'setStpMode']) expect(sent).not.toContain(op);
+  for (const op of ['setLeverage', 'cancelOrders', 'setMarginType', 'setPositionMode', 'scheduleCancel', 'setStpMode'])
+    expect(sent).not.toContain(op);
   expect(sent).toContain('placeOrders');
 });
 
@@ -279,7 +292,10 @@ const loadingWorker = async () => {
 };
 const order = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1, price: 1 };
 const place = (worker: ExchangeWorker) =>
-  worker.handlePayload({ op: 'callMethod', data: { requestId: 'place', method: 'placeOrders', args: [[order]] } } as never);
+  worker.handlePayload({
+    op: 'callMethod',
+    data: { requestId: 'place', method: 'placeOrders', args: [[order]] },
+  } as never);
 const reply = (messages: Array<{ op: string; data?: any }>, id: string) =>
   messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === id);
 
@@ -296,7 +312,9 @@ it('a placement queued past the bound is refused, shown, and never sent even if 
   holdFrames = false;
   await vi.advanceTimersByTimeAsync(60_000);
   expect(sent).not.toContain('placeOrders');
-  expect(messages.filter((message) => message.op === 'callMethod:done' && message.data.requestId === 'place')).toHaveLength(1);
+  expect(
+    messages.filter((message) => message.op === 'callMethod:done' && message.data.requestId === 'place'),
+  ).toHaveLength(1);
 });
 
 it('a placement whose account loads just inside the bound is sent once and never refused', async () => {
@@ -332,3 +350,10 @@ it('other queued writes take the same bound once the engine exists', async () =>
   expect(sent).not.toContain('scheduleCancel');
   expect(sent).not.toContain('setStpMode');
 });
+
+function postedNativeStore(messages: Array<{ op: string; data?: unknown }>): FrameStore {
+  const store = new FrameStore();
+  for (const message of messages)
+    if (message.op === 'frame' && message.data instanceof ArrayBuffer) store.apply(new Frame(message.data));
+  return store;
+}

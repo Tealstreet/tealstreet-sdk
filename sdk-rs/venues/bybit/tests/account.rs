@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Private data and trading against Bybit's documented payloads.
 mod support;
 
@@ -20,6 +21,8 @@ const POSITIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"positi
 /// "Get Wallet Balance".
 const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"totalEquity":"1010.5","accountIMRate":"0","accountIMRateByMp":"0","totalMarginBalance":"1010.5","totalInitialMargin":"95","totalInitialMarginByMp":"95","accountType":"UNIFIED","totalAvailableBalance":"915.5","accountMMRate":"0","accountMMRateByMp":"0","totalPerpUPL":"10","totalWalletBalance":"1000.5","accountLTV":"0","totalMaintenanceMargin":"5","totalMaintenanceMarginByMp":"5","coin":[{"availableToBorrow":"3","bonus":"0","accruedInterest":"0","availableToWithdraw":"0","totalOrderIM":"0","equity":"1010.5","totalPositionMM":"5","usdValue":"1010.5","spotHedgingQty":"0","unrealisedPnl":"10","collateralSwitch":true,"borrowAmount":"0.0","totalPositionIM":"95","walletBalance":"1000.5","cumRealisedPnl":"0","locked":"0","marginCollateral":true,"coin":"USDT","spotBorrow":"0"}]}]},"retExtInfo":{},"time":1690872862481}"#;
 const ORDER_ID: &str = "fd4300ae-7847-404e-b947-b46980a4d140";
+#[path = "account/batch_create_peers.rs"]
+mod batch_create_peers;
 const OK_EMPTY: &str =
     r#"{"retCode":0,"retMsg":"OK","result":{},"retExtInfo":{},"time":1672281607343}"#;
 
@@ -1000,7 +1003,7 @@ fn queries_return_history_in_the_shared_shapes() {
     );
     assert_eq!(
         h.result(21),
-        Some(&Ok(r#"[{"id":"e0cbe81d-0f18-5866-9415-cf319b5dab3b","timestamp":1672282722.0,"symbol":"ETHPERP","orderId":"8c065341-7b52-4ca9-ac2c-37e31ac55c94","price":1190.15,"qty":0.1,"side":"buy","commission":0.071409,"maker":false}]"#.to_owned()))
+        Some(&Ok(r#"[{"id":"e0cbe81d-0f18-5866-9415-cf319b5dab3b","timestamp":1672282722.429,"symbol":"ETHPERP","orderId":"8c065341-7b52-4ca9-ac2c-37e31ac55c94","price":1190.15,"qty":0.1,"side":"buy","commission":0.071409,"maker":false}]"#.to_owned()))
     );
 
     h.command(Command::Query {
@@ -3418,7 +3421,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
     assert!(!fresh.is_empty(), "BTC's own reconcile read");
     let fenced = |h: &Harness, command| {
         h.result(command)
-            .is_some_and(|result| result.as_ref().is_err_and(|e| e.contains("uncertain")))
+            .is_some_and(|result| result.as_ref().is_err_and(|e| e.contains("confirm")))
             && !h.has_request("/v5/order/create-batch")
     };
     // 1. A user retry on BTC is refused NotSent and sends nothing.
@@ -3531,7 +3534,7 @@ fn cancel_all_after_an_unknown_placement_waits_for_the_fresh_read() {
     });
     assert!(
         h.result(62)
-            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("confirm"))),
         "cancel-all is refused while BTC is uncertain: {:?}",
         h.result(62)
     );
@@ -4532,7 +4535,20 @@ fn explicit_terminal_order_history_walks_independent_cursors_and_deduplicates() 
     for id in ["filled", "Cancelled", "Rejected", "Deactivated"] {
         assert!(rows.iter().any(|row| row["id"] == id));
     }
-    assert!(owned_history_markers(&h, 910).is_empty());
+    // The omitted start requests V5's seven-day default, so the terminal
+    // statuses are incomplete even though every available cursor drained.
+    let markers = owned_history_markers(&h, 910);
+    assert_eq!(markers.len(), 1);
+    let safe_cex_engine::Notice::Event(event) = &h.notices[markers[0]] else {
+        panic!("expected the history incomplete event");
+    };
+    assert_eq!(
+        event.fields[1],
+        (
+            "reason",
+            safe_cex_engine::Value::Str("retentionLimit".into())
+        )
+    );
     assert!(!h.has_request(path));
 }
 
@@ -4602,9 +4618,9 @@ fn explicit_terminal_history_failure_retains_rows_with_incomplete_marker() {
 }
 
 #[test]
-fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
+fn terminal_order_history_preserves_default_windows_and_clips_each_status() {
     let mut h = ready();
-    let to = 1_672_300_000_000.0;
+    let to = h.engine.signing_clock(h.now).0;
     h.command(Command::Query {
         command: 913,
         query: Query::OrderHistory {
@@ -4614,30 +4630,24 @@ fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
             limit: None,
         },
     });
-    let mut original = Vec::new();
+    // V5 retains these statuses only for 24h; the old seven-day reuse was invalid.
     for status in [
         None,
         Some("Cancelled"),
         Some("Rejected"),
         Some("Deactivated"),
     ] {
-        for window in 0..2 {
+        for _ in 0..if status.is_none() { 2 } else { 1 } {
             let request = h.take("/v5/order/history");
             assert_eq!(request.url.contains("orderStatus="), status.is_some());
             if let Some(status) = status {
                 assert!(request.url.contains(&format!("orderStatus={status}")));
-            }
-            let bounds: Vec<_> = request
-                .url
-                .split('&')
-                .filter(|part| part.starts_with("startTime=") || part.starts_with("endTime="))
-                .map(str::to_owned)
-                .collect();
-            assert_eq!(bounds.len(), 2);
-            if status.is_none() {
-                original.push(bounds);
-            } else {
-                assert_eq!(bounds, original[window]);
+                assert!(
+                    request
+                        .url
+                        .contains(&format!("startTime={}", to - 86_400_000.0))
+                );
+                assert!(request.url.contains(&format!("endTime={to}")));
             }
             h.reply(request.id, 200, EMPTY_LIST);
         }
@@ -4681,4 +4691,105 @@ fn terminal_status_failure_uses_the_same_incomplete_diagnostic_as_default_histor
         observations.push((h.result(914).unwrap().clone(), format!("{event:?}")));
     }
     assert_eq!(observations[0], observations[1]);
+}
+
+#[test]
+fn owned_history_later_failure_identifies_each_native_read_operation() {
+    for (kind, operation) in [(0, "bybitFills"), (1, "bybitOrders"), (2, "bybitIncome")] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(kind, None);
+        h.command(Command::Query {
+            command: 980,
+            query,
+        });
+        h.respond(
+            path,
+            200,
+            &owned_history_page(&[owned_history_row(kind, "accepted")], "page2"),
+        );
+        let request = h.take(path);
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":10006,"retMsg":"PRIVATE_CANARY","result":{}}"#,
+        );
+        assert!(h.result(980).unwrap().is_ok());
+        let event = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event)
+                    if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap();
+        for (key, value) in [
+            ("historyOperation", operation),
+            ("historyFailureKind", "rateLimited"),
+            ("historyVenueCode", "10006"),
+        ] {
+            assert_eq!(
+                event
+                    .fields
+                    .iter()
+                    .find(|(field, _)| *field == key)
+                    .map(|(_, value)| value),
+                Some(&safe_cex_engine::Value::Str(value.into()))
+            );
+        }
+        assert!(!format!("{:?}", event.fields).contains("PRIVATE_CANARY"));
+        assert!(!h.has_request(path));
+    }
+}
+
+// AGT-115, live on Bybit 2026-11-21: a stop closing the held long went to trading-stop
+// with only its own price and dropped its legs; with no covering position the same stop
+// went through order create and kept them (a `__stop_loss` row came back). Only the
+// trading-stop route refuses, before any write.
+#[test]
+fn a_stop_closing_the_position_with_attached_legs_is_refused_before_any_write() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Bybit");
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for amount in [0.0, 0.01] {
+            for (stop_loss, take_profit) in [
+                (Some(99000.0), None),
+                (None, Some(80000.0)),
+                (Some(0.0), Some(80000.0)),
+            ] {
+                let mut h = ready();
+                let mut stop = limit("BTCUSDT", OrderSide::Sell, amount, 86000.0);
+                stop.kind = kind;
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                let plain = limit("BTCUSDT", OrderSide::Buy, 0.01, 85000.0);
+                place(&mut h, 11, vec![plain, stop]);
+                assert!(
+                    h.requests.iter().all(|r| r.method == Method::Get),
+                    "{kind:?} {amount}: {:?}",
+                    h.paths()
+                );
+                assert!(
+                    matches!(h.result(11), Some(Err(message)) if *message == refusal),
+                    "{kind:?} {amount}: {:?}",
+                    h.result(11)
+                );
+            }
+        }
+    }
+    // A buy stop has no covering position, so it goes through order create with its leg.
+    let mut h = ready();
+    let mut stop = limit("BTCUSDT", OrderSide::Buy, 0.01, 99000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.stop_loss = Some(90000.0);
+    place(&mut h, 12, vec![stop]);
+    let create = h.take("/v5/order/create");
+    assert!(
+        body(&create).contains(r#""stopLoss":"90000""#),
+        "{}",
+        body(&create)
+    );
 }

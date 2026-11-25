@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Actual pending owners receive closed provider failures, never fake HTTP failures.
 use safe_cex_engine::model::*;
 use safe_cex_engine::signing::{Provider, SignError, SignFuture, SignRequest, SignResult, Signer};
@@ -428,7 +429,8 @@ fn unclassified_native_response_after_or_before_unsent_cancel_is_unknown() {
                 Some(Outcome::Unknown),
                 "status {status}, provider first {provider_first}"
             );
-            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            const ENGINE_UNKNOWN_TEXT: &str =
+                "We couldn’t confirm this change. Check your open orders before trying again.";
             assert!(h.error().message.contains(ENGINE_UNKNOWN_TEXT));
         }
     }

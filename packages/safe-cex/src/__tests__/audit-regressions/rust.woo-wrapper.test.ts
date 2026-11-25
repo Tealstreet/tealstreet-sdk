@@ -1,19 +1,19 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
-
 describe('Rust WOO execution history boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   const setup = () => {
-    const exchange = new RustEngineExchange('woo', { key: 'fixture', secret: 'fixture' }, new DefaultStore());
+    const exchange = new RustEngineExchange('woo', { key: 'fixture', secret: 'fixture' }, new FrameStore());
     exchanges.push(exchange);
     const command = vi.fn().mockResolvedValue([]);
     // Observe the engine boundary without loading a built WASM artifact.
@@ -58,10 +58,17 @@ describe('Rust WOO execution history boundary', () => {
     // Retired-name rejection moved to the untyped loader boundary in
     // sdk-rs/hosts/wasm/js/beta-venues.test.mjs.
     const { exchange, command } = setup();
-    const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
-      maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };
+    const opts = {
+      symbol: 'BTCUSDT',
+      type: OrderType.Market,
+      side: OrderSide.Buy,
+      amount: 1,
+      maxSlippagePct: 0.25,
+      clientOrderId: '9007199254740991',
+    };
     await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
-      orderIds: [], clientOrderId: opts.clientOrderId,
+      orderIds: [],
+      clientOrderId: opts.clientOrderId,
     });
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'placeOrders', orders: [opts] });
   });

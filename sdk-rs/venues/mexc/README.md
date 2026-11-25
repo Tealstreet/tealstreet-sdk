@@ -52,6 +52,15 @@ signature refusals, 402 is expiry, and 406/511/701–704 are permission refusals
 background diagnostics use auth.rejected. A malformed envelope, an HTTP
 status alone, or error-looking text cannot prove a key refusal.
 
+Generic HTTP 425 read failures add a closed `requestClass` from the pending
+request and an optional present, nonnegative safe-integer `venueCode`. The
+code must come from a JSON object envelope; arrays and scalar responses supply
+no code, and duplicate or malformed code fields remain absent. The
+diagnostic omits URLs, queries, credentials, response bodies and response messages.
+Typed envelope refusals, ordinary error text, startup completion, backoff,
+signing and write outcomes retain their existing policy. Synthetic full-engine
+controls live in `tests/http_diagnostics.rs`.
+
 MEXC's contract error table identifies 513 as the request-time-window error
 and 602 as signature verification failure:
 https://mexcdevelop.github.io/apidocs/contract_v1_en/#error-code-example
@@ -64,6 +73,14 @@ safe integer from a successful envelope. Failed, malformed or late samples do
 not calibrate or replay. A second 513 ends that attempt. Writes and 602 never
 enter clock recovery. Signing already takes fresh protocol-clock milliseconds
 at dispatch; calibration changes outbound timestamps, not engine deadlines.
+
+Plan/stop snapshots and protective inspection reads serialize `start_time` and
+`end_time` as integer milliseconds, as required by MEXC's `long` query fields.
+They use the shared protocol wire-stamp helpers after clock calibration, keeping
+fractional scheduling time and backward UTC corrections intact. The 89-day
+lookback, signing timestamp and mutation payloads are unchanged; invalid clock
+observations preserve the last known calibration rather than inventing zero.
+Full-engine fake-transport controls live in `tests/query_timestamps.rs`.
 
 ## Protective edits
 
@@ -119,3 +136,9 @@ Sources:
 - [MEXC spot signature rules](https://www.mexc.com/api-docs/spot-v3/introduction#signature)
 - [CCXT pinned MEXC spot signing, lines 6434–6439](https://github.com/ccxt/ccxt/blob/e27b747210ba4f7505de3c0b0e29dc820a96ada4/ts/src/mexc.ts#L6434-L6439)
 - [CCXT pinned MEXC futures signing, lines 6472–6480](https://github.com/ccxt/ccxt/blob/e27b747210ba4f7505de3c0b0e29dc820a96ada4/ts/src/mexc.ts#L6472-L6480)
+
+## Stop-entry brackets (AGT-115)
+
+Stop and take-profit bodies (sized plan or whole-position stop) carry only their own
+trigger, so attached legs were dropped. `place_steps` now refuses the whole command before
+any write with the engine's shared `stop_entry_legs_refusal` copy.

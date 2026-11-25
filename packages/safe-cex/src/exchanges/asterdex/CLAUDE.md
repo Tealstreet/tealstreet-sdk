@@ -12,7 +12,7 @@ The uplift is intentionally backward-compatible: existing V1 accounts continue t
 
 ## API Documentation
 
-- **V1 Futures API docs (legacy)**: <https://github.com/asterdex/api-docs/blob/master/V1%28Legacy%29/EN/aster-finance-futures-api.md>
+- **V1 legacy keys**: the current overview says existing keys remain usable; the V1 documentation was removed on 2026-11-02 (see changelog).
 - **V3 Futures API docs (recommended)**: <https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md>
 - **Official changelog**: <https://github.com/asterdex/api-docs/blob/master/CHANGELOG.md>
 - **V1 vs V3 overview**: <https://github.com/asterdex/api-docs/blob/master/Aster%20API%20Overview.md>
@@ -61,28 +61,18 @@ and secondary read agents retain device custody. V1 PayloadSigner is REST-only;
 V3 requires RemoteSigner. See `sdk-rs/venues/asterdex/README.md` for the protocol.
 
 - Header: `X-MBX-APIKEY`
-- Standard signed params include `recvWindow`, `timestamp`, plus:
-  - `user`
-  - `signer`
-  - `nonce` (microseconds, monotonic)
-- Saved account mapping: `applicationId` is the `user` / login-main wallet,
-  `apiKey` is the API Wallet / agent / vault address (`signer`), and
-  `apiSecret` is the private key for that API wallet. Users must not replace
-  the main wallet with the API/vault wallet; both identities are required for
-  V3 trading/query endpoints.
-- Signature flow:
-  1. Convert business params to string values and sort keys
-  2. ABI encode `[string payloadJson, address user, address signer, uint256 nonce]`
-  3. keccak hash encoded payload
-  4. apply Ethereum signed-message hash
-  5. sign via secp256k1 ECDSA
-- Aster Code query/trading endpoints (`POST /fapi/v3/order`, `GET /fapi/v3/builder`,
-  `GET /fapi/v3/agent`) use the newer EIP-712 `Message.msg` signer instead:
-  1. Build the exact final query string in insertion order, without URL encoding
-  2. Append `asterChain`, `user`, `signer`, and monotonic `nonce`
-  3. Sign `types: { Message: [{ name: 'msg', type: 'string' }] }` under domain
-     `AsterSignTransaction` v1, zero verifying contract, chainId `1666` mainnet or `714` testnet
-  4. Send that exact query string plus `signature`
+- Every authenticated V3 endpoint uses EIP-712 `Message.msg`, including
+  account/position-mode reads, listen-key operations, settings and order cancellation.
+  The old ABI/Keccak/EIP-191 branch is retired; V1 HMAC is unchanged.
+- Saved account mapping: `applicationId` is the main/login wallet (`user`),
+  `apiKey` is the API wallet/agent address (`signer`), and `apiSecret` is that
+  API wallet's private key. A missing main wallet refuses before signing.
+- Build the exact final query string in insertion order, append
+  `asterChain`, `user`, `signer` and monotonic microsecond `nonce`, then sign
+  `Message: [{ name: 'msg', type: 'string' }]` under `AsterSignTransaction` v1,
+  zero verifying contract, chainId `1666` mainnet or `714` testnet.
+- V3 sends no `timestamp` or `recvWindow`; its nonce must remain within the
+  documented 60-second server-time window. See the native README for custody.
 
 The signed `msg` must equal the sent query string byte-for-byte excluding the trailing
 `signature`. Do not reorder params, pass decimals as JS numbers, or rely on Axios
@@ -601,7 +591,7 @@ the dedicated Aster clock uses the same REST constant.
 - **Orders placed individually**: no batch endpoint usage in `placeOrders`/`cancelOrders`; failures are tolerated per-item.
 - **Trigger defaults**: TP defaults to `CONTRACT_PRICE` and SL defaults to `MARK_PRICE` (Binance-like behavior).
 - **All signed params in query**: POST/PUT/DELETE signed requests use query parameters and clear request body.
-- **Dual signing**: V1 routes use HMAC-SHA256; standard V3 routes use wallet signature with `user`, `signer`, and microsecond `nonce`; Aster Code routes use EIP-712 `Message.msg` query-string signing with `asterChain`.
+- **Dual signing**: V1 uses HMAC-SHA256; every authenticated V3 request uses EIP-712 `Message.msg`. There is no endpoint-specific EIP-191 fallback.
 - **Binance-style 200-with-error handling**: interceptor treats negative `code` values as API errors.
 - **Ticker bid/ask source**: bid/ask are derived only from validated partial orderbook snapshots, not 24h ticker REST payload or diff frames.
 - **Private WS repair is split by purpose**: `ACCOUNT_UPDATE` schedules
@@ -703,8 +693,10 @@ contract. Native URLs carry socket roles; host transports apply account routing.
   material's shape, sends it with the public signer addresses, and hands key
   material only to the provider. V3 wallet keys are trimmed hex; V1 secrets
   stay byte-exact. See `docs/plans/RUST_ASTER_SIGNER_ADMISSION.md`.
-- Both V1 and V3 are supported. The exact standard-V3 ABI/EIP-191 versus Code
-  EIP-712 split above is preserved, with independent ethers signature vectors.
+- Both V1 and V3 are supported, with independent ethers EIP-712 and V1 HMAC vectors.
+  Explicit signature refusals stop the native position-mode retry loop, report
+  `Aster API key signature rejected: re-create the key (V3)`, and keep placements
+  held until a valid position-mode read or a fresh account configuration.
 - Browser-hosted signing (`signHttpRequest`) supports V1 only, through
   `asterdex.signing.ts`'s standalone V1 request codec, which the TS venue also
   uses. The host admits an account only when setup resolved an explicit V1, so

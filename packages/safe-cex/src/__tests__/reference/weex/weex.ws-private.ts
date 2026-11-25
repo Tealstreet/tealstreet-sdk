@@ -1,9 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { WeexExchange } from './weex.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket, HeaderCapableWebSocketUnavailableError } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderStatus } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket, HeaderCapableWebSocketUnavailableError } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { signWeexMessage } from './weex.api';
 import { BASE_WS_URL, PRIVATE_WS_REQUEST_PATH } from './weex.types';
 import { normalizeOrder, normalizePosition, normalizeTimestampToSeconds, toNumber } from './weex.utils';
@@ -142,7 +144,10 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
   private logUnsupportedTransport = (reason = 'browser WebSocket clients cannot attach WEEX private-auth headers') => {
     if (this.hasLoggedUnsupportedTransport) return;
     this.hasLoggedUnsupportedTransport = true;
-    this.parent.log(`WEEX private WebSocket disabled: ${reason}; continuing with the REST safety loop`, LogSeverity.Warning);
+    this.parent.log(
+      `WEEX private WebSocket disabled: ${reason}; continuing with the REST safety loop`,
+      LogSeverity.Warning,
+    );
   };
 
   private handleOrders = (json: Record<string, any>) => {
@@ -151,12 +156,39 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       .filter((order): order is Order => !!order);
 
     if (orders.length) {
-      this.store.addOrUpdateOrders(orders as any);
+      (() => {
+        const incoming: StoreData['orders'] = orders as any;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       const closed = orders.filter(
         (order: any) => order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled,
       );
       for (const order of closed) {
-        this.store.updateOrderStatus({ id: order.id }, order.status);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const nativeStatus: StoreData['orders'][number]['status'] = order.status;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     }
 
@@ -168,7 +200,22 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       .map((row) => normalizePosition(row, this.store.marketsBySymbol[row.symbol]))
       .filter(Boolean);
     if (positions.length) {
-      this.store.addOrUpdatePositions(positions as any);
+      (() => {
+        const incoming: StoreData['positions'] = positions as any;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
     this.throttledFetchPositions();
   };
@@ -207,7 +254,11 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       try {
         const orders = await this.parent.fetchOrders();
         if (!this.isDisposed) {
-          this.store.update({ orders });
+          applyReferenceFixture(
+            this.store,
+            { orders },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
       } catch (_err) {}
     }, 250);
@@ -219,7 +270,19 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       try {
         const positions = await this.parent.fetchPositions();
         if (!this.isDisposed) {
-          this.store.addOrUpdatePositionsFull(positions);
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       } catch (_err) {}
     }, 250);
@@ -231,7 +294,11 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       try {
         const balance = await this.parent.fetchBalance();
         if (!this.isDisposed) {
-          this.store.update({ balance });
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
       } catch (_err) {}
     }, 250);

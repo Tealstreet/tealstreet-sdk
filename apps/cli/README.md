@@ -28,7 +28,7 @@ yarn workspace; `@tealstreet/*` deps resolve from there).
 
 ```bash
 yarn install                 # from the monorepo root
-corepack yarn -s rust:build-wasm # build the Rust engine asset before source runs/builds
+corepack yarn -s rust:build-wasm # (mirror root; in tealstreet-next: bash sdk-rs/harness/build.sh) build the Rust engine asset before source runs/builds
 
 cd apps/cli
 yarn dev                     # run the REPL from source (= bun run src/index.ts)
@@ -241,7 +241,9 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   `console` method.)
 - **`print()` / `originalConsoleLog()` bypass all of the above** — use them for
   primary command output, prompts, progress, and anything the user explicitly
-  asked for.
+  asked for. One-shot subcommands (`account list`, `tasks list`, `record stats`, …)
+  have no platform adapter and use `printOutput()` from `src/logger.ts`, which
+  skips the rate limit and dedup but still writes `cli.log`.
 - **Clock skew.** Bybit timestamp refusals use per-account Rust clock correction
   and one bounded re-signed retry. The CLI prints one warning per session with
   the measured fast/slow offset and Windows time-sync steps.

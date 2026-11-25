@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Exchange } from '../exchanges/base';
 import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
@@ -9,10 +10,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { CallMethodHandler } from '../webworker/handlers/CallMethodHandler';
 import { consumerFrame } from './cutover/consumerFrame';
+import { nativeFixture, nativeStoreFrame } from './cutover/nativeFixture';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
 const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 2 };
@@ -65,7 +67,13 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       if (command.command === undefined) return '[]';
       const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
       // A confirmed settings write holds it over the source, as a frame-fed venue does.
-      const held = { op: 'event', level: 'info', code: 'settings.held', message: 'held', fields: { symbol: 'BTCUSDT' } };
+      const held = {
+        op: 'event',
+        level: 'info',
+        code: 'settings.held',
+        message: 'held',
+        fields: { symbol: 'BTCUSDT' },
+      };
       if (command.op === 'placeOrders' && fake.holdOrders) {
         const orders = { op: 'event', level: 'info', code: 'orders.held', message: 'held', fields: fake.holdOrders };
         return JSON.stringify([orders, done]);
@@ -102,7 +110,7 @@ const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
   const exchange = new RustEngineExchange(
     'bybit',
     { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
-    new DefaultStore(),
+    new FrameStore(),
   );
   const calls: string[] = [];
   const orderAsks: unknown[][] = [];
@@ -132,27 +140,32 @@ describe('frame-fed main-thread mirror', () => {
     vi.restoreAllMocks();
   });
 
-  it.each([false, true])('keeps the admitted owner before startup selects the local writer (switch=%s)', async (switchOwner) => {
-    const fake = fakeEngine();
-    const module = lastModule!;
-    let release!: (module: WasmEngineModule) => void;
-    const startup = new Promise<WasmEngineModule>((resolve) => { release = resolve; });
-    setWasmEngineLoader(() => startup);
-    const mirror = mirrorWith(fake);
-    exchange = mirror.exchange;
-    const owner = { ownerId: 'A', generation: 1 };
-    exchange.setWorkerOwner(() => owner);
-    const pending = exchange.placeOrder(order).catch((error: unknown) => error);
-    if (switchOwner) owner.ownerId = 'B';
-    release(module);
-    if (switchOwner) {
-      expect(await pending).toMatchObject({ command: 'placeOrder', outcome: 'notSent' });
-      expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toEqual([]);
-      expect(mirror.calls).toEqual([]);
-      await expect(exchange.placeOrder(order)).resolves.toEqual(['placed-1']);
-    } else expect(await pending).toEqual(['placed-1']);
-    expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
-  });
+  it.each([false, true])(
+    'keeps the admitted owner before startup selects the local writer (switch=%s)',
+    async (switchOwner) => {
+      const fake = fakeEngine();
+      const module = lastModule!;
+      let release!: (module: WasmEngineModule) => void;
+      const startup = new Promise<WasmEngineModule>((resolve) => {
+        release = resolve;
+      });
+      setWasmEngineLoader(() => startup);
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+      const owner = { ownerId: 'A', generation: 1 };
+      exchange.setWorkerOwner(() => owner);
+      const pending = exchange.placeOrder(order).catch((error: unknown) => error);
+      if (switchOwner) owner.ownerId = 'B';
+      release(module);
+      if (switchOwner) {
+        expect(await pending).toMatchObject({ command: 'placeOrder', outcome: 'notSent' });
+        expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toEqual([]);
+        expect(mirror.calls).toEqual([]);
+        await expect(exchange.placeOrder(order)).resolves.toEqual(['placed-1']);
+      } else expect(await pending).toEqual(['placed-1']);
+      expect(fake.commands.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
+    },
+  );
 
   it('signs and sends a manual write on its own engine, never through the data source', async () => {
     const fake = fakeEngine();
@@ -265,7 +278,7 @@ describe('frame-fed main-thread mirror', () => {
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(errors).toHaveLength(1);
-      expect(String(errors[0])).toContain('manual-write engine');
+      expect(String(errors[0])).toContain('this account makes changes through its server connection');
       expect(mirror.calls).toEqual([]);
     });
 
@@ -286,7 +299,11 @@ describe('frame-fed main-thread mirror', () => {
       return bridge;
     };
     const mirrorOnly = () =>
-      new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
+      new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        new FrameStore(),
+      );
 
     // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed;
     // only an ineligible DELEGATED write remains notSent without a page engine.
@@ -332,7 +349,7 @@ describe('frame-fed main-thread mirror', () => {
       const target = new RustEngineExchange(
         'bybit',
         { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
-        new DefaultStore(),
+        new FrameStore(),
       );
       target.on('callMethod', () => {});
       return target;
@@ -364,9 +381,20 @@ describe('frame-fed main-thread mirror', () => {
       try {
         fakeEngine({ supported: false });
         exchange = silentMirror();
-        exchange.store.update({
-          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-        });
+        exchange.store.apply(
+          nativeFixture(
+            {
+              // Rule 5: 7b723d8837 requires decoded evidence for loaded flags.
+              markets: [],
+              tickers: [],
+              orders: [],
+              positions: [],
+              balance: { used: 0, free: 0, total: 0, upnl: 0 },
+              loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+            },
+            exchange.store.markets.map((row) => row.symbol),
+          ),
+        );
         const outcome = vi.fn();
         void exchange.callMethodInWorker('fetchOrders').catch(outcome);
         await vi.advanceTimersByTimeAsync(60_000);
@@ -381,30 +409,44 @@ describe('frame-fed main-thread mirror', () => {
     vi.useFakeTimers();
     try {
       fakeEngine({ supported: false });
-      const store = new DefaultStore();
-      exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, store);
+      const store = new FrameStore();
+      exchange = new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        store,
+      );
       const bridged: unknown[] = [];
       exchange.on('chaser:terminate', (id: unknown) => bridged.push(id));
       const errors: unknown[] = [];
       exchange.on('error', (message: unknown) => errors.push(message));
-      store.update({ activeChasers: [{ id: 'c1', symbol: 'BTCUSDT', isStopped: false } as never] });
+      store.apply(
+        nativeFixture(
+          { activeChasers: [{ id: 'c1', symbol: 'BTCUSDT', isStopped: false } as never] },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       exchange.emitter.emit('chaser:terminate', 'c1');
       expect(bridged).toEqual(['c1']);
       await vi.advanceTimersByTimeAsync(5_000);
       expect(bridged).toEqual(['c1', 'c1']);
       await vi.advanceTimersByTimeAsync(55_000);
-      expect(errors.at(-1)).toContain('NOT confirmed');
+      expect(errors.at(-1)).toContain('couldn’t confirm that');
 
       errors.length = 0;
       bridged.length = 0;
       exchange.emitter.emit('chaser:terminate', 'c1');
       await vi.advanceTimersByTimeAsync(5_000);
-      store.update({ activeChasers: [] });
+      store.apply(
+        nativeFixture(
+          { activeChasers: [] },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(120_000);
       expect(bridged).toHaveLength(2);
-      // The user was told NOT confirmed, so the late confirmation says what is known.
+      // The user was told couldn’t confirm that, so the late confirmation says what is known.
       expect(errors).toEqual([
-        'Chase stop is confirmed, but whether it filled is not known: check Positions and Open Orders.',
+        'The chase has stopped. Check your open orders and positions for fills.',
       ]);
     } finally {
       vi.useRealTimers();
@@ -495,8 +537,18 @@ describe('frame-fed main-thread mirror', () => {
       await other.exchange.frameFedReady;
       try {
         for (let i = 0; i < 2_000; i++) {
-          (mirror.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: i === 1_999 ? 'ETHUSDT' : 'BTCUSDT', liftAfterMs: 3_000 + i } });
-          (other.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: '', liftAfterMs: 0 } });
+          (mirror.exchange as any).receiveEvent({
+            level: 'info',
+            code: 'orders.held',
+            message: 'held',
+            fields: { symbols: i === 1_999 ? 'ETHUSDT' : 'BTCUSDT', liftAfterMs: 3_000 + i },
+          });
+          (other.exchange as any).receiveEvent({
+            level: 'info',
+            code: 'orders.held',
+            message: 'held',
+            fields: { symbols: '', liftAfterMs: 0 },
+          });
         }
         await vi.advanceTimersByTimeAsync(500);
         expect(other.orderAsks).toEqual([[]]);
@@ -506,7 +558,9 @@ describe('frame-fed main-thread mirror', () => {
         await vi.advanceTimersByTimeAsync(60_000);
         expect(other.orderAsks).toHaveLength(1);
         expect(mirror.orderAsks).toHaveLength(1);
-      } finally { other.exchange.dispose(); }
+      } finally {
+        other.exchange.dispose();
+      }
     });
 
     it('dispose between the due timer and worker bridge continuation starts no retired call or timer', async () => {
@@ -515,7 +569,9 @@ describe('frame-fed main-thread mirror', () => {
       const call = vi.spyOn(mirror.exchange, 'callMethodInWorker');
       vi.advanceTimersByTime(500); // Fire the real due timer, hold its async bridge continuation.
       mirror.exchange.dispose();
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       expect.soft(call).not.toHaveBeenCalled();
       expect.soft(vi.getTimerCount()).toBe(0);
     });
@@ -532,10 +588,16 @@ describe('frame-fed main-thread mirror', () => {
       await vi.advanceTimersByTimeAsync(500);
       expect(asks.map((ask) => ask.args)).toEqual([[['BTCUSDT', 'ETHUSDT']]]);
       for (let i = 0; i < 2_000; i++)
-        (mirror.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: 'ETHUSDT', liftAfterMs: 0 } });
+        (mirror.exchange as any).receiveEvent({
+          level: 'info',
+          code: 'orders.held',
+          message: 'held',
+          fields: { symbols: 'ETHUSDT', liftAfterMs: 0 },
+        });
       await vi.advanceTimersByTimeAsync(500);
       expect(asks.map((ask) => ask.args)).toEqual([[['BTCUSDT', 'ETHUSDT']], [['ETHUSDT']]]);
-      for (const ask of asks) mirror.exchange.emitter.emit('callMethod:done', { requestId: ask.requestId, success: true, result: null });
+      for (const ask of asks)
+        mirror.exchange.emitter.emit('callMethod:done', { requestId: ask.requestId, success: true, result: null });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(asks).toHaveLength(2);
     });
@@ -565,16 +627,29 @@ describe('frame-fed main-thread mirror', () => {
       const mirror = mirrorWith(fake);
       exchange = mirror.exchange;
       await exchange.frameFedReady;
-      (exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: 'ETHUSDT', liftAfterMs: 3_000 } });
-      (exchange as any).receiveEvent({ level: 'info', code: 'orders.refresh', message: 'unknown cancel', fields: { symbols: 'BTCUSDT' } });
-      await Promise.resolve(); await Promise.resolve();
+      (exchange as any).receiveEvent({
+        level: 'info',
+        code: 'orders.held',
+        message: 'held',
+        fields: { symbols: 'ETHUSDT', liftAfterMs: 3_000 },
+      });
+      (exchange as any).receiveEvent({
+        level: 'info',
+        code: 'orders.refresh',
+        message: 'unknown cancel',
+        fields: { symbols: 'BTCUSDT' },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
       expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
       await vi.advanceTimersByTimeAsync(3_500);
       expect(mirror.orderAsks).toEqual([[['BTCUSDT']], [['ETHUSDT']]]);
       expect(fake.commands).toEqual([]);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(mirror.orderAsks).toHaveLength(2);
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('forwards native cancel targets on the same single source refresh, then drains them', async () => {
@@ -658,13 +733,13 @@ describe('frame-fed main-thread mirror', () => {
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;
 
-    exchange.ingestSourceFrame(new ArrayBuffer(8), false);
+    exchange.ingestSourceFrame(consumerFrame({}), false);
     expect(fake.applied).toEqual([]);
-    exchange.ingestSourceFrame(new ArrayBuffer(16), true);
-    exchange.ingestSourceFrame(new ArrayBuffer(8), false);
+    exchange.ingestSourceFrame(consumerFrame({}), true);
+    exchange.ingestSourceFrame(consumerFrame({}), false);
     expect(fake.applied).toEqual([
-      { snapshot: true, bytes: 16 },
-      { snapshot: false, bytes: 8 },
+      { snapshot: true, bytes: consumerFrame({}).byteLength },
+      { snapshot: false, bytes: consumerFrame({}).byteLength },
     ]);
   });
 
@@ -672,15 +747,18 @@ describe('frame-fed main-thread mirror', () => {
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;
-    exchange.ingestSourceFrame(new ArrayBuffer(16), true);
+    exchange.ingestSourceFrame(consumerFrame({}), true);
     const needsSnapshot = vi.fn();
     exchange.on('frameFed:needsSnapshot', needsSnapshot);
     fake.refuseNext = true;
-    exchange.ingestSourceFrame(new ArrayBuffer(8), false);
+    exchange.ingestSourceFrame(consumerFrame({}), false);
     expect(needsSnapshot).toHaveBeenCalledOnce();
-    exchange.ingestSourceFrame(new ArrayBuffer(4), false);
-    exchange.ingestSourceFrame(new ArrayBuffer(32), true);
-    expect(fake.applied.map((frame) => frame.bytes)).toEqual([16, 32]);
+    exchange.ingestSourceFrame(consumerFrame({}), false);
+    exchange.ingestSourceFrame(consumerFrame({}), true);
+    expect(fake.applied.map((frame) => frame.bytes)).toEqual([
+      consumerFrame({}).byteLength,
+      consumerFrame({}).byteLength,
+    ]);
   });
 
   it("measures its data source's clock from the frames it ingests", async () => {
@@ -690,7 +768,7 @@ describe('frame-fed main-thread mirror', () => {
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;
     const written = (offset: number) => {
-      const frame = new ArrayBuffer(16);
+      const frame = consumerFrame({});
       new DataView(frame).setFloat64(8, Date.now() + offset, true);
       return frame;
     };
@@ -703,12 +781,23 @@ describe('frame-fed main-thread mirror', () => {
     expect(fake.offsets[1]).toBeLessThanOrEqual(2_000);
   });
 
-  it('fills the UI store from its own engine frames', async () => {
+  it('fills the UI store from source frames while page output stays private', async () => {
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
     await exchange.frameFedReady;
-    exchange.ingestSourceFrame(new ArrayBuffer(16), true);
+    exchange.ingestSourceFrame(
+      nativeStoreFrame({
+        markets: [],
+        loaded: { markets: true, tickers: false, orders: false, positions: false, balance: false },
+        displayedMargin: { longExposure: null, shortExposure: 8, totalNotional: null },
+        balance: { used: 0, free: 4, total: 4, upnl: 0, info: { nativeSource: true } },
+      }),
+      true,
+    );
     expect(exchange.store.loaded.markets).toBe(true);
+    expect(exchange.store.loaded.tickers).toBe(false);
+    expect(exchange.store.displayedMargin).toEqual({ longExposure: null, shortExposure: 8, totalNotional: null });
+    expect(exchange.store.balance.info).toEqual({ nativeSource: true });
   });
 
   it('stops the data source algos first, then runs the nuke legs on its own engine', async () => {
@@ -731,7 +820,7 @@ describe('frame-fed main-thread mirror', () => {
       const mirror = new RustEngineExchange(
         'bybitdemo',
         { key: 'fixture', secret: 'fixture', workerMirror: true, publicDataOnly: false },
-        new DefaultStore(),
+        new FrameStore(),
       );
       exchange = mirror;
       const calls: string[] = [];
@@ -745,7 +834,9 @@ describe('frame-fed main-thread mirror', () => {
         'fixture',
         'bybitdemo',
         worker as unknown as Exchange,
-        { postMessage: ({ op, data }: { op: string; data: unknown }) => mirror.emitter.emit(op, data) } as unknown as Worker,
+        {
+          postMessage: ({ op, data }: { op: string; data: unknown }) => mirror.emitter.emit(op, data),
+        } as unknown as Worker,
         {} as AppSettingsWorkerType,
         {} as ExchangeMetadataWorkerType,
       );
@@ -783,7 +874,7 @@ describe('frame-fed main-thread mirror', () => {
     it('names an unavailable proof RPC and retains its typed cause', async () => {
       const { mirror } = await proofWorker();
       await expect(mirror.nukePositions()).rejects.toMatchObject({
-        message: 'Nuke could not confirm the account is flat: bybitdemo does not support readPositions',
+        message: 'Nuke couldn’t confirm all positions were closed: bybitdemo does not support readPositions',
         cause: { kind: 'unsupported', outcome: 'notSent' },
       });
     });
@@ -799,7 +890,7 @@ describe('frame-fed main-thread mirror', () => {
       );
       const { mirror, fake } = await proofWorker(read);
       await expect(mirror.nukePositions()).rejects.toMatchObject({
-        message: 'Nuke could not confirm the account is flat: Bybit positions request timed out',
+        message: 'Nuke couldn’t confirm all positions were closed: Bybit positions request timed out',
         cause: { kind: 'timeout', venueCode: 'READ_TIMEOUT', outcome: 'notSent' },
       });
       expect(read).toHaveBeenCalledOnce();
@@ -812,7 +903,7 @@ describe('frame-fed main-thread mirror', () => {
     ])('refuses incomplete or malformed worker proof %j', async (proof, reason) => {
       const read = vi.fn().mockResolvedValue(proof);
       const { mirror } = await proofWorker(read);
-      await expect(mirror.nukePositions()).rejects.toThrow(`Nuke could not confirm the account is flat: ${reason}`);
+      await expect(mirror.nukePositions()).rejects.toThrow(`Nuke couldn’t confirm all positions were closed: ${reason}`);
       expect(read).toHaveBeenCalledOnce();
     });
   });
@@ -853,9 +944,16 @@ describe('frame-fed main-thread mirror', () => {
 
   it('builds no engine for a public-only account', async () => {
     const fake = fakeEngine();
-    exchange = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, new DefaultStore());
-    await expect(exchange.frameFedReady).resolves.toBe(false);
+    exchange = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, new FrameStore());
+    await expect(exchange.frameFedReady).resolves.toBe(true);
     expect(fake.started).toBe(0);
+    expect(
+      exchange.ingestSourceFrame(
+        nativeStoreFrame({ displayedMargin: { longExposure: 1, shortExposure: 2, totalNotional: 3 } }),
+        true,
+      ),
+    ).toBe(true);
+    expect(exchange.store.displayedMargin?.totalNotional).toBe(3);
   });
 
   it('keeps hedge legs for a close placed through the main engine', () => {

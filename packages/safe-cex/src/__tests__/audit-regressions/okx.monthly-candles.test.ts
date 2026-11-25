@@ -2,9 +2,10 @@ import type { ExchangeOptions, Market, Timeframe } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../reference/okx/okx.exchange';
 import { ENDPOINTS, INTERVAL } from '../../exchanges/okx/okx.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 
 // OKX v5 candles: `bar=1M` is a Hong Kong-time month and `1Mutc` the UTC
 // calendar month (https://www.okx.com/docs-v5/en/#public-data-rest-api-get-candlesticks;
@@ -52,8 +53,13 @@ const market: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [market], loaded: { ...store.loaded, markets: true } });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [market], loaded: { ...store.loaded, markets: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new OKXExchange('okx', options, store);
 };
 

@@ -862,6 +862,52 @@ mod serial_session {
         no_http(&actions);
         failed(&actions);
     }
+    /// AGT-34: a write refused before release (a venue release veto) sent nothing, so
+    /// the venue may follow it at once with another write: Bybit's partial-stop put-back.
+    #[test]
+    fn unreleased_mutation_refusal_may_continue_as_an_immediate_mutation() {
+        let mut e = start(false, 1);
+        e.venue.immediate = true;
+        e.venue.wrong_next = true;
+        let token = prep(&drain(&mut e));
+        e.http_preparation_failed(1., token, Error::Revoked, VenueError::new("venue veto"));
+        drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Ok(())]);
+        assert!(
+            e.venue.double_continue.unwrap().is_err(),
+            "one continuation per refusal"
+        );
+    }
+    #[test]
+    fn unreleased_mutation_refusal_cannot_continue_as_read() {
+        let mut e = start(false, 1);
+        e.venue.immediate = true;
+        let token = prep(&drain(&mut e));
+        e.http_preparation_failed(1., token, Error::Revoked, VenueError::new("venue veto"));
+        let actions = drain(&mut e);
+        assert!(e.venue.selected.iter().all(Result::is_err));
+        no_http(&actions);
+    }
+    /// The released (possibly landed) write stays fenced: no follow-up write.
+    #[test]
+    fn mutation_transport_failure_cannot_continue_as_mutation() {
+        let mut e = start(false, 1);
+        e.venue.immediate = true;
+        e.venue.wrong_next = true;
+        let token = prep(&drain(&mut e));
+        release(&mut e, token, 0.);
+        e.handle(
+            1.,
+            Event::HttpFailed {
+                request: token.attempt().request,
+                error: "network",
+            },
+        );
+        let actions = drain(&mut e);
+        no_http(&actions);
+        assert!(e.venue.selected.iter().all(Result::is_err));
+        assert_eq!(failed(&actions).outcome, Some(crate::Outcome::Unknown));
+    }
     #[test]
     fn mutation_transport_failure_cannot_continue_as_read() {
         let mut e = start(false, 1);

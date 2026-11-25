@@ -134,7 +134,21 @@ Every `d` includes `accountName`, optional `instanceId`, `intentId`, and `seq`.
 | `order.cancelQueued` | `fingerprint` |
 
 Outcome ID and error fields are always present and nullable. Error objects use
-`message` and optional `outcome: "notSent" | "unknown"`. Receipts echo the input
+`message` and optional `outcome: "notSent" | "rejected" | "unknown"`. The box sends
+`refused` only with `notSent`, or with `rejected` when the engine classified the
+whole order as definitively refused by the venue (no accepted leg, element or
+protective side effect); `message` is then the venue's reason. `rejected` is not
+not-sent proof: the SDK keeps the intent unknown and never resends it. Any other
+native failure, including a partially accepted split or multi-leg placement, is
+`unknown` with `error.outcome: "unknown"`; such an `unknown` may carry
+`error.elements`, each leg's result (`index`, optional `clientOrderId`, `status`
+`placed`/`applied`/`notSent`/`unknown`, `orderIds` or `error.message`), bounded to
+32 legs, 256-byte IDs, 160-character reasons and 4 KiB in all (AGT-185). The box
+drops the list, never the outcome, when it would push the receipt past
+`OUTCOME_MAX`. It is display data only, never outcome evidence: the intent stays
+unknown and is never resent, a reader drops an unreadable list, and the outbox
+keeps it only while the row is unknown. The router must record and replay
+`refused`/`rejected` like any other box outcome. Receipts echo the input
 `seq`. `outcomeSeq` is a positive JS-safe transport delivery counter, not part
 of a business result or its fingerprint. The box numbers its registration output;
 the router may replace that number on **every** live or replayed outcome with its
@@ -164,8 +178,50 @@ routing fields receive a visible ordinary error rather than an oversized receipt
 version nibble 7 and RFC variant 8/9/a/b. Its first 48 bits encode immutable Unix
 creation time in milliseconds. Keys are bounded to 128 bytes. Bybit receives
 that exact UUIDv7 as `orderLinkId` (36 characters, lowercase hex and hyphens);
-`requestId` is the same intent ID. A conflicting caller clientOrderId refuses.
-Existing validation still requires one native order.
+`requestId` is always that original UUID. The SDK selects the venue ID from the
+admitted account, after checking the original payload fingerprint and any caller
+`params.clientOrderId` (which must still equal the UUID before derivation):
+
+| Admitted venue | Caller venue ID |
+| --- | --- |
+| Hyperliquid, Hyperliquid Spot | `0x` plus the UUID's 32 lowercase hex digits |
+| Bitget, Bitget inverse, Bitget USDC; OKX, OKX demo, OKX EU, OKX EU demo; BloFin; Binance PM | The UUID's 32 lowercase hex digits, without hyphens |
+| Bybit variants; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
+| Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
+| WOO | No caller venue ID: its positive JS-safe integer rule cannot carry the UUID losslessly, and router and outbox accept only lossless forms |
+| Backpack; GRVT; HyroTrader | No caller venue ID: numeric-only fields cannot carry the UUID losslessly, or the native codec supports no caller IDs (AGT-50) |
+| Bybit protection; shape-refusing adapters: BloFin, Phemex, OKX (all four), Bitget (all three), KuCoin Futures, Bitunix, ApeX Omni, Crypto.com, Binance USD-M/Spot/PM, BingX, Paradex, Coinbase (futures and spot) | No caller venue ID for that order: the native adapter refuses one on a trigger type or an order carrying `triggerPrice`, `stopLoss` or `takeProfit`; BingX and Paradex also on `close: true`; Coinbase only on `stop_market` or `close: true` (AGT-46, #3758, AGT-110; OKX, KuCoin, Bitget, Bitunix and Binance verified live, the rest by adapter source). Plain orders keep the row above. WEEX and Bitrue share the rule but have no native hosted origin, so they are not hosted; hosting Bitrue also needs a caller-ID form of at most 31 characters, or omission |
+
+Text/hex encodings preserve all 128 intent bits. They do not change the intent,
+request ID, fingerprint, age or durable router claim. SDK receipts retain the
+actual caller venue ID, including unknown outcomes; it is null when none was
+supplied. Native adapters may generate their own internal IDs in that case, but
+the SDK does not claim one from absent evidence. The router never derives a venue
+ID. Its UUID/fingerprint ledger is primary dedupe even when no caller venue ID is
+supported; replay and conflicting payloads never create another forward.
+
+Native order-shape, quantity/split, ownership and command guards remain unchanged.
+A venue ID is never discarded and retried after a native refusal. Multiple or
+missing native result IDs retain the existing unknown outcome, never a resend. The one
+exception is a single bracket on a venue that places its stop-loss/take-profit as
+separate orders after the entry (OKX limit/market entries, Binance limit/market and
+`stop_market`/`take_profit_market` entries, Kraken limit entries): exactly one entry ID
+followed by one ID per requested leg is `placed` with the entry as `venueOrderId`
+(AGT-111, AGT-112). On those, a split entry, a lone entry ID or any other count stays unknown.
+OKX refuses any non-limit/market entry with an attached stop-loss/take-profit, and Binance
+USD-M/PM a `conditional` or trailing one, before any write (AGT-115: they used to place the
+entry without its legs). Kraken, Binance Spot and COIN-M also refuse those brackets, except
+a COIN-M trailing entry, which places its legs uncounted and so stays unknown.
+The same refusal covers every adapter that dropped those legs (AGT-115 follow-up): any
+non-limit/market entry on AsterDEX, Bitget, Bitunix, Hyperliquid, Lighter, MEXC and WOO;
+trailing entries, and stops closing a covering position, on Bybit and HyroTrader; stop and take-profit on WEEX;
+trailing on Phemex. An order that can only reduce (`reduceOnly` or `close`) never carries
+legs on any venue: the engine refuses it `notSent` before the venue sees it, because the legs
+would outlive the position as stray reduce-only triggers (AGT-120; Lighter did this alone first).
+Hyperliquid perps group a limit or market entry's legs into the entry's own `normalTpsl` write
+(market entries dropped them until AGT-117) and the reply names only the entry, so one ID is
+the whole bracket there and a refused leg stays unknown as partial evidence. Hyperliquid spot
+has no trigger orders; the venue refuses a spot bracket whole, which reads as `refused`.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives
@@ -275,8 +331,13 @@ cannot enable a replay. Callers must retain the existing changed/persist and
 retention handling after this constructor, including when a local claim is
 refused and becomes unknown.
 At ten monotonic seconds from creation, its deadline observer marks queued,
-never-forwarded work not sent, even while storage is waiting, and marks in-flight
-or acknowledged work unknown. Physical handoff rechecks the cap. The synchronous
+never-forwarded work not sent, even while storage is waiting. Handed-off work
+waits longer (AGT-125): in-flight work awaits its receipt until
+`DELEGATED_RECEIPT_MAX_AGE_MS` (20 s), since the router and box admit a key by
+their own clocks; acknowledged work is box-admitted and may be queued behind the
+venue's writes, so it becomes unknown at `DELEGATED_ACKNOWLEDGED_MAX_AGE_MS`
+(160 s, which covers the engine's 120 s command wait plus a venue write). Physical
+handoff rechecks the 10 s cap. The synchronous
 send adapter must return true only for a physical handoff; only an explicit false
 positively guarantees neither handoff nor buffering for a later connection.
 A throw or any other non-true return is ambiguous and immediately becomes unknown

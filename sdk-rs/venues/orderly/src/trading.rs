@@ -1005,7 +1005,7 @@ impl Orderly {
                     .any(|(_, blocked)| scopes.iter().any(|s| blocked.contains(s))))
         {
             return Err(
-                "Orderly protective state requires reconciliation before another write".into(),
+                "Orderly’s protection update hasn’t been confirmed. Check your open orders before making another change.".into(),
             );
         }
         let total = steps.len();
@@ -1866,11 +1866,13 @@ fn answer_failure(response: Response<'_>, message: String, write: bool) -> Venue
 fn ambiguous_write(mut error: VenueError) -> VenueError {
     error
         .venue_message
-        .get_or_insert_with(|| error.message.into_boxed_str());
-    error.message = "Orderly write outcome is unknown. Check Open Orders".into();
+        .get_or_insert_with(|| error.message.into());
+    error.message =
+        "Orderly didn’t confirm this change. Check your open orders before trying again.".into();
     error.outcome(Outcome::Unknown)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod allocation_tests {
     use super::ts_lot_count;

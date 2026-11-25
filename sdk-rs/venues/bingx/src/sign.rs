@@ -73,12 +73,21 @@ pub fn unsigned_headers(method: Method) -> &'static [(&'static str, &'static str
     } else {
         &[
             ("X-SOURCE-KEY", "Tealstreet"),
-            ("Content-Type", "application/json, charset=utf-8"),
+            ("Content-Type", "application/json; charset=utf-8"),
         ]
     }
 }
 
 impl Params {
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+    pub(crate) fn text_value(&self, key: &str) -> Option<&str> {
+        match self.0.get(key) {
+            Some(Param::Text(value)) => Some(value),
+            _ => None,
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -171,6 +180,31 @@ pub fn signs(path: &str) -> bool {
 #[cfg(test)]
 mod wire_tests {
     use super::*;
+
+    #[test]
+    fn non_post_requests_use_a_valid_json_media_type() {
+        for method in [Method::Get, Method::Put, Method::Delete] {
+            assert_eq!(
+                unsigned_headers(method),
+                &[
+                    ("X-SOURCE-KEY", "Tealstreet"),
+                    ("Content-Type", "application/json; charset=utf-8"),
+                ],
+                "{method:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn post_headers_keep_the_existing_json_media_type() {
+        assert_eq!(
+            unsigned_headers(Method::Post),
+            &[
+                ("X-SOURCE-KEY", "Tealstreet"),
+                ("Content-Type", "application/json"),
+            ]
+        );
+    }
 
     #[test]
     fn a_post_body_carries_the_numbers_the_signature_covers() {

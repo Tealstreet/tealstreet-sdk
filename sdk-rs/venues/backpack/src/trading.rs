@@ -21,7 +21,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-pub(crate) const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub(crate) const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 fn with_unknown_guidance(mut error: VenueError) -> VenueError {
     if error.outcome == Some(Outcome::Unknown) {
@@ -1686,7 +1687,7 @@ impl Backpack {
             ),
             (_, true, false) => (
                 format!(
-                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                    "Your {symbol} replacement {what} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
                 ),
                 None,
             ),
@@ -1696,7 +1697,12 @@ impl Backpack {
             ),
             (_, false, false) => (gone_text(&symbol, side, kind, true), None),
         };
-        error.message = format!("{message} ({})", error.message);
+        // A guided text keeps its action last; the refusal forms keep their parenthesis.
+        error.message = if message.contains(". Check ") {
+            safe_cex_engine::error::with_detail(&message, &error.message)
+        } else {
+            format!("{message} ({})", error.message)
+        };
         error.protection = protection;
         if data {
             let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);
@@ -1763,7 +1769,7 @@ impl Backpack {
         // A 408 or 5xx on the put-back is sealed before this venue sees it:
         // say what is unknown rather than repeat the replacement's refusal.
         let words = format!(
-            "Your {} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+            "Your {} replacement {} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection.",
             protect.original.symbol,
             what(protect.original.kind)
         );
@@ -2375,6 +2381,7 @@ impl Request {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod managed_repair_gate_tests {
     use super::*;

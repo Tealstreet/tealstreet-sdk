@@ -234,6 +234,38 @@ fn bad_update_execution_row_is_skipped_alone_and_emits_no_fill() {
     assert_eq!(e.store().order("O-200").unwrap().filled, 0.5);
     assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 1);
 }
+// AGT-83: a trade row's exec_id with last_qty is the fill identity; a cumulative delta keeps the order id.
+#[test]
+fn exec_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    let snapshot = r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"trade","order_qty":2,"cum_qty":0.5,"last_qty":0.5,"avg_price":99,"exec_id":"history","timestamp":"2023-11-14T22:13:20Z"}]}"#;
+    message(&mut e, s, snapshot);
+    let _ = e.take_frame(NOW).unwrap_or(&[]).to_vec();
+    for (cumulative, last, exec, second) in [
+        ("1", r#""last_qty":0.5,"#, "live-1", 21),
+        ("1.5", r#""last_qty":0.5,"#, "live-2", 22),
+        ("2", "", "cumulative", 23),
+    ] {
+        message(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"channel":"executions","type":"update","data":[{{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"trade","order_qty":2,"cum_qty":{cumulative},{last}"avg_price":99,"exec_id":"{exec}","timestamp":"2023-11-14T22:13:{second}Z"}}]}}"#
+            ),
+        );
+    }
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(NOW).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["live-1", "live-2", "O-100"].map(|id| (Some(id.to_owned()), "O-100".to_owned(), 0.5))
+    );
+}
 #[test]
 fn snapshot_history_never_emits_and_live_execution_reconnect_duplicates_dedupe() {
     let (mut e, _, private) = ready(false);

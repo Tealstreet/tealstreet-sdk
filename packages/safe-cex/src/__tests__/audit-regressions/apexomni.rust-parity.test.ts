@@ -1,9 +1,13 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 
 vi.mock('zklink-web-sdk-alpha', () => ({
   newRpcSignerWithProvider: () => ({ initZklinkSigner: vi.fn(async () => undefined) }),
@@ -36,44 +40,54 @@ const execution = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 const fixture = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
-      {
-        id: 'BTC-USDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
-        info: { initialMarginRate: '0.01', defaultInitialMarginRate: '0.05' },
-      },
-    ] as any,
-    tickers: [
-      {
-        id: 'BTC-USDT',
-        symbol: 'BTCUSDT',
-        bid: 100,
-        ask: 100,
-        last: 102,
-        mark: 100,
-        index: 100,
-        percentage: 0,
-        openInterest: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
-      },
-    ],
-  });
-  store.updateZkLinkConfig({
-    id: '1',
-    l2Key: 'key',
-    contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
-    contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
-  } as any);
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
+          info: { initialMarginRate: '0.01', defaultInitialMarginRate: '0.05' },
+        },
+      ] as any,
+      tickers: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          bid: 100,
+          ask: 100,
+          last: 102,
+          mark: 100,
+          index: 100,
+          percentage: 0,
+          openInterest: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
+  applyReferenceFixture(
+    store,
+    {
+      zkLinkConfig: {
+        id: '1',
+        l2Key: 'key',
+        contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
+        contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
+      } as any,
+    },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new ApexOmniExchange(
     'apexomni' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase', omniKeySeed: '11'.repeat(65) } as any,
@@ -141,7 +155,9 @@ describe('ApeX Omni Rust parity corrections', () => {
     await expect(exchange.fetchOrders()).rejects.toThrow('invalid quantities');
     exchange.xhr = {
       get: vi.fn(async () => ({
-        data: { data: { positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' }] } },
+        data: {
+          data: { positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' }] },
+        },
       })),
     } as any;
     await expect(exchange.fetchPositions()).rejects.toThrow('invalid quantities');
@@ -295,7 +311,11 @@ describe('ApeX Omni Rust parity corrections', () => {
 
   it('retains the last known balance when numeric fields are malformed', async () => {
     const { exchange, store } = fixture();
-    store.update({ balance: { total: 1000, free: 900, used: 20, upnl: 4 } });
+    applyReferenceFixture(
+      store,
+      { balance: { total: 1000, free: 900, used: 20, upnl: 4 } },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn(async () => ({
         data: { data: { totalEquityValue: 'NaN', initialMargin: '100', maintenanceMargin: '20' } },
@@ -307,7 +327,14 @@ describe('ApeX Omni Rust parity corrections', () => {
   it('ignores a malformed private position frame without exposing partial financial updates', () => {
     const { exchange, websocket, store } = fixture();
     const initial = exchange.mapPosition({ symbol: 'BTC-USDT', side: 'LONG', size: '1', entryPrice: '100' })!;
-    store.addOrUpdatePositionsFull([initial]);
+    (() => {
+      const incoming: StoreData['positions'] = [initial];
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     expect(() =>
       websocket.handlePositionTopic([
         { symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100' },
@@ -320,9 +347,30 @@ describe('ApeX Omni Rust parity corrections', () => {
   it('keeps terminal parent and virtual siblings from reopening in a delayed snapshot', () => {
     const { exchange, websocket, store } = fixture();
     const withLegs = row({ openSlParam: { triggerPrice: '90' }, openTpParams: { triggerPrice: '110' } });
-    store.addOrUpdateOrders(exchange.mapOrder(withLegs));
+    (() => {
+      const incoming: StoreData['orders'] = exchange.mapOrder(withLegs);
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     websocket.handleOrderTopic([row({ status: 'CANCELED' })] as any);
-    store.addOrUpdateOrdersFull(exchange.mapOrder(withLegs));
+    // The producer's terminal fence must reject the stale snapshot before
+    // emitting financial state to FrameStore.
+    websocket.onMessage(
+      new MessageEvent('message', {
+        data: JSON.stringify({ topic: 'ws_zk_accounts_v3', type: 'snapshot', contents: { orders: [withLegs] } }),
+      }),
+    );
     expect(store.orders).toHaveLength(0);
   });
 
@@ -335,7 +383,22 @@ describe('ApeX Omni Rust parity corrections', () => {
         openTpParams: { triggerPrice: '110', triggerPriceType: 'MARKET' },
       }),
     );
-    store.addOrUpdateOrders(orders);
+    (() => {
+      const incoming: StoreData['orders'] = orders;
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
     const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['replacement']);
     await exchange.updateOrder({ order: orders[0], update: { price: 101 } });
@@ -379,8 +442,30 @@ describe('ApeX snapshot identifiers and execution range precision', () => {
   it.each([undefined, null, '', '   '])('rejects missing or blank snapshot symbols: %j', async (symbol) => {
     const { exchange, store, websocket } = fixture();
     const initialPosition = exchange.mapPosition({ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100' })!;
-    store.addOrUpdatePositionsFull([initialPosition]);
-    store.addOrUpdateOrders(exchange.mapOrder(row()));
+    (() => {
+      const incoming: StoreData['positions'] = [initialPosition];
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
+    (() => {
+      const incoming: StoreData['orders'] = exchange.mapOrder(row());
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     exchange.xhr = {
       get: vi.fn(async (path) => ({
         data: {

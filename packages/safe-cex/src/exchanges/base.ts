@@ -4,7 +4,7 @@ import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
 import type { JoinProofResponse } from '../joinProof.types';
 import type { PositionRecord } from '../journal/position.types';
-import type { Store } from '../store/store.interface';
+import type { FrameStore } from '../store/frameStore';
 import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 import type { HttpFailureRecord } from '../utils/httpFailureContext';
@@ -33,7 +33,7 @@ import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
-import { FrameApplier, FrameApplyError } from '../store/frameApplier';
+import { FrameApplyError } from '../store/frameStore';
 import { WorkerFrameRecoveryScopes } from '../store/workerFrameRecoveryScopes';
 import { reportException } from '../telemetry';
 import {
@@ -81,7 +81,7 @@ import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureC
 import { adjust } from '../utils/safe-math';
 import { signHttpCapture } from '../utils/signHttpCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
-import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
 import { BaseWebSocket } from './base.ws';
 import {
@@ -323,7 +323,6 @@ export type OHLCVFrameRejection = { stream: 'ohlcv'; symbol: string; interval: s
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
-  fetchedLeverage: Record<string, FetchedLeverage>;
 };
 
 /** Methods a main-thread Rust mirror forwards whole to its worker's engine. */
@@ -504,7 +503,7 @@ export interface Exchange {
   disablePublicWebsockets(): void;
   setOnlineStatus: (isOnline: boolean) => void;
 
-  store: Store;
+  store: FrameStore;
   emitter: TinyEmitter;
   options: ExchangeOptions;
   isDisposed: boolean;
@@ -625,7 +624,7 @@ export class BaseExchange implements Exchange {
   initTime = Date.now();
 
   _exchangeName: ExchangeName;
-  store: Store;
+  store: FrameStore;
   options: ExchangeOptions;
   emitter: ExchangeEmitter;
 
@@ -661,7 +660,6 @@ export class BaseExchange implements Exchange {
   private _lastHttpFailure?: HttpFailureRecord;
   private remoteSignerAvailabilityCleanups = new Set<() => void>();
   private readonly unsubscribeFromStore: () => void;
-  private applyingWorkerChaserTags = false;
 
   on: TinyEmitter['on'];
   once: TinyEmitter['once'];
@@ -697,7 +695,7 @@ export class BaseExchange implements Exchange {
     return xhr;
   }
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     this._exchangeName = exchangeName;
     this.options = opts;
     this.store = store;
@@ -714,20 +712,6 @@ export class BaseExchange implements Exchange {
     };
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
-      // Frames carry native orders; chaser tags arrive independently with the
-      // worker's derived fields. Reapply on either notification order.
-      if (this.workerFrameApplier && !this.applyingWorkerChaserTags) {
-        const orders = chaserOrderUpdates(data);
-        if (orders.length) {
-          this.applyingWorkerChaserTags = true;
-          try {
-            this.store.addOrUpdateOrders(orders.map(({ order, extra }) => ({ ...order, extra })));
-          } finally {
-            this.applyingWorkerChaserTags = false;
-          }
-          return;
-        }
-      }
       this.emitter.emit('update', data);
     });
   }
@@ -910,7 +894,6 @@ export class BaseExchange implements Exchange {
     try {
       this.accountMarketOverlay = await load();
       if (this.isDisposed || this.store.markets.length === 0) return;
-      this.store.update({ markets: this.adaptExternalMarkets(this.store.markets) });
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message;
       if (err instanceof Error) this.emitAndLogError(err, message ? `Exchange Error: ${message}` : undefined);
@@ -1066,7 +1049,6 @@ export class BaseExchange implements Exchange {
     const removed = Array.from(oldMarkets.values()).filter((m) => !newMarkets.find((n) => n.id === m.id));
 
     if (added.length > 0 || removed.length > 0) {
-      this.store.update({ markets: newMarkets });
       this.emitter.emit('markets:changed', { added, removed });
       this.log(
         `Markets refreshed: +${added.length} -${removed.length} (total: ${newMarkets.length})`,
@@ -1109,12 +1091,6 @@ export class BaseExchange implements Exchange {
         buyLeverage: leverage,
         sellLeverage: leverage,
       };
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: leverageObj,
-        },
-      });
       return leverageObj;
     } catch (err) {
       this.log(`Error fetching leverage for ${symbol}: ${err}`, LogSeverity.Warning);
@@ -1775,8 +1751,6 @@ export class BaseExchange implements Exchange {
     };
   }
 
-  private workerFrameApplier?: FrameApplier;
-
   /** Engine-backed venues take the record a snapshot frame carries; others have none. */
   protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
   private workerFrameRecoveryPending = false;
@@ -1788,7 +1762,7 @@ export class BaseExchange implements Exchange {
   private readonly workerFrameRejectedSections = new WorkerFrameRecoveryScopes();
 
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
-    throw new Error('Engine snapshots are unavailable for this exchange');
+    throw new Error('Account snapshots aren’t available for this exchange');
   };
 
   protected observeOrderBookFrameRejections(symbol: string, observer?: (signal: OrderBookFrameRejection) => void) {
@@ -1836,12 +1810,12 @@ export class BaseExchange implements Exchange {
    * to this store and emit its books, candles and fills as the worker's
    * object messages are emitted, so subscribers cannot tell the difference.
    */
-  applyWorkerFrame(buffer: ArrayBuffer) {
-    this.applyWorkerFrameBuffer(buffer, true);
+  applyWorkerFrame(buffer: ArrayBuffer, snapshot = false): boolean {
+    return this.applyWorkerFrameBuffer(buffer, true, snapshot);
   }
 
-  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
-    const applier = (this.workerFrameApplier ??= new FrameApplier(this.store));
+  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean, snapshot = false): boolean {
+    const applier = this.store;
     let frame: Frame | undefined;
     let needsSnapshot = false;
     const recovering = this.workerFrameRejectedSections.size > 0;
@@ -1877,7 +1851,7 @@ export class BaseExchange implements Exchange {
         diagnosticConsole.error('Engine capabilities section failed', error);
       }
       try {
-        applier.apply(decoded);
+        applier.ingest(decoded, { snapshot });
         if (applier.hasMarketIdentity && decoded.markets()) this.workerFrameRejectedSections.acceptMarketSnapshot();
       } catch (error) {
         if (error instanceof FrameApplyError) {
@@ -1932,6 +1906,7 @@ export class BaseExchange implements Exchange {
       }
     }
     if (needsSnapshot && recover) this.requestWorkerFrameRecovery();
+    return !needsSnapshot;
   }
 
   private requestWorkerFrameRecovery() {
@@ -1952,7 +1927,7 @@ export class BaseExchange implements Exchange {
       );
       return;
     }
-    const applier = this.workerFrameApplier;
+    const applier = this.store;
     if (!applier) return;
     const ceiling = Math.min(30_000, 500 * 2 ** this.workerFrameRecoveryAttempts);
     this.workerFrameRecoveryAt = now + ceiling * (0.5 + Math.random() * 0.5);
@@ -1965,8 +1940,8 @@ export class BaseExchange implements Exchange {
         const requestSnapshot: BaseExchange['callMethodInWorker'] = this.callMethodInWorker;
         const snapshot = await requestSnapshot('fetchEngineSnapshot');
         if (!this.isDisposed && revision === this.workerFrameRecoveryRevision) {
-          this.applyWorkerFrameBuffer(snapshot.frame, false);
-          this.dispatchFrameEvent(() => applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
+          // Rule 5 / #3640 review: recovery establishes a new snapshot sequence domain.
+          this.applyWorkerFrameBuffer(snapshot.frame, false, true);
         }
       })
       .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
@@ -2012,19 +1987,6 @@ export class BaseExchange implements Exchange {
 
   fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
     const orders = await this.fetchOrders(symbols);
-
-    // if we pass symbols assume its not a full update...
-    if (symbols) {
-      for (const symbol of symbols) {
-        const symbolOrders = orders.filter((o) => o.symbol === symbol);
-        this.store.setOrdersForSymbol(symbol, symbolOrders);
-      }
-    } else {
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
-    }
 
     return orders;
   };
@@ -2137,8 +2099,8 @@ export class BaseExchange implements Exchange {
     ..._args: Parameters<this[M]>
   ) => {};
 
-  removeOrders = (orders: Pick<Order, 'id'>[]) => {
-    this.store.removeOrders(orders);
+  removeOrders = (_orders: Pick<Order, 'id'>[]) => {
+    throw new Error('Order state is owned by native frames');
   };
 
   // called on ws reconnect before resubscribing, refetch any private data snapshots needed
@@ -2150,7 +2112,7 @@ export class BaseExchange implements Exchange {
     // re-open resync (BaseWebSocket.trackConnected) with tries=10. Without these checks a disposed
     // account (browser gone / remote signer dead) would keep retrying
     // fetchOrders() — each retry signs a REST request that throws
-    // "Remote signer unavailable", flooding logs/CPU forever. See
+    // "Signing isn’t available for this account", flooding logs/CPU forever. See
     // base.ws.ts send()/dispose() guards for the matching reconnect side.
     if (this.isDisposed) return;
 
@@ -2160,10 +2122,6 @@ export class BaseExchange implements Exchange {
       try {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
         return;
       } catch (e: any) {
         if (this.isDisposed) return;
@@ -2204,7 +2162,6 @@ export class BaseExchange implements Exchange {
       if (this.isDisposed) return [];
 
       delete this._fetchPositionForSymbolPromise[symbol];
-      this.store.addOrUpdatePositions(foundPositions);
     }
     return foundPositions;
   };
@@ -2288,6 +2245,7 @@ export class BaseExchange implements Exchange {
       ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
         ? startupDiagnosticTags(structuredExtraData.engineEvent)
         : {}),
+      ...workerErrorProtectionTags(err),
     };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
@@ -2627,9 +2585,7 @@ export class BaseExchange implements Exchange {
    * true via the no-source branch below, so stale public data could not go red.
    */
   private syncSocketHealthToStoreInternal = () => {
-    this.store.updateSocketHealth(
-      summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), this.externalPublicDataProvider),
-    );
+    // Native frames publish socket health.
   };
 
   public fetchLastLogsFromWebsockets = (): string[] => {

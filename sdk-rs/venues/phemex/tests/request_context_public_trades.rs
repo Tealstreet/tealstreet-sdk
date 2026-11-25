@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Unsigned public-trades custody and unchanged signed-read compatibility.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Prepared, RoutingIntent};
@@ -317,7 +321,10 @@ fn shared_context_capacity_refuses_history_before_native_active_slot_or_io() {
     );
     let error = failure(&output, OWNER);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(error.outcome.is_none());
     assert!(
         peers.iter().all(|peer| e.http_preparation_pending(*peer)),
@@ -413,7 +420,7 @@ fn native_public_duplicates_keep_exact_values_without_live_account_mutation() {
     assert_eq!(rows[0]["timestamp"], 1_666_860_389_799.);
     assert_eq!(rows[0]["price"], 20702.1);
     assert_eq!(rows[0]["qty"], 0.949);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(reply(&mut e, NOW + 2., &request, 200, TRADE).is_empty());
 }
 

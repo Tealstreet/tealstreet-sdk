@@ -1,7 +1,9 @@
 import type { Execution } from '../types';
 
+import { CommandTimeoutError, ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { describe, expect, it, vi } from 'vitest';
 
+import { exchangeErrorTags, serializeCommandError } from '../commandOutcome';
 import { OrderSide } from '../types';
 import { buildFoldedPositionRecords } from './buildRecords';
 
@@ -19,14 +21,16 @@ const TO = FROM + 24 * 60 * 60 * 1000;
 
 /** A buy then a sell, which folds into exactly one closed round trip. */
 const roundTrip = (symbol: string): Execution[] => [
-  { timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1 },
+  { id: '1', timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1, commissionAsset: 'USDT' },
   {
+    id: '2',
     timestamp: FROM / 1000 + 120,
     symbol,
     price: 110,
     qty: 1,
     side: OrderSide.Sell,
     commission: 0.1,
+    commissionAsset: 'USDT',
     realizedPnl: 10,
   },
 ];
@@ -76,6 +80,70 @@ describe('buildFoldedPositionRecords — a failed income read is not an empty ac
     if (!(thrown instanceof Error)) throw new Error('Expected a rejected income read');
     expect(thrown.name).toBe('AuthError');
     expect(thrown.cause).toBe(rejected);
+  });
+
+  it.each([
+    ['rateLimited', '-1003'],
+    ['authPermission', '-2015'],
+    ['network', undefined],
+  ] as const)('keeps native %s classification through the fatal income wrapper', async (kind, venueCode) => {
+    const original = new ExchangeError('apiKey=private-key-canary', { message: 'apiKey=private-key-canary', kind, venueCode });
+    Object.assign(original, { row: { amount: 'private-amount' }, request: { key: 'private-key-canary' } });
+    const fetchHistoricalFills = vi.fn(async () => []);
+    const thrown: unknown = await buildFoldedPositionRecords(
+      { fetchHistoricalFills, fetchIncomeHistoryRange: async () => { throw original; } },
+      options({ symbolScoped: true }),
+    ).catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({ name: 'Error', kind, ...(venueCode && { venueCode }) });
+    expect((thrown as Error).cause).toBe(original);
+    expect((thrown as Error).message).toMatch(/symbol-scoped/);
+    expect(fetchHistoricalFills).not.toHaveBeenCalled();
+    const serialized = serializeCommandError(thrown);
+    expect(serialized).toMatchObject({ kind, ...(venueCode && { venueCode }) });
+    expect(exchangeErrorTags(serialized)).toMatchObject({ error_kind: kind });
+    expect(JSON.stringify(serialized)).not.toMatch(/private-key-canary|private-amount/);
+    expect(serialized).not.toHaveProperty('row');
+    expect(serialized).not.toHaveProperty('request');
+  });
+
+  it('does not invent a write outcome or venue classification for a read timeout', async () => {
+    const original = new CommandTimeoutError(20_000);
+    const thrown: unknown = await buildFoldedPositionRecords(
+      { fetchHistoricalFills: async () => [], fetchIncomeHistoryRange: async () => { throw original; } },
+      options({ symbolScoped: true }),
+    ).catch((error: unknown) => error);
+    expect(thrown).toMatchObject({ name: 'CommandTimeoutError', cause: original });
+    expect(thrown).not.toHaveProperty('kind');
+    expect(thrown).not.toHaveProperty('outcome');
+  });
+
+  it('retains an explicit notSent outcome from a refused income read', async () => {
+    const original = Object.assign(new Error('read admission refused'), { outcome: 'notSent' });
+    const thrown: unknown = await buildFoldedPositionRecords(
+      { fetchHistoricalFills: async () => [], fetchIncomeHistoryRange: async () => { throw original; } },
+      options({ symbolScoped: true }),
+    ).catch((error: unknown) => error);
+    expect(thrown).toMatchObject({ outcome: 'notSent', cause: original });
+    expect(thrown).not.toHaveProperty('kind');
+  });
+
+  it('does not promote arbitrary metadata or replace a refusal with a getter error', async () => {
+    for (const original of [
+      Object.assign(new Error('unclassified'), { kind: 'PRIVATE_KIND', outcome: 'PRIVATE_OUTCOME', row: 'private-row' }),
+      Object.defineProperty(new Error('unreadable'), 'kind', { get: () => { throw new Error('getter-canary'); } }),
+    ]) {
+      const thrown: unknown = await buildFoldedPositionRecords(
+        { fetchHistoricalFills: async () => [], fetchIncomeHistoryRange: async () => { throw original; } },
+        options({ symbolScoped: true }),
+      ).catch((error: unknown) => error);
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).cause).toBe(original);
+      expect(thrown).not.toHaveProperty('kind');
+      expect(thrown).not.toHaveProperty('outcome');
+      expect(thrown).not.toHaveProperty('row');
+    }
   });
 
   it('still treats an income read that SUCCEEDED with no symbols as an empty account', async () => {
@@ -217,5 +285,36 @@ describe('buildFoldedPositionRecords — incomplete history cannot claim complet
     expect(result.totalFills).toBe(2);
     expect(result.records[0].funding).toBe(-0.5);
     expect(result.records[0].fundingAttributed).toBe(true);
+  });
+});
+
+describe('buildFoldedPositionRecords — foreign fee currencies', () => {
+  it('propagates refusal of a nonzero commission with no reported asset', async () => {
+    const fills = roundTrip('BTCUSDT').map((fill, index) => ({
+      ...fill,
+      commissionAsset: index === 0 ? undefined : fill.commissionAsset,
+    }));
+    await expect(
+      buildFoldedPositionRecords(
+        { fetchHistoricalFills: async () => fills, fetchIncomeHistoryRange: async () => [] },
+        options(),
+      ),
+    ).rejects.toThrow(/fee currency conversion/);
+  });
+
+  it('rejects the derived result instead of silently dropping its unconvertible position', async () => {
+    const fills = roundTrip('BTCUSDT').map((fill, index) => ({
+      ...fill,
+      commissionAsset: index === 0 ? 'BNB' : 'USDT',
+    }));
+    await expect(
+      buildFoldedPositionRecords(
+        {
+          fetchHistoricalFills: async () => fills,
+          fetchIncomeHistoryRange: async () => [{ symbol: 'BTCUSDT' }],
+        },
+        options({ symbolScoped: true }),
+      ),
+    ).rejects.toThrow(/fee currency conversion/);
   });
 });

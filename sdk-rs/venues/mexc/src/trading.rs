@@ -592,6 +592,14 @@ impl MexcFutures {
         if orders.iter().any(|o| o.client_order_id.is_some()) {
             return Err("mexc cannot honor a caller clientOrderId".into());
         }
+        // AGT-115: stop bodies carry only their own trigger, so attached legs would be
+        // dropped; refuse the whole command before any write.
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(stop_entry_legs_refusal("MEXC"));
+        }
         let steps: VecDeque<_> = orders
             .iter()
             .cloned()
@@ -1304,7 +1312,7 @@ impl MexcFutures {
                 error.presents = true;
                 if error.outcome == Some(Outcome::Unknown) {
                     error.message = format!(
-                        "Your {} protection status is unknown: {}; check Open Orders and your position before replacing protection",
+                        "Your {} protection wasn’t confirmed: {}. Check your open orders and position before adding protection.",
                         edit.observed.symbol, error.message
                     );
                 } else {

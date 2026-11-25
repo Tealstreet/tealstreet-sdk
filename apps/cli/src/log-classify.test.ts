@@ -27,6 +27,27 @@ describe('classifyLog', () => {
       );
     });
 
+    it.each([
+      'Bybit socket closed (1000); reconnecting',
+      'Bybit socket closed (idle timeout); reconnecting',
+      'Bybit socket closed; reconnecting',
+      'Bybit socket timed out; reconnecting',
+      'Bybit public stream carried no data; reconnecting',
+      'Binance socket route refused; trying the next route',
+      'Lighter socket route refused; trying another',
+      'Bybit fee rates: Bybit returned retCode 10001',
+    ])('keeps a routine engine reconnect or optional fee read in cli.log only: %s', (message) => {
+      expect(classifyLog(message, 'log')).toBe('operational');
+    });
+
+    it.each([
+      'Bybit socket authentication failed; reconnecting',
+      'Bybit socket refused on every route',
+      'Bybit: public market data has not connected for 20 s',
+    ])('keeps a real socket failure on the terminal: %s', (message) => {
+      expect(classifyLog(message, 'log')).toBe('info');
+    });
+
     it('does NOT silence the same content when it arrives via console.error', () => {
       // A genuine error is never demoted to operational, even if it mentions a ping/reconnect.
       expect(classifyLog('[trackLastReceived] reconnect failed permanently', 'error')).not.toBe('operational');

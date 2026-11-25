@@ -124,6 +124,23 @@ test('docs and inert tests skip replay/size, but unknown and shared inputs selec
   }
 });
 
+test('write paths always run combined consumers, even when selection is otherwise narrow', () => {
+  // #3785 (Hyperliquid) and #3523 (a write-routing test only) each skipped the job.
+  for (const path of ['sdk-rs/venues/hyperliquid/src/trading/write_plan.rs',
+    'sdk-rs/venues/hyperliquid/tests/batched_placements.rs', 'sdk-rs/venues/bitget/benches/sign.rs',
+    'packages/safe-cex/src/exchanges/rust/rust.exchange.ts',
+    'packages/safe-cex/src/__tests__/audit-regressions/rust.beta-manual-write-routing.test.ts',
+    'packages/safe-cex/src/__tests__/rust.frame-fed-mirror.test.ts',
+    'packages/safe-cex/src/__tests__/cutover/mainThreadTrading.wasm.test.ts',
+    'packages/safe-cex/src/__tests__/audit-regressions/lighter.page-write-route.wasm.test.ts'])
+    assert.equal(select(path).combinedRequired, true, path);
+  assert.equal(select('sdk-rs/venues/hyperliquid/src/trading.rs').full, false);
+  for (const path of ['sdk-rs/venues/hyperliquid/README.md', 'docs/plans/X.md',
+    'packages/safe-cex/src/__tests__/audit-regressions/woo.v3-regular-writes.test.ts',
+    'packages/safe-cex/src/exchanges/kraken/message.ts', 'sdk-rs/harness/gate.test.mjs'])
+    assert.equal(select(path).combinedRequired, false, path);
+});
+
 test('base dependency edges and transitive users survive removed dependencies', () => {
   const result = selectCi({ paths: ['sdk-rs/venues/binance/src/lib.rs'], manifests: [
     ['asterdex', 'safe-cex-venue-binance.workspace = true'],

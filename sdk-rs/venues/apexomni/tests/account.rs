@@ -146,6 +146,278 @@ fn order(id: &str, status: &str, cumulative: &str) -> String {
     )
 }
 
+fn rejected_status_warning(status: &str) -> String {
+    let mut row: serde_json::Value = serde_json::from_str(&order("parent", "OPEN", "0.5")).unwrap();
+    row["status"] = status.into();
+    row["clientId"] = "private-client-id".into();
+    let (mut e, socket) = ready();
+    ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+    e.prepared(50.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame("delta", &serde_json::json!({"orders":[row]}).to_string()),
+    );
+    // An unknown token cannot cancel or change an existing order.
+    assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+    assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
+    let warnings = e
+        .prepared(100.0)
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some(event.message)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1);
+    let warning = warnings.into_iter().next().unwrap();
+    for field in ["parent", "private-client-id", "BTC-USDT", "BUY"] {
+        assert!(!warning.contains(field), "unrelated row field in warning");
+    }
+    assert!(warning.len() <= 128);
+    assert!(warning.bytes().all(|byte| (b' '..=b'~').contains(&byte)));
+    warning
+}
+
+#[test]
+fn unknown_status_warning_names_only_the_bounded_printable_token() {
+    for (status, expected) in [
+        ("FUTURE_STATUS", r#"unknown order status: "FUTURE_STATUS""#),
+        ("", r#"unknown order status: """#),
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            r#"unknown order status: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA""#,
+        ),
+        ("BAD\"\\STATUS", r#"unknown order status: "BAD\"\\STATUS""#),
+    ] {
+        assert_eq!(rejected_status_warning(status), expected);
+    }
+}
+
+#[test]
+fn unknown_status_warning_hashes_oversized_and_non_printable_input() {
+    for (status, bytes, hash) in [
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            33,
+            "5d873590851b7b00b60490c8e6966b3409c385adcc9590d801f0e03e268b5ba5",
+        ),
+        (
+            "BAD\nSTATUS",
+            10,
+            "597afc8f0b53f492a194e060a101a9191921dc34a69d3385d0a5e7caa0ecc5a4",
+        ),
+        (
+            "BAD\rSTATUS",
+            10,
+            "6b510d65773d8df5b103e8fca8dff5bb3ff9af7f1d3ec20a8fbbaa570d6c0f63",
+        ),
+        (
+            "BAD\tSTATUS",
+            10,
+            "41e735e4eb66c8c74398e02925f1e574dabcb202ab1320f7a058e55f0e21bda9",
+        ),
+        (
+            "BAD\0STATUS",
+            10,
+            "7285d685e1532ce24fcf19fe07a18d38b504b0cdaa09d4a741762f57573aab82",
+        ),
+        (
+            "BAD\x7fSTATUS",
+            10,
+            "9413ad9869ffcde7df3b563d956485b63b5edd9d66cc1d0c0cdcd63f117a2e34",
+        ),
+        (
+            "é",
+            2,
+            "4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!("unknown order status: <bytes={bytes} sha256={hash}>")
+        );
+    }
+}
+
+// #3649: status data must not be mistaken for an authentication refusal.
+#[test]
+fn unknown_status_warning_hashes_tokens_that_would_add_auth_advice() {
+    for (status, hash) in [
+        (
+            "IP not whitelisted",
+            "16c39b90dc569381efb400bfeb90de767c5cab8d8c7b9ef91ce9e1f8245b5b03",
+        ),
+        (
+            "Bad key or IP whitelist",
+            "e0115ea472863bfe63762f7de7f38aa0006e00d5c176c1ebb6c879b893e95064",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!(
+                "unknown order status: <bytes={} sha256={hash}>",
+                status.len()
+            )
+        );
+    }
+}
+
+#[test]
+fn documented_order_statuses_map_on_rest_snapshots_and_private_deltas() {
+    // https://api-docs.omni.apex.exchange/#get-open-orders
+    // OPEN includes partial fills; CANCELED and EXPIRED can also have fills.
+    for (status, expected) in [
+        ("PENDING", OrderStatus::Open),
+        ("OPEN", OrderStatus::Open),
+        ("UNTRIGGERED", OrderStatus::Open),
+        ("FILLED", OrderStatus::Closed),
+        ("EXPIRED", OrderStatus::Closed),
+        ("CANCELED", OrderStatus::Canceled),
+    ] {
+        let (mut e, socket, http) = seeded();
+        let filled = match status {
+            "FILLED" => "2",
+            "PENDING" | "UNTRIGGERED" => "0",
+            _ => "0.25",
+        };
+        let body = format!(
+            r#"{{"code":0,"data":[{}]}}"#,
+            order("catalog", status, filled)
+        );
+        for request in http {
+            response(
+                &mut e,
+                &request,
+                30.0,
+                if request.url.ends_with("/v3/account") {
+                    ACCOUNT
+                } else {
+                    &body
+                },
+            );
+        }
+        let mapped = e.store().order("catalog").expect(status);
+        assert_eq!(mapped.status, expected, "REST {status}");
+        let filled: f64 = filled.parse().unwrap();
+        assert_eq!(mapped.filled, filled, "REST {status}");
+        assert_eq!(mapped.remaining, 2.0 - filled, "REST {status}");
+
+        e.handle(40.0, Event::WsOpened { socket });
+        e.prepared(40.0).for_each(drop);
+        ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+        let row = order("stream", status, &filled.to_string());
+        ws(
+            &mut e,
+            socket,
+            100.0,
+            &frame("delta", &format!(r#"{{"orders":[{row}]}}"#)),
+        );
+        if expected == OrderStatus::Canceled {
+            assert!(e.store().order("stream").is_none());
+        } else {
+            let mapped = e.store().order("stream").expect(status);
+            assert_eq!(mapped.status, expected, "WS {status}");
+            assert_eq!(mapped.filled, filled, "WS {status}");
+        }
+        assert!(!e.prepared(100.0).any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+        )), "documented status {status} must not be skipped");
+    }
+}
+
+// Box log 2026-11-19 (AGT-5 bug 60): `unknown order status: "CANCELING"` on a cancel in flight.
+#[test]
+fn canceling_keeps_the_order_listed_until_the_venue_reports_canceled() {
+    let (mut e, socket, http) = seeded();
+    let body = format!(
+        r#"{{"code":0,"data":[{}]}}"#,
+        order("rest", "CANCELING", "0.25")
+    );
+    for request in http {
+        response(
+            &mut e,
+            &request,
+            30.0,
+            if request.url.ends_with("/v3/account") {
+                ACCOUNT
+            } else {
+                &body
+            },
+        );
+    }
+    let rest = e.store().order("rest").expect("REST CANCELING row");
+    assert_eq!(rest.status, OrderStatus::Canceling);
+    assert_eq!(rest.filled, 0.25);
+    assert_eq!(rest.remaining, 1.75);
+
+    e.handle(40.0, Event::WsOpened { socket });
+    e.prepared(40.0).for_each(drop);
+    ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+    e.prepared(50.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "OPEN", "0.5")),
+        ),
+    );
+    ws(
+        &mut e,
+        socket,
+        200.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "CANCELING", "0.5")),
+        ),
+    );
+    let stream = e.store().order("stream").expect("WS CANCELING row");
+    assert_eq!(stream.status, OrderStatus::Canceling);
+    assert_eq!(stream.filled, 0.5);
+    assert!(!e.prepared(200.0).any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+    )), "CANCELING must not be skipped");
+
+    ws(
+        &mut e,
+        socket,
+        300.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "CANCELED", "0.5")),
+        ),
+    );
+    assert!(e.store().order("stream").is_none());
+}
+
+#[test]
+fn unknown_order_status_is_visible_and_preserves_the_live_order() {
+    // Neither spelling variants nor a future venue state establish terminality.
+    for status in ["CANCELLED", "UNKNOWN_ORDER_STATUS", "FUTURE_STATUS", ""] {
+        let (mut e, socket) = ready();
+        ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+        let row = order("parent", status, "0.5");
+        ws(
+            &mut e,
+            socket,
+            100.0,
+            &frame("delta", &format!(r#"{{"orders":[{row}]}}"#)),
+        );
+        assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+        assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
+        assert!(e.prepared(100.0).any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+                && event.message == format!("unknown order status: {status:?}")
+        )));
+    }
+}
+
 #[test]
 fn login_precedes_immediate_subscription_and_ping_with_private_role() {
     let (mut e, socket, _) = seeded();
@@ -310,6 +582,31 @@ fn duplicate_fill_is_emitted_once_and_same_second_distinct_ids_are_not_collapsed
     );
     ws(&mut e, socket, 110.0, &text);
     assert!(fills(&mut e).is_empty());
+}
+
+// AGT-83: the fill id (else matchFillId) is the fill identity; an idless row keeps the order id.
+#[test]
+fn fill_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket) = ready();
+    e.take_frame(99.0);
+    let first = fill("exec-1", "entry", "0.5");
+    let matched = fill("", "entry", "0.5").replace(r#""id":"""#, r#""matchFillId":"match-2""#);
+    let idless = fill("", "entry", "0.5").replace(r#""id":"","#, "");
+    let text = frame(
+        "delta",
+        &format!(r#"{{"fills":[{first},{matched},{idless}]}}"#),
+    );
+    ws(&mut e, socket, 100.0, &text);
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(100.0).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["exec-1", "match-2", "entry"].map(|id| (Some(id.to_owned()), "entry".to_owned(), 0.5))
+    );
 }
 
 #[test]
@@ -1281,6 +1578,14 @@ fn an_answered_key_refusal_ends_the_start() {
         }
         assert_eq!(failures.len(), 1, "{status} {body}");
         assert_eq!(failures[0].kind, Some(kind), "{status} {body}");
+        // #3649: real authentication refusals keep the existing whitelist advice.
+        if kind == ErrorKind::AuthPermission {
+            assert!(
+                failures[0]
+                    .message
+                    .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+            );
+        }
         assert!(
             failures[0].message.contains(text),
             "{}",

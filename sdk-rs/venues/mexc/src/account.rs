@@ -46,6 +46,21 @@ pub enum Request {
     Mode,
     Snapshot(Box<Snapshot>),
 }
+impl Request {
+    pub(super) fn http_class(&self) -> &'static str {
+        match self {
+            Self::Leverage { .. } => "accountLeverage",
+            Self::Mode => "accountMode",
+            Self::Snapshot(snapshot) => match snapshot.scope {
+                Scope::Assets => "accountAssets",
+                Scope::Positions => "accountPositions",
+                Scope::Regular => "accountOrders",
+                Scope::Plan => "accountPlans",
+                Scope::Stop => "accountStops",
+            },
+        }
+    }
+}
 pub struct Snapshot {
     pub symbol: Option<String>,
     pub scope: Scope,
@@ -235,12 +250,13 @@ impl MexcFutures {
             ]);
         }
         if matches!(snapshot.scope, Scope::Plan | Scope::Stop) {
+            let end = cx.protocol_stamp_ms();
             params.extend([
                 (
                     "start_time",
-                    safe_cex_engine::num::format(cx.protocol_now() - 89.0 * 86400000.0),
+                    safe_cex_engine::num::format(end - 89.0 * 86400000.0),
                 ),
-                ("end_time", safe_cex_engine::num::format(cx.protocol_now())),
+                ("end_time", safe_cex_engine::num::format(end)),
             ]);
             params.push(if snapshot.scope == Scope::Plan {
                 ("states", "1".into())
@@ -404,13 +420,16 @@ impl MexcFutures {
                 } else {
                     raw.id.to_string()
                 };
-                if !key.is_empty() && self.account.fills.insert(key, cx.now).is_some() {
+                let execution = (!key.is_empty()).then_some(key);
+                if let Some(key) = &execution
+                    && self.account.fills.insert(key.clone(), cx.now).is_some()
+                {
                     return;
                 }
                 if raw.vol > 0.0 {
                     cx.fill_with_financials(
                         Fill {
-                            id: None,
+                            id: execution,
                             order_id: raw.order_id.to_string(),
                             symbol,
                             side: side(raw.side),
@@ -1053,7 +1072,7 @@ impl MexcFutures {
         let result = if response.status == 200 {
             Envelope::checked(response.body)
         } else {
-            Err(format!("MEXC HTTP {}", response.status))
+            Err(http_failure(request.http_class(), response))
         };
         let envelope = match result {
             Ok(e) => e,

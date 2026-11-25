@@ -209,6 +209,7 @@ impl MergedScopeAuth {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod merged_scope_auth_tests {
     use super::{AuthOutcome, AuthOutcome::*, MergedScopeAuth, Response};
@@ -646,10 +647,10 @@ pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_PLACEMENT: &str =
-    "Placement outcome is uncertain; reconcile before placing or amending";
+const UNCERTAIN_PLACEMENT: &str = "An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders.";
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
+const UNCERTAIN_CANCEL_ALL: &str =
+    "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.";
 #[cfg(feature = "order-locks")]
 fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
     match hold {
@@ -657,6 +658,23 @@ fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
         None => VenueError::new(message),
     }
     .outcome(crate::Outcome::NotSent)
+}
+
+// Each warning and terminal detail owns its existing action; summary guidance is a fallback.
+fn command_failure_message(summary: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        return summary.to_owned();
+    }
+    let summary =
+        if detail.contains("Check your open orders") || detail.contains("Check Open Orders") {
+            summary
+                .strip_suffix(" Check your open orders before trying again.")
+                .or_else(|| summary.strip_suffix(" Check Open Orders"))
+                .unwrap_or(summary)
+        } else {
+            summary
+        };
+    format!("{summary}\nContext: {detail}")
 }
 
 /// Every order of this placement is reduce-only and its venue enforces that.
@@ -3946,17 +3964,9 @@ impl crate::engine::CoreCx<'_> {
         if let Err(error) = &mut result
             && let Some(summary) = (self.io.core.command_failure_summary)(error)
         {
-            error.message = if error.message.is_empty() {
-                summary.clone()
-            } else {
-                format!("{summary}\nContext: {}", error.message)
-            };
+            error.message = command_failure_message(&summary, &error.message);
             for report in &mut reports {
-                *report = if report.is_empty() {
-                    summary.clone()
-                } else {
-                    format!("{summary}\nContext: {report}")
-                };
+                *report = command_failure_message(&summary, report);
             }
         }
         for message in reports {
@@ -4116,7 +4126,7 @@ impl<V: Venue> Clone for HttpRelease<V> {
 }
 
 /// One exchange implementation. All methods are synchronous and must not block.
-const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.";
+const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live market data couldn’t connect; charts and order books aren’t updating. Check your network connection.";
 
 /// One notice per outage when no public socket opens. A connect timeout or a backoff
 /// timer always delivers an event while a feed is failing, so `is_due` needs no timer.
@@ -4594,6 +4604,17 @@ pub trait Venue {
     /// option and symbol-routed commands from it.
     fn capabilities(&self) -> Capabilities {
         Capabilities::BASE
+    }
+
+    /// Conservative account subscription capacity for hosts that accept several
+    /// clients. A host must refuse a larger configured account limit before
+    /// startup; None leaves its deployment limit unchanged. This does not
+    /// enlarge any managed feed's frame or interest budget.
+    fn max_account_subscriptions() -> Option<usize>
+    where
+        Self: Sized,
+    {
+        None
     }
     /// Per-request continuation: what to do with the response.
     type Pending;
@@ -5571,6 +5592,9 @@ impl<V: Venue> Engine<V> {
         }
         // Validate the complete update before changing state.
         update.validate()?;
+        if let Some(stats) = update.message_handler_stats {
+            self.store.set_public_message_stats(stats, now);
+        }
         let mut accepted_tickers = false;
         for ticker in update.tickers {
             if !ticker.has_values() || self.store.market(&ticker.symbol).is_none() {
@@ -6374,6 +6398,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.streams.remove(&request);
                 cx.io.core.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.store.record_request_outcome(None);
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
@@ -6496,6 +6521,20 @@ impl<V: Venue> Engine<V> {
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
             Event::Command(command) => {
+                // AGT-120: legs on an order that can only reduce would outlive the position,
+                // so the whole command is refused before any lock, fence or venue sees it.
+                if let Command::PlaceOrders { command, orders } = &command
+                    && orders
+                        .iter()
+                        .any(crate::model::PlaceOrderOpts::reduce_only_with_attached_legs)
+                {
+                    cx.refuse_before_entry(
+                        *command,
+                        VenueError::new(crate::model::REDUCE_ONLY_LEGS_REFUSAL)
+                            .outcome(crate::Outcome::NotSent),
+                    );
+                    return;
+                }
                 #[cfg(feature = "order-locks")]
                 let guarded = self.venue.guard_order_mutations()
                     || self.venue.guards_order_mutation(cx.store, &command);
@@ -6767,6 +6806,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn count_http_status(&mut self, status: u16) {
+        self.store.record_request_outcome(Some(status));
         if status == 429 {
             self.io.core.health.count(log_code::RATE_LIMITED);
         } else if status >= 500 {
@@ -7942,6 +7982,7 @@ impl<V: Venue> Engine<V> {
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.store.set_clock(now);
         self.expire_read_roots(now);
         #[cfg(feature = "managed-sockets")]
         self.io.core.socket_driver.state.prepare_stats();
@@ -7988,6 +8029,29 @@ impl<V: Venue> Engine<V> {
         &self.io.core.snapshot
     }
 
+    /// Transfer a late-subscriber frame to a host that appends native sections.
+    /// This leaves the stream baseline untouched, like `snapshot_frame`.
+    pub fn snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a private read frame without consuming stream changes or events.
+    pub fn account_snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.account_snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a flush frame instead of retaining a second host-side copy.
+    pub fn take_frame_owned(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>> {
+        if market_only {
+            self.take_market_frame(now)
+        } else {
+            self.take_frame(now)
+        }?;
+        Some(std::mem::take(&mut self.io.core.frame))
+    }
+
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
@@ -8007,6 +8071,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        self.store.set_clock(now);
         // A fill must not reach a consumer before its order: a book-cadence
         // flush carrying fills writes the store sections with them.
         let store = store || !self.io.core.fills.is_empty();
@@ -8056,20 +8121,41 @@ impl<V: Venue> Engine<V> {
             // A market-only flush must not publish row indexes ahead of MARKETS.
             !self.book_deltas || store || markets_match
         };
-        let buffer = std::mem::take(&mut self.io.core.frame);
-        let mut w = FrameWriter::new(buffer, now);
+        let pending = store.then(|| self.store.take_pending());
+        let (bytes, strings) = pending.as_ref().map_or((0, 0), |pending| {
+            self.store.frame_table_reservation(pending)
+        });
         #[cfg(feature = "managed-sockets")]
         let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
         #[cfg(feature = "managed-sockets")]
         if publish_stats {
             self.io.core.socket_driver.state.prepare_stats();
+        }
+        #[cfg(feature = "managed-sockets")]
+        let (bytes, strings) = if publish_stats {
+            let (stats_bytes, stats_strings) = self
+                .io
+                .core
+                .socket_driver
+                .state
+                .stats_frame_reservation(false);
+            (bytes + stats_bytes, strings + stats_strings)
+        } else {
+            (bytes, strings)
+        };
+        // Allocate the startup output before its temporary interning tables.
+        // Growing it around those tables leaves holes in WASM's linear heap.
+        let buffer = std::mem::take(&mut self.io.core.frame);
+        let mut w = FrameWriter::new(buffer, now);
+        w.reserve_tables(bytes, strings);
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
             self.io
                 .core
                 .socket_driver
                 .state
                 .write_stats(&mut w, now, false);
         }
-        let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
             if let Some(state) = self.venue.export_venue_state_for(&self.store)
@@ -8533,6 +8619,43 @@ mod streaming_tests {
     }
 
     #[test]
+    fn owned_host_frames_transfer_buffers_without_consuming_snapshot_baselines() {
+        let mut borrowed = frame_engine();
+        let mut owned = frame_engine();
+        borrowed.store.set_markets(vec![market("A")]);
+        owned.store.set_markets(vec![market("A")]);
+        assert_eq!(owned.snapshot_frame_owned(1.), borrowed.snapshot_frame(1.));
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned snapshot transfers its allocation"
+        );
+        assert_eq!(
+            owned.account_snapshot_frame_owned(2.),
+            borrowed.account_snapshot_frame(2.)
+        );
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned account read transfers its allocation"
+        );
+        assert_eq!(
+            owned.take_frame_owned(3., false).as_deref(),
+            borrowed.take_frame(3.)
+        );
+        assert_eq!(
+            owned.io.core.frame.capacity(),
+            0,
+            "owned flush transfers its allocation"
+        );
+        assert!(owned.take_frame_owned(4., false).is_none());
+        assert!(borrowed.take_frame(4.).is_none());
+        assert_eq!(
+            owned.take_frame_owned(5., true).as_deref(),
+            borrowed.take_market_frame(5.)
+        );
+    }
+    #[test]
     fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [
             None,
@@ -8776,6 +8899,83 @@ mod streaming_tests {
             Action::Notice(Notice::CommandError { command: 7, message }),
             Action::Notice(Notice::CommandFailed { command: 7, error }),
         ] if message == "SUMMARY\nContext: MASTER: journal warning" && *error == presented)
+        );
+    }
+
+    // Rule 5 (#3726): terminal errors and each warning retain their own single action.
+    #[test]
+    fn summary_keeps_guidance_once_and_retains_context() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        for detail in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "A previous change is unknown. Check Open Orders",
+        ] {
+            let message = command_failure_message(summary, detail);
+            assert_eq!(
+                message,
+                format!("Bitunix couldn’t confirm this change.\nContext: {detail}")
+            );
+            assert_eq!(
+                message.matches("Check your open orders").count()
+                    + message.matches("Check Open Orders").count(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn summary_guides_unguided_details_and_keeps_empty_details() {
+        let summary =
+            "Bitunix couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            command_failure_message(summary, "native diagnostic"),
+            format!("{summary}\nContext: native diagnostic")
+        );
+        assert_eq!(command_failure_message(summary, ""), summary);
+        assert_eq!(
+            command_failure_message("SUMMARY", "detail"),
+            "SUMMARY\nContext: detail"
+        );
+    }
+
+    #[test]
+    fn guided_summary_preserves_native_error_and_warning_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.command_failure_summary = |error| {
+            (error.outcome == Some(crate::Outcome::Unknown))
+            .then(|| "Bitunix couldn’t confirm this change. Check your open orders before trying again.".to_owned())
+        };
+        let detail = "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
+        let expected = VenueError::new(detail)
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec![detail.into(), "raw warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = format!("Bitunix couldn’t confirm this change.\nContext: {detail}");
+        let guided = presented.message.clone();
+        let raw = "Bitunix couldn’t confirm this change. Check your open orders before trying again.\nContext: raw warning";
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message: first }),
+            Action::Notice(Notice::CommandError { command: 7, message: second }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if first == &guided && second == raw && *error == presented)
         );
     }
 
@@ -9094,12 +9294,13 @@ mod streaming_tests {
         let mut engine = frame_engine();
         engine.venue.scoped = false;
         engine.venue.symbol_amend = true;
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         let unknown = |engine: &mut Engine<StreamVenue>, id: u32| {
@@ -9149,7 +9350,7 @@ mod streaming_tests {
             engine.drain_actions().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 10, error })
                     if error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("cancel-all"))),
+                        && error.legacy_text().contains("before cancelling all orders"))),
             "a fenced symbol's cancel-all is refused before any I/O"
         );
         assert_eq!(engine.venue.commands.len(), admitted);
@@ -9285,7 +9486,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all" && error.outcome == Some(crate::Outcome::NotSent))));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders." && error.outcome == Some(crate::Outcome::NotSent))));
         }
         engine
             .io
@@ -9357,7 +9558,7 @@ mod streaming_tests {
             "later cancel-all is dispatched"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("uncertain"))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("An earlier order hasn’t been confirmed"))));
     }
 
     #[cfg(feature = "order-locks")]
@@ -9419,12 +9620,13 @@ mod streaming_tests {
                 })
                 .unwrap()
         };
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         engine.handle(0., Event::Command(held_place(1, "A")));
@@ -9750,6 +9952,7 @@ mod streaming_tests {
         });
         let snapshot = engine.account_snapshot_frame(1.).to_vec();
         let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
         assert_eq!(
             sections.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
             [
@@ -9758,6 +9961,7 @@ mod streaming_tests {
                 section::BALANCE,
                 section::SETTINGS,
                 section::STATUS,
+                section::REQUEST_STATS,
                 section::ACCOUNT_READ
             ]
         );
@@ -11828,6 +12032,73 @@ mod placement_ack_tests {
                 Action::ClearTimer { .. } => None,
                 _ => armed,
             })
+    }
+
+    // AGT-120: an order that can only reduce never carries legs, on any venue; the whole
+    // command is refused NotSent before the venue (whose stub would answer ["7","8"]).
+    #[test]
+    fn a_reduce_only_order_with_legs_is_refused_before_the_venue() {
+        let order = |kind: &str, extra: &str| -> crate::model::PlaceOrderOpts {
+            serde_json::from_str(&format!(
+                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":1,"price":100{extra}}}"#
+            ))
+            .unwrap()
+        };
+        for (kind, legs, refused) in [
+            ("limit", r#","reduceOnly":true,"stopLoss":120"#, true),
+            ("limit", r#","reduceOnly":true,"takeProfit":80"#, true),
+            (
+                "limit",
+                r#","reduceOnly":true,"stopLoss":0,"takeProfit":80"#,
+                true,
+            ),
+            ("limit", r#","close":true,"stopLoss":120"#, true),
+            ("market", r#","reduceOnly":true,"stopLoss":120"#, true),
+            ("limit", r#","reduceOnly":true"#, false),
+            (
+                "limit",
+                r#","reduceOnly":true,"stopLoss":0,"takeProfit":null"#,
+                false,
+            ),
+            ("limit", r#","reduceOnly":false,"stopLoss":120"#, false),
+            ("limit", r#","stopLoss":120,"takeProfit":80"#, false),
+        ] {
+            for needs_stored in [false, true] {
+                let mut engine = engine(needs_stored);
+                engine.handle(
+                    0.,
+                    Event::Command(Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![order("limit", ""), order(kind, legs)],
+                    }),
+                );
+                let outcomes: Vec<_> = engine
+                    .drain_actions()
+                    .filter_map(|action| match action {
+                        Action::Notice(Notice::CommandDone { command, result }) => {
+                            Some((command, Ok(result)))
+                        }
+                        Action::Notice(Notice::CommandFailed { command, error }) => {
+                            Some((command, Err(error)))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(outcomes.len(), 1, "{legs}");
+                match &outcomes[0] {
+                    (1, Err(error)) if refused => {
+                        assert_eq!(error.outcome, Some(crate::Outcome::NotSent), "{legs}");
+                        assert_eq!(
+                            error.legacy_text(),
+                            crate::model::REDUCE_ONLY_LEGS_REFUSAL,
+                            "{legs}"
+                        );
+                    }
+                    (1, Ok(result)) if !refused => assert_eq!(result, r#"["7","8"]"#, "{legs}"),
+                    other => panic!("{legs}: {other:?}"),
+                }
+            }
+        }
     }
 
     #[test]

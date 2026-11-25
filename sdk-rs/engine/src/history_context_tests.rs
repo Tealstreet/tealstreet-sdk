@@ -57,7 +57,8 @@ fn first_root_owner(command: u32, root: Context) -> ReadCompletion {
     Completion {
         command,
         incomplete: None,
-        incomplete_reason: None,
+        #[cfg(feature = "history-page-diagnostics")]
+        operation: Some(HistoryOperation::BybitOrders),
         authority: ReadAuthority {
             root: Box::new(root),
             page: None,
@@ -874,4 +875,45 @@ fn a_live_logical_timer_can_issue_the_next_leg_but_cannot_admit_data() {
     let notices = notices(&mut engine);
     assert_eq!(notices.len(), 2);
     assert_done(&notices);
+}
+
+#[cfg(feature = "history-page-diagnostics")]
+#[test]
+fn later_failure_metadata_uses_the_same_terminal_owner_and_never_overrides_an_earlier_gap() {
+    let notices = run("partial");
+    let Some(Notice::Event(event)) = notices.first() else {
+        panic!("missing incomplete owner marker")
+    };
+    assert_eq!(
+        event
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "historyOperation")
+            .map(|(_, value)| value),
+        Some(&Value::Str("bybitOrders".into()))
+    );
+    assert_eq!(
+        event
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "historyFailureKind")
+            .map(|(_, value)| value),
+        Some(&Value::Str("internal".into()))
+    );
+    let mut completion = Completion::new(10).with_operation(HistoryOperation::BybitOrders);
+    completion.incomplete(IncompleteReason::PageBudget, "original missing coverage");
+    completion.later_failure(
+        &VenueError::new("PRIVATE_CANARY")
+            .kind(ErrorKind::RateLimited)
+            .venue_code("10006"),
+    );
+    let event = completion.incomplete.unwrap().event(10);
+    assert_eq!(
+        event.fields,
+        vec![
+            ("command", Value::Num(10.0)),
+            ("reason", Value::Str("pageBudget".into()))
+        ]
+    );
+    assert_eq!(event.message, "original missing coverage");
 }

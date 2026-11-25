@@ -1,10 +1,12 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Ticker, Writable } from '../../../types';
 import type { KucoinSpotExchange } from './kucoinspot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { KUCOIN_SPOT_ENDPOINTS, KUCOIN_SPOT_INTERVAL } from './kucoinspot.types';
 
 type Data = Record<string, any>;
@@ -182,7 +184,15 @@ export class KucoinSpotPublicWebsocket extends BaseWebSocket<KucoinSpotExchange>
     if (quoteVolume !== undefined) update.quoteVolume = quoteVolume;
 
     if (Object.keys(update).length > 0) {
-      this.parent.store.updateTicker(ticker, update);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 

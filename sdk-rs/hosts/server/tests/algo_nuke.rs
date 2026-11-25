@@ -231,6 +231,7 @@ async fn run_nuke(
         inbox
             .send(AlgoInput::Dispose {
                 reason: "account disposed".into(),
+                server_stopped: None,
                 stopped: None,
             })
             .unwrap();
@@ -249,6 +250,7 @@ async fn run_nuke(
     .expect("nuke answers");
     let _ = inbox.send(AlgoInput::Dispose {
         reason: "account disposed".into(),
+        server_stopped: None,
         stopped: None,
     });
     let commands = commands.lock().unwrap().clone();

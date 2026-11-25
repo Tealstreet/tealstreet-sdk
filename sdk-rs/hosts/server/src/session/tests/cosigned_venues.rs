@@ -1,7 +1,7 @@
 //! Admission through the production Session path, independent of DELEGATED rollout.
 use super::*;
 use crate::delegated::probe::venue_tests::{
-    Seen, apexomni_text, assert_variant_startup, operation,
+    Seen, apexomni_text, assert_variant_startup, kraken, operation, signing_material,
 };
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
@@ -14,13 +14,21 @@ const MATERIAL: &str = "synthetic-material";
 async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
     tokio::task::LocalSet::new()
         .run_until(async {
+            assert!(crate::delegated::enabled("asterdex"));
+            assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+                exchange_name: "asterdex".into(),
+                application_id: Some("synthetic-main-wallet".into()),
+                ..Default::default()
+            }));
             for delegated in [false, true] {
                 let registry = crate::accounts::tests::registry();
                 let (mut session, mut sent) = user_session(registry.clone(), "fixture");
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "hyperliquidspot".into(),
+                    // Only AsterDEX's wallet shape stays excluded; V1 has its own proof.
+                    exchange_name: "asterdex".into(),
+                    application_id: Some("synthetic-main-wallet".into()),
                     key: KEY.into(),
                     ..Default::default()
                 };
@@ -28,11 +36,11 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                     init.signing_mode = Some("delegated".into());
                     let offer = session
                         .handovers
-                        .issue("acct", "hyperliquidspot", crate::accounts::now_ms())
+                        .issue("acct", "asterdex", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed = Some(crate::delegated::tests::seal(
                         &offer,
-                        "hyperliquidspot",
+                        "asterdex",
                         KEY,
                         br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
                     ));
@@ -90,6 +98,7 @@ impl Device {
                 && apexomni_text(preimage).trim_start_matches(|c: char| c.is_ascii_digit())
                     == "GET/ws/accounts"
             || venue == "cryptocom" && preimage.starts_with("public/auth");
+        let socket_auth = socket_auth || venue == "kraken" && kraken::socket_preimage(preimage);
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -102,22 +111,34 @@ impl Device {
             MATERIAL
         };
         let mut options = serde_json::from_value(
-            json!({"key":signing_key,"secret":material,"passphrase":"synthetic-passphrase"}),
+            json!({"key":signing_key,"secret":signing_material(venue, material),"passphrase":"synthetic-passphrase"}),
         )
         .unwrap();
         let (provider, identities) =
             safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
-        let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":preimage,"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
-        let (work, output) =
-            safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
-        let signed = provider.sign(work).await.unwrap();
-        let fresh = safe_cex_venues::hosted_signing::finish(output, &signed)
-            .unwrap()
-            .signature
-            .unwrap();
-        let signature = if socket_auth {
-            fresh
+        let fresh = if venue == "asterdex" {
+            crate::delegated::probe::venue_tests::asterdex::device_signature(
+                request,
+                signing_key,
+                material,
+            )
+            .await
         } else {
+            let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":preimage,"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
+            let (work, output) =
+                safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
+            let signed = provider.sign(work).await.unwrap();
+            safe_cex_venues::hosted_signing::finish(output, &signed)
+                .unwrap()
+                .signature
+                .unwrap()
+        };
+        let proof_signature = if venue == "kraken" {
+            socket_auth
+        } else {
+            !socket_auth
+        };
+        let signature = if proof_signature {
             let key = operation(venue, preimage);
             if matches!(mode, Answer::Replay) {
                 let prior = self
@@ -133,6 +154,8 @@ impl Device {
                 }
                 fresh
             }
+        } else {
+            fresh
         };
         let response = if matches!(mode, Answer::MissingSignature) {
             json!({"id":request["id"]})
@@ -507,9 +530,12 @@ async fn venue_case(venue: &'static str) {
     }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
-        if matches!(venue, "phemex" | "apexomni") && matches!(mode, Answer::Replay) {
-            // Phemex expiry and ApeX's signature-retry clock use whole seconds.
-            // Cross a real boundary before presenting the old signature.
+        if venue == "asterdex" && matches!(mode, Answer::Replay) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        if venue == "phemex" && matches!(mode, Answer::Replay) {
+            // Phemex expiry uses whole seconds. Cross a real boundary before
+            // presenting the old signature.
             tokio::time::sleep(Duration::from_millis(1100)).await;
         }
         let before = seen.lock().unwrap().refused;
@@ -596,6 +622,124 @@ async fn cosigned_variant_bitgetusdc_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_bitgetinverse_requires_connection_proof() {
+    venue_case("bitgetinverse").await;
+}
+
+#[tokio::test]
+async fn cosigned_bitgetinverse_missing_signature_or_wrong_passphrase_cannot_attach() {
+    let venue = "bitgetinverse";
+    for answer in [Answer::MissingSignature, Answer::WrongPassphrase] {
+        let (io, seen) = MockVenue::for_admission(venue);
+        let registry = crate::accounts::testing::e2e_registry("alice", io);
+        let (mut session, mut sent) = user_session(registry.clone(), "alice");
+        let mut device = Device::default();
+        if matches!(answer, Answer::MissingSignature) {
+            let mut done = session.take_verified();
+            session.init(payload(venue)).await.unwrap();
+            assert!(session.pending_verifications.contains_key("acct"));
+            let first = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let first: Value = serde_json::from_str(&first).unwrap();
+            assert_eq!(first["t"], "sign-req");
+            let link = session.pending_verifications["acct"]
+                .cosigned_link
+                .clone()
+                .unwrap();
+            device.answer(venue, &mut session, first, answer).await;
+            assert!(session.joined.is_empty());
+            assert_eq!(seen.lock().unwrap().signed_reads, 0);
+            // Missing signatures can leave native startup pending until its shared deadline.
+            tokio::time::pause();
+            let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+                + Duration::from_millis(u64::from(
+                    safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+                ));
+            tokio::time::advance(budget + Duration::from_millis(1)).await;
+            let completion = done.recv().await.unwrap();
+            tokio::time::resume();
+            while let Ok(text) = sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(frame["d"]["op"], "frame", "no unverified state delivery");
+            }
+            session.verification_completed(completion).await.unwrap();
+            assert!(session.pending_verifications.is_empty());
+            assert!(!link.is_available());
+        } else {
+            proof(venue, &mut session, &mut sent, &mut device, answer).await;
+        }
+        assert!(session.joined.is_empty());
+        assert_eq!(registry.account_count(), 0);
+        if matches!(answer, Answer::MissingSignature) {
+            assert_eq!(seen.lock().unwrap().signed_reads, 0, "no unsigned fallback");
+        } else {
+            assert!(seen.lock().unwrap().refused > 0);
+        }
+        let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+            .map(|text| serde_json::from_str(&text).unwrap())
+            .collect();
+        assert!(frames.iter().any(|frame| {
+            let refusal = &frame["d"]["data"][1];
+            refusal["kind"] == "unverified" && refusal["initRefused"] == true
+        }));
+        assert!(!frames.iter().any(|frame| frame["d"]["op"] == "frame"));
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn cosigned_bitgetinverse_retired_signing_work_cannot_attach_after_owner_aba() {
+    let venue = "bitgetinverse";
+    let (io, _) = MockVenue::for_admission(venue);
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut old, mut sent) = user_session(registry.clone(), "alice");
+    old.identity.resumable = false;
+    let mut completed = old.take_verified();
+    old.init(payload(venue)).await.unwrap();
+    assert!(old.pending_verifications.contains_key("acct"));
+    let frame = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let frame: Value = serde_json::from_str(&frame).unwrap();
+    assert_eq!(frame["t"], "sign-req");
+    let preimage = frame["d"]["wsAuth"]["toSign"].as_str().unwrap();
+    let signature = safe_cex_crypto::hmac_sha256(
+        MATERIAL.as_bytes(),
+        preimage.as_bytes(),
+        safe_cex_crypto::Encoding::Base64,
+    );
+    let response = json!({"id":frame["d"]["id"],"wsAuthSignature":signature});
+    let link = old.pending_verifications["acct"]
+        .cosigned_link
+        .clone()
+        .unwrap();
+    let socket = old.socket;
+    old.close();
+    for user in ["bob", "alice"] {
+        let (mut current, mut output) = user_session(registry.clone(), user);
+        current.identity.resumable = false;
+        let mut device = Device::default();
+        proof(
+            venue,
+            &mut current,
+            &mut output,
+            &mut device,
+            Answer::Correct,
+        )
+        .await;
+        load(venue, &mut current, &mut output, &mut device).await;
+        assert_eq!(current.joined["acct"].account.user, user);
+        assert!(!link.resolve(socket, response.clone()));
+        assert!(registry.held("alice", "acct", socket).is_none());
+        assert!(completed.try_recv().is_err());
+        current.close();
+    }
+}
+
+#[tokio::test]
 async fn cosigned_bybitinverse_brazil_requires_connection_proof() {
     venue_case("bybitinverse").await;
 }
@@ -636,7 +780,7 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
         if rule["remoteSigning"]["enabled"] != true
-            || crate::delegated::probe::cosigned_ready(venue)
+            || crate::delegated::probe::cosigned_ready(&payload(venue))
         {
             continue;
         }
@@ -712,11 +856,22 @@ async fn login_switch_case(venue: &'static str) {
     alice.init(payload(venue)).await.unwrap();
     assert!(alice.pending_verifications.contains_key("acct"));
     // Withhold Alice's proof signature: her native proof is genuinely deferred.
-    let request = tokio::time::timeout(Duration::from_secs(30), a_sent.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let request: Value = serde_json::from_str(&request).unwrap();
+    let request = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut device = Device::default();
+        loop {
+            let request: Value = serde_json::from_str(&a_sent.recv().await.unwrap()).unwrap();
+            if venue != "kraken"
+                || kraken::socket_preimage(request["d"]["wsAuth"]["toSign"].as_str().unwrap())
+            {
+                break request;
+            }
+            device
+                .answer(venue, &mut alice, request, Answer::Correct)
+                .await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(request["t"], "sign-req");
     let old_socket = alice.socket;
     alice.close();
@@ -818,8 +973,71 @@ async fn cosigned_woo_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_kraken_requires_connection_proof() {
+    venue_case("kraken").await;
+}
+
+#[tokio::test]
+async fn cosigned_kraken_login_switch_during_private_challenge_is_isolated() {
+    login_switch_case("kraken").await;
+}
+
+#[tokio::test]
 async fn cosigned_bingx_requires_connection_proof() {
     venue_case("bingx").await;
+}
+
+#[tokio::test]
+async fn cosigned_asterdex_v1_requires_connection_proof() {
+    venue_case("asterdex").await;
+}
+
+#[tokio::test]
+async fn cosigned_asterdex_wallet_shapes_stay_proof_unavailable_without_io() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let io = MockVenue::new(KEY.into(), MATERIAL.into());
+            let observed = io.observed.clone();
+            let registry = crate::accounts::testing::e2e_registry("alice", io);
+            for (key, main) in [
+                (format!("0x{}", "1".repeat(40)), None),
+                (format!("0X{}", "1".repeat(40)), None),
+                (format!(" 0x{} ", "1".repeat(40)), None),
+                (
+                    format!("0x{}", "1".repeat(40)),
+                    Some(format!("0x{}", "2".repeat(40))),
+                ),
+                (KEY.into(), Some(format!("0x{}", "2".repeat(40)))),
+            ] {
+                let (mut session, mut sent) = user_session(registry.clone(), "alice");
+                let mut init = payload("asterdex");
+                init.key = key;
+                init.application_id = main;
+                session.init(init).await.unwrap();
+                assert!(session.pending_verifications.is_empty());
+                assert!(session.joined.is_empty());
+                let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+                    .map(|s| serde_json::from_str(&s).unwrap())
+                    .collect();
+                assert!(
+                    frames
+                        .iter()
+                        .any(|f| f["d"]["data"][1]["kind"] == "proof-unavailable")
+                );
+                assert!(
+                    !frames
+                        .iter()
+                        .any(|f| f["t"] == "sign-req" || f["d"]["op"] == "frame")
+                );
+                assert_eq!(registry.account_count(), 0);
+                session.close();
+            }
+            let observed = observed.lock().unwrap();
+            assert_eq!(observed.preparations, 0);
+            assert_eq!(observed.requests, 0);
+            assert_eq!(observed.sockets, 0);
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -913,7 +1131,15 @@ async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
     // Network preparation uses the existing unverified envelope, which has no
     // write outcome field; pin its full schema and the independent no-I/O proof.
     let expected: Value = serde_json::from_str(&envelope::with_instance_id(
-        envelope::init_unverified("acct", false),
+        envelope::init_unverified(
+            "acct",
+            false,
+            envelope::InitRefusalReasonClass::Unknown,
+            envelope::InitRefusalMetadata {
+                stage: Some(RefusalStage::Construction),
+                ..Default::default()
+            },
+        ),
         "proof-registration",
     ))
     .unwrap();

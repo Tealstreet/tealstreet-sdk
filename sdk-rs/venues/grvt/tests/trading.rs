@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[path = "support/hosted_parity.rs"]
 mod hosted_parity;
 use safe_cex_engine::model::*;
@@ -457,7 +458,10 @@ fn above_max_failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
 fn above_max_unknown_create_uses_canonical_guidance_and_retains_diagnostic() {
     let (actions, client, _) = above_max_unknown_trace(false);
     let error = above_max_failure(&actions);
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let diagnostic = error.venue_message.as_deref().expect("native diagnostic");
     assert!(diagnostic.contains("GRVT create response has no identity"));
     assert!(diagnostic.contains(&format!(
@@ -476,7 +480,7 @@ fn above_max_unknown_create_has_indexed_unknown_and_unissued_outcomes() {
     assert_eq!(rows[0]["status"], "unknown");
     assert_eq!(
         rows[0]["error"]["message"],
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(rows[1]["index"], 1);
     assert_eq!(rows[1]["status"], "notSent");
@@ -500,7 +504,7 @@ fn above_max_unknown_create_emits_one_attributed_event() {
     assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
     assert_eq!(
         events[0].message,
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert!(events[0].fields.contains(&("command", 991_u32.into())));
     assert!(events[0].fields.contains(&("elementIndex", "0".into())));
@@ -512,7 +516,10 @@ fn above_max_unknown_create_preserves_acknowledged_prefix() {
     let (actions, _, accepted) = above_max_unknown_trace(true);
     let accepted = accepted.unwrap();
     let error = above_max_failure(&actions);
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let partial = error.partial.as_ref().expect("accepted prefix IDs");
     assert_eq!(partial.order_ids, std::slice::from_ref(&accepted));
     assert_eq!(partial.total, Some(3));
@@ -1095,7 +1102,7 @@ fn uncertain_write_is_not_retried_and_exposes_reconciliation_identity() {
     let actions: Vec<_> = drain(&mut e).collect();
     assert_eq!(
         failure(&actions).message,
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert!(
         failure(&actions)
@@ -1291,7 +1298,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     let actions = reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#);
     let result = done(&actions, 9).unwrap();
     let error = result.as_ref().unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 #[test]
 fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
@@ -2111,7 +2121,7 @@ fn gateway_failure_on_create_keeps_reconcile_advice() {
     let actions = reply(&mut e, &r, 502, "<html>bad gateway</html>");
     assert_eq!(
         failure(&actions).message,
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     let error = failure(&actions)
         .venue_message
@@ -3229,7 +3239,10 @@ fn protective_429_on_replacement_or_put_back_stays_unknown_without_retry_or_prot
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
-            assert!(error.message.contains("unknown") && error.message.contains("Open Orders"));
+            assert!(
+                error.message.contains("confirm")
+                    && error.message.to_ascii_lowercase().contains("open orders")
+            );
             assert!(!error.message.contains("both refused"));
         }
     }

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -20,10 +21,10 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: admits KuCoin remote custody whi
     expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
     const prettyName = exchangeMetadata[name].prettyName;
     expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrow(
-      `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+      `${prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
     );
     expect(() => assertBetaAccount(name, { key: 'fixture-private-key', payloadSigner: vi.fn() })).toThrow(
-      `${prettyName} delegated signing is unsupported in this build`,
+      `Server trading for ${prettyName} isn’t available in this version`,
     );
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
@@ -147,12 +148,12 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses unknown/cross-slot/parti
     const r = rig(venue);
     const request = work();
     mutate(request);
-    await expect(r.provider(request, context())).rejects.toThrow('Remote signing request refused');
+    await expect(r.provider(request, context())).rejects.toThrow('This request couldn’t be signed');
     expect(r.sign).not.toHaveBeenCalled();
   }
   const r = rig(venue);
   r.sign.mockRejectedValueOnce(new Error('fixture-secret fixture-passphrase fixture-broker'));
-  await expect(r.provider(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+  await expect(r.provider(work(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
 });
 
 it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses malformed/wrong-account responses and canceled late results atomically', async (venue) => {
@@ -163,7 +164,7 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses malformed/wrong-account 
   ]) {
     const r = rig(venue);
     r.sign.mockImplementationOnce(async ({ id }) => ({ id, wsAuthSignature: answer }));
-    await expect(r.provider(work(false), context())).rejects.toThrow('Remote signing request refused');
+    await expect(r.provider(work(false), context())).rejects.toThrow('This request couldn’t be signed');
   }
   const r = rig(venue);
   const abort = new AbortController();
@@ -177,6 +178,6 @@ it.each(['kucoin', 'kucoinspot'] as const)('%s: refuses malformed/wrong-account 
   });
   const pending = r.provider(work(), { signal: abort.signal });
   abort.abort();
-  await expect(pending).rejects.toThrow('Remote signing canceled');
+  await expect(pending).rejects.toThrow('Signing was cancelled');
   release();
 });

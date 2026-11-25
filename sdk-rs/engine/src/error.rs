@@ -1,6 +1,10 @@
 //! Structured command and lifecycle failures. `message` is the user-facing
 //! text hosts have always shown; the other fields let consumers classify a
 //! failure without matching that text.
+#[cfg(feature = "bingx-write-diagnostics")]
+#[path = "error/bingx_write_shape.rs"]
+pub mod bingx_write_shape;
+
 use serde::Serialize;
 use std::fmt;
 
@@ -116,6 +120,8 @@ pub enum HistorySchema {
     KrakenFills,
     KrakenOrders,
     KrakenIncome,
+    BingxIncome,
+    BingxOrders,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
@@ -144,19 +150,449 @@ pub enum HistoryDecodeReason {
     TimestampDecimal,
     LastUpdateTimestampDecimal,
     LimitPriceDecimal,
+    FieldType,
+    FieldValue,
+    EnvelopeShape,
+    EnvelopeCode,
+    DataShape,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum HistoryDecodeField {
+    #[serde(rename = "root")]
+    Root,
+    #[serde(rename = "code")]
+    Code,
+    #[serde(rename = "msg")]
+    Message,
+    #[serde(rename = "data")]
+    Data,
+    #[serde(rename = "data.orders")]
+    DataOrders,
+    #[serde(rename = "row")]
+    Row,
+    #[serde(rename = "row.symbol")]
+    Symbol,
+    #[serde(rename = "row.incomeType")]
+    IncomeType,
+    #[serde(rename = "row.income")]
+    Income,
+    #[serde(rename = "row.asset")]
+    Asset,
+    #[serde(rename = "row.time")]
+    Time,
+    #[serde(rename = "row.tranId")]
+    TranId,
+    #[serde(rename = "row.tradeId")]
+    TradeId,
+    #[serde(rename = "row.orderId")]
+    OrderId,
+    #[serde(rename = "row.side")]
+    Side,
+    #[serde(rename = "row.type")]
+    OrderType,
+    #[serde(rename = "row.status")]
+    Status,
+    #[serde(rename = "row.price")]
+    Price,
+    #[serde(rename = "row.avgPrice")]
+    AveragePrice,
+    #[serde(rename = "row.origQty")]
+    Quantity,
+    #[serde(rename = "row.executedQty")]
+    FilledQuantity,
+    #[serde(rename = "row.reduceOnly")]
+    ReduceOnly,
+    #[serde(rename = "row.positionSide")]
+    PositionSide,
+    #[serde(rename = "row.updateTime")]
+    UpdateTime,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HistoryDecode {
-    pub schema: HistorySchema,
-    pub reason: HistoryDecodeReason,
+pub enum HistoryExpectedType {
+    Object,
+    Array,
+    Integer,
+    String,
+    NumberOrNumericString,
+    StringOrInteger,
+    BooleanOrStringOrNull,
+    StringOrNull,
+    StringOrIntegerOrNull,
+    ArrayOrObject,
 }
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryJsonType {
+    Missing,
+    InvalidJson,
+    Null,
+    Boolean,
+    Number,
+    String,
+    Array,
+    Object,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryEnvelopeCode {
+    Present,
+    Absent,
+    Unavailable,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecodeShape {
+    pub field: HistoryDecodeField,
+    pub expected: HistoryExpectedType,
+    pub actual: HistoryJsonType,
+    pub envelope_code: HistoryEnvelopeCode,
+}
+
+// Preserve the original two-byte optional detail in every VenueError queue.
+// BingX's expected type is fixed by its field/schema, never response content.
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryDecode(std::num::NonZeroU16);
+
+#[cfg(feature = "history-row-diagnostics")]
+impl HistoryDecode {
+    pub fn new(schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
+        Self(
+            std::num::NonZeroU16::new(((schema as u16) << 5 | reason as u16) + 1)
+                .expect("closed schema/reason fits below the shape tag"),
+        )
+    }
+
+    pub fn with_shape(
+        schema: HistorySchema,
+        reason: HistoryDecodeReason,
+        shape: HistoryDecodeShape,
+    ) -> Option<Self> {
+        use HistorySchema as S;
+        if !matches!(schema, S::BingxIncome | S::BingxOrders)
+            || shape.expected != Self::expected(schema, shape.field)
+        {
+            return None;
+        }
+        let reason = Self::SHAPE_REASONS.iter().position(|r| *r == reason)? as u16;
+        let bits = 0x8000
+            | (u16::from(schema == S::BingxOrders) << 14)
+            | reason << 10
+            | (shape.envelope_code as u16) << 8
+            | (shape.actual as u16) << 5
+            | shape.field as u16;
+        std::num::NonZeroU16::new(bits).map(Self)
+    }
+
+    const SHAPE_REASONS: [HistoryDecodeReason; 9] = {
+        use HistoryDecodeReason as R;
+        [
+            R::RowShape,
+            R::FieldType,
+            R::FieldValue,
+            R::EnvelopeShape,
+            R::EnvelopeCode,
+            R::DataShape,
+            R::Side,
+            R::OrderType,
+            R::OrderStatus,
+        ]
+    };
+
+    /// The fixed BingX schema determines the expected type, never response values.
+    pub fn expected(schema: HistorySchema, field: HistoryDecodeField) -> HistoryExpectedType {
+        use HistoryDecodeField as F;
+        use HistoryExpectedType as E;
+        match field {
+            F::Root | F::Row => E::Object,
+            F::Code => E::Integer,
+            F::Data if schema == HistorySchema::BingxOrders => E::ArrayOrObject,
+            F::Data | F::DataOrders => E::Array,
+            F::TranId | F::OrderId => E::StringOrInteger,
+            F::TradeId => E::StringOrIntegerOrNull,
+            F::ReduceOnly => E::BooleanOrStringOrNull,
+            F::PositionSide => E::StringOrNull,
+            F::Income
+            | F::Time
+            | F::Price
+            | F::AveragePrice
+            | F::Quantity
+            | F::FilledQuantity
+            | F::UpdateTime => E::NumberOrNumericString,
+            F::Message
+            | F::Symbol
+            | F::IncomeType
+            | F::Asset
+            | F::Side
+            | F::OrderType
+            | F::Status => E::String,
+        }
+    }
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+impl HistoryDecode {
+    // One concrete JSON encoder avoids duplicating this cold detail across sinks.
+    #[inline(never)]
+    fn wire_json(&self) -> serde_json::Result<Box<serde_json::value::RawValue>> {
+        use HistoryDecodeField as F;
+        use HistorySchema as H;
+        const SCHEMAS: &[&str] = &[
+            "bitgetClassicFills",
+            "bitgetUtaFills",
+            "bitgetClassicOrders",
+            "bitgetUtaOrders",
+            "bitgetClassicIncome",
+            "bitgetUtaIncome",
+            "bitgetPublicTrades",
+            "krakenFills",
+            "krakenOrders",
+            "krakenIncome",
+            "bingxIncome",
+            "bingxOrders",
+        ];
+        const REASONS: &[&str] = &[
+            "rowShape",
+            "identity",
+            "symbol",
+            "quantity",
+            "filledQuantity",
+            "timestamp",
+            "timestampOrder",
+            "side",
+            "orderStatus",
+            "orderType",
+            "fee",
+            "market",
+            "economics",
+            "quantityNegative",
+            "quantityZero",
+            "filledQuantityNegative",
+            "filledQuantityExceedsQuantity",
+            "quantityDecimal",
+            "filledQuantityDecimal",
+            "timestampDecimal",
+            "lastUpdateTimestampDecimal",
+            "limitPriceDecimal",
+            "fieldType",
+            "fieldValue",
+            "envelopeShape",
+            "envelopeCode",
+            "dataShape",
+        ];
+        const FIELDS: &[F] = &[
+            F::Root,
+            F::Code,
+            F::Message,
+            F::Data,
+            F::DataOrders,
+            F::Row,
+            F::Symbol,
+            F::IncomeType,
+            F::Income,
+            F::Asset,
+            F::Time,
+            F::TranId,
+            F::TradeId,
+            F::OrderId,
+            F::Side,
+            F::OrderType,
+            F::Status,
+            F::Price,
+            F::AveragePrice,
+            F::Quantity,
+            F::FilledQuantity,
+            F::ReduceOnly,
+            F::PositionSide,
+            F::UpdateTime,
+        ];
+        const PATHS: &[&str] = &[
+            "root",
+            "code",
+            "msg",
+            "data",
+            "data.orders",
+            "row",
+            "row.symbol",
+            "row.incomeType",
+            "row.income",
+            "row.asset",
+            "row.time",
+            "row.tranId",
+            "row.tradeId",
+            "row.orderId",
+            "row.side",
+            "row.type",
+            "row.status",
+            "row.price",
+            "row.avgPrice",
+            "row.origQty",
+            "row.executedQty",
+            "row.reduceOnly",
+            "row.positionSide",
+            "row.updateTime",
+        ];
+        const EXPECTED: &[&str] = &[
+            "object",
+            "array",
+            "integer",
+            "string",
+            "numberOrNumericString",
+            "stringOrInteger",
+            "booleanOrStringOrNull",
+            "stringOrNull",
+            "stringOrIntegerOrNull",
+            "arrayOrObject",
+        ];
+        const ACTUAL: &[&str] = &[
+            "missing",
+            "invalidJson",
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object",
+        ];
+        const CODES: &[&str] = &["present", "absent", "unavailable"];
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Shape {
+            field: &'static str,
+            expected: &'static str,
+            actual: &'static str,
+            envelope_code: &'static str,
+        }
+        #[derive(Serialize)]
+        struct Wire {
+            schema: &'static str,
+            reason: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            shape: Option<Shape>,
+        }
+        let bits = self.0.get();
+        let wire = if bits & 0x8000 == 0 {
+            let bits = bits - 1;
+            Wire {
+                schema: SCHEMAS[(bits >> 5) as usize],
+                reason: REASONS[(bits & 31) as usize],
+                shape: None,
+            }
+        } else {
+            let schema = if bits & 0x4000 == 0 {
+                H::BingxIncome
+            } else {
+                H::BingxOrders
+            };
+            let field_index = (bits & 31) as usize;
+            Wire {
+                schema: SCHEMAS[schema as usize],
+                reason: REASONS[Self::SHAPE_REASONS[((bits >> 10) & 15) as usize] as usize],
+                shape: Some(Shape {
+                    field: PATHS[field_index],
+                    expected: EXPECTED[Self::expected(schema, FIELDS[field_index]) as usize],
+                    actual: ACTUAL[((bits >> 5) & 7) as usize],
+                    envelope_code: CODES[((bits >> 8) & 3) as usize],
+                }),
+            }
+        };
+        serde_json::value::to_raw_value(&wire)
+    }
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+impl Serialize for HistoryDecode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.wire_json()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
+// A thin optional pointer offsets the closed diagnostic without growing native
+// error queues or Result error variants. Its JSON and string view stay unchanged.
+#[cfg(feature = "bingx-write-diagnostics")]
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct VenueMessage(Box<MessageText>);
+#[cfg(feature = "bingx-write-diagnostics")]
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+struct MessageText {
+    text: String,
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl std::ops::Deref for VenueMessage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl VenueMessage {
+    pub fn into_string(self) -> String {
+        self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl AsRef<str> for VenueMessage {
+    fn as_ref(&self) -> &str {
+        &self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl fmt::Display for VenueMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0.text, f)
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl fmt::Debug for VenueMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0.text, f)
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<String> for VenueMessage {
+    fn from(value: String) -> Self {
+        Self(Box::new(MessageText {
+            text: value.into_boxed_str().into_string(),
+        }))
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<&str> for VenueMessage {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<Box<str>> for VenueMessage {
+    fn from(value: Box<str>) -> Self {
+        value.into_string().into()
+    }
+}
+
+#[cfg(not(feature = "bingx-write-diagnostics"))]
+pub type VenueMessage = Box<str>;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
+    #[cfg(feature = "bingx-write-diagnostics")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bingx_write_shape: Option<bingx_write_shape::BingxWriteShape>,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<ErrorKind>,
@@ -171,7 +607,7 @@ pub struct VenueError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub venue_message: Option<Box<str>>,
+    pub venue_message: Option<VenueMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,12 +680,12 @@ impl VenueError {
     pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
         self.kind = Some(ErrorKind::Internal);
         self.cause_code = Some(ErrorCause::HistoryDecode);
-        self.history_decode = Some(HistoryDecode { schema, reason });
+        self.history_decode = Some(HistoryDecode::new(schema, reason));
         self
     }
 
     pub fn venue_message(mut self, message: impl Into<String>) -> Self {
-        self.venue_message = Some(message.into().into_boxed_str());
+        self.venue_message = Some(VenueMessage::from(message.into()));
         self
     }
 
@@ -343,14 +779,14 @@ impl fmt::Display for crate::request_context::Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::request_context::Error;
         f.write_str(match self {
-            Error::Invalid => "Invalid request context",
-            Error::Capacity => "Engine request capacity reached",
+            Error::Invalid => "This request couldn’t be prepared",
+            Error::Capacity => "The account’s request queue is full. Try again shortly.",
             Error::Duplicate => "Request is already in flight",
-            Error::State => "Request is not in a sendable state",
-            Error::TimedOut => "Request context timed out",
-            Error::Stale => "Request context is stale",
-            Error::Revoked => "Request context was revoked",
-            Error::RetryForbidden => "Request may not be retried",
+            Error::State => "This request isn’t ready to send",
+            Error::TimedOut => "This request timed out",
+            Error::Stale => "This request is out of date",
+            Error::Revoked => "This request was interrupted",
+            Error::RetryForbidden => "This request can’t be sent again",
         })
     }
 }
@@ -473,14 +909,192 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// The action sentences this SDK (and its callers' retained copy) ends user text
+/// with. Only these are actions: any other venue text is detail and is kept.
+const GUIDANCE_ACTIONS: &[&str] = &[
+    "Check your open orders before trying again",
+    "Check your open orders before adding protection",
+    "Check your open orders and position before adding protection",
+    "Check your open orders before adding another stop",
+    "Check your open orders before cancelling all orders",
+    "Check your open orders before placing or editing orders",
+    "Check your open orders before placing a replacement",
+    "Check your open orders before making another change",
+    "Check your open orders before editing it",
+    "Check your open orders before editing again",
+    "Check your open orders before restarting it",
+    "Check your open orders before restarting them",
+    "Check your open orders before restarting automated orders",
+    "Check your open orders before starting it again",
+    "Check your open orders before using a new order ID",
+    "Check your open orders for a second stop",
+    "Check your open orders for a duplicate",
+    "Check your open orders and positions before trying again",
+    "Check your open orders and positions for fills",
+    "Check your open orders and positions",
+    "Check your open orders",
+    "Check your orders and positions before trying again",
+    "Check your orders",
+    "Check Open Orders and Positions before trying again",
+    "Check Open Orders before retrying",
+    "Check Open Orders",
+    "Check it before stopping it again",
+];
+
+fn is_guidance(sentence: &str) -> bool {
+    let sentence = sentence.trim().trim_end_matches('.');
+    GUIDANCE_ACTIONS.iter().any(|action| {
+        sentence.len() == action.len()
+            && sentence.get(1..) == action.get(1..)
+            && sentence[..1].eq_ignore_ascii_case(&action[..1])
+    })
+}
+
+/// Splits one of our trailing action sentences off user text. Anything else,
+/// including venue text that starts with "Check", is returned whole.
+pub fn split_action(text: &str) -> (&str, Option<&str>) {
+    let text = text.trim();
+    if is_guidance(text) {
+        return ("", Some(text));
+    }
+    let mut from = text.len();
+    while let Some(at) = text[..from].rfind(". ") {
+        if is_guidance(&text[at + 2..]) {
+            return (&text[..at], Some(&text[at + 2..]));
+        }
+        from = at;
+    }
+    (text, None)
+}
+
+/// One action for a composed text: protection advice wins, then the earliest.
+fn pick_action<'a>(actions: impl IntoIterator<Item = Option<&'a str>>) -> Option<&'a str> {
+    let actions: Vec<&str> = actions.into_iter().flatten().collect();
+    actions
+        .iter()
+        .find(|action| action.contains("protection"))
+        .or(actions.first())
+        .copied()
+}
+
+fn finish(body: &str, action: Option<&str>) -> String {
+    let body = body.trim().trim_end_matches(['.', ';', ':', ' ']);
+    let Some(action) = action else {
+        return body.to_owned();
+    };
+    let mut action = action.trim().trim_end_matches('.').to_owned();
+    if let Some(first) = action.get(..1) {
+        action.replace_range(..1, &first.to_uppercase());
+    }
+    if body.is_empty() {
+        format!("{action}.")
+    } else {
+        format!("{body}. {action}.")
+    }
+}
+
+/// Adds native `detail` after what happened. A composed text keeps one action
+/// sentence, last; joining after an action would read "…again.: detail".
+pub fn with_detail(text: &str, detail: &str) -> String {
+    let (what, text_action) = split_action(text);
+    let (detail, detail_action) = split_action(detail);
+    if text_action.is_none() && detail_action.is_none() {
+        // No action to keep last: the detail stays verbatim.
+        return if detail.trim().is_empty() {
+            text.to_owned()
+        } else {
+            format!("{}: {}", text.trim_end_matches('.'), detail.trim())
+        };
+    }
+    let detail = detail.trim().trim_end_matches('.');
+    let what = what.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        what.to_owned()
+    } else {
+        format!("{what}: {detail}")
+    };
+    finish(&body, pick_action([text_action, detail_action]))
+}
+
+/// A declined replacement whose put-back of the original is unconfirmed: the
+/// decline is fact, only the restore is uncertain, and one action comes last.
+pub fn restore_unconfirmed_text(declined: &str, unknown: &str, detail: &str) -> String {
+    let (declined, declined_action) = split_action(declined);
+    let (_, unknown_action) = split_action(unknown);
+    let (detail, detail_action) = split_action(detail);
+    let detail = detail.trim().trim_end_matches('.');
+    let declined = declined.trim_end_matches('.');
+    let body = if detail.is_empty() {
+        format!("{declined}; restoring the original wasn’t confirmed")
+    } else {
+        format!("{declined}; restoring the original wasn’t confirmed: {detail}")
+    };
+    finish(
+        &body,
+        pick_action([unknown_action, declined_action, detail_action]),
+    )
+}
+
+/// Whether `message` says what `text` says, ends with exactly one action (a
+/// protection action may outrank `text`'s) and has no ".;" or ".:" join.
+pub fn carries_guidance(message: &str, text: &str) -> bool {
+    let (body, action) = split_action(text);
+    let body = body.trim_end_matches('.');
+    let lower = message.to_lowercase();
+    let actions = lower.matches("check your open orders").count()
+        + lower.matches("check open orders").count();
+    message.contains(body)
+        && !message.contains(".;")
+        && !message.contains(".:")
+        && (action.is_none() || (split_action(message).1.is_some() && actions == 1))
+}
+
+/// Appends a venue's terminal note to the presented message. A part the message
+/// already carries is not repeated, and the result keeps one action, last.
+pub fn join_note(message: &str, note: &str) -> String {
+    let (body, message_action) = split_action(message);
+    let body = body.trim_end_matches('.');
+    let present: Vec<&str> = body
+        .split("; ")
+        .map(|part| part.trim_end_matches('.'))
+        .collect();
+    let mut actions = vec![message_action];
+    let mut added: Vec<&str> = Vec::new();
+    for part in note.split("; ") {
+        let (part, action) = split_action(part);
+        actions.push(action);
+        let part = part.trim().trim_end_matches('.');
+        if part.is_empty()
+            || present.contains(&part)
+            || body.ends_with(part)
+            || added.contains(&part)
+        {
+            continue;
+        }
+        added.push(part);
+    }
+    let body = if added.is_empty() {
+        body.to_owned()
+    } else if body.is_empty() {
+        added.join("; ")
+    } else {
+        format!("{body}; {}", added.join("; "))
+    };
+    match pick_action(actions) {
+        Some(action) => finish(&body, Some(action)),
+        None if added.is_empty() => message.to_owned(),
+        None => body,
+    }
+}
+
 /// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
 pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
     if unknown {
         format!(
-            "Your {symbol} order may be gone: it was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} order was cancelled, but its replacement wasn’t confirmed. Check your open orders before trying again."
         )
     } else {
-        format!("Your {symbol} order is gone: it was canceled and its replacement refused")
+        format!("Your {symbol} order was cancelled and its replacement was declined")
     }
 }
 
@@ -504,15 +1118,16 @@ pub fn stop_gone_text(
     };
     if unknown {
         format!(
-            "Your {symbol} {position} position may have no {order}: the old {order} was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} {position} position’s {order} was cancelled, but its replacement wasn’t confirmed. Check your open orders before adding protection."
         )
     } else {
         format!(
-            "Your {symbol} {position} position has no {order}: the old {order} was canceled and its replacement refused"
+            "Your {symbol} {position} position has no {order}: the previous {order} was cancelled and its replacement was declined"
         )
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,7 +1297,7 @@ mod tests {
     fn request_context_refusals_are_typed_not_sent_failures() {
         use crate::request_context::Error;
         let error = Error::TimedOut.venue_error();
-        assert_eq!(error.message, "Request context timed out");
+        assert_eq!(error.message, "This request timed out");
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         for (reason, kind) in [
@@ -753,9 +1368,12 @@ mod tests {
     fn a_vanished_order_names_its_symbol() {
         assert_eq!(
             super::order_gone_text("BTCUSDT", false),
-            "Your BTCUSDT order is gone: it was canceled and its replacement refused"
+            "Your BTCUSDT order was cancelled and its replacement was declined"
         );
-        assert!(super::order_gone_text("ETHUSDT", true).contains("Your ETHUSDT order may be gone"));
+        assert!(
+            super::order_gone_text("ETHUSDT", true)
+                .contains("Your ETHUSDT order was cancelled, but its replacement wasn’t confirmed")
+        );
     }
 
     #[test]
@@ -763,11 +1381,213 @@ mod tests {
         use crate::model::{OrderSide, OrderType};
         assert_eq!(
             super::stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, false),
-            "Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused"
+            "Your BTCUSDT long position has no stop: the previous stop was cancelled and its replacement was declined"
         );
         assert!(
             super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
-                .starts_with("Your ETHUSDT short position may have no take profit")
+                .starts_with("Your ETHUSDT short position’s take profit was cancelled, but its replacement wasn’t confirmed")
         );
+    }
+}
+
+#[cfg(all(test, feature = "bingx-write-diagnostics"))]
+mod venue_message_tests {
+    use super::*;
+    #[test]
+    fn thin_message_keeps_wire_text_and_discards_spare_capacity() {
+        let mut text = String::with_capacity(65_536);
+        text.push_str("fixture venue message");
+        let message = VenueMessage::from(text);
+        assert_eq!(message.0.text.capacity(), message.len());
+        assert_eq!(message.as_ref(), "fixture venue message");
+        assert_eq!(
+            serde_json::to_string(&message).unwrap(),
+            r#""fixture venue message""#
+        );
+        assert_eq!(format!("{message:?}"), r#""fixture venue message""#);
+        assert_eq!(message.clone().into_string(), "fixture venue message");
+        assert_eq!(
+            std::mem::size_of::<Option<VenueMessage>>(),
+            std::mem::size_of::<usize>()
+        );
+        #[cfg(target_pointer_width = "64")]
+        assert!(std::mem::size_of::<(Box<()>, VenueError)>() < 128);
+    }
+}
+
+#[cfg(test)]
+mod gone_detail_tests {
+    use super::*;
+
+    fn actions(text: &str) -> usize {
+        let lower = text.to_lowercase();
+        lower.matches("check your open orders").count() + lower.matches("check open orders").count()
+    }
+
+    /// Every composer, over the gone texts all venues share and the engine's own
+    /// guided and unguided messages: no ".;" or ".:", and at most one action.
+    #[test]
+    fn composed_user_text_keeps_one_action_and_clean_joins() {
+        use crate::model::{OrderSide, OrderType};
+        let mut texts = vec![
+            String::new(),
+            "No reply arrived".into(),
+            "lost write response.".into(),
+            "We couldn’t confirm this change. Check your open orders before trying again.".into(),
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.".into(),
+            "Too many new orders. check Open Orders before retrying".into(),
+        ];
+        for unknown in [true, false] {
+            texts.push(order_gone_text("BTCUSDT", unknown));
+            for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+                texts.push(stop_gone_text("BTCUSDT", OrderSide::Sell, kind, unknown));
+            }
+        }
+        for a in &texts {
+            for b in &texts {
+                let composed = [
+                    with_detail(a, b),
+                    join_note(a, b),
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), a, b),
+                ];
+                for text in composed {
+                    assert!(
+                        !text.contains(".;") && !text.contains(".:"),
+                        "{a:?} + {b:?}: {text}"
+                    );
+                    assert!(actions(&text) <= 1, "{a:?} + {b:?}: {text}");
+                    if actions(a) + actions(b) > 0 && !text.contains("restoring") {
+                        assert_eq!(actions(&text), 1, "{a:?} + {b:?}: {text}");
+                    }
+                }
+            }
+        }
+        // Venue text that merely starts with "Check" is detail, never dropped.
+        for detail in [
+            "check sum mismatch",
+            "Check failed: insufficient margin",
+            "Leverage too high. Check your leverage settings",
+        ] {
+            for text in [
+                with_detail(&order_gone_text("BTCUSDT", true), detail),
+                join_note(&order_gone_text("BTCUSDT", true), detail),
+                join_note(detail, &order_gone_text("BTCUSDT", true)),
+                restore_unconfirmed_text(
+                    &order_gone_text("BTCUSDT", false),
+                    &order_gone_text("BTCUSDT", true),
+                    detail,
+                ),
+            ] {
+                assert!(
+                    text.contains(detail.trim_end_matches('.')),
+                    "{detail}: {text}"
+                );
+                assert_eq!(actions(&text), 1, "{detail}: {text}");
+            }
+        }
+        // Deterministic fuzz: venue-like detail built from non-guidance fragments
+        // (some start with "Check") survives every composer verbatim.
+        let fragments = [
+            "Check failed",
+            "check sum mismatch",
+            "Check your leverage settings",
+            "check the margin mode",
+            "Margin is insufficient",
+            "HTTP 502",
+            "order 12",
+            "Checking position",
+            "check",
+            "Check",
+            "Leverage too high",
+        ];
+        let separators = [". ", ": ", "; ", " ", ", "];
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        for _ in 0..20_000 {
+            let mut detail = fragments[next(fragments.len())].to_owned();
+            for _ in 0..next(3) {
+                detail.push_str(separators[next(separators.len())]);
+                detail.push_str(fragments[next(fragments.len())]);
+            }
+            if next(2) == 0 {
+                detail.push('.');
+            }
+            let kept = detail.trim_end_matches('.');
+            let base = [
+                order_gone_text("BTCUSDT", true),
+                stop_gone_text("BTCUSDT", OrderSide::Buy, OrderType::TakeProfit, true),
+            ][next(2)]
+            .clone();
+            let composed = [
+                (with_detail(&base, &detail), false),
+                (join_note(&base, &detail), true),
+                (
+                    restore_unconfirmed_text(&order_gone_text("BTCUSDT", false), &base, &detail),
+                    false,
+                ),
+            ];
+            for (text, parts) in composed {
+                // The note join folds a repeated identical part; every distinct part stays.
+                if parts {
+                    for part in kept.split("; ") {
+                        assert!(
+                            text.contains(part.trim_end_matches('.')),
+                            "{detail:?}: {text}"
+                        );
+                    }
+                } else {
+                    assert!(text.contains(kept), "{detail:?}: {text}");
+                }
+                assert_eq!(actions(&text), 1, "{detail:?}: {text}");
+                assert!(
+                    !text.contains(".;") && !text.contains(".:"),
+                    "{detail:?}: {text}"
+                );
+            }
+        }
+        let stop = stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, true);
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert!(with_detail(&stop, guided).ends_with("before adding protection."));
+        assert!(join_note(guided, &stop).ends_with("before adding protection."));
+    }
+
+    #[test]
+    fn detail_sits_before_the_action_and_never_after_its_full_stop() {
+        let unknown = order_gone_text("BTCUSDT", true);
+        assert_eq!(
+            with_detail(&unknown, "HTTP 502."),
+            "Your BTCUSDT order was cancelled, but its replacement wasn’t confirmed: HTTP 502. Check your open orders before trying again."
+        );
+        let declined = order_gone_text("BTCUSDT", false);
+        assert_eq!(
+            with_detail(&declined, "insufficient margin"),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin"
+        );
+        assert_eq!(
+            restore_unconfirmed_text(
+                &with_detail(&declined, "insufficient margin"),
+                &unknown,
+                "timeout"
+            ),
+            "Your BTCUSDT order was cancelled and its replacement was declined: insufficient margin; restoring the original wasn’t confirmed: timeout. Check your open orders before trying again."
+        );
+        for text in [&unknown, &declined] {
+            assert!(!with_detail(text, "x").contains(".:"));
+        }
+        let guided = "We couldn’t confirm this change. Check your open orders before trying again.";
+        assert_eq!(
+            with_detail(&unknown, guided)
+                .matches("Check your open orders")
+                .count(),
+            1
+        );
+        let restored = restore_unconfirmed_text(&declined, &unknown, guided);
+        assert_eq!(restored.matches("Check your open orders").count(), 1);
+        assert!(restored.ends_with(guided), "{restored}");
     }
 }

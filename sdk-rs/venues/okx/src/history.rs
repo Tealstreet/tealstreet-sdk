@@ -20,6 +20,10 @@ use std::collections::HashMap;
 
 const PAGE: usize = 100;
 const RECENT_MS: f64 = 6.0 * 24.0 * 3_600_000.0;
+const ORDER_RECENT_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
+const CANCELED_ORDER_RETENTION_MS: f64 = 2.0 * 3_600_000.0;
+const ORDERS_RECENT: &str = "/api/v5/trade/orders-history";
+const ORDERS_ARCHIVE: &str = "/api/v5/trade/orders-history-archive";
 
 #[derive(Default)]
 pub struct HistoryState {
@@ -36,6 +40,7 @@ pub struct Request {
     instrument: Option<String>,
     inst_type: &'static str,
     next_type: bool,
+    archive_orders: bool,
     order_id: Option<String>,
     income_kind: Option<String>,
     from: Option<f64>,
@@ -141,6 +146,16 @@ struct HistoricalOrder {
     created_time: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realized_pnl: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fees: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fee_asset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate_asset: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -216,6 +231,9 @@ struct OrderRow<'a> {
     pos_side: &'a str,
     c_time: &'a str,
     u_time: &'a str,
+    fee: Option<&'a str>,
+    fee_ccy: Option<&'a str>,
+    pnl: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -265,9 +283,9 @@ fn fill_bound(value: Option<f64>) -> Option<f64> {
 }
 fn fill_seconds(value: f64) -> f64 {
     if value > 1_000_000_000_000.0 {
-        (value / 1000.0).floor()
+        value / 1000.0
     } else {
-        value.floor()
+        value
     }
 }
 fn positive(value: &str) -> Option<f64> {
@@ -372,6 +390,19 @@ impl Request {
         }
     }
     fn finish(mut self, cx: &mut Cx<'_, Pending>) {
+        // Retention can expire while pages are in flight. Use the completion
+        // clock so an admission-time boundary cannot become a false success.
+        if self.lookup.is_none()
+            && matches!(self.rows, Rows::Orders(_))
+            && self
+                .from
+                .is_none_or(|from| from <= cx.protocol_now() - CANCELED_ORDER_RETENTION_MS)
+        {
+            self.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::RetentionLimit,
+                "OKX order history is incomplete: unfilled canceled orders are retained for only two hours and are absent from the archive",
+            );
+        }
         let json = match &mut self.rows {
             Rows::Fills(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
@@ -466,7 +497,7 @@ impl Okx {
                 to_ms,
                 limit,
             } => (
-                "/api/v5/trade/orders-history",
+                ORDERS_RECENT,
                 symbol,
                 None,
                 None,
@@ -516,6 +547,8 @@ impl Okx {
             || from.zip(to).is_some_and(|(from, to)| from > to)
         {
             Some(Err("invalid OKX history time bounds"))
+        } else if symbol.is_some() && instrument.is_none() && matches!(rows, Rows::Orders(_)) {
+            Some(Err("OKX order history has an unresolved historical market"))
         } else if symbol.is_some() && instrument.is_none() {
             Some(Ok("[]"))
         } else {
@@ -575,6 +608,10 @@ impl Okx {
                 return;
             }
         };
+        // Select the archive once; all its pages retain the admitted read root.
+        let now = cx.protocol_now();
+        let archive_orders = matches!(rows, Rows::Orders(_))
+            && from.is_some_and(|from| from < now - ORDER_RECENT_MS);
         self.history_request(
             cx,
             Request {
@@ -587,6 +624,7 @@ impl Okx {
                 instrument,
                 inst_type,
                 next_type,
+                archive_orders,
                 order_id,
                 income_kind,
                 from,
@@ -711,6 +749,7 @@ impl Okx {
             instrument: Some(instrument),
             inst_type: "SWAP",
             next_type: false,
+            archive_orders: false,
             order_id: None,
             income_kind: None,
             from: None,
@@ -968,7 +1007,12 @@ impl Okx {
                 let id = text(row.trade_id).or_else(|| text(row.bill_id));
                 let timestamp = fill_seconds(time);
                 let key = id.as_ref().map(|id| format!("id:{id}")).unwrap_or_else(|| {
-                    format!("{}:{timestamp}:{price}:{qty}:{}", order_id, row.side)
+                    // Keep the existing fallback identity at whole-second precision.
+                    let identity_timestamp = timestamp.floor();
+                    format!(
+                        "{}:{identity_timestamp}:{price}:{qty}:{}",
+                        order_id, row.side
+                    )
                 });
                 let execution = Execution {
                     id,
@@ -980,7 +1024,7 @@ impl Okx {
                     side: row.side.into(),
                     commission: {
                         let value = first(&[row.fee, row.fill_fee]);
-                        parse_decimal(if value.is_empty() { "0" } else { value }).map(f64::abs)
+                        parse_decimal(if value.is_empty() { "0" } else { value }).map(|fee| -fee)
                     },
                     commission_asset: text(first(&[row.fee_ccy, row.ccy])),
                     position_side: (!row.pos_side.is_empty()).then(|| hedge(row.pos_side)),
@@ -998,19 +1042,28 @@ impl Okx {
                     return;
                 };
                 r.cursor(row.ord_id);
-                let Some(m) = cx.store.market_by_id(row.inst_id) else {
-                    return;
-                };
                 let Some(time) = positive(row.c_time) else {
                     return;
                 };
-                if row.ord_id.is_empty()
-                    || !matches!(row.side, "buy" | "sell")
-                    || !r.within(time)
-                    || r.symbol.as_deref().is_some_and(|s| s != m.symbol)
-                {
+                if row.ord_id.is_empty() || !matches!(row.side, "buy" | "sell") || !r.within(time) {
                     return;
                 }
+                let Some(m) = cx.store.market_by_id(row.inst_id) else {
+                    if r.instrument.as_deref().is_none_or(|id| id == row.inst_id) {
+                        r.completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::CoverageGap,
+                            "OKX order history has an unresolved historical market; contract metadata is unavailable",
+                        );
+                    }
+                    return;
+                };
+                if r.symbol.as_deref().is_some_and(|s| s != m.symbol) {
+                    return;
+                }
+                // Derivative fee is a signed aggregate: negative charge, positive credit.
+                // Preserve the reported total in its direction; do not infer gross fee/rebate splits.
+                let fee = row.fee.and_then(parse_decimal);
+                let rebate = fee.filter(|value| *value > 0.0);
                 let order = HistoricalOrder {
                     id: row.ord_id.into(),
                     symbol: m.symbol.clone(),
@@ -1050,9 +1103,19 @@ impl Okx {
                     position_side: hedge(row.pos_side),
                     created_time: time,
                     updated_time: positive(row.u_time),
+                    // Native order pnl excludes fees; it is not position-history net realizedPnl.
+                    realized_pnl: row.pnl.and_then(parse_decimal),
+                    fees: fee.filter(|value| *value <= 0.0).map(f64::abs),
+                    fee_asset: row.fee_ccy.and_then(text),
+                    rebate,
+                    rebate_asset: rebate.and(row.fee_ccy).and_then(text),
                 };
                 if let Rows::Orders(rows) = &mut r.rows {
-                    Request::put(&mut r.indices, rows, row.ord_id.into(), order);
+                    // A duplicate archive row must not overwrite the recent endpoint's
+                    // authoritative state (especially an unfilled cancellation).
+                    if r.endpoint != ORDERS_ARCHIVE || !r.indices.contains_key(row.ord_id) {
+                        Request::put(&mut r.indices, rows, row.ord_id.into(), order);
+                    }
                 }
             }
             Rows::Income(_) => {
@@ -1207,6 +1270,24 @@ impl Okx {
                 r.pages = 0;
                 r.rows_seen = 0;
                 self.history_request(cx, r);
+                return;
+            }
+            if r.archive_orders {
+                r.archive_orders = false;
+                r.endpoint = ORDERS_ARCHIVE;
+                r.inst_type = r
+                    .instrument
+                    .as_deref()
+                    .map_or("SWAP", |id| self.instrument_type(id));
+                r.next_type = self.options.eea && r.instrument.is_none();
+                r.after = None;
+                r.oldest = None;
+                r.pages = 0;
+                r.rows_seen = 0;
+                // Both sources share the original root/deadline and the existing
+                // 100ms history continuation pacing.
+                let timer = cx.set_timer(100.0);
+                self.history.delayed.push((timer, r));
                 return;
             }
             r.finish(cx);

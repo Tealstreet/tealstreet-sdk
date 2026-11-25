@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`:
 //! an unproven (Unknown) placement fences its symbol until a complete orders
 //! snapshot requested after that write reconciles it.
@@ -116,7 +117,7 @@ fn assert_place_refused(e: &mut Engine<Lighter>, t: &mut Timers, at: f64, comman
     assert!(
         matches!(&terminals(&out, command)[..], [Notice::CommandFailed { error, .. }]
             if error.outcome == Some(Outcome::NotSent)
-                && error.message == "Placement outcome is uncertain; reconcile before placing or amending"),
+                && error.message == "An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders."),
         "{:?}",
         terminals(&out, command)
     );
@@ -163,7 +164,7 @@ fn cancel_all_after_an_unknown_placement_is_refused_by_the_fence() {
     );
     assert!(
         matches!(&terminals(&out, 8)[..], [Notice::CommandFailed { error, .. }]
-            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"),
+            if error.message == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."),
         "{:?}",
         terminals(&out, 8)
     );
@@ -399,7 +400,7 @@ fn a_proven_placement_and_a_later_cancel_all_still_proceed() {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
-    let out = drain(&mut e, &mut t);
+    let out = drain_proven(&mut e, &mut t);
     assert!(
         matches!(&terminals(&out, 7)[..], [Notice::CommandDone { .. }]),
         "a proven placement completes: {:?}",
@@ -433,7 +434,7 @@ fn a_cancel_by_the_returned_index_before_its_row_arrives_is_sent() {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
-    let out = drain(&mut e, &mut t);
+    let out = drain_proven(&mut e, &mut t);
     let [Notice::CommandDone { result, .. }] = &terminals(&out, 7)[..] else {
         panic!("a proven placement completes");
     };

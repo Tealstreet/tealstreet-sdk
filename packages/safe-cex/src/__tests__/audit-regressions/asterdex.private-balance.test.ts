@@ -1,36 +1,42 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { PositionSide } from '../../types';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const createExchange = (includeNonUsdtCurrency = false) => {
-  const store = new DefaultStore();
-  store.update({
-    balance: {
-      total: 100,
-      free: 80,
-      used: 20,
-      upnl: 2,
-      info: { retained: true },
-      currencies: {
-        USDT: { total: 100, free: 80, used: 20, upnl: 2 },
-        ...(includeNonUsdtCurrency ? { BUSD: { total: 5, free: 5, used: 0, upnl: 0 } } : {}),
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      balance: {
+        total: 100,
+        free: 80,
+        used: 20,
+        upnl: 2,
+        info: { retained: true },
+        currencies: {
+          USDT: { total: 100, free: 80, used: 20, upnl: 2 },
+          ...(includeNonUsdtCurrency ? { BUSD: { total: 5, free: 5, used: 0, upnl: 0 } } : {}),
+        },
       },
+      positions: [
+        nativePosition({
+          id: 'BTCUSDT-long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          contracts: 1,
+          entryPrice: 100,
+          notional: 102,
+          unrealizedPnl: 2,
+          realizedPnl: 0,
+        }),
+      ] as any,
     },
-    positions: [
-      {
-        id: 'BTCUSDT-long',
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        contracts: 1,
-        entryPrice: 100,
-        notional: 102,
-        unrealizedPnl: 2,
-        realizedPnl: 0,
-      },
-    ] as any,
-  });
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new AsterDEXExchange('asterdex', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store, websocket: exchange.privateWebsocket };
 };
@@ -49,9 +55,7 @@ describe('audit regression: AsterDEX private balance events', () => {
         e: 'ACCOUNT_UPDATE',
         E: 100,
         a: {
-          B: [
-            { a: 'USDT', wb: '120', cw: '90' },
-          ],
+          B: [{ a: 'USDT', wb: '120', cw: '90' }],
           P: [{ s: 'BTCUSDT', pa: '1', ps: 'BOTH', ep: '100', up: '5', cr: '0' }],
         },
       }),

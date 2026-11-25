@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native request contract from the official Aster V3 New Order, Cancel Order,
 //! Change Initial Leverage and STP examples. Synthetic credentials only.
 use safe_cex_engine::model::*;
@@ -1301,7 +1302,10 @@ fn a_refused_limit_replacement_says_the_order_is_gone() {
         r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
-    assert!(message.contains("order is gone"), "{message}");
+    assert!(
+        message.contains("order was cancelled and its replacement was declined"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1372,7 +1376,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("The outcome is unknown. Check Open Orders")
+                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.") || error.message.contains("We couldn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");
@@ -1568,3 +1572,52 @@ mod legacy_parity;
 
 #[path = "support/unknown_exception.rs"]
 mod unknown_exception;
+
+// AGT-115: a stop entry was placed with its attached legs cleared. Any non-limit/market
+// entry with a non-zero leg now refuses the whole command, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("AsterDEX");
+    for entry in [
+        json!({"type":"stop_market","price":9500}),
+        json!({"type":"take_profit_market","price":9100}),
+        json!({"type":"conditional","triggerPrice":9500}),
+        json!({"type":"trailing_stop_market","price":50}),
+    ] {
+        for legs in [
+            json!({"stopLoss":9000}),
+            json!({"takeProfit":9800}),
+            json!({"stopLoss":0,"takeProfit":9800}),
+        ] {
+            let mut bracket = limit();
+            for (k, v) in entry
+                .as_object()
+                .unwrap()
+                .iter()
+                .chain(legs.as_object().unwrap())
+            {
+                bracket[k] = v.clone();
+            }
+            let mut h = Harness::new();
+            h.command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![
+                    serde_json::from_value(limit()).unwrap(),
+                    serde_json::from_value(bracket).unwrap(),
+                ],
+            });
+            assert!(h.requests.is_empty(), "{entry} {legs}");
+            let (_, error) = h.failures.last().expect("refused");
+            assert_eq!(error.legacy_text(), refusal, "{entry} {legs}");
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
+    }
+    // A zero leg means none: the stop entry still goes out.
+    let mut h = Harness::new();
+    let mut stop = limit();
+    stop["type"] = json!("stop_market");
+    stop["stopLoss"] = json!(0);
+    h.place(stop);
+    let entry = h.take(Method::Post);
+    assert!(entry.url.contains("type=STOP_MARKET"), "{}", entry.url);
+}

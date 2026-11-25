@@ -6,7 +6,13 @@ import { describe, expect, it, vi } from 'vitest';
 import frames from '../../../../sdk-rs/hosts/server/tests/data/delegated-orders-v1.json';
 import routerReplies from '../../../../sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json';
 import { delegatedIntentFingerprint } from '../delegatedOrderFrames';
-import { createDelegatedIntentId, DelegatedOutbox, markDelegatedNotSent } from '../delegatedOutbox';
+import {
+  createDelegatedIntentId,
+  DELEGATED_ACKNOWLEDGED_MAX_AGE_MS,
+  DELEGATED_RECEIPT_MAX_AGE_MS,
+  DelegatedOutbox,
+  markDelegatedNotSent,
+} from '../delegatedOutbox';
 import { DelegatedOutbox as LegacyOutbox } from './fixtures/delegatedOutbox.7232375420';
 
 const checkpoints = new WeakMap<Map<string, DelegatedIntent>, Map<string, number>>();
@@ -712,7 +718,8 @@ describe('DELEGATED host-neutral outbox', () => {
     });
     const id = await box.enqueue(params);
     expect(f.writes).toHaveLength(1);
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     await box.flush(c);
     expect(box.entries()[0].state).toBe('unknown');
     box.close();
@@ -821,10 +828,129 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     const id = await box.enqueue(params);
     expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'sending' });
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     expect(box.entries()[0].state).toBe('unknown');
     await box.flush(c);
     expect([...f.rows.values()][0].state).toBe('unknown');
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  // AGT-125: a box-ACKed intent waits in the venue's pacing queue; that wait is not the
+  // ten-second admission budget, so it keeps waiting for the real outcome up to its own bound.
+  it.each(['placement', 'action'] as const)(
+    'keeps an acknowledged %s waiting past the admission budget until its outcome',
+    async (kind) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect({
+        ...f.connection(),
+        capabilities: {
+          delegatedOrderFramesV1: true,
+          delegatedOrderLedgerV1: true,
+          delegatedOrderActionsV1: true,
+          delegatedOrderActionLedgerV1: true,
+        },
+      });
+      const id =
+        kind === 'placement'
+          ? await box.enqueue(params)
+          : await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-1', symbol: 'BTCUSDT' } });
+      f.advance(400);
+      await box.receive(
+        c,
+        response(id, kind === 'placement' ? 'order.ack' : 'order.actionAck', { version: 1, received: true }),
+      );
+      expect(box.entries()[0].state).toBe('acknowledged');
+      f.advance(25_000);
+      expect(box.entries()[0].state).toBe('acknowledged');
+      await box.receive(
+        c,
+        kind === 'placement'
+          ? response(id, 'order.outcome', {
+              outcome: 'placed',
+              venueOrderId: 'venue-2',
+              clientOrderId: id,
+              error: null,
+            })
+          : response(id, 'order.actionOutcome', {
+              version: 1,
+              outcome: 'applied',
+              result: { kind: 'cancel' },
+              error: null,
+            }),
+      );
+      expect(box.entries()[0].state).toBe(kind === 'placement' ? 'placed' : 'applied');
+      expect(f.writes).toHaveLength(1);
+      box.close();
+    },
+  );
+  // AGT-125 (okx-t, 40-order burst): the router admits a key until it is 10 s old by its
+  // own clock and ACKs it after that; four ACKs landed at 10.2-10.7 s and all four placed.
+  it('keeps a handed-off intent waiting for a receipt that lands just after the admission budget', async () => {
+    const f = fixture();
+    const states: string[] = [];
+    f.options.changed = (row) => states.push(row.state);
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(10_400);
+    expect(box.entries()[0].state).toBe('sending');
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'venue-2', clientOrderId: id, error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(states).not.toContain('unknown');
+    box.close();
+  });
+  it('bounds a handed-off intent with no receipt by DELEGATED_RECEIPT_MAX_AGE_MS, then unknown without a replay', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS - 1);
+    expect(box.entries()[0].state).toBe('sending');
+    f.advance(1);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    await box.flush(c);
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it('returns an unknown intent to waiting when its ACK lands after the receipt bound', async () => {
+    const f = fixture();
+    const states: string[] = [];
+    f.options.changed = (row) => states.push(row.state);
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS + 1_000);
+    expect(box.entries()[0].state).toBe('unknown');
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    expect(box.entries()[0].state).toBe('acknowledged');
+    f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS - DELEGATED_RECEIPT_MAX_AGE_MS - 2_000);
+    expect(box.entries()[0].state).toBe('acknowledged');
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'venue-2', clientOrderId: id, error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(states).toEqual(['queued', 'sending', 'unknown', 'acknowledged', 'placed']);
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+  it('bounds an acknowledged intent by DELEGATED_ACKNOWLEDGED_MAX_AGE_MS, then unknown without a replay', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS - 1);
+    expect(box.entries()[0].state).toBe('acknowledged');
+    f.advance(1);
+    expect(box.entries()[0]).toMatchObject({ intentId: id, state: 'unknown' });
+    await box.flush(c);
     expect(f.writes).toHaveLength(1);
     box.close();
   });
@@ -1756,7 +1882,8 @@ describe('DELEGATED host-neutral outbox', () => {
     const c = box.connect(f.connection());
     const replayed = await box.enqueue(params);
     const live = await box.enqueue(params);
-    f.advance(10_000);
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
     expect(box.entries().map((row) => row.state)).toEqual(['unknown', 'unknown']);
     await box.receive(
       c,
@@ -2071,5 +2198,471 @@ describe('DELEGATED host-neutral outbox', () => {
     expect(box.entries()[1].state).toBe('notSent');
     expect(f.writes).toEqual([]);
     box.close();
+  });
+});
+
+describe('lossless venue receipt identities', () => {
+  it.each(['raw', 'none', 'compact', 'hyperliquid'] as const)(
+    'settles %s without changing intent or resending',
+    async (encoding) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const ticket = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const clientOrderId =
+        encoding === 'none'
+          ? null
+          : encoding === 'raw'
+            ? id
+            : `${encoding === 'hyperliquid' ? '0x' : ''}${id.replaceAll('-', '')}`;
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'native-one', clientOrderId, error: null }),
+      );
+      expect(box.entries()[0].state).toBe('placed');
+      expect(box.entries()[0].intentId).toBe(id);
+      expect(box.entries()[0].venueOrderId).toBe('native-one');
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection('restored')));
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    },
+  );
+  it.each(['foreign', 'uppercase', 'prefix', 'numeric', 'idless'] as const)(
+    'rejects %s without consuming a valid receipt sequence',
+    async (kind) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const ticket = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const invalid =
+        kind === 'foreign'
+          ? '0x' + 'f'.repeat(32)
+          : kind === 'uppercase'
+            ? id.replaceAll('-', '').toUpperCase()
+            : kind === 'prefix'
+              ? '0X' + id.replaceAll('-', '')
+              : kind === 'numeric'
+                ? '123'
+                : id;
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', {
+          outcome: 'placed',
+          venueOrderId: kind === 'idless' ? null : 'native-one',
+          clientOrderId: invalid,
+          outcomeSeq: 99,
+          error: null,
+        }),
+      );
+      expect(box.entries()[0].state).toBe('sending');
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', {
+          outcome: 'placed',
+          venueOrderId: 'native-one',
+          clientOrderId: id,
+          error: null,
+        }),
+      );
+      expect(box.entries()[0].state).toBe('placed');
+      expect(f.writes).toHaveLength(1);
+      box.close();
+    },
+  );
+});
+
+describe('DELEGATED outbox retirement of host-settled entries', () => {
+  const rejected = (id: string) =>
+    response(id, 'order.outcome', {
+      outcome: 'refused',
+      venueOrderId: null,
+      clientOrderId: id,
+      error: { message: 'requires enabling the settlement asset as collateral', outcome: 'rejected' },
+    });
+
+  it('accepts a venue rejection as unknown, then forgets it once the host settles it', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(ticket, rejected(id));
+    expect(box.entries()[0]).toMatchObject({
+      state: 'unknown',
+      error: { message: 'requires enabling the settlement asset as collateral' },
+    });
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    expect(f.rows.size).toBe(0);
+    // A late receipt names no entry and creates none.
+    await box.receive(ticket, { ...rejected(id), d: { ...rejected(id).d, outcomeSeq: 2 } });
+    expect(box.entries()).toEqual([]);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()).toEqual([]);
+    // The durable sequence still advances past the retired intent.
+    const next = await restored.enqueue(params);
+    expect(restored.entries().find((row) => row.intentId === next)?.seq).toBe(2);
+    restored.close();
+  });
+
+  it.each(['placed', 'notSent'] as const)('retires a settled %s entry', async (settled) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(
+      ticket,
+      settled === 'placed'
+        ? response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'v1', clientOrderId: id, error: null })
+        : response(id, 'order.ack', { received: false }),
+    );
+    expect(box.entries()[0].state).toBe(settled);
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    expect(f.rows.size).toBe(0);
+    box.close();
+  });
+
+  it('retires an applied action', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const connection = f.connection();
+    connection.capabilities = {
+      ...connection.capabilities,
+      delegatedOrderActionsV1: true,
+      delegatedOrderActionLedgerV1: true,
+    };
+    const ticket = box.connect(connection);
+    const id = await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-order-1', symbol: 'BTCUSDT' } });
+    await box.receive(ticket, {
+      t: 'order.actionOutcome',
+      d: {
+        version: 1,
+        accountName: 'main',
+        instanceId: 'registration',
+        intentId: id,
+        seq: 1,
+        outcomeSeq: 1,
+        outcome: 'applied',
+        result: { kind: 'cancel' },
+        error: null,
+      },
+    });
+    expect(box.entries()[0].state).toBe('applied');
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    box.close();
+  });
+
+  it('keeps in-flight, cancel-pending and caller-reserved intents', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const queued = await box.enqueue(params);
+    expect(box.entries()[0].state).toBe('queued');
+    expect(await box.retire(queued)).toBe(false);
+    const ticket = box.connect(f.connection());
+    await box.flush(ticket);
+    expect(box.entries()[0].state).toBe('sending');
+    expect(await box.retire(queued)).toBe(false);
+    await box.cancel(queued);
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: true });
+    expect(await box.retire(queued)).toBe(false);
+    const reserved = await box.enqueue(
+      { ...params, price: 50_001 },
+      { intentId: '018bcfe5-6800-7000-8000-000000000009' },
+    );
+    await box.receive(ticket, { ...rejected(reserved), d: { ...rejected(reserved).d, seq: 2 } });
+    expect(box.entries().find((row) => row.intentId === reserved)?.state).toBe('unknown');
+    expect(await box.retire(reserved)).toBe(false);
+    expect(await box.retire('018bcfe5-6800-7000-8000-00000000000a')).toBe(false);
+    expect(box.entries()).toHaveLength(2);
+    expect(f.rows.size).toBe(2);
+    box.close();
+    expect(await box.retire(queued)).toBe(false);
+  });
+
+  // Storage first since AGT-106 (#3759): memory and the retirement floor change only after the
+  // compaction commits, so a failed delete leaves both the stored and the in-memory entry.
+  it('keeps the stored and in-memory entry when the delete fails, so it restores as before', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(ticket, rejected(id));
+    f.options.storage.compact = async () => {
+      throw new Error('storage unavailable');
+    };
+    await expect(box.retire(id)).rejects.toThrow('storage unavailable');
+    expect(box.entries()).toMatchObject([{ intentId: id }]);
+    box.close();
+    const restored = await DelegatedOutbox.open(fixture('alice', f.rows).options);
+    expect(restored.entries()).toMatchObject([{ intentId: id, state: 'unknown' }]);
+    restored.close();
+  });
+
+  // AGT-163: the box may still execute an ACKed write after a relaunch, so hosts must keep it
+  // out of age- and miss-based "not placed" verdicts. The ACK fact survives restore.
+  describe('durable box acknowledgement', () => {
+    const submits = (writes: string[]) => writes.filter((frame) => JSON.parse(frame).t === 'order.submit');
+
+    it.each(['close', 'disconnect'] as const)(
+      'a restored box-ACKed intent stays unknown and keeps boxAcknowledged (%s)',
+      async (ending) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const c = box.connect(f.connection());
+        const id = await box.enqueue(params);
+        await box.receive(c, response(id, 'order.ack', { received: true }));
+        expect(box.entries()[0]).toMatchObject({ state: 'acknowledged', boxAcknowledged: true });
+        if (ending === 'disconnect') {
+          box.disconnect(c);
+          await box.flush(c);
+        }
+        box.close();
+        f.advance(DELEGATED_ACKNOWLEDGED_MAX_AGE_MS + 1);
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+        expect([...f.rows.values()][0]).toMatchObject({ boxAcknowledged: true });
+        expect(submits(f.writes)).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    it('a restored box-ACKed action stays unknown and keeps boxAcknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect({
+        ...f.connection(),
+        capabilities: {
+          delegatedOrderFramesV1: true,
+          delegatedOrderLedgerV1: true,
+          delegatedOrderActionsV1: true,
+          delegatedOrderActionLedgerV1: true,
+        },
+      });
+      const id = await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-1', symbol: 'BTCUSDT' } });
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'sending', boxAcknowledged: false });
+      await box.receive(c, response(id, 'order.actionAck', { version: 1, received: true }));
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    });
+
+    it('a restored never-ACKed handoff stays unknown without boxAcknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      box.connect(f.connection());
+      const id = await box.enqueue(params);
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'sending', boxAcknowledged: false });
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection('restored')));
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: false });
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
+    it('a router ACK refusal stays notSent without boxAcknowledged after restore', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      await box.receive(c, response(id, 'order.ack', { received: false }));
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent', boxAcknowledged: false });
+      restored.close();
+    });
+
+    it.each(['sending', 'acknowledged', 'unknown'] as const)(
+      'an older %s row without the field restores as box-acknowledged',
+      async (state) => {
+        const f = fixture();
+        const box = await DelegatedOutbox.open(f.options);
+        const c = box.connect(f.connection());
+        const id = await box.enqueue(params);
+        if (state === 'acknowledged') await box.receive(c, response(id, 'order.ack', { received: true }));
+        if (state === 'unknown') f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
+        await box.flush(c);
+        const { boxAcknowledged: _, ...legacy } = box.entries()[0];
+        box.close();
+        expect(legacy.state).toBe(state);
+        await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+        const restored = await DelegatedOutbox.open(f.options);
+        await restored.flush(restored.connect(f.connection('restored')));
+        expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+        expect([...f.rows.values()][0]).toMatchObject({ boxAcknowledged: true });
+        expect(submits(f.writes)).toHaveLength(1);
+        restored.close();
+      },
+    );
+
+    // Review h5h59b: an older build that restored a newer row keeps its stale false while it
+    // persists the ACKed state, so the stored state is the ACK evidence.
+    it('a stored acknowledged row with a stale false flag restores as box-acknowledged', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      await box.receive(c, response(id, 'order.ack', { received: true }));
+      const entry = box.entries()[0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify({ ...entry, boxAcknowledged: false })));
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'unknown', boxAcknowledged: true });
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    });
+
+    it('a router ACK refusal clears the defaulted flag on an older unknown row', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const c = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      f.advance(DELEGATED_RECEIPT_MAX_AGE_MS);
+      await box.flush(c);
+      const { boxAcknowledged: _, ...legacy } = box.entries()[0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+      const restored = await DelegatedOutbox.open(f.options);
+      const rc = restored.connect(f.connection());
+      expect(restored.entries()[0]).toMatchObject({ state: 'unknown', boxAcknowledged: true });
+      await restored.receive(rc, response(id, 'order.ack', { received: false }));
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'notSent', boxAcknowledged: false });
+      expect([...f.rows.values()][0]).toMatchObject({ state: 'notSent', boxAcknowledged: false });
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
+    it('an older queued row without the field restores replayable and is sent exactly once', async () => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const id = await box.enqueue(params);
+      const { boxAcknowledged: _, ...legacy } = [...f.rows.values()][0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify(legacy)));
+      const restored = await DelegatedOutbox.open(f.options);
+      expect(restored.entries()[0]).toMatchObject({ intentId: id, state: 'queued', boxAcknowledged: false });
+      await restored.flush(restored.connect(f.connection()));
+      expect(submits(f.writes)).toHaveLength(1);
+      restored.close();
+    });
+
+    it.each([null, 'true', 1])('refuses a malformed boxAcknowledged (%s)', async (value) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      await box.enqueue(params);
+      const row = [...f.rows.values()][0];
+      box.close();
+      await f.options.storage.put(f.options, JSON.parse(JSON.stringify({ ...row, boxAcknowledged: value })));
+      await expect(DelegatedOutbox.open(f.options)).rejects.toThrow('Invalid persisted intent');
+    });
+  });
+});
+
+// AGT-185, okx-t: entry and stop loss placed, take profit refused. The box's unknown receipt carries
+// each leg's result so the host can say which landed; the intent stays unknown and is never resent.
+describe('an unknown placement’s per-leg results', () => {
+  const legs = [
+    { index: 0, status: 'placed', orderIds: ['entry'] },
+    { index: 1, status: 'placed', orderIds: ['sl'] },
+    { index: 2, status: 'notSent', error: { message: 'OKX 51279: TP trigger price cannot be lower than the last price' } },
+  ];
+  const settle = async (data: Record<string, unknown>) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.flush(c);
+    await box.receive(c, response(id, 'order.ack', { received: true }));
+    await box.receive(c, response(id, 'order.outcome', { clientOrderId: id, venueOrderId: null, ...data }));
+    return { f, box, id, c };
+  };
+
+  it('keeps them on the unknown row and never resends it', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    const [row] = box.entries();
+    expect(row.state).toBe('unknown');
+    expect(row.error).toEqual({ message: 'raw', elements: legs });
+    await box.flush(box.connect(f.connection()));
+    expect(f.writes).toHaveLength(1);
+    box.close();
+  });
+
+  it.each([
+    ['an unknown status', [...legs, { index: 3, status: 'future' }]],
+    ['a negative index', [{ ...legs[0], index: -1 }]],
+    ['a non-string order ID', [{ index: 0, status: 'placed', orderIds: [7] }]],
+    ['an unknown leg without its reason', [{ index: 0, status: 'unknown' }]],
+    ['an over-long reason', [{ index: 0, status: 'notSent', error: { message: 'x'.repeat(161) } }]],
+    ['too many legs', Array.from({ length: 33 }, (_, index) => ({ index, status: 'applied' }))],
+    ['an empty list', []],
+    ['an ID over 256 UTF-8 bytes', [{ index: 0, status: 'placed', orderIds: ['é'.repeat(129)] }]],
+    [
+      'a list over 4 KiB',
+      Array.from({ length: 32 }, (_, index) => ({ index, status: 'notSent', error: { message: 'x'.repeat(160) } })),
+    ],
+  ])('drops a list with %s and keeps the row', async (_case, elements) => {
+    const { box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements } });
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', error: { message: 'raw' } });
+    expect(box.entries()[0].error).not.toHaveProperty('elements');
+    box.close();
+  });
+
+  it('ignores them on a placed or refused receipt', async () => {
+    for (const data of [
+      { outcome: 'placed', venueOrderId: 'entry', error: { message: 'note', elements: legs } },
+      { outcome: 'refused', error: { message: 'no', outcome: 'rejected', elements: legs } },
+    ]) {
+      const { box } = await settle(data);
+      expect(box.entries()[0].error).not.toHaveProperty('elements');
+      box.close();
+    }
+  });
+
+  it('drops them once a later receipt settles the row, even one without an error', async () => {
+    const { box, id, c } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    await box.receive(
+      c,
+      response(id, 'order.outcome', { outcomeSeq: 2, clientOrderId: id, outcome: 'placed', venueOrderId: 'entry', error: null }),
+    );
+    expect(box.entries()[0].state).toBe('placed');
+    expect(box.entries()[0].error ?? {}).not.toHaveProperty('elements');
+    box.close();
+  });
+
+  it('restores a list only onto a row that is still unknown', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    box.close();
+    const [stored] = [...f.rows.values()];
+    // An ACKed row restores as unknown and keeps its list; a placed one drops it.
+    await f.options.storage.put(f.options, { ...stored, state: 'acknowledged' } as never);
+    const acked = await DelegatedOutbox.open(f.options);
+    expect(acked.entries()[0]).toMatchObject({ state: 'unknown', error: { elements: legs } });
+    acked.close();
+    await f.options.storage.put(f.options, { ...stored, state: 'placed', venueOrderId: 'entry' } as never);
+    const placed = await DelegatedOutbox.open(f.options);
+    expect(placed.entries()[0].state).toBe('placed');
+    expect(placed.entries()[0].error).not.toHaveProperty('elements');
+    placed.close();
+  });
+
+  it('restores a valid list and drops an unreadable one without refusing the load', async () => {
+    const { f, box } = await settle({ outcome: 'unknown', error: { message: 'raw', outcome: 'unknown', elements: legs } });
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()[0].error).toEqual({ message: 'raw', elements: legs });
+    restored.close();
+    const [stored] = [...f.rows.values()];
+    await f.options.storage.put(f.options, { ...stored, error: { message: 'raw', elements: [{ index: 'zero' }] } } as never);
+    const reloaded = await DelegatedOutbox.open(f.options);
+    expect(reloaded.entries()[0]).toMatchObject({ state: 'unknown', error: { message: 'raw' } });
+    expect(reloaded.entries()[0].error).not.toHaveProperty('elements');
+    reloaded.close();
   });
 });

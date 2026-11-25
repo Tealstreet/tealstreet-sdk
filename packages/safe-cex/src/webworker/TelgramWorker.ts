@@ -60,7 +60,7 @@ export class TelegramWorker {
         if (exchange) exchange.algoOp('exec', { symbol, command });
         else
           this._exchange.emitter.emit('exec-log', {
-            message: 'Command failed: algos run only on a Rust engine account.',
+            message: 'Automated orders aren’t available for this account.',
           });
       }
     }

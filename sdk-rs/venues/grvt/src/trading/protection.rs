@@ -231,7 +231,7 @@ impl Grvt {
         let mut step =
             self.placement(cx, &opts, None, Some(edit.execution), &mut HashSet::new())?;
         let original: NativeOrder<'_> = serde_json::from_str(&edit.native)
-            .map_err(|_| "GRVT stop must be re-placed: exact standalone provenance unavailable")?;
+            .map_err(|_| "The GRVT stop’s original details aren’t available for this edit. Change the stop directly on GRVT.")?;
         let mut body: RestoreBody<'_> =
             serde_json::from_str(&step.body).map_err(|_| "GRVT restore encoding unavailable")?;
         let wire = &mut body.o;
@@ -246,7 +246,7 @@ impl Grvt {
             || wire.m.t != original.m.t
         {
             return Err(
-                "GRVT stop must be re-placed: exact standalone provenance unavailable".into(),
+                "The GRVT stop’s original details aren’t available for this edit. Change the stop directly on GRVT.".into(),
             );
         }
         if !valid_client(&original.m.co) {

@@ -6,9 +6,10 @@ import {
   LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
   LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
 } from '../exchanges/lighter/lighter.account-tier';
-import { LighterExchange } from './reference/lighter/lighter.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 
 const { createOrderMock } = vi.hoisted(() => ({
   createOrderMock: vi.fn(),
@@ -61,45 +62,50 @@ describe('LighterExchange builder fee order wiring', () => {
       ...overrides,
     } as ExchangeOptions;
 
-    const exchange = new LighterExchange('lighter', options, new DefaultStore());
-    exchange.store.update({
-      markets: [
+    const exchange = new LighterExchange('lighter', options, new FrameStore());
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: {
-            amount: { min: 0.001, max: 100 },
-            leverage: { min: 1, max: 50 },
-          },
-          isExpiring: false,
-          info: {
-            amountDecimals: 3,
-            priceDecimals: 1,
-          },
+          markets: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: {
+                amount: { min: 0.001, max: 100 },
+                leverage: { min: 1, max: 50 },
+              },
+              isExpiring: false,
+              info: {
+                amountDecimals: 3,
+                priceDecimals: 1,
+              },
+            },
+          ],
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 100,
+              ask: 100,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 100,
-          ask: 100,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     (exchange as any).ensureSignerAdapter = vi.fn().mockResolvedValue({
       createOrder: createOrderMock,

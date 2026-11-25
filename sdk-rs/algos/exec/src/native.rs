@@ -515,7 +515,7 @@ impl Adapter {
                 let book = self
                     .chasers
                     .as_ref()
-                    .ok_or("Hosted chaser runtime unavailable")?;
+                    .ok_or("Chase isn’t available on this server")?;
                 let mut ids = Vec::new();
                 let mut symbols = Vec::new();
                 for option in options {
@@ -565,7 +565,7 @@ impl Adapter {
                 let book = self
                     .chasers
                     .as_ref()
-                    .ok_or("Hosted chaser runtime unavailable")?;
+                    .ok_or("Chase isn’t available on this server")?;
                 if let Some(chase) = book
                     .active_chasers()
                     .into_iter()
@@ -593,7 +593,7 @@ impl Adapter {
                 let book = self
                     .chasers
                     .as_ref()
-                    .ok_or("Hosted chaser runtime unavailable")?;
+                    .ok_or("Chase isn’t available on this server")?;
                 let all = book.active_chasers();
                 reply.message = if all.is_empty() {
                     "No active or recent chasers".into()
@@ -622,7 +622,7 @@ impl Adapter {
                 let book = self
                     .chasers
                     .as_ref()
-                    .ok_or("Hosted chaser runtime unavailable")?;
+                    .ok_or("Chase isn’t available on this server")?;
                 if target.is_empty() {
                     reply.message = "Usage: chasers cancel <id> or chasers cancel all".into();
                 } else if target == "all" {
@@ -658,7 +658,7 @@ impl Adapter {
                 let factory = self
                     .twap
                     .as_ref()
-                    .ok_or("Hosted TWAP runtime unavailable")?;
+                    .ok_or("TWAP isn’t available on this server")?;
                 value["accountName"] = json!(
                     self.account_name
                         .as_ref()
@@ -674,7 +674,7 @@ impl Adapter {
                 let factory = self
                     .twap
                     .as_ref()
-                    .ok_or("Hosted TWAP runtime unavailable")?;
+                    .ok_or("TWAP isn’t available on this server")?;
                 let rows = factory.active_twaps(
                     self.account_name
                         .as_deref()
@@ -696,7 +696,7 @@ impl Adapter {
                 let factory = self
                     .twap
                     .as_ref()
-                    .ok_or("Hosted TWAP runtime unavailable")?;
+                    .ok_or("TWAP isn’t available on this server")?;
                 let rows = factory.active_twaps(
                     self.account_name
                         .as_deref()

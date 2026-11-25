@@ -100,7 +100,10 @@ pub use error::{
     VenueError,
 };
 #[cfg(feature = "history-row-diagnostics")]
-pub use error::{HistoryDecode, HistoryDecodeReason, HistorySchema};
+pub use error::{
+    HistoryDecode, HistoryDecodeField, HistoryDecodeReason, HistoryDecodeShape,
+    HistoryEnvelopeCode, HistoryExpectedType, HistoryJsonType, HistorySchema,
+};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};
@@ -110,3 +113,9 @@ pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 #[cfg(feature = "address-nonce")]
 pub use engine::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
 pub use engine::{AddressSetupSlots, SetupRetirement};
+
+/// Native UI sections of the account frame.
+pub mod store_frame_wire;
+
+#[cfg(all(test, feature = "managed-sockets"))]
+mod test_alloc;

@@ -15,6 +15,13 @@ Refusal text explains server-only DELEGATED execution, an unsupported frame-fed
 operation without a source route, unverified page support, or failed page-engine
 initialization; it never recommends changing signing mode or turning cloud off.
 It retains `unsupported` / `notSent` without adding a retry or fallback.
+Page writes also wait for the page engine's own native MARKETS readiness;
+source STATUS/market evidence cannot stand in for its independent instrument
+read. Page frames wake that bounded wait without publishing into the source
+FrameStore. Owner admission is rechecked after the wait. `frameFedReady`
+resolves false for refused/unsupported/failed private page construction and
+true after initialization, allowing metadata-independent signing immediately.
+Manual writes separately await its catalogue; public mirrors need no engine.
 Account reads retain their source bridge. See `packages/safe-cex/CLAUDE.md` →
 "Rust main-thread trading".
 
@@ -1667,3 +1674,9 @@ still emit their single exchange error event.
 Rust algo actions use `EngineHost.checkAlgosForExecution`, not the observational
 `runsRustAlgos`/`algosRunning` getters. Status reads and disposal do not manufacture
 engine deaths; action admission retains strict ownership retirement.
+
+## Notification wording compatibility
+
+User-visible messages use plain language without changing typed outcomes or retries.
+Signing failures now say that signing is unavailable; the unsent-error recognizer
+still accepts the historical wording documented above during mixed-version rollouts.

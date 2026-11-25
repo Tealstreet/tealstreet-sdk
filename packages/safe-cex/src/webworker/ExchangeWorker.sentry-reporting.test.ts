@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ExchangeError, type BingxWriteShapeDetail } from '@tealstreet/safe-cex-wasm/host';
+
 import { ExchangeWorker } from './ExchangeWorker';
 
-const createWorker = () => {
+const createWorker = (exchangeName: 'bybit' | 'bingx' = 'bybit') => {
   const messages: any[] = [];
   const ctx = {
     postMessage: vi.fn((message: any) => {
@@ -12,7 +14,7 @@ const createWorker = () => {
   const worker = new ExchangeWorker(
     ctx as any,
     'bybit-main',
-    'bybit',
+    exchangeName,
     {} as any,
     {} as any,
     {} as any,
@@ -109,5 +111,75 @@ describe('ExchangeWorker Sentry reporting', () => {
       worker_error_family: 'bybit_markets_startup',
       worker_error_phase: 'startup',
     });
+  });
+});
+
+
+describe('ExchangeWorker closed history diagnostics', () => {
+  it('retains native decode evidence through the actual redacted worker packet', () => {
+    const { messages, worker } = createWorker();
+    const error = new ExchangeError('Kraken order history rejected: apiKey=private-key-canary', {
+      message: 'Kraken order history rejected: apiKey=private-key-canary',
+      kind: 'internal',
+      causeCode: 'HISTORY_DECODE',
+      historyDecode: { schema: 'krakenOrders', reason: 'quantityDecimal' },
+    });
+    Object.assign(error, { row: { uid: 'private-row', quantity: 123 }, credentials: { apiKey: 'private-key-canary' } });
+    Reflect.get(worker, 'logError').call(worker, 'Kraken history failed', error);
+    const { sentryData } = structuredClone(messages[0]).data[1];
+    expect(sentryData.tags).toMatchObject({
+      cause_code: 'HISTORY_DECODE',
+      history_schema: 'krakenOrders',
+      history_reason: 'quantityDecimal',
+    });
+    expect(sentryData.error).toMatchObject({
+      causeCode: 'HISTORY_DECODE',
+      historyDecode: { schema: 'krakenOrders', reason: 'quantityDecimal' },
+    });
+    expect(sentryData.error).not.toHaveProperty('row');
+    expect(sentryData.error).not.toHaveProperty('credentials');
+    expect(JSON.stringify(sentryData)).not.toContain('private-row');
+    expect(JSON.stringify(sentryData)).not.toContain('private-key-canary');
+  });
+
+  it('does not project arbitrary uppercase causes or row-shaped diagnostic values', () => {
+    const { messages, worker } = createWorker();
+    const error = Object.assign(new Error('history failed'), {
+      causeCode: 'PRIVATE_ACCOUNT_123',
+      historyDecode: { schema: 'krakenOrders', reason: 'private-amount' },
+    });
+    Reflect.get(worker, 'logError').call(worker, 'history failed', error);
+    const { sentryData } = messages[0].data[1];
+    expect(sentryData.tags).not.toHaveProperty('cause_code');
+    expect(sentryData.tags).not.toHaveProperty('history_reason');
+    expect(sentryData.error).not.toHaveProperty('causeCode');
+    expect(sentryData.error).not.toHaveProperty('historyDecode');
+    expect(JSON.stringify(sentryData)).not.toContain('PRIVATE_ACCOUNT_123');
+    expect(JSON.stringify(sentryData)).not.toContain('private-amount');
+  });
+});
+
+
+describe('ExchangeWorker closed BingX write shape', () => {
+  it('retains only closed shape in the existing redacted packet without another report', () => {
+    const { messages, worker } = createWorker('bingx');
+    const shape: BingxWriteShapeDetail = {
+      endpointFamily: 'order', method: 'DELETE', parameterNames: ['orderId', 'signature', 'symbol', 'timestamp'],
+      hasOtherParameters: false, idClass: 'numeric', idDigits: 19, targetKind: 'takeProfit',
+      symbolFormat: 'hyphenated', replacement: 'observed',
+    };
+    const error = new ExchangeError('BingX cancellation rejected: apiKey=private-key-canary', {
+      message: 'fixture refusal', kind: 'invalidInput', venueCode: '109400', bingxWriteShape: shape,
+    });
+    Object.assign(error, { request: { orderId: 'private-order', signature: 'private-signature' } });
+    Reflect.get(worker, 'logError').call(worker, 'BingX cancellation rejected', error);
+    expect(messages).toHaveLength(1);
+    const packet = structuredClone(messages[0]);
+    expect(packet.data[1].sentryData.error.bingxWriteShape).toEqual(shape);
+    expect(packet.data[1].sentryData.tags).toMatchObject({
+      bingx_endpoint: 'order', bingx_id_class: 'numeric', bingx_id_digits: '19',
+      bingx_target_kind: 'takeProfit', bingx_replacement: 'observed',
+    });
+    expect(JSON.stringify(packet)).not.toMatch(/private-key-canary|private-order|private-signature/);
   });
 });

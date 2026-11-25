@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,7 @@ const TOOLCHAIN = { wasmBindgen: '0.2.129', wasmOpt: 'required', profile: 'relea
 const tree = () => {
   const root = mkdtempSync(join(tmpdir(), 'beta-inputs-'));
   for (const [path, text] of [
+    ['packages/safe-cex/src/exchange-display-policy.json', '{}'],
     ['sdk-rs/Cargo.lock', 'lock'],
     ['sdk-rs/rust-toolchain.toml', 'channel = "1.99.0"'],
     ['sdk-rs/engine/src/lib.rs', 'pub fn a() {}'],
@@ -26,7 +27,7 @@ const tree = () => {
 test('the fingerprint is deterministic and counts every input', () => {
   const root = tree();
   const first = betaWasmInputs(root, TOOLCHAIN);
-  assert.equal(first.files, 4);
+  assert.equal(first.files, 5);
   assert.equal(betaWasmInputs(root, { ...TOOLCHAIN }).fingerprint, first.fingerprint);
 });
 
@@ -110,6 +111,9 @@ test('harness files that only gate or measure a release leave the fingerprint al
   for (const path of [
     'sdk-rs/harness/wasm-budget.test.mjs',
     'sdk-rs/harness/wasm-budget.mjs',
+    'sdk-rs/harness/wasm-caps.json',
+    'sdk-rs/harness/wasm-caps-history.md',
+    'sdk-rs/harness/update-wasm-caps.mjs',
     'sdk-rs/harness/beta-wasm-release-guard.mjs',
     'sdk-rs/harness/ci-result.mjs',
     'sdk-rs/harness/cpu-ci.mjs',
@@ -126,6 +130,40 @@ test('harness files that only gate or measure a release leave the fingerprint al
     writeFileSync(join(root, path), 'new');
     assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, counted, path);
   }
+});
+
+test('only the exact harness guide is fingerprint-neutral; sibling build inputs and other guides still count', () => {
+  const root = tree();
+  const guide = 'sdk-rs/harness/CLAUDE.md';
+  writeFileSync(join(root, guide), '# Harness guidance');
+  const before = betaWasmInputs(root, TOOLCHAIN);
+  assert.ok(!betaWasmInputPaths(root).includes(guide));
+  writeFileSync(join(root, guide), '# Updated harness guidance');
+  assert.deepEqual(betaWasmInputs(root, TOOLCHAIN), before);
+  for (const path of [
+    'sdk-rs/harness/families.integration.mjs',
+    'sdk-rs/harness/README.md',
+    'sdk-rs/engine/CLAUDE.md',
+    'sdk-rs/harness/nested/CLAUDE.md',
+    'sdk-rs/harness/CLAUDE.md.mjs',
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    const prior = betaWasmInputs(root, TOOLCHAIN);
+    writeFileSync(join(root, path), 'counted input');
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, prior.fingerprint, path);
+  }
+});
+
+test('the exact harness guide exclusion still refuses symlinks and traverses same-named directories', () => {
+  const root = tree();
+  const guide = join(root, 'sdk-rs/harness/CLAUDE.md');
+  symlinkSync(join(root, 'sdk-rs/engine/src/lib.rs'), guide);
+  assert.throws(() => betaWasmInputs(root, TOOLCHAIN), /symlink/);
+  rmSync(guide);
+  mkdirSync(guide);
+  writeFileSync(join(guide, 'input.rs'), 'pub fn counted() {}');
+  assert.ok(betaWasmInputPaths(root).includes('sdk-rs/harness/CLAUDE.md/input.rs'));
 });
 
 test('replay gate edits leave the fingerprint alone while fingerprint-definition edits still move it', () => {
@@ -188,10 +226,11 @@ const HOST_ROOTS = [...new Set(exportFiles(JSON.parse(read('sdk-rs/hosts/wasm/pa
   .filter((path) => path.startsWith('./js/') && path.endsWith('.mjs'))
   .map((path) => `sdk-rs/hosts/wasm/${path.slice(2)}`))];
 
-test('the replay gate is unreachable from build, loader and shipped host imports', () => {
+test('the replay gate and exact harness guide are unreachable from build, loader and shipped host imports', () => {
   const reached = importGraph([...BUILD_ROOTS, ...HOST_ROOTS]);
   assert.ok(reached.has('sdk-rs/hosts/wasm/js/managed-http.mjs'), 'transitive host dependencies are followed');
   assert.ok(!reached.has('sdk-rs/harness/gate.mjs'), 'replay verdicts never shape a built or shipped module');
+  assert.ok(!reached.has('sdk-rs/harness/CLAUDE.md'), 'agent guidance never shapes a built or shipped module');
 });
 
 test('the build roots are the scripts the release actually runs', () => {
@@ -226,4 +265,20 @@ test('release family tests import the size gate without making it a build input'
 test('each excluded harness pattern still names a real file', () => {
   const harness = readdirSync(join(REPO, 'sdk-rs/harness')).map((name) => `sdk-rs/harness/${name}`);
   for (const pattern of HARNESS_NOT_BUILT) assert.ok(harness.some((rel) => pattern.test(rel)), String(pattern));
+});
+
+test('shared display metadata is a compiled input, including changes outside sdk-rs', () => {
+  const root = tree();
+  const policy = join(root, 'packages/safe-cex/src/exchange-display-policy.json');
+  mkdirSync(dirname(policy), { recursive: true });
+  writeFileSync(policy, '{"bybit":true}');
+  const before = betaWasmInputs(root, TOOLCHAIN).fingerprint;
+  writeFileSync(policy, '{"bybit":false}');
+  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before);
+});
+
+test('missing shared display policy refuses a release fingerprint', () => {
+  const root = tree();
+  rmSync(join(root, 'packages/safe-cex/src/exchange-display-policy.json'));
+  assert.throws(() => betaWasmInputs(root, TOOLCHAIN), /ENOENT/);
 });

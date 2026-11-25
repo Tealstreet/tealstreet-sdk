@@ -22,8 +22,8 @@ export class MarginCommand extends BaseCommand {
       return this.success();
     }
 
-    // Use shared formatter from MonitorCommand
-    const output = formatMarginTable(ctx.exchange as any);
+    // A balance can only be present when the context has an exchange.
+    const output = formatMarginTable(ctx.exchange!);
     this.print(ctx, [output]);
     return this.success();
   }

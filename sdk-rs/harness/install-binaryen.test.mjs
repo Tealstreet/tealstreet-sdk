@@ -98,7 +98,11 @@ test('the fixed release and bounded transport retries are shared by every Binary
   assert.match(action, /runner\.tool_cache.*binaryen-archives/);
   assert.match(action, /runner\.os.*runner\.arch.*hashFiles\('sdk-rs\/harness\/install-binaryen.sh'\)/);
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  assert.equal(workflow.split('uses: ./.github/actions/install-binaryen').length - 1, 6);
+  // Sam 2026-11-17 / bd13e4e4c retired Bitget's CPU job; pin every remaining consumer.
+  const consumers = [...workflow.matchAll(/^  ([a-z][\w-]*):\n([\s\S]*?)(?=^  [a-z][\w-]*:\n|$(?![\s\S]))/gm)]
+    .filter(match => match[2].includes('uses: ./.github/actions/install-binaryen')).map(match => match[1]);
+  assert.deepEqual(consumers, ['wasm-size-comparison', 'mutation-barrier-size', 'families', 'combined', 'replay-native-consumers', 'replay-consumers', 'gate']);
+  assert.equal(workflow.split('uses: ./.github/actions/install-binaryen').length - 1, consumers.length);
   assert.equal(workflow.split("- '.github/actions/install-binaryen/**'").length - 1, 1);
   assert.doesNotMatch(workflow, /run: bash sdk-rs\/harness\/install-binaryen\.sh/);
 });

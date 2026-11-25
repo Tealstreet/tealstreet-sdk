@@ -3,6 +3,10 @@ import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import { ethers } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+
 import '../../transport/registerTealstreetTransport';
 
 import { setProxyToken } from '../../accessToken';
@@ -22,11 +26,10 @@ import {
   getAsterBuilderApprovalFeeRate,
   resolveAsterBuilderFeeConfig,
 } from '../../exchanges/asterdex/asterdex.builder-fee';
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { asterDEXVirtualClock } from '../../exchanges/asterdex/asterdex.virtualClock';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 import { PRIVATE_PROXY_JP } from '../../transport/tealstreet/transportResolution';
+import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const builderAddress = '0xc2af13e1B1de3A015252A115309A0F9DEEDCFa0A';
 const userAddress = '0x1111111111111111111111111111111111111111';
@@ -40,17 +43,21 @@ const createExchange = (opts?: {
   includeBuilderConfig?: boolean;
   marketMaxAmount?: number;
 }) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
-      {
-        symbol: 'BTCUSDT',
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { max: opts?.marketMaxAmount ?? 100 } },
-        info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
-      } as any,
-    ],
-  });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { max: opts?.marketMaxAmount ?? 100 }, leverage: { min: 1, max: 100 } },
+          info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
+        }) as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
 
   const exchange = new AsterDEXExchange(
     'asterdex',
@@ -397,6 +404,79 @@ describe('audit regression: Aster builder attribution', () => {
     ).toBe(signerAddress);
   });
 
+  it.each([
+    ['get', '/fapi/v3/positionSide/dual'],
+    ['get', '/fapi/v3/account'],
+    ['get', '/fapi/v3/positionRisk'],
+    ['delete', '/fapi/v3/order'],
+    ['post', '/fapi/v3/listenKey'],
+    ['put', '/fapi/v3/listenKey'],
+  ])('uses the current EIP-712 signature for V3 %s %s', async (method, path) => {
+    vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
+    vi.spyOn(asterDEXVirtualClock, 'getCurrentTimeMs').mockReturnValue(1_700_000_000_000);
+    const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
+      config,
+      data: {},
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const api = createAPI(createExchange(), {
+      apiKey: signerAddress,
+      apiSecret: signerPrivateKey,
+      apiVersion: 'v3',
+      v3UserAddress: userAddress,
+      v3SignerAddress: signerAddress,
+      v3SignerPrivateKey: signerPrivateKey,
+    });
+    api.defaults.adapter = adapter;
+    await api.request({ method, url: path });
+    const sent = adapter.mock.calls[0][0];
+    expect(sent.params).toBeUndefined();
+    const [query, signature] = (sent.url ?? '').split('?')[1].split('&signature=');
+    expect(query).toContain(`signer=${signerAddress}`);
+    expect(query).toContain('nonce=');
+    expect(query).not.toContain('recvWindow=');
+    expect(query).not.toContain('timestamp=');
+    expect(
+      ethers.verifyTypedData(
+        {
+          name: 'AsterSignTransaction',
+          version: '1',
+          chainId: 1666,
+          verifyingContract: '0x0000000000000000000000000000000000000000',
+        },
+        { Message: [{ name: 'msg', type: 'string' }] },
+        { msg: query },
+        signature,
+      ),
+    ).toBe(signerAddress);
+  });
+
+  it('surfaces a V3 signature refusal once with actionable key guidance', async () => {
+    vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
+    const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
+      config,
+      data: { code: -1000, msg: 'Signature check failed' },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+    const api = createAPI(createExchange(), {
+      apiKey: signerAddress,
+      apiSecret: signerPrivateKey,
+      apiVersion: 'v3',
+      v3UserAddress: userAddress,
+      v3SignerAddress: signerAddress,
+      v3SignerPrivateKey: signerPrivateKey,
+    });
+    api.defaults.adapter = adapter;
+    await expect(api.get('/fapi/v3/positionSide/dual')).rejects.toThrow(
+      'Aster API key signature rejected: re-create the key (V3)',
+    );
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps V3 order nonces strictly increasing for rapid attributed requests', async () => {
     vi.spyOn(asterDEXVirtualClock, 'needsSync').mockReturnValue(false);
     vi.spyOn(asterDEXVirtualClock, 'getCurrentTimeMs').mockReturnValue(1_700_000_000_000);
@@ -434,11 +514,10 @@ describe('audit regression: Aster builder attribution', () => {
 
   it('surfaces Aster missing-builder-config errors with actionable API-key guidance', async () => {
     const emitAndLogError = vi.fn();
-    const api = createAPI(
-      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
-      {},
-      { key: '', secret: '' } as any,
-    );
+    const api = createAPI({ options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any, {}, {
+      key: '',
+      secret: '',
+    } as any);
     api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
       config,
       data: { code: -5025, msg: 'Cannot found builder config.' },
@@ -447,19 +526,16 @@ describe('audit regression: Aster builder attribution', () => {
       statusText: 'OK',
     }));
 
-    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
-      'Aster builder attribution is not synced for this API key',
-    );
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow('Aster builder attribution is not synced for this API key');
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('Open your Aster API key settings'));
   });
 
   it('surfaces HTTP Aster missing-builder-config errors with actionable API-key guidance', async () => {
     const emitAndLogError = vi.fn();
-    const api = createAPI(
-      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
-      {},
-      { key: '', secret: '' } as any,
-    );
+    const api = createAPI({ options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any, {}, {
+      key: '',
+      secret: '',
+    } as any);
     api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) =>
       Promise.reject(
         Object.assign(new Error('Request failed'), {
@@ -475,9 +551,7 @@ describe('audit regression: Aster builder attribution', () => {
       ),
     );
 
-    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
-      'Aster builder attribution is not synced for this API key',
-    );
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow('Aster builder attribution is not synced for this API key');
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('reconnect the account and try again'));
   });
 

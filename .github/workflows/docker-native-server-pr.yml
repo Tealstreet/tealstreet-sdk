@@ -1,0 +1,58 @@
+name: Native server image PR builds
+
+on:
+  pull_request:
+    paths:
+      - 'sdk-rs/**'
+      - 'packages/safe-cex/src/exchanges/rust/construction-rules.json'
+      - 'packages/safe-cex/src/exchange-display-policy.json'
+      - '.github/workflows/docker-exchange-server-native.yml'
+      - '.github/workflows/docker-candle-server-native.yml'
+      - '.github/workflows/docker-native-server-pr.yml'
+      - '.github/tests/native-server-pr-build.test.cjs'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: native-server-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Native image / PR dry-run (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: exchange-server-native
+            dockerfile: sdk-rs/hosts/server/Dockerfile
+          - image: candle-server-native
+            dockerfile: sdk-rs/hosts/candle-server/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Authenticate for read-only build cache imports
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/native-pr-docker
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+      - name: Build the production image without publishing
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/native-pr-docker
+          IMAGE: ghcr.io/tealstreet/${{ matrix.image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          docker buildx create --use --name native-pr >/dev/null
+          docker buildx build . \
+            --file "$DOCKERFILE" \
+            --platform linux/amd64 \
+            --cache-from "type=registry,ref=$IMAGE:buildcache-sdk" \
+            --output type=cacheonly

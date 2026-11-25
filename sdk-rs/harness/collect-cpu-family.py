@@ -48,8 +48,8 @@ try:
            and git('rev-parse', 'HEAD^{tree}', cwd=base) == git('rev-parse', authority['baseline'] + '^{tree}')
            and not git('status', '--porcelain', '--untracked-files=all', cwd=base), 'base checkout is not clean authenticated parent')
     env = {**os.environ, 'CARGO_TARGET_DIR': str(base / 'sdk-rs/target')}
-    subprocess.run(['bash', 'sdk-rs/harness/build.sh', '--venue', authority['suite']], cwd=base, env=env, check=True)
-    subprocess.run(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', authority['suite'],
+    subprocess.run(['bash', 'sdk-rs/harness/build.sh', '--venue', authority['family']], cwd=base, env=env, check=True)
+    subprocess.run(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', authority['family'],
                     '--archive', str(out / 'baseline')], cwd=base, env=env, check=True)
 finally:
     insist(git('rev-parse', 'HEAD') == authority['candidate']

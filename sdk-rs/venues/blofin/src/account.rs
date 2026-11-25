@@ -1005,15 +1005,17 @@ impl Blofin {
                 ..OrderExtra::default()
             }),
         };
-        if o.order_type == "trigger"
-            && !o.algo_id.is_empty()
-            && !o.reduce_only.0
-            && o.trigger_price.0 > 0.0
-        {
+        // Reduce-only triggers are Conditional too, keeping `reduce_only`; TP/SL
+        // rows on this channel carry `tpslId` and orderType `conditional`.
+        if o.order_type == "trigger" && !o.algo_id.is_empty() && o.trigger_price.0 > 0.0 {
+            let whole_position = o.size.0 == -1.0;
+            let amount = if whole_position { 0.0 } else { amount };
             return vec![Order {
                 id: o.algo_id.to_string(),
                 kind: OrderType::Conditional,
                 price: o.trigger_price.0,
+                amount,
+                close: whole_position.then_some(true),
                 filled: 0.0,
                 remaining: amount,
                 time_in_force: None,

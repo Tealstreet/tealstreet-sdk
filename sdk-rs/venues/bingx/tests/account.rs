@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Scripted private payload oracles: BingX-API/api-ai-skills swap-account,
 //! swap-ws-account and swap-trade. No credentials or live writes are used.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode, PositionSide};
@@ -362,7 +363,7 @@ fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
         );
         assert!(h.failures.iter().any(|(command, error)| *command == id
             && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-            && error.message.contains("uncertain")));
+            && error.message.contains("confirm")));
     };
     refused(&mut h, 701);
     let fresh = h.take(ORDERS);
@@ -418,7 +419,7 @@ fn a_degraded_open_order_snapshot_does_not_clear_a_placement_fence() {
             h.event(Event::Command(place(id)));
             assert!(h.failures.iter().any(|(command, error)| *command == id
                 && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain")));
+                && error.message.contains("confirm")));
             assert!(h.requests.iter().all(
                 |r| r.method != Method::Post || !r.url.contains("/openApi/swap/v2/trade/order")
             ));
@@ -513,6 +514,31 @@ fn every_partial_execution_is_emitted_once_including_repeated_terminal_events() 
     assert_eq!(
         h.engine.store().order(ORDER_ID).unwrap().status,
         OrderStatus::Closed
+    );
+}
+
+// AGT-83: a last-fill row's trade id `t` is the fill identity; an idless row keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::ready();
+    for (time, filled, trade) in [
+        (1001, "0.05", r#","t":"t1""#),
+        (1002, "0.1", r#","t":"t2""#),
+        (1003, "0.15", ""),
+    ] {
+        h.message(&format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","E":{time},"o":{{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","z":"{filled}","l":"0.05","L":"59001","ap":"59001"{trade}}}}}"#
+        ));
+    }
+    let identities: Vec<_> = wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, (fill.amount * 1e6).round()))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        ["t1", "t2", ORDER_ID].map(|id| (Some(id.to_owned()), ORDER_ID.to_owned(), 50_000.0))
     );
 }
 

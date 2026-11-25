@@ -1,19 +1,18 @@
-import { vi } from 'vitest';
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
+import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeOptions } from '../../types';
+
+import { describe, expect, it, vi } from 'vitest';
+
+import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
+import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
+import { runsOnRustEngine, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
-
-import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
-
-import { describe, expect, it } from 'vitest';
-
-import { RustEngineExchange, runsOnRustEngine } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
-import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 
 const options = () =>
   ({
@@ -76,18 +75,24 @@ describe('trusted local signer setup', () => {
     ])
       expect(
         () => new LocalSignerSetup({ ...withoutSigningCredentials(options()), ...read } as ExchangeOptions),
-      ).toThrow(/nonempty key and secret/);
+      ).toThrow(/The extra API credentials need both a key and secret/);
   });
   it('carries trusted metadata and an empty passphrase only through the one-use setup', () => {
-    const input = { ...options(), passphrase: '', localSigner: {
-      primary: { stableId: 'account/17', secretEncoding: 'base64' as const, trimCredential: true },
-      secondary: { stableId: 'read/17' },
-    } };
+    const input = {
+      ...options(),
+      passphrase: '',
+      localSigner: {
+        primary: { stableId: 'account/17', secretEncoding: 'base64' as const, trimCredential: true },
+        secondary: { stableId: 'read/17' },
+      },
+    };
     const setup = new LocalSignerSetup(input);
     expect(withoutSigningCredentials(input)).not.toHaveProperty('localSigner');
     let received: unknown;
     class Engine {
-      constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
+      constructor(_venue: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
     }
     setup.construct(Engine as never, 'binance', '{}');
     expect(received).toMatchObject({
@@ -96,25 +101,42 @@ describe('trusted local signer setup', () => {
     });
     expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
   });
-  it.each(['base64Text', 'base58'] as const)('forwards the declared %s key encoding to the Rust provider unchanged', (encoding) => {
-    let received: unknown;
-    class Engine {
-      constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
-    }
-    new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: encoding } } })
-      .construct(Engine as never, 'binance', '{}');
-    expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
-  });
+  it.each(['base64Text', 'base58'] as const)(
+    'forwards the declared %s key encoding to the Rust provider unchanged',
+    (encoding) => {
+      let received: unknown;
+      class Engine {
+        constructor(_venue: string, _options: string, json?: string) {
+          received = JSON.parse(json!);
+        }
+      }
+      new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: encoding } } }).construct(
+        Engine as never,
+        'binance',
+        '{}',
+      );
+      expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
+    },
+  );
   // #3314 migrates TxFlow; Polymarket retains the unmigrated provider-metadata refusal.
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('polymarket', { ...options(), localSigner: {} }, new DefaultStore()))
-      .toThrow(/not supported/);
+    expect(() => new RustEngineExchange('polymarket', { ...options(), localSigner: {} }, new FrameStore())).toThrow(
+      /not supported/,
+    );
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {
     let constructors = 0;
-    class Engine { constructor() { constructors++; } }
+    class Engine {
+      constructor() {
+        constructors++;
+      }
+    }
     for (const localSigner of [
-      null, [], 'base64', { tertiary: {} }, { primary: [] },
+      null,
+      [],
+      'base64',
+      { tertiary: {} },
+      { primary: [] },
       { primary: { secretEncodng: 'base64' } },
       { primary: { secretEncoding: 'unknown' } },
       { primary: { trimCredential: 'true' } },
@@ -124,39 +146,54 @@ describe('trusted local signer setup', () => {
     ]) {
       let failure: unknown;
       try {
-        new LocalSignerSetup({ ...options(), localSigner } as unknown as ExchangeOptions)
-          .construct(Engine as never, 'binance', '{}');
-      } catch (error) { failure = error; }
+        new LocalSignerSetup({ ...options(), localSigner } as unknown as ExchangeOptions).construct(
+          Engine as never,
+          'binance',
+          '{}',
+        );
+      } catch (error) {
+        failure = error;
+      }
       expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
       expect(constructors).toBe(0);
     }
   });
 });
 
-
-it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'] as const)(
-  '%s retains private intent without putting credentials in generic exchange or worker options',
-  (venue) => {
-    const input = options();
-    const exchange = new RustEngineExchange(venue, input, new DefaultStore());
-    try {
-      expect(exchange.isPublicDataOnly).toBe(false);
-      expect(JSON.stringify(exchange.options)).not.toContain('audit-secret-sentinel');
-      expect(JSON.stringify(exchange.options)).not.toContain('primary-key');
-      for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase'])
-        expect(exchange.options).not.toHaveProperty(field);
-      expect(input.secret).toBe('audit-secret-sentinel');
-    } finally { exchange.dispose(); }
-  },
-);
-
+it.each([
+  'binance',
+  'binancepm',
+  'binanceinverse',
+  'binancespot',
+  'bybit',
+  'bybitinverse',
+  'bybitspot',
+  'bybitdemo',
+  'hyrotrader',
+] as const)('%s retains private intent without putting credentials in generic exchange or worker options', (venue) => {
+  const input = options();
+  const exchange = new RustEngineExchange(venue, input, new FrameStore());
+  try {
+    expect(exchange.isPublicDataOnly).toBe(false);
+    expect(JSON.stringify(exchange.options)).not.toContain('audit-secret-sentinel');
+    expect(JSON.stringify(exchange.options)).not.toContain('primary-key');
+    for (const field of ['key', 'secret', 'passphrase', 'secondary_key', 'secondary_secret', 'secondary_passphrase'])
+      expect(exchange.options).not.toHaveProperty(field);
+    expect(input.secret).toBe('audit-secret-sentinel');
+  } finally {
+    exchange.dispose();
+  }
+});
 
 it('incomplete secondary setup reports typed invalidInput/notSent at construction', () => {
   let failure: unknown;
-  try { new LocalSignerSetup({ ...options(), secondary_secret: '' }); } catch (error) { failure = error; }
+  try {
+    new LocalSignerSetup({ ...options(), secondary_secret: '' });
+  } catch (error) {
+    failure = error;
+  }
   expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
 });
-
 
 it.each([
   ['NEL is trimmed', '\u0085', true, false],
@@ -168,7 +205,7 @@ it.each([
   const input = { ...options(), key, localSigner: { primary: { trimCredential } } };
   const setup = new LocalSignerSetup(input);
   expect(setup.primaryComplete).toBe(complete);
-  const exchange = new RustEngineExchange('binance', input, new DefaultStore());
+  const exchange = new RustEngineExchange('binance', input, new FrameStore());
   try {
     expect(exchange.isPublicDataOnly).toBe(!complete);
     expect(JSON.stringify(exchange.options)).not.toContain('audit-secret-sentinel');
@@ -179,40 +216,68 @@ it.each([
   }
 });
 
-
 describe('shared credential setup policy', () => {
   it('declares MEXC normalization and rejects an inconsistent persisted mapping', () => {
     const policy = deriveSignerSetupPolicy('mexc');
-    expect(policy).toEqual({ primary: { trimCredential: true, signing: 'optional' }, secondary: { trimCredential: false } });
+    expect(policy).toEqual({
+      primary: { trimCredential: true, signing: 'optional' },
+      secondary: { trimCredential: false },
+    });
     expect(deriveSignerSetupPolicy('binance')).toEqual({});
-    const input = { ...options(), key: '\u0085 primary ', secondary_key: ' secondary ', localSigner: {
-      primary: { trimCredential: false, stableId: 'primary/7' },
-      secondary: { trimCredential: true, stableId: 'read/7' },
-    } };
+    const input = {
+      ...options(),
+      key: '\u0085 primary ',
+      secondary_key: ' secondary ',
+      localSigner: {
+        primary: { trimCredential: false, stableId: 'primary/7' },
+        secondary: { trimCredential: true, stableId: 'read/7' },
+      },
+    };
     const setup = new LocalSignerSetup(input, policy);
     let received: unknown;
-    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     setup.construct(Engine as never, 'mexc', '{}');
     expect(received).toEqual({
-      primary: { key: input.key, secret: input.secret, passphrase: input.passphrase, stableId: 'primary/7', trimCredential: true },
-      secondary: { key: input.secondary_key, secret: input.secondary_secret, passphrase: input.secondary_passphrase, stableId: 'read/7', trimCredential: false },
+      primary: {
+        key: input.key,
+        secret: input.secret,
+        passphrase: input.passphrase,
+        stableId: 'primary/7',
+        trimCredential: true,
+      },
+      secondary: {
+        key: input.secondary_key,
+        secret: input.secondary_secret,
+        passphrase: input.secondary_passphrase,
+        stableId: 'read/7',
+        trimCredential: false,
+      },
     });
     expect(input.localSigner.primary.trimCredential).toBe(false);
     expect(input.localSigner.secondary.trimCredential).toBe(true);
     expect(input.key).toBe('\u0085 primary ');
-    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/mapping conflicts/);
+    expect(() => new RustEngineExchange('mexc', input, new FrameStore())).toThrow(/mapping conflicts/);
   });
 
-  it.each([['\u0085', false], ['\ufeff', true], [' \t', false], ['  a b  ', true]] as const)(
-    'uses native whitespace semantics for MEXC intent %j', (key, present) => {
-      const input = { ...options(), key, localSigner: { primary: { trimCredential: false } } };
-      const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
-      expect(setup.primaryComplete).toBe(present);
-      expect(derivePublicMode('mexc', input, undefined, setup.credentialPresence))
-        .toEqual({ canSign: present, publicDataOnly: !present });
-      setup.dispose();
-    },
-  );
+  it.each([
+    ['\u0085', false],
+    ['\ufeff', true],
+    [' \t', false],
+    ['  a b  ', true],
+  ] as const)('uses native whitespace semantics for MEXC intent %j', (key, present) => {
+    const input = { ...options(), key, localSigner: { primary: { trimCredential: false } } };
+    const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
+    expect(setup.primaryComplete).toBe(present);
+    expect(derivePublicMode('mexc', input, undefined, setup.credentialPresence)).toEqual({
+      canSign: present,
+      publicDataOnly: !present,
+    });
+    setup.dispose();
+  });
 
   it('declares Bitunix signing-key trimming for both slots and forwards it to the provider', () => {
     const policy = deriveSignerSetupPolicy('bitunix');
@@ -223,7 +288,11 @@ describe('shared credential setup policy', () => {
     const input = { ...options(), key: ' key ', secret: ' secret\n' };
     const setup = new LocalSignerSetup(input, policy);
     let received: unknown;
-    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     setup.construct(Engine as never, 'bitunix', '{}');
     expect(received).toMatchObject({
       primary: { key: ' key ', secret: ' secret\n', trimCredential: true, trimSigning: true },
@@ -232,26 +301,38 @@ describe('shared credential setup policy', () => {
     expect(input.secret).toBe(' secret\n');
   });
 
-  it.each([['\u0085', false], ['\ufeff', true], [' \t', false], [' s ', true]] as const)(
-    'treats a Bitunix signing key %j by native whitespace semantics', (secret, present) => {
-      const setup = new LocalSignerSetup({ ...options(), secret }, deriveSignerSetupPolicy('bitunix'));
-      expect(setup.credentialPresence.secret).toBe(present);
-      setup.dispose();
-      const secondary = () => new LocalSignerSetup({ ...options(), secondary_secret: secret }, deriveSignerSetupPolicy('bitunix'));
-      if (present) expect(secondary).not.toThrow();
-      else expect(secondary).toThrow(/nonempty key and secret/);
-    },
-  );
+  it.each([
+    ['\u0085', false],
+    ['\ufeff', true],
+    [' \t', false],
+    [' s ', true],
+  ] as const)('treats a Bitunix signing key %j by native whitespace semantics', (secret, present) => {
+    const setup = new LocalSignerSetup({ ...options(), secret }, deriveSignerSetupPolicy('bitunix'));
+    expect(setup.credentialPresence.secret).toBe(present);
+    setup.dispose();
+    const secondary = () =>
+      new LocalSignerSetup({ ...options(), secondary_secret: secret }, deriveSignerSetupPolicy('bitunix'));
+    if (present) expect(secondary).not.toThrow();
+    else expect(secondary).toThrow(/The extra API credentials need both a key and secret/);
+  });
 
   it('never lets caller metadata request signing-key trimming', () => {
-    expect(() => new LocalSignerSetup({ ...options(), localSigner: { primary: { trimSigning: true } } } as unknown as ExchangeOptions)
-      .construct(class {} as never, 'binance', '{}')).toThrow();
+    expect(() =>
+      new LocalSignerSetup({
+        ...options(),
+        localSigner: { primary: { trimSigning: true } },
+      } as unknown as ExchangeOptions).construct(class {} as never, 'binance', '{}'),
+    ).toThrow();
   });
 
   it('does not invent slots solely because a family has a setup policy', () => {
     const setup = new LocalSignerSetup({ publicDataOnly: true } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
     let received: unknown;
-    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     setup.construct(Engine as never, 'mexc', '{}');
     expect(received).toEqual({});
     expect(setup.primaryComplete).toBe(false);
@@ -260,92 +341,170 @@ describe('shared credential setup policy', () => {
 
   it('validates secondary effective presence without trimming secrets or overriding undeclared metadata', () => {
     const input = { ...options(), secondary_key: '\u0085', localSigner: { secondary: { trimCredential: true } } };
-    expect(() => new LocalSignerSetup(input)).toThrow(/nonempty key and secret/);
+    expect(() => new LocalSignerSetup(input)).toThrow(/The extra API credentials need both a key and secret/);
     const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
     expect(setup.hasSecondary).toBe(true);
     let received: unknown;
-    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     setup.construct(Engine as never, 'mexc', '{}');
-    expect(received).toMatchObject({ secondary: { key: '\u0085', secret: input.secondary_secret, passphrase: input.secondary_passphrase, trimCredential: false } });
+    expect(received).toMatchObject({
+      secondary: {
+        key: '\u0085',
+        secret: input.secondary_secret,
+        passphrase: input.secondary_passphrase,
+        trimCredential: false,
+      },
+    });
   });
 });
 
-
-const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc', 'weex'] as const;
-const requiredSetup = (input: Partial<ExchangeOptions>, venue: typeof passphraseFamilies[number] = 'okx') =>
+const passphraseFamilies = [
+  'okx',
+  'okxeu',
+  'okxdemo',
+  'okxeudemo',
+  'bitget',
+  'bitgetinverse',
+  'bitgetusdc',
+  'weex',
+] as const;
+const requiredSetup = (input: Partial<ExchangeOptions>, venue: (typeof passphraseFamilies)[number] = 'okx') =>
   new LocalSignerSetup(input as ExchangeOptions, deriveSignerSetupPolicy(venue));
 const setupFailure = (run: () => unknown): unknown => {
-  try { run(); } catch (error) { return error; }
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
   throw new Error('expected setup rejection');
 };
 const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
   let received: unknown;
-  class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+  class Engine {
+    constructor(_venue: string, _options: string, json?: string) {
+      received = JSON.parse(json!);
+    }
+  }
   setup.construct(Engine as never, venue, '{}');
   return received;
 };
 
 describe('shared required passphrase field policy', () => {
-  it.each(passphraseFamilies)('%s declares both slot rules; only migrated OKX, Bitget and WEEX adopt dispatch signing', (venue) => {
-    expect(deriveSignerSetupPolicy(venue)).toEqual({
-      primary: { passphrase: 'requiredForPrivate' },
-      secondary: { passphrase: 'requiredWithPrimaryFallback' },
-    });
-    const stripped = venue.startsWith('okx') || venue.startsWith('bitget');
-    const migrated = stripped || venue === 'weex';
-    expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
-    const construct = () => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore());
-    if (stripped) {
-      const exchange = construct();
-      expect(exchange.options.key).toBeUndefined();
-      expect(exchange.options.secret).toBeUndefined();
-      expect(exchange.options.passphrase).toBeUndefined();
-    } else if (migrated) {
-      expect(construct).not.toThrow();
-    } else {
-      expect(construct).toThrow(/not supported/);
-    }
-  });
+  it.each(passphraseFamilies)(
+    '%s declares both slot rules; only migrated OKX, Bitget and WEEX adopt dispatch signing',
+    (venue) => {
+      expect(deriveSignerSetupPolicy(venue)).toEqual({
+        primary: { passphrase: 'requiredForPrivate' },
+        secondary: { passphrase: 'requiredWithPrimaryFallback' },
+      });
+      const stripped = venue.startsWith('okx') || venue.startsWith('bitget');
+      const migrated = stripped || venue === 'weex';
+      expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
+      const construct = () =>
+        new RustEngineExchange(
+          venue,
+          { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions,
+          new FrameStore(),
+        );
+      if (stripped) {
+        const exchange = construct();
+        expect(exchange.options.key).toBeUndefined();
+        expect(exchange.options.secret).toBeUndefined();
+        expect(exchange.options.passphrase).toBeUndefined();
+      } else if (migrated) {
+        expect(construct).not.toThrow();
+      } else {
+        expect(construct).toThrow(/not supported/);
+      }
+    },
+  );
 
-  it.each(passphraseFamilies)('%s rejects missing/empty primary passphrase only for complete private material', (venue) => {
-    for (const passphrase of [undefined, '']) {
-      expect(setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase }, venue)))
-        .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine primary signing credentials require a passphrase' });
-      const setup = requiredSetup({ key: 'key', secret: 'secret', passphrase, publicDataOnly: true }, venue);
-      expect(setup.primaryComplete).toBe(true);
-      expect(setupPayload(setup, venue)).toEqual({ primary: { key: 'key', secret: 'secret', ...(passphrase === undefined ? {} : { passphrase }) } });
-    }
-    for (const input of [{}, { key: 'key' }, { secret: 'secret' }, { passphrase: '' }]) {
+  it.each(passphraseFamilies)(
+    '%s rejects missing/empty primary passphrase only for complete private material',
+    (venue) => {
+      for (const passphrase of [undefined, '']) {
+        expect(setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase }, venue))).toMatchObject({
+          kind: 'invalidInput',
+          outcome: 'notSent',
+          message: 'The primary API credentials need a passphrase',
+        });
+        const setup = requiredSetup({ key: 'key', secret: 'secret', passphrase, publicDataOnly: true }, venue);
+        expect(setup.primaryComplete).toBe(true);
+        expect(setupPayload(setup, venue)).toEqual({
+          primary: { key: 'key', secret: 'secret', ...(passphrase === undefined ? {} : { passphrase }) },
+        });
+      }
+      for (const input of [{}, { key: 'key' }, { secret: 'secret' }, { passphrase: '' }]) {
+        const setup = requiredSetup(input, venue);
+        expect(setup.primaryComplete).toBe(false);
+        setup.dispose();
+      }
+    },
+  );
+
+  it.each(passphraseFamilies)(
+    '%s keeps absent secondary passphrase absent while validating its primary fallback',
+    (venue) => {
+      const input = {
+        key: 'key',
+        secret: 'secret',
+        passphrase: ' primary pass ',
+        secondary_key: 'read',
+        secondary_secret: 'read-secret',
+      };
+      const before = JSON.stringify(input);
       const setup = requiredSetup(input, venue);
-      expect(setup.primaryComplete).toBe(false);
-      setup.dispose();
-    }
-  });
+      expect(setup.hasSecondary).toBe(true);
+      const payload = setupPayload(setup, venue) as { secondary: Record<string, unknown> };
+      expect(payload).toEqual({
+        primary: { key: 'key', secret: 'secret', passphrase: ' primary pass ' },
+        secondary: { key: 'read', secret: 'read-secret' },
+      });
+      expect(payload.secondary).not.toHaveProperty('passphrase');
+      expect(JSON.stringify(input)).toBe(before);
+    },
+  );
 
-  it.each(passphraseFamilies)('%s keeps absent secondary passphrase absent while validating its primary fallback', (venue) => {
-    const input = { key: 'key', secret: 'secret', passphrase: ' primary pass ', secondary_key: 'read', secondary_secret: 'read-secret' };
-    const before = JSON.stringify(input);
-    const setup = requiredSetup(input, venue);
-    expect(setup.hasSecondary).toBe(true);
-    const payload = setupPayload(setup, venue) as { secondary: Record<string, unknown> };
-    expect(payload).toEqual({
-      primary: { key: 'key', secret: 'secret', passphrase: ' primary pass ' },
-      secondary: { key: 'read', secret: 'read-secret' },
-    });
-    expect(payload.secondary).not.toHaveProperty('passphrase');
-    expect(JSON.stringify(input)).toBe(before);
-  });
-
-  it.each([false, true])('secondary checks remain active with publicDataOnly=%s and never fall back from explicit empty', (publicDataOnly) => {
-    const complete = { key: 'key', secret: 'secret', passphrase: 'primary-pass', secondary_key: 'read', secondary_secret: 'read-secret', publicDataOnly };
-    expect(setupFailure(() => requiredSetup({ ...complete, secondary_passphrase: '' })))
-      .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
-    for (const passphrase of [undefined, '']) {
-      // Partial primary material cannot fail a primary-private requirement first.
-      expect(setupFailure(() => requiredSetup({ key: 'partial', passphrase, secondary_key: 'read', secondary_secret: 'read-secret', publicDataOnly })))
-        .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
-    }
-  });
+  it.each([false, true])(
+    'secondary checks remain active with publicDataOnly=%s and never fall back from explicit empty',
+    (publicDataOnly) => {
+      const complete = {
+        key: 'key',
+        secret: 'secret',
+        passphrase: 'primary-pass',
+        secondary_key: 'read',
+        secondary_secret: 'read-secret',
+        publicDataOnly,
+      };
+      expect(setupFailure(() => requiredSetup({ ...complete, secondary_passphrase: '' }))).toMatchObject({
+        kind: 'invalidInput',
+        outcome: 'notSent',
+        message: 'The secondary API credentials need a passphrase',
+      });
+      for (const passphrase of [undefined, '']) {
+        // Partial primary material cannot fail a primary-private requirement first.
+        expect(
+          setupFailure(() =>
+            requiredSetup({
+              key: 'partial',
+              passphrase,
+              secondary_key: 'read',
+              secondary_secret: 'read-secret',
+              publicDataOnly,
+            }),
+          ),
+        ).toMatchObject({
+          kind: 'invalidInput',
+          outcome: 'notSent',
+          message: 'The secondary API credentials need a passphrase',
+        });
+      }
+    },
+  );
 
   it('preserves a primary passphrase-only source without inventing primary key/signing material', () => {
     const input = { passphrase: 'fallback-only', secondary_key: 'read', secondary_secret: 'read-secret' };
@@ -363,8 +522,12 @@ describe('shared required passphrase field policy', () => {
   it('prefers an own secondary passphrase and preserves whitespace, secret bytes and metadata without mutation', () => {
     const passphrase = '\u0085 \t\ufeff';
     const input = Object.freeze({
-      key: ' primary ', secret: ' primary-secret ', passphrase,
-      secondary_key: ' read ', secondary_secret: ' read-secret ', secondary_passphrase: ' own pass ',
+      key: ' primary ',
+      secret: ' primary-secret ',
+      passphrase,
+      secondary_key: ' read ',
+      secondary_secret: ' read-secret ',
+      secondary_passphrase: ' own pass ',
       localSigner: Object.freeze({
         primary: Object.freeze({ stableId: 'account/7', trimCredential: true }),
         secondary: Object.freeze({ stableId: 'read/7', trimCredential: false }),
@@ -374,24 +537,52 @@ describe('shared required passphrase field policy', () => {
     const setup = requiredSetup(input);
     expect(setup.primaryComplete).toBe(true);
     expect(setupPayload(setup)).toEqual({
-      primary: { key: ' primary ', secret: ' primary-secret ', passphrase, stableId: 'account/7', trimCredential: true },
-      secondary: { key: ' read ', secret: ' read-secret ', passphrase: ' own pass ', stableId: 'read/7', trimCredential: false },
+      primary: {
+        key: ' primary ',
+        secret: ' primary-secret ',
+        passphrase,
+        stableId: 'account/7',
+        trimCredential: true,
+      },
+      secondary: {
+        key: ' read ',
+        secret: ' read-secret ',
+        passphrase: ' own pass ',
+        stableId: 'read/7',
+        trimCredential: false,
+      },
     });
     expect(JSON.stringify(input)).toBe(before);
-    const readOnly = requiredSetup({ secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: 'own' });
+    const readOnly = requiredSetup({
+      secondary_key: 'read',
+      secondary_secret: 'read-secret',
+      secondary_passphrase: 'own',
+    });
     expect(setupPayload(readOnly)).toEqual({ secondary: { key: 'read', secret: 'read-secret', passphrase: 'own' } });
   });
 
   it('rejects malformed required passphrase values without exposing input or constructing an engine', () => {
     for (const passphrase of [null, 17, {}, ['secret-sentinel']]) {
-      const failure = setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase } as unknown as ExchangeOptions));
+      const failure = setupFailure(() =>
+        requiredSetup({ key: 'key', secret: 'secret', passphrase } as unknown as ExchangeOptions),
+      );
       expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
       expect(String(failure)).not.toContain('secret-sentinel');
       if (passphrase === null) continue;
-      const secondaryFailure = setupFailure(() => requiredSetup({
-        passphrase: 'valid-primary-fallback', secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: passphrase, publicDataOnly: true,
-      } as unknown as ExchangeOptions));
-      expect(secondaryFailure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
+      const secondaryFailure = setupFailure(() =>
+        requiredSetup({
+          passphrase: 'valid-primary-fallback',
+          secondary_key: 'read',
+          secondary_secret: 'read-secret',
+          secondary_passphrase: passphrase,
+          publicDataOnly: true,
+        } as unknown as ExchangeOptions),
+      );
+      expect(secondaryFailure).toMatchObject({
+        kind: 'invalidInput',
+        outcome: 'notSent',
+        message: 'The secondary API credentials need a passphrase',
+      });
     }
   });
 
@@ -401,10 +592,17 @@ describe('shared required passphrase field policy', () => {
       expect(setup.primaryComplete).toBe(true);
       setup.dispose();
     }
-    const explicitOptional = new LocalSignerSetup({
-      key: 'key', secret: 'secret', passphrase: '',
-      secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: '',
-    } as ExchangeOptions, { primary: { passphrase: 'optional' }, secondary: { passphrase: 'optional' } });
+    const explicitOptional = new LocalSignerSetup(
+      {
+        key: 'key',
+        secret: 'secret',
+        passphrase: '',
+        secondary_key: 'read',
+        secondary_secret: 'read-secret',
+        secondary_passphrase: '',
+      } as ExchangeOptions,
+      { primary: { passphrase: 'optional' }, secondary: { passphrase: 'optional' } },
+    );
     expect(setupPayload(explicitOptional)).toEqual({
       primary: { key: 'key', secret: 'secret', passphrase: '' },
       secondary: { key: 'read', secret: 'read-secret', passphrase: '' },
@@ -417,29 +615,43 @@ describe('shared required passphrase field policy', () => {
     expect(setupPayload(absent)).toEqual({});
     const publicAbsent = requiredSetup({ publicDataOnly: true });
     expect(setupPayload(publicAbsent)).toEqual({});
-    const mexc = new LocalSignerSetup({ key: ' key ', secret: ' secret ' } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
+    const mexc = new LocalSignerSetup(
+      { key: ' key ', secret: ' secret ' } as ExchangeOptions,
+      deriveSignerSetupPolicy('mexc'),
+    );
     expect(setupPayload(mexc, 'mexc')).toEqual({ primary: { key: ' key ', secret: ' secret ', trimCredential: true } });
   });
 });
 
-
 it('keeps a secondary requiredForPrivate field required in public mode, matching native slot policy', () => {
-  expect(() => new LocalSignerSetup({
-    publicDataOnly: true, secondary_key: 'read', secondary_secret: 'read-secret',
-  } as ExchangeOptions, { secondary: { passphrase: 'requiredForPrivate' } })).toThrow('secondary signing credentials require a passphrase');
+  expect(
+    () =>
+      new LocalSignerSetup(
+        {
+          publicDataOnly: true,
+          secondary_key: 'read',
+          secondary_secret: 'read-secret',
+        } as ExchangeOptions,
+        { secondary: { passphrase: 'requiredForPrivate' } },
+      ),
+  ).toThrow('The secondary API credentials need a passphrase');
 });
-
 
 it('preserves JSON null-as-None secondary fallback while explicit empty never inherits', () => {
   const options = {
-    passphrase: 'primary-pass', secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: null,
+    passphrase: 'primary-pass',
+    secondary_key: 'read',
+    secondary_secret: 'read-secret',
+    secondary_passphrase: null,
   } as unknown as ExchangeOptions;
   const setup = new LocalSignerSetup(options, deriveSignerSetupPolicy('okx'));
   expect(setupPayload(setup)).toEqual({
     primary: { passphrase: 'primary-pass' },
     secondary: { key: 'read', secret: 'read-secret', passphrase: null },
   });
-  expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow('secondary signing credentials require a passphrase');
+  expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow(
+    'The secondary API credentials need a passphrase',
+  );
 });
 
 describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
@@ -481,7 +693,6 @@ describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
   });
 });
 
-
 describe('feature-independent provider capsule serialization', () => {
   it('omits the trusted false default for both slots without changing policy or eligibility', () => {
     const input = options();
@@ -489,7 +700,11 @@ describe('feature-independent provider capsule serialization', () => {
     const setup = new LocalSignerSetup(input, policy);
     expect(setup.primaryComplete).toBe(true);
     let received: { primary: Record<string, unknown>; secondary: Record<string, unknown> } | undefined;
-    class Capture { constructor(_name: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Capture {
+      constructor(_name: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     setup.construct(Capture as never, 'binance', '{}');
     expect(received?.primary).not.toHaveProperty('trimSigning');
     expect(received?.secondary).not.toHaveProperty('trimSigning');
@@ -499,7 +714,11 @@ describe('feature-independent provider capsule serialization', () => {
   });
   it('keeps Bitunix trusted true in both slots', () => {
     let received: { primary: Record<string, unknown>; secondary: Record<string, unknown> } | undefined;
-    class Capture { constructor(_name: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    class Capture {
+      constructor(_name: string, _options: string, json?: string) {
+        received = JSON.parse(json!);
+      }
+    }
     new LocalSignerSetup(options(), deriveSignerSetupPolicy('bitunix')).construct(Capture as never, 'bitunix', '{}');
     expect(received?.primary.trimSigning).toBe(true);
     expect(received?.secondary.trimSigning).toBe(true);
@@ -507,8 +726,9 @@ describe('feature-independent provider capsule serialization', () => {
   it('still refuses caller trimming metadata at either value in either slot', () => {
     for (const slot of ['primary', 'secondary']) {
       for (const trimSigning of [false, true]) {
-        expect(() => new LocalSignerSetup({ ...options(), localSigner: { [slot]: { trimSigning } } }))
-          .toThrow('Invalid local signer setup metadata');
+        expect(() => new LocalSignerSetup({ ...options(), localSigner: { [slot]: { trimSigning } } })).toThrow(
+          'Invalid local signer setup metadata',
+        );
       }
     }
   });

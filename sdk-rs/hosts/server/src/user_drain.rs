@@ -17,12 +17,18 @@ pub const MAX_CAP_MS: u64 = 86_400_000;
 pub fn starts_job(op: &str) -> bool {
     matches!(
         op,
-        "chaser:start" | "twap:start" | "twap:resume" | "twap:state" | "exec"
+        "chaser:start"
+            | "chaser:amend"
+            | "twap:start"
+            | "twap:amend"
+            | "twap:resume"
+            | "twap:state"
+            | "exec"
     )
 }
 
 pub fn refusal() -> Value {
-    json!({"name":"ServerDraining", "kind":"venueUnavailable", "message":"The server is draining; new algo jobs are not accepted", "outcome":"notSent"})
+    json!({"name":"ServerDraining", "kind":"venueUnavailable", "message":"The server is preparing to restart and isn’t starting new automated orders", "outcome":"notSent"})
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -595,6 +601,7 @@ impl Drop for Socket {
 
 pub const FORCE_DEADLINE: Duration = Duration::from_secs(25);
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,6 +954,82 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test]
+    async fn a_typed_amendment_refused_while_draining_settles_not_sent() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for op in ["chaser:amend", "twap:amend"] {
+                    let registry = crate::accounts::tests::registry();
+                    let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                    let (account, placed) =
+                        crate::accounts::tests::held_load_account(link, Some(0.));
+                    crate::accounts::testing::register(&registry, &account);
+                    let (sent, _frames) = tokio::sync::mpsc::unbounded_channel();
+                    crate::accounts::tests::hold_live(
+                        &account,
+                        7,
+                        Arc::new(move |frame| sent.send(frame).is_ok()),
+                    );
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    registry
+                        .user_drains
+                        .idle_release("u", REQUEST, TTL)
+                        .unwrap();
+                    let (out, mut receipts, _) = crate::out::Out::channel(4);
+                    let hex = format!("{:012x}", crate::accounts::now_ms());
+                    let intent = format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]);
+                    let deadline = crate::order_actions::ActionDeadline::new(
+                        &intent,
+                        0.0,
+                        std::time::Instant::now(),
+                    )
+                    .unwrap();
+                    let receipt = crate::order_actions::NukeReceipt::new(
+                        out,
+                        "main".into(),
+                        json!(intent),
+                        1,
+                        deadline,
+                        None,
+                    )
+                    .with_kind("algo");
+                    account
+                        .algos
+                        .as_ref()
+                        .unwrap()
+                        .send(crate::algos::AlgoInput::Op {
+                            op: op.into(),
+                            data: r#"{"id":"job","update":{"maxAttempts":5}}"#.into(),
+                            origin: "test".into(),
+                            twap_owner: account.twap_owner.snapshot(),
+                            action: Some(Box::new(receipt)),
+                        })
+                        .unwrap();
+                    let frame: Value = tokio::time::timeout(Duration::from_secs(2), async {
+                        loop {
+                            let frame: Value =
+                                serde_json::from_str(&receipts.recv().await.unwrap()).unwrap();
+                            if frame["t"] == "order.actionOutcome" {
+                                break frame;
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(frame["d"]["outcome"], "refused", "{op}: {frame}");
+                    assert_eq!(frame["d"]["error"]["outcome"], "notSent", "{op}: {frame}");
+                    assert_eq!(
+                        frame["d"]["error"]["message"],
+                        crate::user_drain::refusal()["message"],
+                        "{op}: {frame}"
+                    );
+                    assert!(!account.running.any());
+                    assert_eq!(placed.load(Ordering::Relaxed), 0);
+                }
+            })
+            .await;
+    }
+
     #[tokio::test(start_paused = true)]
     async fn idle_expiry_runs_without_traffic_and_cannot_clear_a_newer_or_operator_latch() {
         let users = Users::default();
@@ -1227,7 +1310,9 @@ mod tests {
         assert!(users.get("u").admit().is_err());
         for op in [
             "chaser:start",
+            "chaser:amend",
             "twap:start",
+            "twap:amend",
             "twap:state",
             "twap:resume",
             "exec",
@@ -1330,7 +1415,7 @@ mod tests {
             let id = tokio::time::timeout(Duration::from_secs(2),async {
                 loop {
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
-                    if let Some(id) = frame["d"]["data"]["activeTWAPs"][0]["id"].as_str() {break id.to_owned();}
+                    if frame["d"]["op"] == "twap:stateUpdate" && let Some(id) = frame["d"]["data"].as_object().and_then(|rows|rows.keys().next()) {break id.clone();}
                 }
             }).await.unwrap();
             tokio::time::timeout(Duration::from_secs(2),async {

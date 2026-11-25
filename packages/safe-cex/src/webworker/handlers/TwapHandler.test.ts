@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +38,12 @@ const restoredRow = {
 };
 
 describe('TwapHandler', () => {
+  it('forwards a live amendment without changing restore ownership or issuing stop/start', () => {
+    const exchange = rustAlgoExchange();
+    const data = { id: 'twap-1', update: { intervalMs: 1000, remainingSlices: 3 } };
+    new TwapHandler(...handlerArgs(exchange)).handle({ op: 'twap:amend', data });
+    expect(exchange.algoOp).toHaveBeenCalledExactlyOnceWith('twap:amend', data);
+  });
   beforeEach(() => setTwapLockManager(null));
   afterEach(() => setTwapLockManager(undefined));
 
@@ -85,7 +92,7 @@ describe('TwapHandler', () => {
     new TwapHandler(...handlerArgs(exchange)).handle({ op: 'twap:start', data: options } as StoreWorkerPayload);
     expect(exchange.emitter.emit).toHaveBeenCalledWith(
       'error',
-      'twap:start was not run: algos run only on a Rust engine account',
+      'Starting the TWAP isn’t available for this account',
     );
   });
 

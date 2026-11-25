@@ -1,7 +1,7 @@
-import type { BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt, VenueErrorDetail } from '@tealstreet/safe-cex-wasm/host';
+import type { BingxWriteShapeDetail, BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt, VenueErrorDetail } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
 
-import { builderAuthorizationOf, historyDecodeOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
+import { bingxWriteShapeFromError, builderAuthorizationOf, historyDecodeOf, writeCommandOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -80,6 +80,7 @@ export type SerializedCommandError = {
   kind?: ExchangeErrorKind;
   causeCode?: string;
   historyDecode?: HistoryDecodeDetail;
+  bingxWriteShape?: BingxWriteShapeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -111,6 +112,8 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   if (typeof source.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(source.causeCode)) result.causeCode = source.causeCode;
   const historyDecode = historyDecodeOf(source.historyDecode);
   if (historyDecode) result.historyDecode = historyDecode;
+  const bingxWriteShape = bingxWriteShapeFromError(source);
+  if (bingxWriteShape) result.bingxWriteShape = bingxWriteShape;
   const elements = writePlanElementsOf(source.elements);
   if (elements) result.elements = elements;
   const errorReported = isErrorReported(value) ? true : source.errorReported;
@@ -198,16 +201,20 @@ export const exchangeErrorCategory = (value: unknown): ErrorCategory | undefined
 };
 
 /** The classified fields of an engine error, for the `'error'` event payload. */
-export type ClassifiedError = { kind?: ExchangeErrorKind; outcome?: CommandOutcome; venueCode?: string };
+export type ClassifiedError = { kind?: ExchangeErrorKind; outcome?: CommandOutcome; venueCode?: string; command?: string; bingxWriteShape?: BingxWriteShapeDetail };
 
 /** Only the closed-set classification of `value`; undefined when it carries none. */
 export const classifiedError = (value: unknown): ClassifiedError | undefined => {
   if (value === null || typeof value !== 'object') return undefined;
-  const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
+  const { kind, outcome, venueCode, command } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown; command?: unknown };
   const result: ClassifiedError = {};
+  const operation = writeCommandOf(command);
+  if (operation) result.command = operation;
   if (typeof kind === 'string' && KINDS.includes(kind)) result.kind = kind as ExchangeErrorKind;
   if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) result.outcome = outcome as CommandOutcome;
   if (typeof venueCode === 'string' && venueCode) result.venueCode = venueCode;
+  const bingxWriteShape = bingxWriteShapeFromError(value);
+  if (bingxWriteShape) result.bingxWriteShape = bingxWriteShape;
   return Object.keys(result).length ? result : undefined;
 };
 
@@ -230,19 +237,78 @@ export const engineEventClassified = (event: {
   return Object.keys(classified).length ? classified : undefined;
 };
 
+// Mirrors engine::ErrorCause. A syntax check alone would admit private uppercase values.
+const HISTORY_CAUSES: readonly string[] = [
+  'HISTORY_RATE_LIMITED',
+  'HISTORY_AUTH_INVALID',
+  'HISTORY_AUTH_PERMISSION',
+  'HISTORY_INVALID_PARAMS',
+  'HISTORY_VENUE_ERROR',
+  'HISTORY_HTTP_ERROR',
+  'HISTORY_DECODE',
+  'HISTORY_CURSOR_STALLED',
+  'HISTORY_PAGE_LIMIT',
+  'HISTORY_WINDOW_MISMATCH',
+  'HISTORY_NETWORK',
+  'HISTORY_TIMEOUT',
+];
+
+/** Detached, closed history evidence for diagnostics; never copies a row or request. */
+export const historyErrorDiagnostics = (
+  value: unknown,
+): { causeCode?: string; historyDecode?: HistoryDecodeDetail } => {
+  const result: { causeCode?: string; historyDecode?: HistoryDecodeDetail } = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return result;
+  try {
+    const { causeCode } = value as { causeCode?: unknown };
+    if (typeof causeCode === 'string' && HISTORY_CAUSES.includes(causeCode)) result.causeCode = causeCode;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  try {
+    const detail = historyDecodeOf((value as { historyDecode?: unknown }).historyDecode);
+    if (detail) result.historyDecode = detail;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  return result;
+};
+
 /**
  * Closed-set Sentry tags for a classified failure: kind, its health category,
- * outcome and the venue's code. Never free text, so tags stay low-cardinality.
+ * outcome, venue code and closed history evidence. Never includes row values.
  */
 export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   if (value === null || typeof value !== 'object') return {};
   const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
   const tags: Record<string, string> = {};
+  const operation = writeCommandOf((value as { command?: unknown }).command);
+  if (operation) tags.error_command = operation;
   if (typeof kind === 'string' && KINDS.includes(kind)) {
     tags.error_kind = kind;
     tags.error_category = CATEGORIES[kind as ExchangeErrorKind];
   }
   if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) tags.error_outcome = outcome;
   if (typeof venueCode === 'string' && /^[\w.-]{1,32}$/.test(venueCode)) tags.venue_code = venueCode;
+  const shape = bingxWriteShapeFromError(value);
+  if (shape) {
+    tags.bingx_endpoint = shape.endpointFamily;
+    tags.bingx_method = shape.method;
+    tags.bingx_param_names_1 = shape.parameterNames.slice(0, 10).join(',');
+    tags.bingx_param_names_2 = shape.parameterNames.slice(10, 20).join(',');
+    tags.bingx_param_names_3 = shape.parameterNames.slice(20).join(',');
+    tags.bingx_other_params = String(shape.hasOtherParameters);
+    tags.bingx_id_class = shape.idClass;
+    tags.bingx_id_digits = String(shape.idDigits);
+    tags.bingx_target_kind = shape.targetKind;
+    tags.bingx_symbol_format = shape.symbolFormat;
+    tags.bingx_replacement = shape.replacement;
+  }
+  const { causeCode, historyDecode } = historyErrorDiagnostics(value);
+  if (causeCode) tags.cause_code = causeCode;
+  if (historyDecode) {
+    tags.history_schema = historyDecode.schema;
+    tags.history_reason = historyDecode.reason;
+  }
   return tags;
 };

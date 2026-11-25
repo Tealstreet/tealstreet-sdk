@@ -26,6 +26,15 @@ host obeys, and that had already happened: the CLI adapter applied none of it.
 `downSizeReduceOrder` took a web `OpenOrder` (`Order & { account }`) and reads
 none of the extra field, so it takes `readonly Order[]` here.
 
+**Held size is the larger of the TP side and the SL side, never their sum**
+(`locksPositionSize`, Bitget). Reduce-only limits and take profits fill on a
+favourable move, stops and trailing stops on an adverse one; a close order of
+unknown direction (`Conditional`, an in-flight market) is added outright.
+Summing them refused closing the unprotected half of a position whose TP and
+SL each covered the other half (AGT-44).
+A whole-position TP/SL reaches here with amount 0 (the Bitget venue maps it so)
+and holds nothing; keep `unfilled(o) > 0` in the holding filter (AGT-70).
+
 **`oems-core` consumes this package, never the reverse.** `rounding.ts` started
 in `oems-core`; moving the policy here would have closed a cycle
 (`script-api-core` -> `oems-core` -> `script-api-core`), which turbo fails the
@@ -354,3 +363,9 @@ amounts and amendments keep preserve-or-refuse; unknown native sizes refuse.
 notional, or exposure overflows. Its numeric summary never substitutes zero
 or publishes a partial sum. Position reads preserve unknown valuation; native
 close sizing continues through the SDK sizing helper.
+
+## Caller action identity
+
+A close captures the optional host placement identity before its first await and
+restores stable symbol/side child UUIDs for each actual placement. Venue client
+IDs, host ownership checks, rounding and partial-result handling are unchanged.

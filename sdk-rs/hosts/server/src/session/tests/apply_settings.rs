@@ -69,6 +69,7 @@ async fn apply_settings_requires_an_admitted_client_and_records_the_stop_reason(
             let crate::algos::AlgoInput::Dispose {
                 reason,
                 stopped: Some(stopped),
+                server_stopped: None,
             } = algos.try_recv().expect("settings stop")
             else {
                 panic!("expected the existing settings-disposal path");

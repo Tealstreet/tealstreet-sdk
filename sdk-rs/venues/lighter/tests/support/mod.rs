@@ -1,7 +1,9 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_lighter::Lighter;
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 pub const NOW: f64 = 1_700_000_000_000.0;
 pub const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250}]}"#;
 pub const ACCOUNT: &str = r#"{"code":200,"accounts":[{"index":718895,"collateral":"1000","total_asset_value":"1000","available_balance":"900","positions":[{"market_id":1,"position":"2","sign":1,"avg_entry_price":"100","unrealized_pnl":"0","realized_pnl":"3","initial_margin_fraction":1000,"margin_mode":0,"liquidation_price":"50"}]}]}"#;
@@ -392,4 +394,66 @@ impl Default for Options {
             ws_routed: false,
         }
     }
+}
+/// Answer every pending placement-proof read with one `status` row per client
+/// index; returns the other drained actions. Later actions stay queued.
+pub fn prove_with(e: &mut Engine<Lighter>, now: f64, status: &str) -> Vec<Action> {
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
+    answer_proofs(e, now, actions, status)
+}
+/// Answer the placement-proof reads among `actions`; return the rest.
+pub fn answer_proofs(
+    e: &mut Engine<Lighter>,
+    now: f64,
+    actions: Vec<Action>,
+    status: &str,
+) -> Vec<Action> {
+    let mut rest = Vec::new();
+    for action in actions {
+        match &action {
+            Action::Http(r) if r.url.contains("/api/v1/accountOrders?") => {
+                let rows: Vec<serde_json::Value> = proof_ids(r)
+                    .iter()
+                    .map(|id| {
+                        serde_json::json!({"client_order_index": id.parse::<u64>().unwrap(),
+                            "order_index": id, "status": status, "filled_base_amount": "0"})
+                    })
+                    .collect();
+                let body = serde_json::json!({"code":200,"orders":rows}).to_string();
+                reply_at(e, now, r, 200, &body);
+            }
+            _ => rest.push(action),
+        }
+    }
+    rest
+}
+pub fn prove_open(e: &mut Engine<Lighter>, now: f64) -> Vec<Action> {
+    prove_with(e, now, "open")
+}
+/// The client order indexes a placement-proof read asks for.
+pub fn proof_ids(r: &HttpRequest) -> Vec<String> {
+    r.url
+        .split("client_order_indexes=")
+        .nth(1)
+        .unwrap_or_default()
+        .split('&')
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+/// A sendTx/sendTxBatch carrying ordinary order creations (tx type 14).
+pub fn creates(r: &HttpRequest) -> bool {
+    let body = r.body.as_deref().unwrap_or_default();
+    body.split('&')
+        .any(|pair| pair == "tx_type=14" || (pair.starts_with("tx_types=") && pair.contains("14")))
+}
+/// `drain` with every placement-proof read answered open on the way.
+pub fn drain_proven(e: &mut Engine<Lighter>, timers: &mut Timers) -> Vec<Action> {
+    let actions = drain(e, timers);
+    let mut out = answer_proofs(e, NOW, actions, "open");
+    out.extend(drain(e, timers));
+    out
 }

@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -606,7 +607,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
         message(
             &mut e,
@@ -624,7 +625,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         );
         assert!(
             e.drain_plain()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -1019,7 +1020,7 @@ fn unlisted_settings_error_fences_the_next_queued_command() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData" || kind(r) == "clearinghouseState")));
 }
 
@@ -1068,7 +1069,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
     );
     assert!(
         e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
     );
     reply_at(
         &mut e,
@@ -1522,7 +1523,8 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
     }
-    // The second order is refused after the first rested: nothing to claim.
+    // The second order is refused beside the first, which rested: nothing to claim. Both
+    // share one action since feat/hyperliquid-batched-placements, so one reply carries both.
     let (mut e, _) = ready("disabled");
     e.handle(
         2000.,
@@ -1536,16 +1538,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         &mut e,
         &r,
         200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}}]}}}"#,
-    );
-    let timer = pace_timer(&mut e);
-    e.handle(3000., Event::TimerFired { timer });
-    let r = write(&mut e);
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order price too far"}]}}}"#,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":1}},{"error":"Order price too far"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
@@ -1604,6 +1597,57 @@ fn perp_zero_bracket_prices_disable_only_the_requested_child() {
                 "normalTpsl"
             }
         );
+        for (wire, kind) in wires.iter().skip(1).zip(children) {
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+        }
+    }
+}
+
+// AGT-117: a market entry was sent alone (`na`) and its legs dropped while the receipt said
+// placed. It now carries them under `normalTpsl` like a limit entry: the same wire that was
+// accepted live on 2026-11-21 (DOGE, filled parent then two `waitingForTrigger` legs).
+#[test]
+fn market_entry_attaches_its_legs_under_normal_tpsl() {
+    for (side, parent_p, leg_side) in [("buy", "105", false), ("sell", "95", true)] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"market","side":"{side}","amount":2,"stopLoss":80,"takeProfit":120,"clientOrderId":"{CLOID}"}}"#))] }));
+        let payload = body(&write(&mut e));
+        assert_eq!(payload["action"]["grouping"], "normalTpsl", "{side}");
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 3, "{side}");
+        assert_eq!(wires[0]["c"], CLOID);
+        assert_eq!(wires[0]["p"], parent_p);
+        assert_eq!(wires[0]["t"]["limit"]["tif"], "Gtc");
+        assert_eq!(wires[0]["r"], false);
+        for (wire, (kind, trigger)) in wires[1..].iter().zip([("sl", "80"), ("tp", "120")]) {
+            assert_eq!(wire["a"], wires[0]["a"]);
+            assert_eq!(wire["b"], leg_side, "{side} {kind}");
+            assert_eq!(wire["p"], parent_p, "{side} {kind}");
+            assert_eq!(wire["s"], wires[0]["s"], "{side} {kind}");
+            assert_eq!(wire["r"], true, "{side} {kind}");
+            assert_eq!(wire["t"]["trigger"]["isMarket"], true);
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+            assert_eq!(wire["t"]["trigger"]["triggerPx"], trigger);
+            assert_ne!(wire["c"], wires[0]["c"]);
+        }
+        assert_ne!(wires[1]["c"], wires[2]["c"]);
+    }
+    for (stop, take, children) in [
+        ("0", "0", Vec::<&str>::new()),
+        ("null", "120", vec!["tp"]),
+        ("80", "0", vec!["sl"]),
+    ] {
+        let (mut e, _) = ready("disabled");
+        e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"market","side":"buy","amount":2,"stopLoss":{stop},"takeProfit":{take}}}"#))] }));
+        let payload = body(&write(&mut e));
+        let wires = payload["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 1 + children.len(), "sl {stop} tp {take}");
+        let grouping = if children.is_empty() {
+            "na"
+        } else {
+            "normalTpsl"
+        };
+        assert_eq!(payload["action"]["grouping"], grouping);
         for (wire, kind) in wires.iter().skip(1).zip(children) {
             assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
         }
@@ -1756,7 +1800,7 @@ fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     reply_at(
         &mut e,
         &reads[0],

@@ -58,7 +58,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   remain authoritative; it does not invent a cancellation or fill event.
 - Protective-edit proof pages can contain ordinary orders without a trigger
   source. The edited/cancelled stop still requires its exact known `triggerBy`;
-  missing/changed target evidence refuses, and peer lineage remains mandatory.
+  missing/changed target evidence fails the proof. A live or executed old stop
+  ends the edit without a replacement, and other failures get one final orderId
+  read before the replacement (exactly one stop; see `write-plan.md`).
 - Private reconnects require the existing correlated auth/subscription handshake
   and REST snapshots. A timeout/transport failure is not proof of a rejected
   order; retain the existing identity-based reconciliation before retrying.
@@ -67,11 +69,18 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 
 Ordinary writes share the engine's mutation release domain across commands.
 Single writes have a 200ms floor, restoring the legacy transport's five-request
-budget. A plan using create-batch or cancel-batch also shares a 1200ms floor:
+budget. A plan using create-batch or cancel-batch also shares a batch floor of
+120ms per order in its largest batch, so a full ten-order batch keeps 1200ms:
 Bybit counts orders within a batch, so two commands cannot each release ten
-orders in the same second. Smaller batches and single-order fallbacks in such
-a plan conservatively use that same batch floor. Existing per-plan batch waits
-remain; unrelated reads and history's separate pacing remain unchanged.
+orders in the same second. Charging every batch the whole 1200ms paced a burst
+of one-order placements (each a one-order create-batch) at one per 1.2s, which
+users saw as DELEGATED capping their clicks (AGT-124); they now run at the 200ms
+single-write floor. A floor is set by the batch just released, so small batches
+followed at once by a full batch can briefly exceed a 10/s budget; Bybit then
+refuses only the excess orders with native `10006`, a known rejection. Single-order
+fallbacks in a batch plan share that plan's floor; an unrecognised batch leg is
+charged the full 1200ms. Existing per-plan batch waits remain; unrelated reads
+and history's separate pacing remain unchanged.
 
 The floors advance only on actual engine Claim release, not queueing or a
 response. Held work retains its original owner, credential, deadline and
@@ -85,6 +94,18 @@ a known rejection nor Unknown grants a resend. Contradictory rows/IDs, malformed
 replies, ambiguous HTTP statuses, native `429`/`10018`, and protective edits that
 may already have cancelled a stop retain Unknown and Open Orders guidance.
 This per-engine budget cannot account for another app or engine using the same UID.
+
+Create-batch may acknowledge a reduce-only peer resize alongside the new order.
+Immediately before dispatch, the native plan snapshots bounded open, nonvirtual,
+same-symbol/same-side reduce-only peer IDs, only for an entirely reduce-only batch.
+Aligned response/status rows may subtract those known peers; requested echoes
+match their targets, and a single remaining unnamed identity is unambiguous.
+Multiple unnamed new identities, foreign/duplicate IDs, conflicting echoes,
+misaligned arrays or a rejected peer remain Unknown without resending. The peer
+is never a caller result or algo-owned order; its private stream owns its state.
+Scope decoding shares the acknowledgement field codec, and duplicate checks
+borrow identities before moving caller results. Membership checks copy no ID strings.
+This follows Bybit's documented [reduce-only resizing](https://www.bybit.com/en/help-center/article/Reduce-Only-Order?category=5f2fb74e9c8b771130).
 
 ## Browser reachability and beta gates
 
@@ -116,3 +137,76 @@ the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 Account UX, consuming that event in the web Requests Log, and the beta user
 document belong to the NX web workstream. Production promotion requires separate
 approval after reachability and that smoke pass are accepted.
+
+## Order-history terminal retention
+
+The default `/v5/order/history` walk keeps the caller's full range and existing
+seven-day paging for filled orders. The additional `Cancelled`, `Rejected` and
+`Deactivated` passes clip the lower bound to the last 24 hours on the calibrated
+protocol clock; an older range skips these passes. Explicit upper bounds remain
+unchanged, including valid future end times. Existing seven-day splitting still
+applies, and wholly-future slices are omitted. This matches the
+[V5 order-history retention rules](https://bybit-exchange.github.io/docs/v5/order/order-list)
+and prevents an unavailable terminal slice from refusing the default history.
+Terminal bounds use the shared integer wire-timestamp conversion after clipping;
+fractional calibration, default query bounds and scheduling clocks are unchanged.
+Caller deadlines, read-key selection, pacing, cursors and partial-row markers
+remain shared with the original walk.
+
+A successful order-history result whose effective start precedes that 24-hour
+boundary at completion (including time spent fetching pages) carries
+`incompleteReason: "retentionLimit"`, including an empty result.
+The diagnostic names the unfilled `Cancelled`/`Rejected`/`Deactivated` population;
+older filled orders still return. Omitted starts use V5's seven-day default before
+the supplied end (or now). Ranges still inside retention at completion retain
+their usual completeness.
+A failed later page preserves its more specific incomplete reason.
+Frequent reads while an authenticated engine exists can collect those terminal
+rows before expiry. This does not recover expired rows or provide durable capture
+while no engine is running; deeper backfill cannot close that retention gap.
+
+
+## Later-page history failure diagnostics
+
+Closed-PnL and query history capture their closed native operation when binding
+an owned read. If a later page fails after accepted rows, the original result
+remains incomplete with reason `laterPageFailed`. Its existing command-attributed
+marker also carries `historyOperation`, `historyFailureKind`, and an optional
+allowlisted `historyVenueCode`; unlisted native codes become `other`. Messages,
+URLs, cursor tokens, credentials and row values are not diagnostic metadata.
+The non-default engine feature `history-page-diagnostics` is enabled by Bybit;
+other families do not opt into these additional native fields.
+
+The browser host and SDK completeness helpers retain those facts as optional
+`failure: { operation, kind, venueCode? }` beside the positive incomplete marker,
+through mapping and worker/hosted JSON. This distinguishes a closed-PnL failure
+from an auxiliary order-history failure without treating a retained prefix as
+complete coverage. An earlier missing-coverage reason remains authoritative;
+first-page failures and serialization failures still reject. These diagnostics
+do not change requests, deadlines, retry policy, pacing or writes.
+## HyroTrader auth refusal during admission
+
+A current, correlated `auth` acknowledgement with explicit `success:false` and
+native `10003` reports a generic typed `rejected` event. Hosted admission can
+refuse that attempt promptly without guessing a key/IP cause, disabling the
+credential, changing resident ownership, or authorizing any write. The numeric
+code is retained without interpreting its cause; raw reply text is not copied.
+Missing/null success, other codes, subscription responses, stale request IDs and
+transport/handshake timeouts retain their existing uncertainty and retry behavior.
+
+## Execution-history fees
+
+Historical fills preserve the signed `execFee`: positive is a cost and negative
+is a maker rebate. The transaction-log income row uses the opposite cash-flow
+sign. Missing, empty or invalid execution fees stay absent; an explicitly
+reported zero remains zero. Timestamps, pagination and order identity are unchanged.
+
+## Stop-entry brackets (AGT-115)
+
+A trailing stop, and a stop/take-profit that closes a covering position, go to
+`/v5/position/trading-stop` with only their own price, so attached legs were dropped (both
+live, 2026-11-21). `plan_place` (and `hyro_stop`) now refuse those routes when the order
+carries a non-zero leg, failing the whole command before any write with the engine's shared
+`stop_entry_legs_refusal` copy (`HyroTrader` names Hyro). The check sits at the routing point,
+so it sees the same position the route does. A stop with no covering position goes through
+order create and keeps its legs (live: a `__stop_loss` row came back), as does `conditional`.

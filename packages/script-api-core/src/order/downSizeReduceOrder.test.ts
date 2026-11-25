@@ -327,13 +327,7 @@ describe('downSizeReduceOrder', () => {
         amount: 0.02,
         reduceOnly: false,
       });
-      const result = downSizeReduceOrder(
-        mockMarket,
-        order,
-        [position],
-        [reduceOnlyOrder, nonReduceOnlyOrder],
-        51000,
-      );
+      const result = downSizeReduceOrder(mockMarket, order, [position], [reduceOnlyOrder, nonReduceOnlyOrder], 51000);
       // Only reduceOnly order is considered in hedged mode
       expect(result.amount).toBe(0.07);
     });
@@ -358,13 +352,7 @@ describe('downSizeReduceOrder', () => {
         amount: 0.02,
         reduceOnly: false,
       });
-      const result = downSizeReduceOrder(
-        mockMarket,
-        order,
-        [position],
-        [reduceOnlyOrder, nonReduceOnlyOrder],
-        51000,
-      );
+      const result = downSizeReduceOrder(mockMarket, order, [position], [reduceOnlyOrder, nonReduceOnlyOrder], 51000);
       // Both orders are considered in one-way mode
       expect(result.amount).toBe(0.05);
     });
@@ -575,7 +563,6 @@ describe('a remainder that rounds to zero', () => {
   });
 });
 
-
 // Bitget classic: sized close plans and reduce-only limits hold position size; only the free part closes.
 describe('a venue whose resting close orders lock position size', () => {
   const locks = { locksPositionSize: true };
@@ -584,6 +571,8 @@ describe('a venue whose resting close orders lock position size', () => {
   const close = (amount: number) => createOrder({ type: OrderType.Market, amount, price: undefined });
   const position = (contracts: number) => [createPosition({ contracts })];
 
+  // AGT-44: this used to expect 0.197 (TP + SL summed as held); a TP and an SL on one slice are
+  // alternatives, so the pair holds 0.1451 and 0.3421 is free.
   it('caps a close to the free part when sized TP/SL plans hold the rest, and says so', () => {
     const onLocked = vi.fn();
     const plans = [plan({ id: 'tp' }), plan({ id: 'sl', type: OrderType.StopLoss, price: 40000 })];
@@ -591,11 +580,11 @@ describe('a venue whose resting close orders lock position size', () => {
       ...locks,
       onLocked,
     });
-    expect(result.amount).toBeCloseTo(0.197, 9);
+    expect(result.amount).toBeCloseTo(0.342, 9);
     expect(onLocked).toHaveBeenCalledOnce();
     expect(onLocked.mock.calls[0][0]).toMatchObject({ symbol: 'BTCUSD', total: 0.4872, orders: 2 });
-    expect(onLocked.mock.calls[0][0].locked).toBeCloseTo(0.2902, 9);
-    expect(onLocked.mock.calls[0][0].sent).toBeCloseTo(0.197, 9);
+    expect(onLocked.mock.calls[0][0].locked).toBeCloseTo(0.1451, 9);
+    expect(onLocked.mock.calls[0][0].sent).toBeCloseTo(0.342, 9);
   });
 
   it('does not count position-level TP/SL, which carry no size', () => {
@@ -638,9 +627,7 @@ describe('a venue whose resting close orders lock position size', () => {
     const held = [createPosition({ symbol: 'USELESSUSDT', contracts: 143916 })];
     const run = () => downSizeReduceOrder(market, order, held, ladder, 0.2, locks);
     expect(run).toThrow(ReduceOrderLockedError);
-    expect(run).toThrow(
-      '143916 of your USELESSUSDT position is reserved by 20 open close orders; cancel them first',
-    );
+    expect(run).toThrow('143916 of your USELESSUSDT position is reserved by 20 open close orders; cancel them first');
   });
 
   it('never says more is reserved than the position holds', () => {
@@ -664,6 +651,124 @@ describe('a venue whose resting close orders lock position size', () => {
       expect(unflagged).toEqual(downSizeReduceOrder(...args));
       expect(unflagged.amount).toBeCloseTo(expected, 9);
     }
+    expect(onLocked).not.toHaveBeenCalled();
+  });
+});
+
+// AGT-44 (bitget-t, 2026-11-19): long 0.0004 with a partial SL 0.0002 and a partial TP 0.0002; a
+// reduce-only market close of 0.0002 was refused as "0.0004 ... reserved by 2 open close orders".
+describe('a take profit and a stop loss on the same slice are alternatives, not a sum', () => {
+  const locks = { locksPositionSize: true };
+  const market = { ...mockMarket, id: 'BTCUSDT', symbol: 'BTCUSDT', precision: { amount: 0.0001, price: 0.1 } };
+  const long = (contracts: number, positionMode = PositionMode.OneWay) =>
+    createPosition({ symbol: 'BTCUSDT', side: PositionSide.Long, contracts, positionMode });
+  const short = (contracts: number, positionMode = PositionMode.OneWay) =>
+    createPosition({ symbol: 'BTCUSDT', side: PositionSide.Short, contracts, positionMode });
+  const exit = (id: string, type: OrderType, amount: number, price: number, side = OrderSide.Sell) =>
+    createOpenOrder({ id, symbol: 'BTCUSDT', side, type, price, amount, remaining: amount });
+  const close = (amount: number, side = OrderSide.Sell) =>
+    createOrder({ symbol: 'BTCUSDT', side, type: OrderType.Market, amount, price: undefined });
+  const longTp = (amount: number) => exit('tp', OrderType.TakeProfit, amount, 66924.8);
+  const longSl = (amount: number) => exit('sl', OrderType.StopLoss, amount, 60551);
+
+  it('closes the unprotected half when a TP and an SL each cover the other half', () => {
+    const onLocked = vi.fn();
+    const result = downSizeReduceOrder(market, close(0.0002), [long(0.0004)], [longSl(0.0002), longTp(0.0002)], 63000, {
+      ...locks,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.0002, 12);
+    expect(onLocked).not.toHaveBeenCalled();
+  });
+
+  it('cuts a full close to the part neither side holds, and reports the larger side as held', () => {
+    const onLocked = vi.fn();
+    const result = downSizeReduceOrder(market, close(0.0004), [long(0.0004)], [longSl(0.0002), longTp(0.0002)], 63000, {
+      ...locks,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.0002, 12);
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(onLocked.mock.calls[0][0].locked).toBeCloseTo(0.0002, 12);
+    expect(onLocked.mock.calls[0][0].orders).toBe(2);
+  });
+
+  it('still refuses when either side alone covers the whole position', () => {
+    const run = () =>
+      downSizeReduceOrder(market, close(0.0002), [long(0.0004)], [longSl(0.0004), longTp(0.0004)], 63000, locks);
+    expect(run).toThrow(ReduceOrderLockedError);
+    expect(run).toThrow('0.0004 of your BTCUSDT position is reserved by 2 open close orders; cancel them first');
+  });
+
+  it('sums the exits on one side: a reduce-only limit counts with the take profits', () => {
+    const limit = exit('limit', OrderType.Limit, 0.0002, 65000);
+    const run = () => downSizeReduceOrder(market, close(0.0002), [long(0.0004)], [limit, longTp(0.0002)], 63000, locks);
+    expect(run).toThrow(ReduceOrderLockedError);
+  });
+
+  it('holds the larger of the take-profit total and the stop total', () => {
+    const limit = exit('limit', OrderType.Limit, 0.0001, 65000);
+    const trailing = exit('trail', OrderType.TrailingStopLoss, 0.0001, 61000);
+    const result = downSizeReduceOrder(
+      market,
+      close(0.0004),
+      [long(0.0004)],
+      [limit, longTp(0.0001), longSl(0.0002), trailing],
+      63000,
+      locks,
+    );
+    expect(result.amount).toBeCloseTo(0.0001, 12);
+  });
+
+  it('counts a close order of unknown direction outright, never as an alternative', () => {
+    const conditional = exit('cond', OrderType.Conditional, 0.0002, 61000);
+    const run = () =>
+      downSizeReduceOrder(market, close(0.0002), [long(0.0004)], [longSl(0.0002), conditional], 63000, locks);
+    expect(run).toThrow(ReduceOrderLockedError);
+  });
+
+  describe('in hedge mode, each position side takes only its own exits', () => {
+    const positions = [long(0.0004, PositionMode.Hedged), short(0.0004, PositionMode.Hedged)];
+    const shortTp = exit('stp', OrderType.TakeProfit, 0.0004, 59000, OrderSide.Buy);
+    const shortSl = exit('ssl', OrderType.StopLoss, 0.0004, 67000, OrderSide.Buy);
+    const resting = [longSl(0.0002), longTp(0.0002), shortTp, shortSl];
+
+    it('closes the unprotected half of the long beside a fully protected short', () => {
+      const result = downSizeReduceOrder(market, close(0.0002), positions, resting, 63000, locks);
+      expect(result.amount).toBeCloseTo(0.0002, 12);
+    });
+
+    it('refuses the short, whose TP and SL each cover all of it', () => {
+      const run = () => downSizeReduceOrder(market, close(0.0002, OrderSide.Buy), positions, resting, 63000, locks);
+      expect(run).toThrow('0.0004 of your BTCUSDT position is reserved by 2 open close orders; cancel them first');
+    });
+  });
+});
+
+// AGT-70 (bitget-t, 2026-11-19): a whole-position SL refused every partial close as "0.02 ... reserved
+// by 1 open close order". The Bitget venue maps a whole-position plan (pos_loss/pos_profit) with amount
+// 0, because it closes whatever is open when it triggers; this pins that amount 0 holds nothing.
+describe('a whole-position TP/SL holds no size', () => {
+  const market = { ...mockMarket, id: 'ETHUSDT', symbol: 'ETHUSDT', precision: { amount: 0.01, price: 0.01 } };
+  const long = createPosition({ symbol: 'ETHUSDT', side: PositionSide.Long, contracts: 0.02 });
+  const wholeSl = createOpenOrder({
+    id: 'sl',
+    symbol: 'ETHUSDT',
+    side: OrderSide.Sell,
+    type: OrderType.StopLoss,
+    price: 1605.69,
+    amount: 0,
+    remaining: 0,
+  });
+
+  it('closes part of the position while a whole-position SL rests', () => {
+    const onLocked = vi.fn();
+    const close = createOrder({ symbol: 'ETHUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 0.01 });
+    const result = downSizeReduceOrder(market, { ...close, price: undefined }, [long], [wholeSl], 1700, {
+      locksPositionSize: true,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.01, 12);
     expect(onLocked).not.toHaveBeenCalled();
   });
 });

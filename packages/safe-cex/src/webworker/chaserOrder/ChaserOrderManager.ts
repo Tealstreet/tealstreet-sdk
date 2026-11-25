@@ -208,7 +208,7 @@ export class ChaserOrderManager {
     if (!ticker || !market) {
       this.log('no market or ticker found', instance);
       instance.markComplete('No market or ticker found');
-      exchange.emitter.emit('error', `Chaser no market or ticker found for ${instance.options.symbol}`);
+      exchange.emitter.emit('error', `Market data for ${instance.options.symbol} isn’t available yet`);
       throw new Error(`No market or ticker found for ${instance.options.symbol}`);
     }
 
@@ -251,13 +251,13 @@ export class ChaserOrderManager {
     if (!instance.remainingSize) {
       this.log('size is 0', instance);
       instance.markComplete('No remaining size. User likely cancelled order');
-      exchange.emitter.emit('error', 'Chaser has no remaining size. User likely cancelled order');
+      exchange.emitter.emit('error', 'The chase stopped because no order size remains');
       throw new Error('size is 0');
     }
 
     if (tries >= maxTries) {
       this.log(`failed to place orders after ${maxTries} tries`, instance);
-      exchange.emitter.emit('error', `Chaser failed to place orders after ${maxTries} tries`);
+      exchange.emitter.emit('error', `The chase stopped after ${maxTries} unsuccessful order attempts`);
       instance.markComplete(`Failed to place orders after ${maxTries} tries`);
       this.checkAndMarkIfComplete(instance);
       this.cleanupInstance(instance);
@@ -316,7 +316,7 @@ export class ChaserOrderManager {
         } else if (lost) {
           // Placing again could double it. The order may still land, so say where to look —
           // also when a STOP arrived during the lookups, which is no evidence it did not.
-          const message = `Chaser for ${instance.options.symbol} stopped: could not confirm whether its order was placed — check open orders`;
+          const message = `Chase for ${instance.options.symbol} was interrupted before its order was confirmed. Check your open orders before starting it again.`;
           this.log(message, instance);
           exchange.emitter.emit('error', message);
           if (!instance.isStopped) {
@@ -449,7 +449,9 @@ export class ChaserOrderManager {
       let priceCheckTimeout: ReturnType<typeof setTimeout> | undefined;
       let queuedOrdersTimeout: ReturnType<typeof setTimeout> | undefined;
       let isCleanedUp = false;
-      let onUpdate: ((data: StoreData) => void | Promise<void>) | undefined;
+      let onUpdate:
+        ((data: StoreData, observed?: { orders: boolean; positions: boolean }) => void | Promise<void>) | undefined;
+      let stopObservations: (() => void) | undefined;
       let onFill: ((fill: OrderFillEvent) => void) | undefined;
       // Track whether the current order IDs have appeared in the store. This
       // is intentionally reset after each replace, because new order IDs can
@@ -467,6 +469,7 @@ export class ChaserOrderManager {
         }
 
         isCleanedUp = true;
+        stopObservations?.();
         if (priceCheckTimeout) {
           clearTimeout(priceCheckTimeout);
           priceCheckTimeout = undefined;
@@ -604,11 +607,11 @@ export class ChaserOrderManager {
                   errorMsg.includes('never placed');
 
                 if (useFillBasedTracking && isAlreadyFilledOrCanceled) {
-                  this.log(`cancel failed (order may be filled): ${errorMsg}`, instance);
+                  this.log(`Cancellation wasn’t confirmed: ${errorMsg}`, instance);
                   // Don't stop - we'll check fills via REST below
                 } else {
                   cleanup();
-                  exchange?.emitter.emit('error', 'Chaser failed to cancel orders, stopping');
+                  exchange?.emitter.emit('error', 'The chase stopped because its orders couldn’t be cancelled. Check your open orders.');
                   instance.markComplete('Failed to cancel orders');
                   this.log('failed to cancel orders', instance);
                   throw new Error('Failed to cancel orders');
@@ -785,7 +788,7 @@ export class ChaserOrderManager {
         }, wait);
       };
 
-      onUpdate = async (data: StoreData) => {
+      onUpdate = async (data: StoreData, observed) => {
         try {
           if (instance.isStopped) {
             this.log('instance is stopped from outside, unsubbing', instance);
@@ -796,7 +799,8 @@ export class ChaserOrderManager {
           }
 
           const ordersUpdateId = data.updateIds?.orders;
-          const hasOrderUpdate = ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId;
+          const hasOrderUpdate =
+            observed?.orders ?? (ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId);
           if (ordersUpdateId !== undefined) {
             lastOrdersUpdateId = ordersUpdateId;
           }
@@ -805,7 +809,8 @@ export class ChaserOrderManager {
           // never arrive. `confirmMissingOrders` stays tied to order updates —
           // a position-only notify is not evidence an order vanished.
           const positionsUpdateId = data.updateIds?.positions;
-          const hasPositionUpdate = positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId;
+          const hasPositionUpdate =
+            observed?.positions ?? (positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId);
           if (positionsUpdateId !== undefined) {
             lastPositionsUpdateId = positionsUpdateId;
           }
@@ -864,6 +869,16 @@ export class ChaserOrderManager {
       };
 
       exchange.on('update', onUpdate);
+      // Equal native censuses prove disappearance without incrementing UI mutation IDs.
+      let observations = exchange.store.observationIds;
+      stopObservations = exchange.store.subscribeAccountObservations((ids) => {
+        const observed = {
+          orders: ids.orders !== observations.orders,
+          positions: ids.positions !== observations.positions,
+        };
+        observations = ids;
+        void onUpdate?.(exchange.store.data, observed);
+      });
       // Only subscribe to fill events for exchanges that use fill-based tracking
       if (useFillBasedTracking) {
         exchange.on('fill', onFill);

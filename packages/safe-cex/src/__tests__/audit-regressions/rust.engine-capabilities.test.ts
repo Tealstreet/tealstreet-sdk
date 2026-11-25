@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { EngineCapabilities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, Order, StoreData } from '../../types';
@@ -11,34 +6,50 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { ExchangeHealthMonitor } from '../../health/ExchangeHealthMonitor';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const running: RustEngineExchange[] = [];
 
 /** A venue whose bridge behaviour comes only from the record its engine reports. */
-const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName = 'woo', native?: () => Partial<StoreData>) => {
+const fixture = (
+  capabilities: Partial<EngineCapabilities>,
+  name: ExchangeName = 'woo',
+  native?: () => Partial<StoreData>,
+) => {
   const commands: Array<Record<string, unknown>> = [];
   const commandTimes: number[] = [];
+  const nativeLeverage: StoreData['fetchedLeverage'] = {};
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
   const replies: Record<string, unknown> = {
     fetchAccount: { userId: 'account-1' },
     fetchLeverage: { buyLeverage: 20, sellLeverage: 50 },
     findOrderByClientOrderId: { found: false, definitive: true },
-    fetchOrderBook: name === 'weex'
-      ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '90071992547409931234567890' }
-      : name === 'paradex'
-      ? { bids: [{ price: 60000, amount: 0.001, total: 60 }], asks: [] }
-      : name === 'grvt'
-      ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [] }
-      : ['backpack', 'cryptocom'].includes(name)
-      ? { bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [] }
-      : { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
+    fetchOrderBook:
+      name === 'weex'
+        ? {
+            bids: [{ price: 60000, amount: 0.001, total: 0.001 }],
+            asks: [],
+            lastUpdateId: '90071992547409931234567890',
+          }
+        : name === 'paradex'
+          ? { bids: [{ price: 60000, amount: 0.001, total: 60 }], asks: [] }
+          : name === 'grvt'
+            ? { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [] }
+            : ['backpack', 'cryptocom'].includes(name)
+              ? { bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [] }
+              : { bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993' },
   };
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name, capabilities),
@@ -48,6 +59,10 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
       if (command.op === 'setTickerSymbols') return '[]';
       commands.push(command);
       commandTimes.push(now);
+      if (command.op === 'fetchLeverage') {
+        // The native command publishes SETTINGS as well as its method result.
+        nativeLeverage[command.symbol] = { buyLeverage: 20, sellLeverage: 50 };
+      }
       return JSON.stringify([
         { op: 'done', command: command.command, result: JSON.stringify(replies[command.op] ?? []) },
       ]);
@@ -59,7 +74,8 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
@@ -71,9 +87,16 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
       return engine;
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
-  const store = new DefaultStore();
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
-  installNativeStartupFrames(engine, store, native);
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
+  );
+  installNativeStartupFrames(engine, store, () => ({
+    ...native?.(),
+    fetchedLeverage: { ...nativeLeverage, ...native?.().fetchedLeverage },
+  }));
   // WEEX trusted signer setup requires its private passphrase.
   const credentials = { key: 'key', secret: 'secret', ...(name === 'weex' ? { passphrase: 'pass' } : {}) };
   const exchange = new RustEngineExchange(name, credentials, store);
@@ -131,7 +154,9 @@ describe('Rust bridge routes from the engine capability record', () => {
     expect(started).toHaveBeenCalledOnce();
     expect(exchange.engineCapabilities).toBeDefined();
     const history = exchange.fetchHistoricalOrders({ from: 1, to: 2 });
-    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    const placement = exchange.placeOrders([
+      { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 },
+    ]);
     await vi.advanceTimersByTimeAsync(0);
     expect(commands.filter((command) => ['fetchOrderHistory', 'placeOrders'].includes(String(command.op)))).toEqual([]);
     ready = true;
@@ -139,7 +164,9 @@ describe('Rust bridge routes from the engine capability record', () => {
     await startup;
     await expect(history).resolves.toEqual([]);
     await expect(placement).resolves.toEqual([]);
-    expect(commands.filter((command) => ['fetchOrderHistory', 'placeOrders'].includes(String(command.op)))).toHaveLength(2);
+    expect(
+      commands.filter((command) => ['fetchOrderHistory', 'placeOrders'].includes(String(command.op))),
+    ).toHaveLength(2);
   });
 
   it('settles queued calls through the existing startup disposal lifecycle without dispatching writes', async () => {
@@ -150,9 +177,13 @@ describe('Rust bridge routes from the engine capability record', () => {
     const startup = exchange.start();
     const failedStartup = expect(startup).rejects.toThrow('disposed');
     await vi.advanceTimersByTimeAsync(0);
-    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    const placement = exchange.placeOrders([
+      { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 },
+    ]);
     const failedPlacement = expect(placement).rejects.toMatchObject({
-      kind: 'invalidInput', outcome: 'notSent', message: expect.stringContaining('placeOrders: exchange has not started because startup failed'),
+      kind: 'invalidInput',
+      outcome: 'notSent',
+      message: expect.stringContaining('placeOrders: exchange has not started because startup failed'),
     });
     exchange.dispose();
     await failedStartup;
@@ -163,14 +194,20 @@ describe('Rust bridge routes from the engine capability record', () => {
   it('keeps an undispatched queued write notSent when native startup traps', async () => {
     vi.spyOn(console, 'trace').mockImplementation(() => {});
     const { exchange, commands, engine } = fixture({}, 'txflow');
-    engine.start = () => { throw new WebAssembly.RuntimeError('fixture startup trap'); };
+    engine.start = () => {
+      throw new WebAssembly.RuntimeError('fixture startup trap');
+    };
     const errors = vi.fn();
     exchange.on('error', errors);
     const startup = exchange.start();
     const startupFailure = expect(startup).rejects.toMatchObject({ code: 'ENGINE_DEAD' });
-    const placement = exchange.placeOrders([{ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 }]);
+    const placement = exchange.placeOrders([
+      { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 },
+    ]);
     await expect(placement).rejects.toMatchObject({
-      kind: 'invalidInput', outcome: 'notSent', cause: { code: 'ENGINE_DEAD' },
+      kind: 'invalidInput',
+      outcome: 'notSent',
+      cause: { code: 'ENGINE_DEAD' },
       message: expect.stringContaining('placeOrders: exchange has not started because startup failed'),
     });
     await startupFailure;
@@ -184,14 +221,23 @@ describe('Rust bridge routes from the engine capability record', () => {
     vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
     const { exchange, commands, commandTimes } = fixture({}, 'hyperliquid');
     await exchange.start();
-    for (const invalid of [NaN, Infinity, -Infinity, now + 4_999, now + 5_000.5, Number.MAX_SAFE_INTEGER + 1, '1800000030000', false]) {
+    for (const invalid of [
+      NaN,
+      Infinity,
+      -Infinity,
+      now + 4_999,
+      now + 5_000.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      '1800000030000',
+      false,
+    ]) {
       await expect(exchange.scheduleCancel(invalid as number)).rejects.toThrow(/safe integer|5 seconds/);
     }
     expect(commands.some((c) => c.op === 'scheduleCancel')).toBe(false);
     await expect(exchange.scheduleCancel(now + 5_000)).resolves.toBeUndefined();
     await expect(exchange.scheduleCancel(null)).resolves.toBeUndefined();
     await expect(exchange.scheduleCancel()).resolves.toBeUndefined();
-    expect(commands.flatMap((c, i) => c.op === 'scheduleCancel' ? [commandTimes[i]] : [])).toEqual([now, now, now]);
+    expect(commands.flatMap((c, i) => (c.op === 'scheduleCancel' ? [commandTimes[i]] : []))).toEqual([now, now, now]);
     expect(commands.filter((c) => c.op === 'scheduleCancel')).toEqual([
       expect.objectContaining({ time: now + 5_000 }),
       expect.not.objectContaining({ time: expect.anything() }),
@@ -205,7 +251,14 @@ describe('Rust bridge routes from the engine capability record', () => {
     engine.command = (json) => {
       const c = JSON.parse(json);
       commands.push(c);
-      return JSON.stringify([{ op: 'done', command: c.command, error: 'lost schedule reply', detail: { message: 'lost schedule reply', kind: 'network', outcome: 'unknown' } }]);
+      return JSON.stringify([
+        {
+          op: 'done',
+          command: c.command,
+          error: 'lost schedule reply',
+          detail: { message: 'lost schedule reply', kind: 'network', outcome: 'unknown' },
+        },
+      ]);
     };
     await expect(exchange.scheduleCancel()).rejects.toMatchObject({ kind: 'network', outcome: 'unknown' });
     expect(commands.filter((c) => c.op === 'scheduleCancel')).toHaveLength(1);
@@ -240,7 +293,8 @@ describe('Rust bridge routes from the engine capability record', () => {
     await exchange.start();
     const result = await exchange.fetchOrderBook('SOL_USDC_PERP', 1);
     expect(result).toEqual({
-      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [],
+      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }],
+      asks: [],
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'SOL_USDC_PERP', limit: 1 }),
@@ -252,7 +306,9 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'weex');
     await exchange.start();
     await expect(exchange.fetchOrderBook('BTCUSDT', 1)).resolves.toEqual({
-      bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '90071992547409931234567890',
+      bids: [{ price: 60000, amount: 0.001, total: 0.001 }],
+      asks: [],
+      lastUpdateId: '90071992547409931234567890',
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTCUSDT', limit: 1 }),
@@ -264,7 +320,8 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'paradex');
     await exchange.start();
     await expect(exchange.fetchOrderBook('BTC-USD-PERP', 5)).resolves.toEqual({
-      bids: [{ price: 60000, amount: 0.001, total: 60 }], asks: [],
+      bids: [{ price: 60000, amount: 0.001, total: 60 }],
+      asks: [],
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTC-USD-PERP', limit: 5 }),
@@ -276,7 +333,8 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'grvt');
     await exchange.start();
     await expect(exchange.fetchOrderBook('BTC_USDT_PERP', 1)).resolves.toEqual({
-      bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [],
+      bids: [{ price: 60000, amount: 0.001, total: 0.001 }],
+      asks: [],
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTC_USDT_PERP', limit: 1 }),
@@ -288,7 +346,8 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'cryptocom');
     await exchange.start();
     await expect(exchange.fetchOrderBook('BTCUSD-PERP', 1)).resolves.toEqual({
-      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }], asks: [],
+      bids: [{ id: '60000.00', price: 60000, amount: 0.001, total: 0 }],
+      asks: [],
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTCUSD-PERP', limit: 1 }),
@@ -300,7 +359,9 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'mexc');
     await exchange.start();
     await expect(exchange.fetchOrderBook('BTCUSDT', 20)).resolves.toEqual({
-      bids: [{ price: 60000, amount: 0.001, total: 0.001 }], asks: [], lastUpdateId: '9007199254740993',
+      bids: [{ price: 60000, amount: 0.001, total: 0.001 }],
+      asks: [],
+      lastUpdateId: '9007199254740993',
     });
     expect(commands.filter((c) => c.op === 'fetchOrderBook')).toEqual([
       expect.objectContaining({ symbol: 'BTCUSDT', limit: 20 }),
@@ -312,11 +373,12 @@ describe('Rust bridge routes from the engine capability record', () => {
     const monitor = new ExchangeHealthMonitor('mexc');
     try {
       for (const status of [401, 403, 200]) {
-        expect(monitor.processMessage(
-          `MEXC depth query HTTP ${status}: invalid api key: permission denied`,
-          true,
-          { kind: 'venueUnavailable', outcome: 'notSent' },
-        )).toBe('exchange_down');
+        expect(
+          monitor.processMessage(`MEXC depth query HTTP ${status}: invalid api key: permission denied`, true, {
+            kind: 'venueUnavailable',
+            outcome: 'notSent',
+          }),
+        ).toBe('exchange_down');
         expect(monitor.hasAuthError()).toBe(false);
       }
     } finally {
@@ -346,7 +408,10 @@ describe('Rust bridge routes from the engine capability record', () => {
 
   it('answers a client order lookup from open orders before an engine exists', async () => {
     const { exchange, commands } = fixture({ clientOrderLookup: true });
-    await expect(exchange.findOrderByClientOrderId('BTC', 'id-1')).resolves.toEqual({ found: false, definitive: false });
+    await expect(exchange.findOrderByClientOrderId('BTC', 'id-1')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
     // The native open-order read may start the engine; no lookup command is sent.
     expect(commands.filter((command) => command.op !== 'setPollScale')).toEqual([]);
   });
@@ -374,18 +439,22 @@ describe('Rust bridge routes from the engine capability record', () => {
     const perSymbol = fixture({ cancelAll: 'eachOpenSymbol' });
     await perSymbol.exchange.start();
     // Cancel-all reads the native open orders; the fixture's native state mirrors the store.
-    perSymbol.exchange.store.update({
-      markets: ['BTC', 'ETH'].map((symbol) => ({
-        id: symbol,
-        symbol,
-        base: symbol,
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.1, price: 0.1 },
-        limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
-      })),
-      orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
-    });
+    applyReferenceFixture(
+      perSymbol.exchange.store,
+      {
+        markets: ['BTC', 'ETH'].map((symbol) => ({
+          id: symbol,
+          symbol,
+          base: symbol,
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.1, price: 0.1 },
+          limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
+        })),
+        orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
+      },
+      perSymbol.exchange.store.markets.map((row) => row.symbol),
+    );
     await perSymbol.exchange.cancelAllOrders();
     expect(perSymbol.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual([
       'BTC',
@@ -458,10 +527,12 @@ describe('Rust bridge routes from the engine capability record', () => {
     const { exchange, commands } = fixture({}, 'bingx', loadedMarkets('BTCUSDT'));
     await exchange.start();
     await exchange.updateSymbolMetadata('BTCUSDT');
-    expect(commands.filter((c) => c.op === 'fetchLeverage')).toEqual([
-      expect.objectContaining({ symbol: 'BTCUSDT' }),
-    ]);
-    expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 20, sellLeverage: 50 });
+    expect(commands.filter((c) => c.op === 'fetchLeverage')).toEqual([expect.objectContaining({ symbol: 'BTCUSDT' })]);
+    expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({
+      buyLeverage: 20,
+      sellLeverage: 50,
+      positionMode: 'oneway',
+    });
   });
 
   it('keeps combined metadata refreshes and explicit reads fresh even with cached rails', async () => {
@@ -551,7 +622,11 @@ const capabilityFrame = (flags: number, enums: number) => {
 
 describe('main-thread mirrors learn the record from snapshot frames', () => {
   it('adopts the record a worker snapshot carries, without an engine', () => {
-    const mirror = new RustEngineExchange('binancespot', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const mirror = new RustEngineExchange(
+      'binancespot',
+      { key: '', secret: '', publicDataOnly: true },
+      new FrameStore(),
+    );
     try {
       expect(mirror.engineCapabilities).toBeUndefined();
       expect(mirror.capabilities.orderHistory).toBe(true);

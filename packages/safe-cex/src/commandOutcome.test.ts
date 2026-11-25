@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifiedError,
   deserializeCommandError,
   exchangeErrorCategory,
   exchangeErrorTags,
@@ -273,4 +274,98 @@ it('keeps closed history row evidence through worker serialization without extra
   const serialized = serializeCommandError(error);
   expect(serialized).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
   expect(deserializeCommandError(structuredClone(serialized))).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
+});
+
+
+describe('closed history diagnostic tags', () => {
+  it.each([
+    'HISTORY_RATE_LIMITED',
+    'HISTORY_AUTH_INVALID',
+    'HISTORY_AUTH_PERMISSION',
+    'HISTORY_INVALID_PARAMS',
+    'HISTORY_VENUE_ERROR',
+    'HISTORY_HTTP_ERROR',
+    'HISTORY_DECODE',
+    'HISTORY_CURSOR_STALLED',
+    'HISTORY_PAGE_LIMIT',
+    'HISTORY_WINDOW_MISMATCH',
+    'HISTORY_NETWORK',
+    'HISTORY_TIMEOUT',
+  ])('keeps the native cause %s', (causeCode) => {
+    expect(exchangeErrorTags({ causeCode })).toEqual({ cause_code: causeCode });
+  });
+
+  it('copies only closed schema/reason tags, even when the original row is attached', () => {
+    expect(
+      exchangeErrorTags({
+        causeCode: 'HISTORY_DECODE',
+        historyDecode: {
+          schema: 'krakenOrders',
+          reason: 'filledQuantityExceedsQuantity',
+          row: { uid: 'private-row', quantity: 123 },
+        },
+      }),
+    ).toEqual({
+      cause_code: 'HISTORY_DECODE',
+      history_schema: 'krakenOrders',
+      history_reason: 'filledQuantityExceedsQuantity',
+    });
+  });
+
+  it.each(['PRIVATE_ROW_123', 'HISTORY_SECRET_AMOUNT_123', 'HISTORY_DECODE extra', 123, null])(
+    'drops unknown causes %s',
+    (causeCode) => {
+      expect(exchangeErrorTags({ causeCode })).toEqual({});
+    },
+  );
+
+  it.each([
+    { schema: 'private-row', reason: 'quantity' },
+    { schema: 'krakenOrders', reason: 'private-amount' },
+    { schema: 'krakenOrders' },
+    ['krakenOrders', 'quantity'],
+    null,
+  ])('drops malformed history details %j', (historyDecode) => {
+    expect(exchangeErrorTags({ causeCode: 'HISTORY_DECODE', historyDecode })).toEqual({ cause_code: 'HISTORY_DECODE' });
+  });
+
+  it('ignores throwing diagnostic getters without losing ordinary classification', () => {
+    const error = {
+      kind: 'internal',
+      get historyDecode() {
+        throw new Error('private-row');
+      },
+    };
+    expect(exchangeErrorTags(error)).toEqual({ error_kind: 'internal', error_category: 'unknown' });
+    expect(
+      exchangeErrorTags({
+        get causeCode() {
+          throw new Error('private-row');
+        },
+      }),
+    ).toEqual({});
+  });
+});
+
+it('preserves a closed settled-write command through worker classification and Sentry tags', () => {
+  for (const command of ['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
+    'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode',
+    'setStpMode', 'setAccountTier', 'scheduleCancel']) {
+    const error = Object.assign(new Error('Order does not exist'), {
+      command, kind: 'rejected', venueCode: '51400',
+    });
+    const restored = deserializeCommandError(structuredClone(serializeCommandError(error)));
+    expect(exchangeErrorTags(classifiedError(restored))).toEqual({
+      error_kind: 'rejected', error_category: 'order_rejected', venue_code: '51400', error_command: command,
+    });
+  }
+});
+
+it('never copies arbitrary command text into classified error tags', () => {
+  for (const command of ['apiKey=PRIVATE_COMMAND_CANARY', 'https://signed?secret=PRIVATE_COMMAND_CANARY',
+    'fetchOHLCV', '__proto__', {}, 123]) {
+    const error = { kind: 'rejected', command };
+    expect(classifiedError(error)).not.toHaveProperty('command');
+    expect(exchangeErrorTags(error)).not.toHaveProperty('error_command');
+  }
 });

@@ -10,7 +10,14 @@ The source must match the master push and pass the existing ancestry check.
 The workflow-completion trigger remains a fallback. Both paths share release
 concurrency and skip already-published input fingerprints, so a second trigger
 for the same SHA succeeds without rebuilding or replacing its release. Automatic
-cuts also skip source superseded by a newer published release. Manual dispatch
+cuts also skip source superseded by a newer published release, except when the
+wrapper-owned `refs/heads/copybara/sdk-import-staged` in the SDK repo names that
+exact commit. The NX Copybara wrapper sets this signal for its held batch and
+clears it on admission; the release job reads it with its existing repository
+token. Missing, unreadable, malformed or nonmatching refs grant no exception.
+No cross-repository token or caller-supplied override is added. The exception is
+only to supersession: the unchanged push-run required-coverage job, master ancestry,
+release hold, input deduplication and fresh-tag checks remain mandatory. Manual dispatch
 retains its existing `skip_certification: false` default and explicit override.
 Publication still requires new `sdk-rs/` inputs. tealstreet-next
 `rust-beta-wasm-pin.yml` lands the matching pin by PR once its CI passes. This

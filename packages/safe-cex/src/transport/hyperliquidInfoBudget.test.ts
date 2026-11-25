@@ -1,12 +1,14 @@
+import type { InternalAxiosRequestConfig } from 'axios';
 import type { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
 
 import { setImmediate } from 'node:timers';
 
+import { AxiosHeaders } from 'axios';
 import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { hyperliquidInfoWeight } from './hyperliquidInfoBudget';
+import { hyperliquidInfoBudgetKey, hyperliquidInfoWeight } from './hyperliquidInfoBudget';
 
 const ORIGIN = 'https://api.hyperliquid.xyz';
 const ORDERS = JSON.stringify({ type: 'frontendOpenOrders', user: 'local-only' });
@@ -56,7 +58,9 @@ afterEach(() => {
 });
 
 describe('unavailable shared storage', () => {
-  it.each([false, true])('allows local dispatch only if IDB never opened in this realm: %s', async (opened) => {
+  // Supersedes d732927cb30's established-store refusal: the maintainer now prioritizes
+  // chart availability with half-rate local admission after shared storage fails.
+  it.each([false, true])('allows conservative local dispatch after storage failure: opened=%s', async (opened) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     if (opened) await client().response(ORIGIN, 200, '');
     const unavailable = {
@@ -69,9 +73,9 @@ describe('unavailable shared storage', () => {
       const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
       const send = vi.fn();
       const result = Promise.allSettled([a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)]);
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(await result).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
-      expect(send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledOnce();
+      expect(await result).toMatchObject([{ status: 'fulfilled' }]);
     } else {
       await spend(a);
       let sent = false;
@@ -215,7 +219,8 @@ describe('unavailable shared storage', () => {
       await flushDatabase();
       await vi.advanceTimersByTimeAsync(200);
     }
-    expect(await firstOutcome).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    // c0705fca9 supersedes d732927cb30's blackout; recovery still restores the shared cap.
+    expect(await firstOutcome).toMatchObject([{ status: 'fulfilled' }]);
     await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     const end = Date.now() + 60_000;
     const sends: number[] = [];
@@ -238,7 +243,7 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     await bursting;
     expect(stalls).toBe(0);
-    // No extra local bucket is available after joining the shared coordinator.
+    // After the cooldown, merged local debt shares the original aggregate bucket.
     expect(sends.length * 20).toBeLessThanOrEqual(2000);
     expect(sends.length * 20).toBeGreaterThanOrEqual(1500);
   });
@@ -261,6 +266,7 @@ describe('unavailable shared storage', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  // d732927cb30's storage-fault matrix now requires the same degraded admission above.
   it.each([
     'throw',
     'error',
@@ -270,7 +276,7 @@ describe('unavailable shared storage', () => {
     'transactionError',
     'quota',
     'transactionStalled',
-  ])('bounds storage failure %s without leaking details or bypassing an established coordinator', async (failure) => {
+  ])('bounds storage failure %s and degrades admission without leaking details', async (failure) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const openRequest: any = {};
     const readRequest: any = {};
@@ -311,10 +317,10 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     const established = failure.startsWith('transaction') || failure === 'quota';
     if (established) await vi.advanceTimersByTimeAsync(17_000);
-    expect((await first)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await first)[0].status).toBe('fulfilled');
     const next = Promise.allSettled([admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal())]);
     await vi.advanceTimersByTimeAsync(20_000);
-    expect((await next)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await next)[0].status).toBe('fulfilled');
     expect(open).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
@@ -494,9 +500,52 @@ describe('cross-worker Hyperliquid info admission', () => {
     ['metaAndAssetCtxs', 20],
     ['frontendOpenOrders', 20],
     ['userFillsByTime', 120],
-    ['candleSnapshot', 104],
+    // AGT-113: a body with no readable span reserves the 6,000-row maximum (was 104).
+    ['candleSnapshot', 120],
   ])('reserves the documented weight for %s including bounded reply surcharges', (type, weight) => {
     expect(hyperliquidInfoWeight(JSON.stringify({ type }))).toBe(weight);
+  });
+
+  const candles = (interval: string, startTime: unknown, endTime: unknown) =>
+    JSON.stringify({ type: 'candleSnapshot', req: { coin: 'BTC', interval, startTime, endTime } });
+  const HOUR = 3_600_000;
+  const T = Date.parse('2026-11-20T20:33:08Z');
+  it.each([
+    // E6Z's sampled first reads: Hyperliquid returned 330, 95 and 0 candles for these.
+    ['a 330-bar 1m chart read', candles('1m', T - 329 * 60_000, T), 26],
+    ['a 330-bar 4h chart read', candles('4h', T - 329 * 4 * HOUR, T), 26],
+    ['a 330-day daily read', candles('1d', T - 330 * 24 * HOUR, T), 26],
+    // Both boundary candles return: 10:30..12:00 on 1h is 10:00, 11:00 and 12:00.
+    ['a span crossing three hourly opens', candles('1h', 10.5 * HOUR, 12 * HOUR), 21],
+    ['a zero-width span', candles('1m', T, T), 21],
+    // Hyperliquid returned 5,182 rows for a full 1m reply, so the cap is 6,000 rows.
+    ['a span beyond 6,000 candles', candles('1m', 0, T), 120],
+    ['a two-month span of 30-day buckets', candles('1M', 0, 60 * 24 * HOUR), 21],
+    ['an unknown interval', candles('7m', 0, HOUR), 120],
+    ['a reversed span', candles('1m', T, T - HOUR), 120],
+    ['a string timestamp', candles('1m', String(T - HOUR), T), 120],
+    ['a missing request', JSON.stringify({ type: 'candleSnapshot' }), 120],
+  ])('reserves %s by its requested span', (_label, body, weight) => {
+    expect(hyperliquidInfoWeight(body)).toBe(weight);
+  });
+
+  it("admits a chart's first reads behind a saturated bulk ceiling before their 20 s deadline", async () => {
+    // AGT-113: at 104 each, the fourth read needed 25 s of refill and expired at 20 s.
+    const budget = client();
+    await spend(budget, 800);
+    const start = Date.now();
+    const body = candles('1m', T - 329 * 60_000, T);
+    const sent: number[] = [];
+    const reads = [0, 1, 2, 3].map(async () => {
+      const deadline = start + 20_000;
+      const grant = await budget.wait(ORIGIN, body, deadline, signal(), 'bulk');
+      return budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => sent.push(Date.now() - start));
+    });
+    const settled = Promise.allSettled(reads);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await settled).map((read) => read.status)).toEqual(Array(4).fill('fulfilled'));
+    expect(sent).toHaveLength(4);
+    expect(Math.max(...sent)).toBeLessThan(20_000);
   });
 });
 
@@ -612,7 +661,8 @@ describe('managed transport admission', () => {
     ['legacy', 'frontendOpenOrders', 20],
     ['managed', 'frontendOpenOrders', 20],
     ['managed', 'metaAndAssetCtxs', 20],
-    ['managed', 'candleSnapshot', 104],
+    // AGT-113: a span-less candle body reserves the 6,000-row maximum (was 104).
+    ['managed', 'candleSnapshot', 120],
   ] as const)(
     'applies the shared budget to two actual %s transports for %s before dispatch',
     async (mode, type, weight) => {
@@ -1277,4 +1327,663 @@ it('financial reconciliation cannot bypass the shared 429 pause', async () => {
     code: 'HTTP_PREPARATION_TIMED_OUT',
   });
   expect(send).not.toHaveBeenCalled();
+});
+
+describe('closed info admission timeout diagnosis', () => {
+  it('labels a refused quota reservation without changing its deadline or shared pause', async () => {
+    const a = client();
+    await a.response(ORIGIN, 429, 'retry-after: 30');
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    // The pause still owns the same empty-bucket refill; no earlier send is granted.
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 1, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+    });
+  });
+
+  it('labels a final admission refusal and never calls physical handoff', async () => {
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    await client().response(ORIGIN, 429, 'retry-after: 30');
+    const send = vi.fn();
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('labels the original deadline timer only while the budget wait is pending', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    await spend(a);
+    const abort = new AbortController();
+    const waiting = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal, 'critical');
+    const checked = expect(waiting).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    await flushDatabase();
+    abort.abort(new HttpPreparationError('timedOut'));
+    await checked;
+  });
+
+  it('preserves cancellation and errors after handoff instead of labelling them admission', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const error = new HttpPreparationError('timedOut');
+    const send = vi.fn(() => {
+      throw error;
+    });
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toBe(error);
+    expect(send).toHaveBeenCalledOnce();
+    expect(error.cause).toBeUndefined();
+    const abort = new AbortController();
+    const cancelled = new Error('disposed');
+    abort.abort(cancelled);
+    await expect(a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)).rejects.toBe(cancelled);
+  });
+});
+
+it.each(['wait', 'dispatch'] as const)(
+  'does not relabel a timeout already aborted before %s admission starts',
+  async (stage) => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const abort = new AbortController();
+    const error = new HttpPreparationError('timedOut');
+    abort.abort(error);
+    const send = vi.fn();
+    const work =
+      stage === 'wait'
+        ? a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)
+        : a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, send);
+    await expect(work).rejects.toBe(error);
+    expect(error.cause).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  },
+);
+
+describe('mid-session storage degradation', () => {
+  it('serves two candle reads after an established transaction never answers', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const budget = client();
+    await budget.response(ORIGIN, 200, '');
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const send = vi.fn(() => 0);
+    const pending = Promise.allSettled(
+      [0, 1].map(async () => {
+        const controller = new AbortController();
+        const body = JSON.stringify({ type: 'candleSnapshot' });
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, body, deadline, controller.signal, 'bulk');
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, send);
+      }),
+    );
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  });
+
+  it.each(['critical', 'reconciliation', 'normal', 'bulk'] as const)(
+    'halves both local burst and refill after prior shared storage: %s',
+    async (readClass) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await client().response(ORIGIN, 200, '');
+      const unavailable = {
+        open: () => {
+          throw new Error('unavailable');
+        },
+      } as unknown as IDBFactory;
+      const budget = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+      const run = async () => {
+        const controller = new AbortController();
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, ORDERS, deadline, controller.signal, readClass);
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, () => 0);
+      };
+      const burst = readClass === 'critical' || readClass === 'reconciliation' ? 25 : 20;
+      let burstCompleted = false;
+      const sends = Promise.allSettled([
+        (async () => {
+          for (let i = 0; i < burst; i++) await run();
+          burstCompleted = true;
+        })(),
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(burstCompleted).toBe(true);
+      expect(await sends).toMatchObject([{ status: 'fulfilled' }]);
+      let completed = false;
+      const waiting = run().then(() => {
+        completed = true;
+      });
+      await vi.advanceTimersByTimeAsync(2399);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await waiting;
+      expect(completed).toBe(true);
+    },
+  );
+
+  it('rejoins shared storage after cooldown and retains a known 429 pause', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const storage = new budgetModule.IndexedInfoBudgetStorage(factory);
+    const budget = new budgetModule.HyperliquidInfoBudget(storage);
+    await budget.response(ORIGIN, 200, '');
+    const original = IDBDatabase.prototype.transaction;
+    const unavailable = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+      throw new DOMException('closed', 'InvalidStateError');
+    });
+    let initialSent = false;
+    const first = Promise.allSettled([
+      admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+        initialSent = true;
+      }),
+    ]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(initialSent).toBe(true);
+    await first;
+    await budget.response(ORIGIN, 429, 'Retry-After: 45');
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    unavailable.mockImplementation(original);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    await vi.advanceTimersByTimeAsync(16_200);
+    await admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    expect(unavailable).toHaveBeenCalled();
+  });
+});
+
+it('tops up a shared reservation if storage degrades immediately before handoff', async () => {
+  await client().response(ORIGIN, 200, '');
+  const now = Date.now();
+  const state = { nextAt: now + 58_800, pausedUntil: 0, generation: 0, failures: 0 };
+  let updates = 0;
+  const storage = {
+    update: async <T>(_key: string, change: (draft: typeof state, shared: boolean) => T) =>
+      change(state, ++updates === 1),
+  };
+  const budget = new budgetModule.HyperliquidInfoBudget(storage);
+  const send = vi.fn(() => 0);
+  const result = budget.admitDispatch(
+    ORIGIN,
+    { generation: 0, weight: 20, readClass: 'critical' },
+    now + 20_000,
+    signal(),
+    send,
+  );
+  await vi.advanceTimersByTimeAsync(1199);
+  expect(send).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await result;
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it('keeps public-only candle preparation off private proxy authorization and tunnel readiness', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const { directTransport } = await import('./direct');
+  const privateRoute = vi.fn(() => {
+    throw new Error('Private route must not prepare public candles');
+  });
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const prepare = vi.fn((_packet: { url: string }) => ({ bind: () => ({ ready: () => true, dispatch: send }) }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    {
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      tealstreetProxy: true,
+      tealstreetTunnel: true,
+      transport: { ...directTransport, name: 'route-boundary', rest: privateRoute, restAdapter: privateRoute },
+    },
+    { ...nativeTransport(), request: send, prepareHttp: prepare },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  try {
+    await (await transport.prepareHttp!({ ...packet, intent: 'public' })).bind(packet).dispatch();
+    expect(send).toHaveBeenCalledOnce();
+    expect(prepare.mock.calls[0][0].url).toBe(ORIGIN + '/info');
+    expect(privateRoute).not.toHaveBeenCalled();
+  } finally {
+    transport.dispose?.();
+  }
+});
+
+it('keeps two actual candle transports available when an established IndexedDB stops responding', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    {
+      ...nativeTransport(),
+      request: send,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: send }) }),
+    },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  const run = async (request: number) =>
+    (await transport.prepareHttp!({ ...packet, request, intent: 'public' })).bind({ ...packet, request }).dispatch();
+  try {
+    await run(1);
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const pending = Promise.allSettled([run(2), run(3)]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  } finally {
+    transport.dispose?.();
+  }
+});
+
+describe('resolved Hyperliquid egress admission', () => {
+  const setup = async () => {
+    vi.stubGlobal('indexedDB', factory);
+    const { createEngineTransport } = await import('./engine');
+    const { directTransport } = await import('./direct');
+    const tunnel = await import('@tealstreet/http-over-websocket/src/tunnelEndpoints');
+    tunnel.resetTunnelLane(true);
+    const directSend = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+    const fleetSend = vi.fn(async (config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() }) => ({
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      data: '[]',
+      config,
+    }));
+    const adapter = Object.assign(fleetSend, {
+      prepare: async () => ({ bind: () => ({ ready: () => true, dispatch: fleetSend }) }),
+    });
+    const provider = {
+      ...directTransport,
+      name: 'egress-budget-fixture',
+      publicCorsProxy: () => 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy',
+      rest: ({ options }: { options: { overrideProxyUrl?: string; tealstreetProxy?: boolean } }) => {
+        const prefix =
+          options.overrideProxyUrl ||
+          (options.tealstreetProxy ? 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy' : '');
+        return { baseURL: prefix ? `${prefix}/${ORIGIN}` : ORIGIN, proxied: Boolean(prefix) };
+      },
+      restAdapter: ({ options }: { options: { tealstreetTunnel?: boolean } }) =>
+        options.tealstreetTunnel === false ? undefined : adapter,
+      wsRouting: (_exchange: unknown, options: { proxyRegion?: string }) => ({
+        restProxyHost: '',
+        howEgress: options.proxyRegion === 'SG' ? ('sg' as const) : ('jp' as const),
+        wsPublic: { tunnelled: false },
+        wsPrivate: { tunnelled: false },
+        wsBusiness: { tunnelled: false },
+      }),
+    };
+    const raw = {
+      ...nativeTransport(),
+      request: directSend,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: directSend }) }),
+    };
+    const create = (
+      publicDataOnly: boolean,
+      options: { proxyRegion?: string; tealstreetTunnel?: boolean; overrideProxyUrl?: string } = {},
+    ) =>
+      createEngineTransport(
+        'hyperliquid',
+        {
+          key: '',
+          secret: '',
+          publicDataOnly,
+          transport: provider,
+          ...options,
+        },
+        raw,
+      );
+    const run = async (
+      transport: ReturnType<typeof create>,
+      publicRead: boolean,
+      timeoutMs = 20_000,
+      signal?: AbortSignal,
+      route?: 'publicCors',
+    ) => {
+      const packet = {
+        request: 1,
+        method: 'POST' as const,
+        url: ORIGIN + '/info',
+        headers: {},
+        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }),
+        timeoutMs,
+        readClass: publicRead ? ('bulk' as const) : ('reconciliation' as const),
+        signal,
+        route,
+      };
+      const prepared = await transport.prepareHttp!({ ...packet, intent: publicRead ? 'public' : 'primary' });
+      return prepared.bind(packet).dispatch();
+    };
+    return { create, run, directSend, fleetSend, tunnel };
+  };
+
+  it('admits direct public candles immediately after the account fleet exhausts its bucket', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    const chart = create(true);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      let completed = false;
+      const candles = Promise.allSettled([run(chart, true, 1000), run(chart, true, 1000)]).then((rows) => {
+        completed = rows.every((row) => row.status === 'fulfilled');
+      });
+      await flushDatabase();
+      await vi.advanceTimersByTimeAsync(0);
+      await flushDatabase();
+      expect(completed).toBe(true);
+      expect(directSend).toHaveBeenCalledTimes(2);
+      await candles;
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps separate account instances on the same resolved fleet coordinated', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const a = create(false);
+    const b = create(false, { proxyRegion: 'SG' });
+    try {
+      for (let i = 0; i < 50; i++) await run(a, false);
+      await expect(run(b, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('recovers shared legacy pauses after provisional inheritance during an outage', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = client();
+    await shared.response(ORIGIN, 429, 'Retry-After: 300');
+    let available = false;
+    const unstable = {
+      open: (name: string, version?: number) => {
+        if (!available) throw new DOMException('storage unavailable', 'SecurityError');
+        return factory.open(name, version);
+      },
+    } as IDBFactory;
+    const recovering = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unstable));
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    const send = vi.fn(() => 0);
+    const dispatch = async (budget: HyperliquidInfoBudget, key: string) => {
+      const deadline = Date.now() + 1000;
+      const abort = signal();
+      const grant = await budget.wait(key, ORDERS, deadline, abort, 'critical');
+      return budget.admitDispatch(key, grant, deadline, abort, send);
+    };
+    await dispatch(recovering, fleet);
+    expect(send).toHaveBeenCalledOnce();
+    available = true;
+    await vi.advanceTimersByTimeAsync(30_001);
+    const freshFleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://other.example.test/tunnel', true);
+    await expect(dispatch(shared, freshFleet)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    await expect(dispatch(recovering, fleet)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('retries legacy inheritance when the target migration could not commit', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = client();
+    await shared.response(ORIGIN, 200, '');
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    const put = IDBObjectStore.prototype.put;
+    let failTarget = true;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (key === fleet && failTarget) {
+        failTarget = false;
+        throw new DOMException('target migration failed', 'UnknownError');
+      }
+      return put.call(this, value, key);
+    });
+    const recovering = client();
+    await admit(recovering, fleet, ORDERS, Date.now() + 1000, signal());
+    await shared.response(ORIGIN, 429, 'Retry-After: 300');
+    await vi.advanceTimersByTimeAsync(30_001);
+    await expect(admit(recovering, fleet, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+  });
+
+  it('finishes durable inheritance when storage recovers between migration and admission', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await client().response(ORIGIN, 429, 'Retry-After: 300');
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    let available = false;
+    const unstable = {
+      open: (name: string, version?: number) => {
+        if (!available) throw new DOMException('storage unavailable', 'SecurityError');
+        return factory.open(name, version);
+      },
+    } as IDBFactory;
+    const backend = new budgetModule.IndexedInfoBudgetStorage(unstable);
+    const update = backend.update.bind(backend);
+    let recoverAfterMigration = true;
+    vi.spyOn(backend, 'update').mockImplementation(async (key, change) => {
+      const result = await update(key, change);
+      if (key === fleet && recoverAfterMigration) {
+        recoverAfterMigration = false;
+        available = true;
+        vi.setSystemTime(Date.now() + 30_001);
+      }
+      return result;
+    });
+    const recovering = new budgetModule.HyperliquidInfoBudget(backend);
+    const send = vi.fn(() => 0);
+    const deadline = Date.now() + 60_000;
+    const dispatched = recovering
+      .wait(fleet, ORDERS, deadline, signal(), 'critical')
+      .then((grant) => recovering.admitDispatch(fleet, grant, deadline, signal(), send));
+    await expect(dispatched).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('holds legacy unscoped 429 evidence when introducing a fleet bucket', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    await client().response(ORIGIN, 429, 'Retry-After: 45');
+    const account = create(false);
+    try {
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).not.toHaveBeenCalled();
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('does not spread a fleet 429 pause to direct public candles', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    fleetSend.mockResolvedValue({
+      status: 429,
+      statusText: 'limited',
+      headers: { 'retry-after': '45' },
+      data: '[]',
+      config: { headers: new AxiosHeaders() },
+    });
+    const account = create(false);
+    const chart = create(true);
+    try {
+      await run(account, false);
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      await run(chart, true, 1000);
+      expect(directSend).toHaveBeenCalledOnce();
+      expect(fleetSend).toHaveBeenCalledOnce();
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps private HTTP fallback in the exhausted tunnel fleet without a resend', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      const endpoint = tunnel.tunnelEgressUrl('jp');
+      for (let i = 0; i < 4; i++) tunnel.noteTunnelDialFailed(tunnel.tunnelDialUrl(endpoint));
+      expect(tunnel.tunnelOutage()).toBeDefined();
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      expect(directSend).not.toHaveBeenCalled();
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps distinct resolved tunnel endpoints in independent fleet buckets', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const endpoints = { jp: tunnel.tunnelEgressUrl('jp'), sg: tunnel.tunnelEgressUrl('sg') };
+    tunnel.setTunnelEgressUrls({ jp: 'wss://tokyo.example.test/tunnel', sg: 'wss://singapore.example.test/tunnel' });
+    const a = create(false);
+    const b = create(false, { proxyRegion: 'SG' });
+    try {
+      for (let i = 0; i < 50; i++) await run(a, false);
+      await run(b, false, 1000);
+      expect(fleetSend).toHaveBeenCalledTimes(51);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      tunnel.setTunnelEgressUrls(endpoints);
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('inherits old unscoped debt without copying it repeatedly or weakening later pauses', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    await spend(client(), 1000);
+    const account = create(false);
+    try {
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1200);
+      await run(account, false, 1000);
+      expect(fleetSend).toHaveBeenCalledOnce();
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps a public CORS candle on its own egress after the private fleet is exhausted', async () => {
+    const { create, run, directSend, tunnel } = await setup();
+    const account = create(false);
+    const chart = create(true);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      await run(chart, true, 1000, undefined, 'publicCors');
+      expect(directSend).toHaveBeenCalledOnce();
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('cancels an unsent fleet waiter without a later resend or renewed deadline', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      const controller = new AbortController();
+      const pending = Promise.allSettled([run(account, false, 20_000, controller.signal)]);
+      await flushDatabase();
+      controller.abort(new Error('cancelled'));
+      await pending;
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flushDatabase();
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      await expect(run(account, false, 1, controller.signal)).rejects.toThrow('cancelled');
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('does not re-import later direct debt when a new account joins an existing fleet bucket', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const first = create(false);
+    const peer = create(false);
+    try {
+      await run(first, false);
+      await client().response(ORIGIN, 429, 'Retry-After: 45');
+      await run(peer, false, 1000);
+      expect(fleetSend).toHaveBeenCalledTimes(2);
+    } finally {
+      first.dispose?.();
+      peer.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+});
+
+it('keys resolved routes without account, credential, query or lane-port identity', () => {
+  const direct = hyperliquidInfoBudgetKey(ORIGIN);
+  expect(direct).toBe(ORIGIN);
+  const privateFleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io:8443/tunnel-staging', true)).toBe(
+    privateFleet,
+  );
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/')).toBe(
+    privateFleet,
+  );
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy')).not.toBe(
+    privateFleet,
+  );
+  const custom = hyperliquidInfoBudgetKey(
+    ORIGIN,
+    'https://PRIVATE_USER:PRIVATE_PASS@proxy.example.test/path?credential=PRIVATE_QUERY',
+  );
+  expect(custom).toBe(hyperliquidInfoBudgetKey(ORIGIN, 'https://proxy.example.test/another-path'));
+  expect(custom).not.toContain('PRIVATE');
+  expect(custom).not.toBe(direct);
 });

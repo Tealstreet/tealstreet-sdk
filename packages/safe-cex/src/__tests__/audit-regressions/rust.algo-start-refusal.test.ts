@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -10,8 +10,13 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 
 afterEach(() => vi.restoreAllMocks());
 
-it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound startup throws', (op) => {
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+// Rule 5: display labels change while the original operations and refusal controls stay pinned.
+it.each([
+  ['twap:start', 'Starting the TWAP'],
+  ['chaser:start', 'Starting the chase'],
+  ['exec', 'Running this trading request'],
+])('refuses %s when owner-bound startup throws', (op, label) => {
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
   const run = vi.fn();
   const refuse = vi.fn();
   const host = {
@@ -28,7 +33,7 @@ it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound sta
   try {
     expect(() => exchange.routeAlgoOp('acct', op, run, refuse)).not.toThrow();
     expect(run).not.toHaveBeenCalled();
-    expect(refuse).toHaveBeenCalledExactlyOnceWith(`${op} was not run: authenticated owner changed during startup`);
+    expect(refuse).toHaveBeenCalledExactlyOnceWith(`${label} wasn’t possible: authenticated owner changed during startup`);
     expect(host.checkAlgosForExecution).not.toHaveBeenCalled();
     host.algoStart.mockImplementation(() => {});
     exchange.routeAlgoOp('acct', op, run, refuse);
@@ -39,7 +44,7 @@ it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound sta
     exchange.routeAlgoOp('acct', op, run, refuse);
     expect(run).toHaveBeenCalledTimes(1);
     expect(refuse).toHaveBeenCalledTimes(2);
-    expect(refuse).toHaveBeenLastCalledWith(`${op} was not run: the bybit engine stopped before it could run algos`);
+    expect(refuse).toHaveBeenLastCalledWith(`${label} wasn’t possible because bybit was interrupted`);
   } finally {
     exchange.dispose();
   }

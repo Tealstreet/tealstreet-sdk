@@ -1,5 +1,5 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type { ExchangeName } from '../../../types';
 
 import rateLimit from 'axios-rate-limit';
@@ -8,6 +8,9 @@ import times from 'lodash/times';
 import { mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -39,8 +42,9 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './bitrue.api';
 import {
   ENDPOINTS,
@@ -96,7 +100,7 @@ export class BitrueExchange extends BaseExchange {
     Pick<Position, 'symbol' | 'side' | 'leverage' | 'positionMode' | 'marginType'>
   >();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
@@ -136,15 +140,23 @@ export class BitrueExchange extends BaseExchange {
     if (Number.isFinite(currentMax) && Math.abs(currentMax - maxLeverage) < 1e-8) {
       return;
     }
-    this.store.updateMarket(market, {
-      limits: {
-        ...market.limits,
-        leverage: {
-          ...market.limits.leverage,
-          max: maxLeverage,
+    (() => {
+      const target = market;
+      const changes: Partial<StoreData['markets'][number]> = {
+        limits: {
+          ...market.limits,
+          leverage: {
+            ...market.limits.leverage,
+            max: maxLeverage,
+          },
         },
-      },
-    });
+      };
+      return applyReferenceFixture(
+        this.store,
+        { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   private parseMaxLeverageFromBracketResponse = (
@@ -314,8 +326,21 @@ export class BitrueExchange extends BaseExchange {
     try {
       const { balance, positions } = await this.fetchBalanceAndPositions();
       if (this.isDisposed) return;
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({ balance, loaded: { ...this.store.loaded, balance: true, positions: true } });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        { balance, loaded: { balance: true, positions: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       const symbolsToRefresh = Array.from(this.pendingOrderRefreshSymbols);
       this.pendingOrderRefreshSymbols.clear();
@@ -368,11 +393,15 @@ export class BitrueExchange extends BaseExchange {
         volume: 0,
         quoteVolume: 0,
       }));
-      this.store.update({
-        markets,
-        tickers,
-        loaded: { ...this.store.loaded, markets: true, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          tickers,
+          loaded: { markets: true, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       this.publicWebsocket.connectAndSubscribe();
     }
@@ -381,10 +410,18 @@ export class BitrueExchange extends BaseExchange {
       this.privateWebsocket.connectAndSubscribe();
       const { balance, positions } = await this.fetchBalanceAndPositions();
       if (this.isDisposed) return;
-      this.store.update({ balance, positions, loaded: { ...this.store.loaded, balance: true, positions: true } });
+      applyReferenceFixture(
+        this.store,
+        { balance, positions, loaded: { balance: true, positions: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
-      this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+      applyReferenceFixture(
+        this.store,
+        { orders, loaded: { orders: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
       this.tick();
       // this.fetchAndEmitOrders();
     }
@@ -405,7 +442,7 @@ export class BitrueExchange extends BaseExchange {
     if ('amount' in update) newOrder.amount = update.amount;
 
     await this.cancelOrders([order]);
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   tick = async () => {
@@ -427,8 +464,24 @@ export class BitrueExchange extends BaseExchange {
           return found.contracts === 0;
         });
 
-        this.store.addOrUpdatePositionsFull(positions);
-        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true, positions: true } });
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
+        applyReferenceFixture(
+          this.store,
+          { balance, loaded: { balance: true, positions: true } },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         // if any positions were closed, fetch orders for those symbols stops should be removed, but dont come over ws
         if (closedOnTick.length) {
@@ -577,7 +630,7 @@ export class BitrueExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     return [...openPositionsForSymbols, ...fakePositions];
@@ -683,7 +736,7 @@ export class BitrueExchange extends BaseExchange {
                 leverage,
                 unrealizedPnl,
                 contracts,
-                liquidationPrice,
+                liquidationPrice: nativeLiquidationPrice(liquidationPrice),
                 info: position,
               };
             });
@@ -730,6 +783,18 @@ export class BitrueExchange extends BaseExchange {
     return balance;
   };
 
+  // Rule 5 / #3640: retained REST evidence enters the same native frame path.
+  // Each complete symbol census replaces its scope, including terminal rows.
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders(symbols);
+    if (!this.isDisposed && symbols?.length) {
+      applyReferenceFixture(this.store, {
+        orders: [...this.store.orders.filter((row) => !symbols.includes(row.symbol)), ...orders],
+      });
+    }
+    return orders;
+  };
+
   fetchOrders = async (symbols?: string[]) => {
     if (symbols?.length) {
       const orders = await mapSeries(symbols, (symbol) => this.fetchOrdersForSymbol(symbol));
@@ -759,9 +824,8 @@ export class BitrueExchange extends BaseExchange {
       if (!nextToFetch) break;
       toFetch.delete(nextToFetch);
       fetchedSymbols.add(nextToFetch);
-      const orders = await this.fetchOrdersForSymbol(nextToFetch);
+      await this.fetchAndSetOrders([nextToFetch]);
       if (this.isDisposed) return;
-      this.store.addOrUpdateOrders(orders);
       await sleep(100);
       if (this.isDisposed) return;
     }
@@ -1249,11 +1313,13 @@ export class BitrueExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     const payloads = this.formatCreateOrder(opts);
     const res = await this.placeOrderBatch(payloads);
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit || opts.stopLoss || opts.takeProfit) {
-      await (this as any as BaseExchange).callMethodInWorker('fetchAndSetOrders', [opts.symbol]);
+      await this.fetchAndSetOrders([opts.symbol]);
       // stop orders have bad ID, just remove the placeholder by returning []
       return [];
     }
@@ -1261,6 +1327,8 @@ export class BitrueExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const requests = orders.flatMap((o) => this.formatCreateOrder(o));
     const res = await this.placeOrderBatch(requests);
@@ -1271,9 +1339,9 @@ export class BitrueExchange extends BaseExchange {
         .map((o) => o.symbol),
     );
 
-    // if set is not empty, need to fetch updated orders in worker as WS does not provide TP/SL updates
+    // Refresh the native order frames because WS does not provide TP/SL updates.
     if (tpSlSymbols.size) {
-      await (this as any as BaseExchange).callMethodInWorker('fetchAndSetOrders', Array.from(tpSlSymbols));
+      await this.fetchAndSetOrders(Array.from(tpSlSymbols));
       // stop orders have bad ID, just remove the placeholder by returning []
       return [];
     }
@@ -1402,8 +1470,9 @@ export class BitrueExchange extends BaseExchange {
       });
 
       // bitrue doesnt update orders on cancel, so we need to remove them manually
-      const orderIds: Pick<Order, 'id'>[] = orders.map((o) => ({ id: o.id }));
-      await (this as any as BaseExchange).callMethodInWorker('removeOrders', orderIds);
+      if (this.isDisposed) return;
+      const removed = new Set(orders.map((order) => order.id));
+      applyReferenceFixture(this.store, { orders: this.store.orders.filter((row) => !removed.has(row.id)) });
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw new Error(err?.response?.data?.msg || err?.message);

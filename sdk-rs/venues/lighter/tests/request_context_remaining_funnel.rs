@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Remaining private reads and writes retain genuine admission and DATA custody.
 mod support;
 
@@ -149,6 +150,18 @@ fn release_at(
 
 fn after_reply(engine: &mut Engine<Lighter>, packet: &HttpRequest, body: &str) -> Vec<Action> {
     reply_at(engine, NOW, packet, 200, body);
+    engine.drain_actions().collect()
+}
+
+/// The acknowledged placement's accountOrders proof, answered open.
+fn proven(engine: &mut Engine<Lighter>, actions: &[Action], now: f64) -> Vec<Action> {
+    let proof = release_at(engine, actions, "accountOrders", now);
+    let rows: Vec<Value> = support::proof_ids(&proof)
+        .iter()
+        .map(|id| serde_json::json!({"client_order_index": id.parse::<u64>().unwrap(), "status": "open"}))
+        .collect();
+    let body = serde_json::json!({"code":200,"orders":rows}).to_string();
+    reply_at(engine, now, &proof, 200, &body);
     engine.drain_actions().collect()
 }
 
@@ -362,6 +375,11 @@ fn native_transaction_values_and_client_index_result_are_preserved() {
     assert_eq!(tx["BaseAmount"], 200);
     assert_eq!(tx["Price"], 9000);
     let actions = after_reply(&mut engine, &packet, r#"{"code":200,"tx_hash":"accepted"}"#);
+    assert!(
+        terminal(&actions).is_empty(),
+        "the ACK alone is not success"
+    );
+    let actions = proven(&mut engine, &actions, NOW);
     assert!(matches!(terminal(&actions).as_slice(),
         [Notice::CommandDone { result, .. }]
             if serde_json::from_str::<Vec<String>>(result).unwrap()
@@ -404,6 +422,7 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
         r#"{"code":200,"tx_hash":"accepted"}"#,
     );
     let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = proven(&mut engine, &actions, at);
     assert!(matches!(terminal(&actions).as_slice(),
         [Notice::CommandDone { result, .. }]
             if serde_json::from_str::<Vec<String>>(result).unwrap()
@@ -564,7 +583,7 @@ fn retired_setting_is_fenced_before_its_queued_successor_wakes() {
         if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandFailed { command, error })
-        if *command == COMMAND + 1 && error.message.contains("awaiting reconciliation"))));
+        if *command == COMMAND + 1 && error.message.contains("settings update hasn’t been confirmed"))));
 }
 
 #[test]

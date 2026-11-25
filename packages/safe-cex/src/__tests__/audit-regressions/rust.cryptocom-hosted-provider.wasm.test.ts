@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { createHmac } from 'node:crypto';
@@ -7,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import vectors from '../../../../../sdk-rs/venues/cryptocom/tests/fixtures/hosted-signing.json';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
 import { prepareRecordedHttp } from '../support/managedHttp';
@@ -37,7 +38,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const exchange = new RustEngineExchange(
     'cryptocom',
     { engine: 'rust', key: 'replay-key', secret: 'replay-secret', ...options },
-    new DefaultStore(),
+    new FrameStore(),
   );
   live.push(exchange);
   return { exchange, io };
@@ -236,7 +237,7 @@ it.each(['remote', 'payload'] as const)(
     const exchange = new RustEngineExchange(
       'cryptocom',
       { engine: 'rust', key: 'replay-key', secret: '', ...(mode === 'remote' ? { remoteSigner } : { payloadSigner }) },
-      new DefaultStore(),
+      new FrameStore(),
     );
     live.push(exchange);
     const errors: unknown[] = [];
@@ -273,7 +274,7 @@ it.each(['remote', 'payload'] as const)(
     placementStatus = 503;
     await expect(exchange.placeOrder({ ...order, clientOrderId: 'metadata-unknown' })).rejects.toMatchObject({
       outcome: 'unknown',
-      message: expect.stringContaining('unknown'),
+      message: expect.stringContaining('The exchange reply didn’t confirm this change. Check your open orders before trying again.'),
     });
     expect(requests.filter((r) => r.url.endsWith('/private/create-order'))).toHaveLength(2);
     for (const request of requests.filter((r) => r.url.includes('/private/'))) {

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
-import { wasmBudgetError } from './wasm-budget.mjs';
+import { reportReserveWarning, wasmBudgetError, wasmReserveWarning } from './wasm-budget.mjs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
 import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
 import { checkParadexLocalSigning } from './paradex-local-signing.mjs';
@@ -36,15 +36,18 @@ for (const family of selectedFamilies) {
   test(`${family} family package`, async () => {
     for (const target of ['web', 'node']) {
       const size = statSync(new URL(`${target}/${family}/safe_cex_wasm_bg.wasm`, pkg)).size;
-      // One source of truth for the single-venue budget: wasm-budget.mjs.
+      // One source of truth for the single-venue budget: wasm-budget.mjs. Only the
+      // cap fails; a rule-17 reserve shortfall is a warning the master cap bot repairs.
       const error = wasmBudgetError(size, 'venue', family);
       assert.equal(error, undefined, `${target} ${family}: ${error}`);
+      const warning = wasmReserveWarning(size, 'venue', family);
+      if (warning) reportReserveWarning(`${target}: ${warning}`);
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
-    // Only the first activation candidate carries the device codec by default.
+    // Only activated device-proof families carry the codec by default.
     assert.equal(typeof engine.WasmEngine.prototype.prepareJoinProof,
-      family === 'backpack' ? 'function' : 'undefined', `${family}: admission dispatch must stay opt-in`);
+      ['backpack', 'grvt', 'hyperliquid', 'lighter'].includes(family) ? 'function' : 'undefined', `${family}: admission dispatch must stay opt-in`);
     if (family === 'hyperliquid') {
       await checkHyperliquidLocalSigning(engine.WasmEngine, false);
       await checkHyperliquidLocalSigning(engine.WasmEngine, true);

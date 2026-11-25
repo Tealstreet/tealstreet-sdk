@@ -40,10 +40,9 @@ export const buildAsterTape = ({ v3 = false, native = false, secondary = false }
   const http = (method, endpoint, query, payload, extras = {}) => {
     const path = endpoint === 'account' && !v3 ? '/fapi/v4/account' : `/fapi/${version}/${endpoint}`;
     const signed = !['time', 'exchangeInfo', 'ticker/24hr', 'openInterest', 'trades', 'klines', 'depth'].includes(endpoint);
-    const code = v3 && method === 'POST' && endpoint === 'order';
     const credentials =
       v3 && signed
-        ? `${code ? 'asterChain=Mainnet&' : ''}user=${ASTER_USER}&signer=${secondary && method === 'GET' ? ASTER_READ_SIGNER : ASTER_SIGNER}`
+        ? `asterChain=Mainnet&user=${ASTER_USER}&signer=${secondary && method === 'GET' ? ASTER_READ_SIGNER : ASTER_SIGNER}`
         : '';
     const fullQuery = [query, credentials].filter(Boolean).join('&');
     records.push({

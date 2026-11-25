@@ -1,5 +1,8 @@
 # AsterDEX Rust port
 
+> Historical plan: the old V3 EIP-191/Code split below is superseded by the
+> current [V3 signing contract](../../sdk-rs/venues/asterdex/README.md#hosted-and-delegated-signing).
+
 Branch: `feat/rust-asterdex`, based on `origin/feat/rust-rewrite`.
 Spec: `RUST_REWRITE.md`; process and gates: `VENUE_PORT_BRIEF.md`.
 Full automatic execution; stable commits, no stash, PR targets the rewrite branch.

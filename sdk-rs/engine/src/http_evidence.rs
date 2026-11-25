@@ -108,7 +108,7 @@ impl UnprovenEvidence {
 
     pub fn venue_message(&mut self, message: &str) {
         if self.error.venue_message.is_none() {
-            self.error.venue_message = Some(self.budget.text(message).into_boxed_str());
+            self.error.venue_message = Some(self.budget.text(message).into());
         }
     }
 
@@ -228,7 +228,10 @@ impl EvidenceBudget {
             return;
         }
         let note = self.text(note);
-        *message = format!("{message}; {note}").into_boxed_str().into_string();
+        // Display only: one action, last, and no part the message already carries.
+        *message = crate::error::join_note(message, &note)
+            .into_boxed_str()
+            .into_string();
     }
 
     fn admit_identity(&mut self, id: &str) -> bool {
@@ -271,7 +274,7 @@ impl EvidenceBudget {
         error.venue_message = error
             .venue_message
             .as_ref()
-            .map(|value| self.text(value).into_boxed_str());
+            .map(|value| self.text(value).into());
     }
 
     fn text(&mut self, source: &str) -> String {
@@ -322,6 +325,37 @@ pub(super) fn mark_id_overflow(error: &mut VenueError) {
 mod write_plan_tests {
     use super::*;
     use crate::write_plan::{Element, ElementResult, WritePlan};
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn a_terminal_note_adds_only_parts_the_presented_message_lacks() {
+        const GUIDANCE: &str =
+            "We couldn’t confirm this change. Check your open orders before trying again.";
+        let note = |message: &str, note: &str| {
+            let mut error = VenueError::new(message);
+            note_unprojected(&mut error, note);
+            error.message
+        };
+        let cancel = format!("Cancel not acknowledged. {GUIDANCE}");
+        assert_eq!(note(&cancel, GUIDANCE), cancel);
+        assert_eq!(
+            note(&cancel, &format!("lost read; {GUIDANCE}")),
+            "Cancel not acknowledged. We couldn’t confirm this change; lost read. Check your open orders before trying again."
+        );
+        assert_eq!(
+            note("Refused by the venue", "lost read"),
+            "Refused by the venue; lost read"
+        );
+        assert_eq!(
+            note("Refused by the venue", &format!("lost read; {GUIDANCE}")),
+            "Refused by the venue; lost read; We couldn’t confirm this change. Check your open orders before trying again."
+        );
+        // A whole matching part is dropped; a substring of an unrelated part is not.
+        assert_eq!(
+            note("Refused order 123", "order 12"),
+            "Refused order 123; order 12"
+        );
+    }
 
     #[test]
     fn unproven_http_seal_preserves_prefix_pending_and_unissued_rows() {

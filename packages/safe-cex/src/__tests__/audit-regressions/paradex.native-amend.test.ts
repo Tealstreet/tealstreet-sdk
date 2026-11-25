@@ -2,11 +2,12 @@ import type { Axios } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ParadexRequestSigner } from '../reference/paradex/paradex.sdk';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
-import { Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const MARKET: Market = {
   id: 'BTC-USD-PERP',
@@ -47,7 +48,8 @@ const createLimitOrder = (overrides: Partial<Order> = {}): Order => ({
 });
 
 const createTriggerOrder = (
-  type: 'STOP_MARKET' | 'STOP_LOSS_MARKET' | 'TAKE_PROFIT_MARKET' | 'STOP_LIMIT' | 'STOP_LOSS_LIMIT' | 'TAKE_PROFIT_LIMIT',
+  type:
+    'STOP_MARKET' | 'STOP_LOSS_MARKET' | 'TAKE_PROFIT_MARKET' | 'STOP_LIMIT' | 'STOP_LOSS_LIMIT' | 'TAKE_PROFIT_LIMIT',
   overrides: Partial<Order> = {},
 ): Order => {
   const isTakeProfit = type.startsWith('TAKE_PROFIT');
@@ -83,8 +85,13 @@ const createTriggerOrder = (
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new ParadexExchange(
     'paradex',
     { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
@@ -168,9 +175,7 @@ describe('Paradex native order amendment', () => {
 
     await expect(exchange.updateOrder({ order, update: { price: 49_100.04 } })).resolves.toEqual([order.id]);
 
-    expect(signModifyOrder).toHaveBeenCalledWith(
-      expect.objectContaining({ id: order.id, type, price, size: '0.8' }),
-    );
+    expect(signModifyOrder).toHaveBeenCalledWith(expect.objectContaining({ id: order.id, type, price, size: '0.8' }));
     expect(put).toHaveBeenCalledWith(
       `/orders/${order.id}`,
       expect.objectContaining({ id: order.id, type, price, trigger_price: '49100' }),
@@ -237,9 +242,7 @@ describe('Paradex native order amendment', () => {
     const { exchange, put, deleteRequest, post } = createExchange();
     put.mockImplementation(response as any);
 
-    await expect(exchange.updateOrder({ order: createLimitOrder(), update: { price: 50_100 } })).rejects.toThrow(
-      error,
-    );
+    await expect(exchange.updateOrder({ order: createLimitOrder(), update: { price: 50_100 } })).rejects.toThrow(error);
 
     expect(deleteRequest).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();

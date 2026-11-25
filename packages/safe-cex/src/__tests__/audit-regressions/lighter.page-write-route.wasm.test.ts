@@ -6,7 +6,6 @@ import { setProxyToken } from '../../accessToken';
 import { createExchangeFromAccount } from '../../createExchangeFromAccount';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
 import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderSide, OrderType } from '../../types';
@@ -17,10 +16,7 @@ const KEY = `01${'00'.repeat(39)}`;
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-const recorded = (
-  accountLimits: unknown = { code: 200, user_tier_name: 'premium' },
-  integrator = 158385,
-) => {
+const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium' }, integrator = 158385) => {
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const sockets: Array<{ subscriptions: string[]; message(text: string): void }> = [];
   let marginMode = 0;
@@ -102,6 +98,17 @@ const recorded = (
         });
       if (pathname.endsWith('/accountLimits')) return response(accountLimits);
       if (pathname.endsWith('/accountActiveOrders')) return response({ code: 200, orders: [] });
+      // AGT-45: a placement completes only once accountOrders shows its row.
+      // The public proxy may carry the venue URL encoded inside its own path.
+      if (decodeURIComponent(request.url).includes('/accountOrders?')) {
+        const ids = (/client_order_indexes=([\d,]+)/.exec(decodeURIComponent(request.url))?.[1] ?? '')
+          .split(',')
+          .filter(Boolean);
+        return response({
+          code: 200,
+          orders: ids.map((id) => ({ client_order_index: Number(id), status: 'open', filled_base_amount: '0' })),
+        });
+      }
       if (pathname.endsWith('/nextNonce')) return response({ code: 200, nonce: 10 });
       if (pathname.endsWith('/sendTx')) {
         const params = new URLSearchParams(request.body);
@@ -121,9 +128,18 @@ const recorded = (
 };
 
 const account = (flags: object) =>
-  ({ exchange: 'lighter', name: 'row', apiKey: '', apiSecret: KEY, apiKeyIndex: '0', applicationId: '718895', ...flags }) as any;
+  ({
+    exchange: 'lighter',
+    name: 'row',
+    apiKey: '',
+    apiSecret: KEY,
+    apiKeyIndex: '0',
+    applicationId: '718895',
+    ...flags,
+  }) as any;
 // Legacy's rule (#2833): Lighter REST goes through the public CORS proxy whatever the boxes say.
-const PUBLIC_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/api/v1/sendTx';
+const PUBLIC_PROXY =
+  'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/api/v1/sendTx';
 const place = { symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.2, price: 90 };
 
 /** The form hides the REST proxy box on Lighter (forbidCors); its one box sets tealstreetWsRoute. */
@@ -133,7 +149,10 @@ describe('where a browser-tab Lighter write goes', () => {
     ['the WebSocket Route box, the one the Lighter form offers', { tealstreetWsRoute: true }, PUBLIC_PROXY],
     ['no box', {}, PUBLIC_PROXY],
   ])('%s', async (_label, flags, expected) => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no network in this test'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('no network in this test'))),
+    );
     setDefaultTransport(tealstreetTransport);
     setProxyToken('test-token');
     const tape = recorded();
@@ -146,7 +165,9 @@ describe('where a browser-tab Lighter write goes', () => {
     await worker.placeOrder(place);
     expect(sendTx()).toEqual([expected]);
     tape.requests.length = 0;
-    const page = (await createExchangeFromAccount(account(flags), { workerMirror: true } as any)) as unknown as RustEngineExchange;
+    const page = (await createExchangeFromAccount(account(flags), {
+      workerMirror: true,
+    } as any)) as unknown as RustEngineExchange;
     cleanup.push(() => page.dispose());
     await expect(page.frameFedReady).resolves.toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 50));

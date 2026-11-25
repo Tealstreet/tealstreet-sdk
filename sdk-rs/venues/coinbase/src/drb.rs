@@ -102,7 +102,7 @@ impl std::fmt::Debug for RpcError {
 pub struct Failure {
     pub verdict: Verdict,
     pub code: Option<i64>,
-    pub rpc_error: Option<RpcError>,
+    pub rpc_error: Option<Box<RpcError>>,
 }
 impl Failure {
     fn unknown(kind: Option<ErrorKind>) -> Self {
@@ -165,6 +165,9 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refusal(11042, ErrorKind::AuthPermission),
         refusal(11043, ErrorKind::InvalidInput),
         refusal(11044, ErrorKind::Rejected),
+        // post_only_reject: a post-only order that would take liquidity is refused
+        // whole, before it reaches the book (docs.deribit.com/articles/errors).
+        refusal(11054, ErrorKind::Rejected),
         refusal(13009, ErrorKind::AuthExpired),
     ],
     success: &[Key::Int(0)],
@@ -563,7 +566,7 @@ impl Transport {
                 Err(Failure {
                     verdict,
                     code: Some(error.code),
-                    rpc_error: Some(error),
+                    rpc_error: Some(Box::new(error)),
                 })
             }
             _ => Err(Failure {

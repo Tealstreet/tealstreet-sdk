@@ -1,0 +1,137 @@
+# Generated WASM caps (rule 17). After each master Rust SDK run, measure every
+# sealed family artifact and the combined package of that run and raise any cap
+# whose reserve fell under 10 KiB: cap = max(cap, ceil((measured + 10 KiB) / KiB)).
+# Caps are never lowered. Since 2026-11-19 a master family over its cap stays red
+# and uploads no artifact, so this bot only restores reserve and never absorbs an
+# overrun; a PR that outgrows its cap raises it itself in a separate commit with a
+# wasm-caps-history.md line and a CLEAR naming the growth. Raised caps go to the bot-owned branch bot/wasm-caps and
+# the job summary; this workflow calls no PR API. Actions may not create or approve
+# PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
+# a user token. A bot push to an open PR queues its pull_request runs as
+# action_required, which hide any other run's checks from branch protection, so
+# after pushing, the job approves those runs (workflow runs, never a PR review).
+# A run whose caps match the bot branch pushes nothing, so the PR head stays put.
+#
+# Keep every step GitHub-owned: this repo's Actions policy allows only
+# GitHub-owned actions.
+name: WASM caps
+
+on:
+  workflow_run:
+    workflows: [Rust SDK]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+  # write only to approve the pushed head's queued pull_request runs.
+  actions: write
+
+concurrency:
+  group: wasm-caps
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Restore rule-17 reserve
+    # Only master pushes measure every family; a failed run uploads only the families that fit.
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MEASURED_SHA: ${{ github.event.workflow_run.head_sha }}
+      MEASURED_RUN: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+      BOT_BRANCH: bot/wasm-caps
+    steps:
+      - name: Check out current master (the caps to rewrite)
+        uses: actions/checkout@v7
+        with:
+          ref: master
+      - name: Check out the measured source (validates each artifact's build-input fingerprint)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: measured
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download that run's sealed family artifacts
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: wasm-family-*
+          path: ${{ runner.temp }}/wasm-caps
+      - name: Download that run's combined package
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          # A by-name download extracts flat, so name the directory the caps script expects.
+          name: replay-combined-package
+          path: ${{ runner.temp }}/wasm-caps/replay-combined-package
+      - name: Keep raises already proposed on the bot branch
+        run: |
+          if git fetch --depth=1 origin "$BOT_BRANCH" 2>/dev/null; then
+            git show "FETCH_HEAD:sdk-rs/harness/wasm-caps.json" > "$RUNNER_TEMP/bot-wasm-caps.json"
+            echo "BOT_LEASE=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
+          fi
+      - name: Apply rule 17 to the measured modules
+        run: |
+          node sdk-rs/harness/update-wasm-caps.mjs \
+            --artifacts "$RUNNER_TEMP/wasm-caps" --root measured \
+            --source-head "$MEASURED_SHA" --run-id "$MEASURED_RUN" \
+            --merge "$RUNNER_TEMP/bot-wasm-caps.json" --report "$RUNNER_TEMP/wasm-caps.md"
+          cat "$RUNNER_TEMP/wasm-caps.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Push raised caps to the bot branch
+        run: |
+          if git diff --quiet -- sdk-rs/harness/wasm-caps.json; then
+            echo "Every measured module keeps its rule-17 reserve; \`$BOT_BRANCH\` unchanged." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -f "$RUNNER_TEMP/bot-wasm-caps.json" ] && cmp -s "$RUNNER_TEMP/bot-wasm-caps.json" sdk-rs/harness/wasm-caps.json; then
+            echo "\`$BOT_BRANCH\` already carries these caps; not pushed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BOT_BRANCH"
+          git commit -m "chore(wasm): restore rule-17 reserve" \
+            -m "Measured by Rust SDK run $RUN_URL at $MEASURED_SHA." -- sdk-rs/harness/wasm-caps.json
+          # Bot-owned branch, recreated from master each run; the lease refuses if it moved since the fetch.
+          git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"
+          echo "PUSHED=true" >> "$GITHUB_ENV"
+          {
+            echo "Pushed raised caps to \`$BOT_BRANCH\` from [Rust SDK run $MEASURED_RUN]($RUN_URL) at \`$MEASURED_SHA\`."
+            echo "fleet-watch opens the PR \"chore(wasm): restore rule-17 reserve\" with a user token."
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Dispatched runs do not help: the newer action_required suites shadow them in
+      # the PR's rollup (#3690 at 16b8c590). Approving the queued runs reports the
+      # required `ci` and `Rust / required coverage` checks on the pushed head.
+      - name: Approve the pushed head's pull_request runs
+        if: env.PUSHED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(git rev-parse HEAD)
+          # No open PR means no runs; fleet-watch's user-token PR then runs CI normally.
+          for _ in $(seq 1 20); do
+            queued=$(gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \
+              --json databaseId,conclusion --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+            [ -n "$queued" ] && break
+            sleep 15
+          done
+          if [ -z "$queued" ]; then
+            echo "No queued pull_request runs at \`$head\` (no open PR); nothing approved." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Let the rest of the PR's workflows queue before approving the batch.
+          sleep 30
+          queued=$(gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \
+            --json databaseId,conclusion --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+          for run in $queued; do
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/approve"
+          done
+          echo "Approved pull_request runs ${queued//$'\n'/ } at \`$head\`." >> "$GITHUB_STEP_SUMMARY"

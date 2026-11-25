@@ -16,6 +16,31 @@ retires the socket immediately. Repeated login failures retain their backoff;
 only stable authenticated traffic resets it. A delayed post-write recovery
 retains its recovery hint and waits for any pending authentication retry.
 
+An exact pre-login `30014` samples the unsigned `/api/v2/public/time` clock once
+per in-flight recovery. A reconnect waits at most five seconds for that sample;
+only a live successful reply with a valid integer timestamp calibrates protocol
+time. Failed or invalid samples retain the previous clock and existing backoff.
+Login is signed at dispatch, including after delayed reconnects; retired sockets
+receive no deferred login. Account refreshes, scheduling time and write retries
+are unchanged.
+
+Public subscribe and unsubscribe envelopes are packed by their actual serialized
+UTF-8 size, including JSON escaping and envelope overhead, within Classic V2's
+4096-byte limit. Catalogue order and the legacy three-socket ticker partition
+remain unchanged; stock-style instrument names are not excluded by spelling.
+A single topic that cannot fit both subscription and later unsubscription is
+refused locally with a bounded `subscription.rejected` event, while other topics
+continue. Reconnects and book/candle repair use the same bounded formatter.
+
+A native `30001` ticker refusal naming the exact known REST market and product
+as nonexistent retires only that ticker topic for the engine lifetime, including
+the venue's `,precision:null` spelling. It cancels an existing topic retry and
+skips future retry/reconnect subscription sends, with one fixed-title Warn.
+A fresh engine starts from its own catalogue again. REST rows and book/candle
+subscriptions remain available; unrelated refusals retain Errors and the existing
+1/2/4-second retries. Initial catalogue selection retains the legacy partition
+without inferring WS availability from a symbol's spelling or trading status.
+
 Protocol sources for the scripted tests:
 
 - [Classic changelog: sequence metadata replaces checksums](https://www.bitget.com/zh-CN/legacy-docs/classic/changelog)
@@ -30,10 +55,25 @@ the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
 
+A leverage read for a fresh, flat UTA symbol may return JSON `null` when a valid
+settings response omits its product/symbol and neither a prior numeric setting
+nor an open position exists. This means unavailable leverage, never a default.
+Known-setting omissions, malformed settings and venue/HTTP failures still refuse;
+metadata reads never set leverage to discover it.
+
 Classic and UTA normal orders use the legacy TS allocation: round the requested amount,
 repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
 remainder. Per-lot rounding can change the submitted total. Batch chunks retain
 their 50-row limit and the existing partial-failure reporting.
+
+DELEGATED intent UUIDs use the server's lossless 32-character hexadecimal
+`clientOid` encoding (85b32c27469), while the router retains the original intent
+UUID. This fits the [UTA REST client-ID contract](https://www.bitget.com/docs/catalog/trading/order-management)
+and the shared native adapter's 32-character limit. A raw UUID has 36 characters
+and is refused before a write. Caller IDs also require one physical order: split
+amounts, brackets and algorithmic orders retain their existing refusal.
+`tests/trading.rs::delegated_uuid_encoding_preserves_one_plain_limit_order`
+pins the 0.001 BTCUSDT at 55000 case on Classic and UTA without venue I/O.
 
 UTA fills use the dedicated execution channel. UTA account topics cover multiple
 products, so orders are filtered by category and positions by margin coin and
@@ -51,7 +91,7 @@ never retried. This is the recorded stop-after-UNKNOWN parity exception
 (Sean/daxx, 2026-11-08): legacy TS can continue after an unproven acknowledgement.
 Venue-authored terminal write failures retain acknowledged IDs and name the
 unconfirmed request with
-`The outcome is unknown. Check Open Orders`; the companion
+`We couldn’t confirm this change. Check your open orders before trying again.`; the companion
 `order.outcome_unknown` event reports the command, acknowledged count and
 unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
@@ -74,6 +114,12 @@ UNPROVEN without a DEMO capture. Explicit selections refuse before send, and
 preset children retain only their returned `fill_price` / `mark_price` reference.
 UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
 See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
+
+A whole-position TP/SL (`pos_loss`/`pos_profit`, or UTA `tpslMode: full`) is
+stored with amount 0 even when its row reports the current position size: it
+closes whatever is open when it triggers and holds no size. The close
+reservation (`reduceOrdersLockPositionSize`) therefore never counts it against a
+manual partial close (AGT-70); sized `loss_plan`/`profit_plan` rows keep their size.
 
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
@@ -146,3 +192,10 @@ failures carry neither field. Frame-fed consumers without their own native split
 receipt also omit them; frame/model quantities never stand in for a receipt.
 The same read-only binding applies to refusals and first-booking size mismatches
 and adds no event or request.
+
+## Stop-entry brackets (AGT-115)
+
+Stop, take-profit and trailing payloads (Classic `algo_payload`, UTA `strategy_payload`)
+never carry the order's own legs; they are position TP/SL or trailing closes. Such an entry
+with an attached stop-loss/take-profit used to place without it (live, 2026-11-21); the
+whole command now refuses in `preflight` before any I/O with the engine's shared `stop_entry_legs_refusal` copy.

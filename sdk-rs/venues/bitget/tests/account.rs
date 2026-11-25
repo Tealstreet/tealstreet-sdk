@@ -376,6 +376,64 @@ fn uta_fill_topic_emits_exact_executions_and_order_snapshot_does_not_duplicate()
     assert!(h.sent.iter().any(|(_, t)| t.contains("\"topic\":\"fill\"")));
 }
 
+fn fill_identities(h: &mut Harness) -> Vec<(Option<String>, String, f64)> {
+    safe_cex_engine::wire::fills(h.engine.take_frame(h.now).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect()
+}
+
+// AGT-83: a last-fill row's tradeId is the fill identity; a cumulative delta keeps the order id.
+#[test]
+fn classic_trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::classic();
+    delivered_fills(&mut h);
+    let execution = r#"{"arg":{"channel":"orders"},"action":"update","data":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0.4","accBaseVolume":"0.4","fillPrice":"99","price":"90","side":"buy","orderType":"limit","status":"partially_filled","tradeId":"t1"}]}"#;
+    h.private_message(execution);
+    h.private_message(
+        &execution
+            .replace("\"accBaseVolume\":\"0.4\"", "\"accBaseVolume\":\"0.8\"")
+            .replace("\"t1\"", "\"t2\""),
+    );
+    h.private_message(
+        &execution
+            .replace("\"baseVolume\":\"0.4\",", "")
+            .replace("\"accBaseVolume\":\"0.4\"", "\"accBaseVolume\":\"1.2\"")
+            .replace("\"t1\"", "\"cumulative\""),
+    );
+    let identities = fill_identities(&mut h);
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities
+            .iter()
+            .map(|(id, order, _)| (id.as_deref(), order.as_str()))
+            .collect::<Vec<_>>(),
+        [(Some("t1"), "1"), (Some("t2"), "1"), (Some("1"), "1")]
+    );
+    assert!(
+        identities
+            .iter()
+            .all(|(_, _, amount)| (amount - 0.4).abs() < 1e-12)
+    );
+}
+
+// AGT-83: the UTA fill topic's execId is the fill identity.
+#[test]
+fn uta_exec_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = uta(r#"{"code":"00000","data":[]}"#);
+    h.engine.take_frame(h.now);
+    for exec in ["e1", "e2"] {
+        h.private_message(&format!(
+            r#"{{"arg":{{"topic":"fill"}},"action":"snapshot","data":[{{"category":"usdt-futures","symbol":"BTCUSDT","orderId":"1","execId":"{exec}","execPrice":"200","execQty":"1","side":"buy"}}]}}"#
+        ));
+    }
+    assert_eq!(
+        fill_identities(&mut h),
+        ["e1", "e2"].map(|id| (Some(id.to_owned()), "1".to_owned(), 1.0))
+    );
+}
+
 #[test]
 fn classic_40085_without_array_promotes_route_and_ignores_old_http_generation() {
     let mut h = Harness::classic();
@@ -1198,4 +1256,62 @@ fn a_same_session_cancel_clears_a_stop() {
     );
     let status = h.engine.store().order("my-stop").map(|o| o.status);
     assert_ne!(status, Some(safe_cex_engine::model::OrderStatus::Open));
+}
+#[test]
+fn a_fresh_flat_uta_symbol_without_a_setting_returns_no_leverage() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    let balance = h.engine.store().balance().clone();
+    let loaded = h.engine.store().loaded();
+    fetch_leverage(&mut h, 86, "BTCUSDT");
+    let request = h.take("/account/settings");
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[]}}"#,
+    );
+    assert!(fetched(&h, 86).is_null());
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    assert_eq!(h.engine.store().balance(), &balance);
+    assert_eq!(h.engine.store().loaded(), loaded);
+    assert!(h.failures.is_empty());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn a_foreign_product_row_does_not_supply_uta_leverage() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    fetch_leverage(&mut h, 87, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(request.id, 200, r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDC-FUTURES","leverage":"44","marginMode":"crossed"}]}}"#);
+    assert!(fetched(&h, 87).is_null());
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+}
+
+#[test]
+fn an_invalid_uta_settings_reply_is_not_optional_leverage_absence() {
+    for (status, body) in [
+        (200, r#"{"code":"00000","data":{}}"#),
+        (200, r#"{"code":"40001","msg":"no permission","data":null}"#),
+        (
+            200,
+            r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDT-FUTURES","marginMode":"crossed"}]}}"#,
+        ),
+        (200, "not-json"),
+        (503, r#"{"code":"00000","data":{"holdMode":"hedge_mode"}}"#),
+    ] {
+        let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+        fetch_leverage(&mut h, 88, "BTCUSDT");
+        let request = h.take("/account/settings");
+        h.reply(request.id, status, body);
+        let (_, result) = h.done.iter().find(|(id, _)| *id == 88).unwrap();
+        assert!(result.is_err(), "{status}: {body}");
+        assert!(h.engine.store().setting("BTCUSDT").is_none());
+        assert!(h.engine.store().loaded().balance);
+    }
 }

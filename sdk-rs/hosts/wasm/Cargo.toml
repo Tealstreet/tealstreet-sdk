@@ -24,13 +24,13 @@ dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 # Browser hosted signing captures, for families with a hosted codec only.
 hosted-signing = ["dispatch-signing", "safe-cex-venues/hosted-signing"]
 hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
-# Opt-in admission recipe; only the first candidate (Backpack) links it by default.
+# Opt-in admission recipe; activated candidate families link it by default.
 # Existing constructor custody gates and server readiness remain separate.
 hosted-join-proof = ["safe-cex-venues/hosted-join-proof"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
-grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet"]
+grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet", "hosted-join-proof"]
 polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
 coinbase = ["safe-cex-venues/coinbase", "text-ingress", "dispatch-signing", "hosted-signing"]
 # The combined build isolates the startup subscription decoder.
@@ -40,14 +40,16 @@ apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command
 txflow = ["safe-cex-venues/txflow", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta", "dispatch-signing", "hosted-signing"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing", "hosted-signing", "hosted-wallet", "address-nonce"]
-lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet"]
+lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet", "hosted-join-proof"]
 woo = ["safe-cex-venues/woo", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing", "hosted-signing"]
 backpack = ["safe-cex-venues/backpack", "text-ingress", "dispatch-signing", "hosted-signing", "hosted-join-proof"]
 blofin = ["safe-cex-venues/blofin", "text-ingress", "dispatch-signing", "hosted-signing"]
 mexc = ["safe-cex-venues/mexc", "text-ingress", "dispatch-signing", "hosted-signing"]
-bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing", "hosted-signing"]
+# Decode the shared Spot wire inputs in production, then apply the venue's own
+# capability/credential guards; replay-only features must not own these codecs.
+bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-engine/command-order-book", "safe-cex-engine/command-kucoinspot"]
 weex = ["safe-cex-venues/weex", "text-ingress", "dispatch-signing"]
 phemex = ["safe-cex-venues/phemex", "text-ingress", "dispatch-signing", "hosted-signing"]
 default = [
@@ -86,11 +88,12 @@ binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing", "hoste
 kucoin = ["safe-cex-venues/kucoin", "dispatch-signing", "text-ingress", "hosted-signing"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "dispatch-signing", "hosted-signing", "text-ingress", "safe-cex-engine/command-kucoinspot"]
 bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing", "hosted-signing", "safe-cex-algos?/product-semantics"]
-hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
+hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet", "hosted-join-proof"]
 okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing", "hosted-signing"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
 
 [dependencies]
+safe-cex-store-frames.workspace = true
 zeroize.workspace = true
 safe-cex-engine = { workspace = true, features = ["polling-control"] }
 safe-cex-venues.workspace = true

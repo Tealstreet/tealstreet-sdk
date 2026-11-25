@@ -255,11 +255,11 @@ impl Route {
         match tokio::time::timeout(OPEN_TIMEOUT, opening).await {
             Ok(Ok(socket)) => Ok(socket),
             Ok(Err(error)) => {
-                crate::transport::log_open_failure(&url, &error, None);
+                crate::transport::log_open_failure(&url, &error, None, None);
                 Err(error)
             }
             Err(_) => {
-                crate::transport::log_open_failure(&url, "timed out after 15s", None);
+                crate::transport::log_open_failure(&url, "timed out after 15s", None, None);
                 Err("timed out".into())
             }
         }

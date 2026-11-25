@@ -575,6 +575,9 @@ export class Tape {
       throw error;
     }
     if (this.responses.unserved !== unservedBefore) this.pollingFence?.reject(new Error('Polling replay sent an unmatched HTTP request'));
+    // A taped read may quote an order index this replay created, as frames do.
+    if (this.venue.responseText && typeof response.body === 'string' && response.status !== 599)
+      response = { ...response, body: this.venue.responseText(response.body) };
     const matchedWrite = this.responses.isWrite(method, url) && response.status !== 599;
     const ackStage = matchedWrite ? this.responses.served.afterCommand : undefined;
     if (matchedWrite) {
@@ -1037,7 +1040,7 @@ export class Tape {
    * Commands are awaited where they fall. A private tape is paced: each record
    * waits until its time after the account is ready.
    */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}, checkpoint) {
+  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}, checkpoint, drain) {
     const first = this.frames.find((frame) => frame.url && frame.type !== 'wait' && frame.type !== 'http');
     const startupDeadline = performance.now() + this.timeoutMs;
     await within((async () => {
@@ -1064,6 +1067,7 @@ export class Tape {
     let delivered = 0;
     const replayFrames = this.frames.filter((frame) => !this.bootstrapFrame(frame));
     const checkpoints = checkpointOrdinals(replayFrames);
+    if (drain) await within(drain(), this.timeoutMs, 'Replay pending messages');
     await checkpoint?.({ ordinal: 0, recordIndex: -1, t: 0 });
     const warm = Math.floor(replayFrames.length / 4);
     for (const frame of this.frames) {
@@ -1104,13 +1108,17 @@ export class Tape {
         await this.deliverFrame(frame);
       }
       delivered++;
+      if (drain) await within(drain(), this.timeoutMs, 'Replay pending messages');
       onTick?.(frame.t);
       await new Promise(setImmediate);
       if (this.earlyFailure) throw this.earlyFailure;
-      if (checkpoints.has(delivered))
+      if (checkpoints.has(delivered)) {
+        if (drain) await within(drain(), this.timeoutMs, 'Replay pending messages');
         await checkpoint?.({ ordinal: delivered, recordIndex: this.recordIndices.get(frame), t: frame.t ?? 0 });
+      }
     }
     if (this.selectedPollingResponses) await this.finishPolling(clock);
+    if (drain) await within(drain(), this.timeoutMs, 'Replay pending messages');
     return delivered;
   }
 

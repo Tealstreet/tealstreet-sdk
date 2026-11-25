@@ -1,7 +1,6 @@
-import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -14,7 +13,28 @@ import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
+import {
+  BROKER_ID,
+  ENDPOINTS,
+  FETCH_BATCH_LEV_RESPONSE,
+  FETCH_MARGIN_MODE_RESPONSE,
+  FETCH_POSITION_RESPONSE,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TYPE,
+  ORDERS_RESPONSE,
+  POSITION_MODE_RESPONSE,
+  POSITION_SIDE,
+  REVERSE_ORDER_TYPE,
+  USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY,
+} from '../../../exchanges/blofin/blofin.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { mapBlofinPositionHistory } from '../../../journal/blofin.position-adapter';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -57,30 +77,14 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { createAPI } from './blofin.api';
-import { mapBlofinFillToIncomeRecords } from './blofin.income';
 import { mapBlofinClosedPosition } from './blofin.closed-pnl';
+import { mapBlofinFillToIncomeRecords } from './blofin.income';
 import { mapBlofinHistoricalOrder } from './blofin.order-history';
-import {
-  BROKER_ID,
-  ENDPOINTS,
-  FETCH_BATCH_LEV_RESPONSE,
-  FETCH_MARGIN_MODE_RESPONSE,
-  FETCH_POSITION_RESPONSE,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TYPE,
-  ORDERS_RESPONSE,
-  POSITION_MODE_RESPONSE,
-  POSITION_SIDE,
-  REVERSE_ORDER_TYPE,
-  USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY,
-} from '../../../exchanges/blofin/blofin.types';
 import { BlofinPrivateWebsocket } from './blofin.ws-private';
 import { BlofinPublicWebsocket } from './blofin.ws-public';
 
@@ -154,21 +158,21 @@ export class BlofinExchange extends BaseExchange {
     ].filter((candidate) => candidate.value !== undefined && Number.isFinite(candidate.value) && candidate.value > 0);
     const sequence = Math.max(...candidates.map((candidate) => candidate.sequence));
     const unresolved = this.ambiguousLeverage.get(id);
-    // Projecting NaN into the Store must not erase a loaded conflict. Only a
+    // Publishing the native finite unknown marker must not erase a conflict. Only a
     // confirmation ordered after the conflict can make the fallback usable.
-    if (unresolved !== undefined && sequence <= unresolved) return Number.NaN;
+    if (unresolved !== undefined && sequence <= unresolved) return 0;
     const newest = candidates.filter((candidate) => candidate.sequence === sequence);
     // Missing provenance cannot establish an order between conflicting values.
-    if (!newest.length) return Number.NaN;
+    if (!newest.length) return 0;
     if (!newest.every((candidate) => candidate.value === newest[0].value)) {
       this.ambiguousLeverage.set(id, this.leverageSequence);
-      return Number.NaN;
+      return 0;
     }
     this.ambiguousLeverage.delete(id);
-    return newest[0].value ?? Number.NaN;
+    return newest[0].value ?? 0;
   };
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
@@ -221,10 +225,14 @@ export class BlofinExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const [, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
@@ -236,10 +244,14 @@ export class BlofinExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const tickers = this.formatTickers(rawTickers);
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
 
     if (publicDataOnly) return;
@@ -249,17 +261,25 @@ export class BlofinExchange extends BaseExchange {
 
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
-        this.store.update({
-          balance,
-          positions,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }),
       this.fetchOrders().then((orders) => {
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }),
     ]);
 
@@ -283,15 +303,27 @@ export class BlofinExchange extends BaseExchange {
         // position records (which the WS layer keeps around to retain leverage / margin context)
         // aren't wiped every 10 seconds. This previously caused the place-order % slider to
         // jitter because the React fallback would briefly land on 1x between tick and WS update.
-        this.store.addOrUpdatePositionsFull(positions);
-        this.store.update({
-          balance,
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-            positions: true,
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true, positions: true },
           },
-        });
+          this.store.markets.map((row) => row.symbol),
+        );
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         // Continue to orders fetch even if balance/positions failed
@@ -303,7 +335,11 @@ export class BlofinExchange extends BaseExchange {
         if (this.isDisposed) return;
         // Only update if we got valid orders (fetchOrders now returns existing on failure)
         if (orders.length > 0 || this.store.orders.length === 0) {
-          this.store.update({ orders });
+          applyReferenceFixture(
+            this.store,
+            { orders },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -448,7 +484,7 @@ export class BlofinExchange extends BaseExchange {
           notional: 0,
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           info: {},
         }));
       }
@@ -649,21 +685,33 @@ export class BlofinExchange extends BaseExchange {
       const leverageObj: FetchedLeverage = {
         buyLeverage,
         sellLeverage,
-        marginType: (longRow.marginMode || shortRow.marginMode || netRow?.marginMode) === 'isolated'
-          ? MarginType.Isolated
-          : MarginType.Cross,
+        marginType:
+          (longRow.marginMode || shortRow.marginMode || netRow?.marginMode) === 'isolated'
+            ? MarginType.Isolated
+            : MarginType.Cross,
         positionMode: netRow ? PositionMode.OneWay : PositionMode.Hedged,
       };
 
+      // A newer wire position report remains authoritative over this delayed read.
+      if (
+        Object.values(this.store.positionSettings).some(
+          (setting) => setting.symbol === symbol && (this.reportedLeverage.get(setting.id)?.sequence ?? 0) > sequence,
+        )
+      )
+        return leverageObj;
       const newer = this.fetchedLeverageObservations.get(symbol);
       if (newer && newer.sequence > sequence) return this.store.fetchedLeverage[symbol] ?? null;
       this.fetchedLeverageObservations.set(symbol, { buyLeverage, sellLeverage, sequence });
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: leverageObj,
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: leverageObj,
+          },
         },
-      });
+        this.store.markets.map((row) => row.symbol),
+      );
 
       return leverageObj;
     } catch (err: any) {
@@ -1418,7 +1466,7 @@ export class BlofinExchange extends BaseExchange {
     } else {
       await this.cancelOrders(relativeOrders);
     }
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   cancelOrders = async (_orders: Order[]) => {
@@ -1493,7 +1541,7 @@ export class BlofinExchange extends BaseExchange {
 
       // Place the preserved order after a short delay to ensure the cancellation is processed
       await sleep(500);
-      await this.placeOrder(preserveOrder);
+      await replacing(this, () => this.placeOrder(preserveOrder));
     }
   };
 
@@ -1583,22 +1631,28 @@ export class BlofinExchange extends BaseExchange {
       sequence: ++this.leverageSequence,
     });
     const currentPositions = this.store.positions;
-    this.store.update({
-      ...(currentPositions.some((position) => position.symbol === symbol)
-        ? {
-            positions: currentPositions.map((position) =>
-              position.symbol === symbol ? { ...position, leverage } : position,
-            ),
-          }
-        : {}),
-      fetchedLeverage: {
-        ...this.store.fetchedLeverage,
-        [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
+    applyReferenceFixture(
+      this.store,
+      {
+        ...(currentPositions.some((position) => position.symbol === symbol)
+          ? {
+              positions: currentPositions.map((position) =>
+                position.symbol === symbol ? { ...position, leverage } : position,
+              ),
+            }
+          : {}),
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
+        },
       },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     if (opts.type === OrderType.Conditional) {
       return [await this.placeTriggerOrder(await this.formatTriggerOrder(opts))];
@@ -1620,6 +1674,8 @@ export class BlofinExchange extends BaseExchange {
   };
 
   placeOrders = async (opts: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (opts.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(opts);
     const [triggerOrders, nonTriggerOrders] = partition(opts, (o) => o.type === OrderType.Conditional);
     const [algoOrders, normalOrders] = partition(nonTriggerOrders, (o) => this.isAlgoOrder(o.type));
@@ -1855,7 +1911,7 @@ export class BlofinExchange extends BaseExchange {
         leverage,
         unrealizedPnl: contracts ? adjust(parseFloat(p.unrealizedPnl), market.precision.price) : 0,
         contracts: Math.abs(contracts),
-        liquidationPrice,
+        liquidationPrice: nativeLiquidationPrice(liquidationPrice),
         marginType: p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross,
         positionMode,
         extra: {
@@ -1935,7 +1991,22 @@ export class BlofinExchange extends BaseExchange {
     await this.getOrFetchMarginType(undefined, true);
     if (symbol) {
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
 
     // {
@@ -1980,22 +2051,26 @@ export class BlofinExchange extends BaseExchange {
       return;
     }
 
-    this.store.update({
-      ...(fetchedLeverageEntries.length
-        ? {
-            fetchedLeverage: Object.fromEntries(
-              fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, marginType }]),
-            ),
-          }
-        : {}),
-      ...(hasFlatPositionUpdates
-        ? {
-            positions: positions.map((position) =>
-              Number(position.contracts) === 0 ? { ...position, marginType } : position,
-            ),
-          }
-        : {}),
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        ...(fetchedLeverageEntries.length
+          ? {
+              fetchedLeverage: Object.fromEntries(
+                fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, marginType }]),
+              ),
+            }
+          : {}),
+        ...(hasFlatPositionUpdates
+          ? {
+              positions: positions.map((position) =>
+                Number(position.contracts) === 0 ? { ...position, marginType } : position,
+              ),
+            }
+          : {}),
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   private applyConfirmedPositionMode = (positionMode: PositionMode) => {
@@ -2003,31 +2078,35 @@ export class BlofinExchange extends BaseExchange {
 
     const fetchedLeverageEntries = Object.entries(this.store.fetchedLeverage);
     const positions = this.store.positions;
-    if (!fetchedLeverageEntries.length && !positions.length) {
-      return;
-    }
 
-    this.store.update({
-      ...(fetchedLeverageEntries.length
-        ? {
-            fetchedLeverage: Object.fromEntries(
-              fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
-            ),
-          }
-        : {}),
-      ...(positions.length
-        ? {
-            positions: uniqBy(
-              positions.map((position) => ({
-                ...position,
-                id: createPositionId(position.symbol, position.side, positionMode),
-                positionMode,
-              })),
-              'id',
-            ),
-          }
-        : {}),
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        // Native SETTINGS reads account mode from STATUS, including flat accounts.
+        loaded: this.store.loaded,
+        options: { ...this.store.options, isHedged: positionMode === PositionMode.Hedged },
+        ...(fetchedLeverageEntries.length
+          ? {
+              fetchedLeverage: Object.fromEntries(
+                fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
+              ),
+            }
+          : {}),
+        ...(positions.length
+          ? {
+              positions: uniqBy(
+                positions.map((position) => ({
+                  ...position,
+                  id: createPositionId(position.symbol, position.side, positionMode),
+                  positionMode,
+                })),
+                'id',
+              ),
+            }
+          : {}),
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   private parsePositivePrice = (value: unknown) => {
@@ -2531,7 +2610,14 @@ export class BlofinExchange extends BaseExchange {
         const realFailures: typeof rows = [];
         for (const row of rows) {
           if (this.isAlreadyGoneCancelRow(row) && row.orderId) {
-            this.store.removeOrders([{ id: row.orderId }]);
+            (() => {
+              const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: row.orderId }];
+              return applyReferenceFixture(
+                this.store,
+                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           } else {
             realFailures.push(row);
           }
@@ -2566,7 +2652,7 @@ export class BlofinExchange extends BaseExchange {
       if (res?.data.code !== '0') {
         const rows: Array<{ tpslId?: string; algoId?: string; code?: string; msg?: string }> = res?.data?.data ?? [];
         // Algo orders the exchange reports as already gone are reconciled out of the
-        // store. Store ids are `${tpslId}__take_profit` / `__stop_loss`; match on the
+        // store. FrameStore ids are `${tpslId}__take_profit` / `__stop_loss`; match on the
         // exact tpslId segment (`id.split('__')[0]`), not a raw prefix, so `12` can't
         // sweep away `123`'s legs. Genuine errors and already-gone rows with no
         // reconcile id throw.
@@ -2575,7 +2661,15 @@ export class BlofinExchange extends BaseExchange {
           const goneId = row.tpslId || row.algoId;
           if (this.isAlreadyGoneCancelRow(row) && goneId) {
             const storeIds = this.store.orders.filter((o) => o.id.split('__')[0] === goneId).map((o) => ({ id: o.id }));
-            if (storeIds.length) this.store.removeOrders(storeIds);
+            if (storeIds.length)
+              (() => {
+                const removed: Array<Pick<StoreData['orders'][number], 'id'>> = storeIds;
+                return applyReferenceFixture(
+                  this.store,
+                  { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                  this.store.markets.map((row) => row.symbol),
+                );
+              })();
           } else {
             realFailures.push(row);
           }
@@ -2617,7 +2711,14 @@ export class BlofinExchange extends BaseExchange {
 
       const row = response.data?.data;
       if (this.isAlreadyGoneCancelRow(row) && row?.algoId === payload.algoId) {
-        this.store.removeOrders([{ id: payload.algoId }]);
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: payload.algoId }];
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       } else if (
         response.data?.code !== '0' ||
         (row?.code !== undefined && row.code !== '0') ||

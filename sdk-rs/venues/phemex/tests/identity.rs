@@ -1,5 +1,8 @@
 //! Native rare identity reads: route/signer, exact IDs, failure ownership and no state commits.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 mod support;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use support::{Options, PreparedEngine as Engine};
@@ -120,7 +123,7 @@ fn identity_returns_exact_response_ids_without_mutating_live_account() {
         result(out, false).unwrap(),
         r#"{"userId":"9007199254740993"}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(respond(&mut e,&r,200,r#"{"code":0,"data":{"account":{"userID":9007199254740993,"currency":"USDT","accountBalanceRv":"1000"},"positions":[]}}"#).is_empty(),"duplicate response is consumed once");
 }
 #[test]
@@ -143,7 +146,7 @@ fn identity_uses_secondary_read_signer_and_contract_fallback() {
         result(out, false).unwrap(),
         r#"{"userId":"9007199254740994"}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
 }
 #[test]
 fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state() {
@@ -157,7 +160,7 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = request(&mut e);
         result(respond(&mut e, &r, 200, body), true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
     for network in [false, true] {
         let mut e = engine(false, false);
@@ -176,7 +179,15 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
             respond(&mut e, &r, 503, "unavailable")
         };
         result(out, true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

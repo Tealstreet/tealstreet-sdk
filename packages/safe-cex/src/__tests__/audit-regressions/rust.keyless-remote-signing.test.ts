@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,6 @@ import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { runsOnRustEngine, RUST_VENUES, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 
 const remoteSigner: RemoteSigner = {
@@ -41,7 +41,9 @@ describe('Rust-only hosted account selection', () => {
         expect(exchange).toBeInstanceOf(RustEngineExchange);
         exchange.dispose();
       } else {
-        expect(() => assertBetaAccount(name, options)).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
+        expect(() => assertBetaAccount(name, options)).toThrow(
+          `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
+        );
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }
     }

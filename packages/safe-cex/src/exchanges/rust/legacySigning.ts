@@ -152,7 +152,7 @@ export const signHostedHttp = async (
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
   if (name === 'apexomni') {
     const xhr = axios.create({ paramsSerializer: { serialize: serializeApexOmni },
-      headers: { 'Content-Type': 'application/json, charset=utf-8' } });
+      headers: { 'Content-Type': 'application/json; charset=utf-8' } });
     xhr.interceptors.request.use(async (config) => {
       const clock = host.hostedSigningClock();
       const prepared = prepareApexOmniRequest(config, clock.stampMs);
@@ -268,7 +268,7 @@ export const signHostedHttp = async (
   const cryptocom = name === 'cryptocom';
   const blofin = name === 'blofin';
   if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !bingx && !phemex && !blofin && !aster && !woo && !cryptocom && !mexc)
-    return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
+    return { id: request.id, error: 'Server signing isn’t available for this exchange yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget and Phemex interceptors sign every request once credentials exist.
   const unsigned = mexc ? options.publicDataOnly === true || isMexcUnsignedRequest(request.config.url)
@@ -326,16 +326,16 @@ export const signHostedHttp = async (
     } : bingx ? {
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
     } : mexc || cryptocom ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
     } : {
       'X-Referer': BROKER_ID,
       'X-BAPI-RECV-WINDOW': options.extra?.recvWindow ?? RECV_WINDOW,
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
       ...siteHeaders,
     },
   });

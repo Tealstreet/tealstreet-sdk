@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original controls: caller-wait propagation and managed history are absent.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 #[allow(dead_code)]
 mod support;
 use safe_cex_engine::request_context::HttpAction;
@@ -227,6 +231,7 @@ fn original_primary_lookup_requires_managed_page_preparation() {
 #[test]
 fn revised_short_caller_root_stops_a_page_waiting_at_dequeue() {
     let mut engine = ready();
+    let before_stats = engine.snapshot_frame(NOW).to_vec();
     deliver(&mut engine, NOW, orders(), Some(250));
     let first = request(actions(&mut engine, NOW));
     reply(&mut engine, &first, NOW + 200., &page(0));
@@ -234,11 +239,17 @@ fn revised_short_caller_root_stops_a_page_waiting_at_dequeue() {
     let timer = paced(&output, NOW + 300.);
     engine.handle(NOW + 300., Event::TimerFired { timer });
     root_expired(&actions(&mut engine, NOW + 300.));
-    assert!(engine.take_frame(NOW + 300.).is_none());
+    assert_request_stats_frame(
+        &before_stats,
+        engine.take_frame(NOW + 300.),
+        NOW + 300.,
+        [1, 0, 0, 0, 0],
+    );
 }
 #[test]
 fn revised_default_caller_root_does_not_renew_across_valid_page_children() {
     let mut engine = ready();
+    let before_stats = engine.snapshot_frame(NOW).to_vec();
     deliver(&mut engine, NOW, orders(), None);
     let mut current = request(actions(&mut engine, NOW));
     for number in 0..8 {
@@ -247,7 +258,8 @@ fn revised_default_caller_root_does_not_renew_across_valid_page_children() {
         let output = actions(&mut engine, at);
         if number == 7 {
             root_expired(&output);
-            assert!(engine.take_frame(at).is_none());
+            // Seven pages complete before root expiry; the eighth delivery is stale.
+            assert_request_stats_frame(&before_stats, engine.take_frame(at), at, [7, 0, 0, 0, 0]);
             return;
         }
         let timer = paced(&output, at + 100.);
@@ -680,7 +692,10 @@ fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].0, OWNER);
     assert_eq!(failures[0].1.kind, Some(ErrorKind::Internal));
-    assert_eq!(failures[0].1.message, "Engine request capacity reached");
+    assert_eq!(
+        failures[0].1.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(failures[0].1.outcome.is_none());
     assert!(done(&output).is_none());
     assert!(!output.iter().any(|a| matches!(

@@ -136,7 +136,7 @@ fn first_pages_reject_instead_of_empty_or_failed_body_prefix_success() {
 }
 
 #[test]
-fn later_fill_window_failure_retains_only_prior_rows_with_one_owned_marker() {
+fn later_fill_page_failure_retains_only_prior_rows_with_one_owned_marker() {
     for failure in 0..4 {
         let mut h = harness();
         start(&mut h, 92, fills(true));
@@ -145,7 +145,8 @@ fn later_fill_window_failure_retains_only_prior_rows_with_one_owned_marker() {
         assert!(first.url.contains("limit=1"));
         h.reply(first.id, 200, "", &format!("[{FILL}]"));
         let second = h.take("/userTrades");
-        assert!(second.url.contains("startTime=604800001&endTime=604800010"));
+        // B6: the next read now drains the saturated parent before the next week.
+        assert!(second.url.contains("startTime=0&endTime=302400000"));
         match failure {
             0 => h.reply(second.id, 400, "", r#"{"code":-1,"msg":"second failed"}"#),
             1 => h.reply(second.id, 503, "", "unavailable"),
@@ -162,15 +163,23 @@ fn later_fill_window_failure_retains_only_prior_rows_with_one_owned_marker() {
         }
         let rows = partial(&h, 92, 1);
         assert_eq!(rows[0]["id"], "1");
-        assert_eq!(rows[0]["timestamp"], 1_700_000_000.0);
+        assert_eq!(rows[0]["timestamp"], 1_700_000_000.123);
         assert!(!h.requests.iter().any(|r| r.url.contains("/userTrades")));
     }
 }
 
 #[test]
-fn fills_keep_native_order_duplicate_ids_and_per_window_limit_without_global_cap() {
+fn fills_keep_native_order_duplicate_ids_across_unsaturated_windows() {
     let mut h = harness();
-    start(&mut h, 93, fills(true));
+    // Full-page draining is covered by history_range_completion.rs (B6).
+    let query = Query::Fills {
+        symbol: Some("BTCUSDT".into()),
+        order_id: None,
+        from_ms: Some(0.0),
+        to_ms: Some(WEEK + 10.0),
+        limit: Some(3),
+    };
+    start(&mut h, 93, query);
     let r = h.take("/userTrades");
     h.reply(
         r.id,
@@ -179,7 +188,7 @@ fn fills_keep_native_order_duplicate_ids_and_per_window_limit_without_global_cap
         &format!("[{},{}]", FILL.replace("\"id\":1", "\"id\":2"), FILL),
     );
     let r = h.take("/userTrades");
-    assert!(r.url.contains("limit=1"));
+    assert!(r.url.contains("limit=3"));
     h.reply(r.id, 200, "", &format!("[{FILL}]"));
     let rows: Vec<serde_json::Value> =
         serde_json::from_str(h.result(93).unwrap().as_ref().unwrap()).unwrap();
@@ -189,10 +198,8 @@ fn fills_keep_native_order_duplicate_ids_and_per_window_limit_without_global_cap
             .collect::<Vec<_>>(),
         ["2", "1", "1"]
     );
-    // Both limit-1 windows filled their page, so the rows are kept and the
-    // result is marked incomplete once (history_saturation.rs; #2128 finding).
-    assert_eq!(markers(&h).len(), 1);
-    assert_eq!(h.command_notices, [(93, "incomplete"), (93, "done")]);
+    assert_eq!(markers(&h).len(), 0);
+    assert_eq!(h.command_notices, [(93, "done")]);
 }
 
 #[test]
@@ -447,4 +454,44 @@ fn income_start_alone_with_no_limit_walks_chunks_up_to_now() {
     );
     let request = h.take("/income");
     assert!(request.url.contains("endTime="), "{}", request.url);
+}
+
+#[test]
+fn historical_fills_preserve_milliseconds_native_order_and_duplicate_ids() {
+    let mut h = harness();
+    start(
+        &mut h,
+        101,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(100),
+        },
+    );
+    let later = FILL
+        .replace("1700000000123", "1700000000987")
+        .replace("\"id\":1", "\"id\":2");
+    let request = h.take("/userTrades");
+    h.reply(request.id, 200, "", &format!("[{later},{FILL},{FILL}]"));
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(101).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["2", "1", "1"]
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["timestamp"].as_f64().unwrap())
+            .collect::<Vec<_>>(),
+        [1_700_000_000.987, 1_700_000_000.123, 1_700_000_000.123]
+    );
+    assert_eq!(
+        rows[0]["timestamp"].as_f64().unwrap() * 1000.0,
+        1_700_000_000_987.0
+    );
 }

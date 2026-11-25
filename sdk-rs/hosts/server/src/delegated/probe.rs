@@ -7,8 +7,23 @@ use std::time::Duration;
 // Server-only build output from the per-venue proof records.
 include!(concat!(env!("OUT_DIR"), "/cosigned_catalog.rs"));
 
-pub(crate) fn cosigned_ready(venue: &str) -> bool {
-    PRIVATE_STARTUP_VENUES.contains(&venue)
+#[path = "kraken_private_startup.rs"]
+mod kraken_private_startup;
+
+pub(crate) fn cosigned_ready(init: &crate::envelope::InitPayload) -> bool {
+    PRIVATE_STARTUP_VENUES.contains(&init.exchange_name.as_str())
+        && (init.exchange_name != "asterdex" || asterdex_v1_init(init))
+}
+
+pub(crate) fn asterdex_v1_init(init: &crate::envelope::InitPayload) -> bool {
+    let key = init.key.trim();
+    init.exchange_name == "asterdex"
+        && !key.starts_with("0x")
+        && !key.starts_with("0X")
+        && init
+            .application_id
+            .as_deref()
+            .is_none_or(|s| s.trim().is_empty())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,38 +70,14 @@ impl ProbeOutcome {
     }
 }
 
-/// Closed host-owned labels; no error text or client data can become a stage.
-#[derive(Clone, Copy, Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum RefusalStage {
-    Unverified,
-    PrivateRead,
-    PrivateStartup,
-    Options,
-    Authority,
-    Construction,
-    ProbeJoin,
-    ProbeClosed,
-    SignerSetup,
-    ProbeTimeout,
-    AccountAttach,
-    Authentication,
-    VenuePolicy,
-    PublicAccount,
-    SigningMode,
-    Capacity,
-    Permit,
-    MissingHandover,
-    HandoverAttempt,
-    HandoverOpen,
-    KeyOffer,
-}
+pub(crate) use crate::envelope::InitRefusalStage as RefusalStage;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
     pub transient: bool,
     pub unavailable: bool,
     pub transition: Option<crate::envelope::ModeTransitionRefusal>,
+    pub settings: Option<crate::accounts::SettingsConflict>,
     pub stage: RefusalStage,
     pub error_kind: Option<ErrorKind>,
     pub venue_code: Option<i64>,
@@ -96,6 +87,7 @@ impl ProbeRefusal {
         transient: false,
         unavailable: false,
         transition: None,
+        settings: None,
         stage: RefusalStage::Unverified,
         error_kind: None,
         venue_code: None,
@@ -108,6 +100,13 @@ impl ProbeRefusal {
         unavailable: true,
         ..Self::INVALID
     };
+
+    pub(crate) fn settings(settings: crate::accounts::SettingsConflict) -> Self {
+        Self {
+            settings: Some(settings),
+            ..Self::INVALID
+        }
+    }
 
     pub(crate) fn transition(reason: crate::envelope::ModeTransitionRefusal) -> Self {
         Self {
@@ -127,9 +126,20 @@ impl ProbeRefusal {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
             unavailable: false,
             transition: None,
+            settings: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),
             venue_code: None,
+        }
+    }
+}
+
+impl From<ProbeRefusal> for crate::envelope::InitRefusalMetadata {
+    fn from(refusal: ProbeRefusal) -> Self {
+        Self {
+            error_kind: refusal.error_kind,
+            venue_code: refusal.venue_code,
+            stage: (!matches!(refusal.stage, RefusalStage::Unverified)).then_some(refusal.stage),
         }
     }
 }
@@ -172,13 +182,22 @@ pub(crate) async fn run<T: Transport + 'static>(
     if !allowed() {
         return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority));
     }
-    let (handle, task) = safe_cex_native::spawn_venue_account(
-        venue,
-        options_json,
-        transport,
-        Some(provider),
-        config,
-    )
+    let private = (venue == "kraken").then(|| Arc::new(kraken_private_startup::Gate::default()));
+    let (handle, task) = if let Some(gate) = &private {
+        safe_cex_native::spawn_venue_account(
+            venue,
+            options_json,
+            kraken_private_startup::PrivateStartup {
+                inner: transport,
+                gate: gate.clone(),
+                allowed: allowed.clone(),
+            },
+            Some(provider),
+            config,
+        )
+    } else {
+        safe_cex_native::spawn_venue_account(venue, options_json, transport, Some(provider), config)
+    }
     .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
     let mut actor = ProbeActor { handle, task };
     let result = async {
@@ -203,9 +222,10 @@ pub(crate) async fn run<T: Transport + 'static>(
                         let loaded = store.loaded();
                         loaded.markets && loaded.balance && loaded.orders && loaded.positions
                     }).await;
+                    if !allowed() { return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority)); }
                     match loaded {
-                        Some(true) => return classify(Ok(())).into_result(),
-                        Some(false) => {},
+                        Some(true) if private.as_ref().is_none_or(|gate| gate.accepted()) => return classify(Ok(())).into_result(),
+                        Some(_) => {},
                         None => return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeClosed)),
                     }
                 }
@@ -267,6 +287,37 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cosigned_readiness_is_asterdex_v1_shape_scoped() {
+        assert!(cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "asterdex".into(),
+            key: "synthetic-key".into(),
+            ..Default::default()
+        }));
+        for &venue in PRIVATE_STARTUP_VENUES {
+            let mut init = crate::envelope::InitPayload {
+                exchange_name: venue.into(),
+                key: "synthetic-key".into(),
+                ..Default::default()
+            };
+            assert!(cosigned_ready(&init));
+            init.key = format!("0x{}", "1".repeat(40));
+            init.application_id = Some(format!("0x{}", "2".repeat(40)));
+            assert_eq!(cosigned_ready(&init), venue != "asterdex");
+        }
+        for key in [
+            format!("0X{}", "1".repeat(40)),
+            format!(" 0x{} ", "1".repeat(40)),
+        ] {
+            let init = crate::envelope::InitPayload {
+                exchange_name: "asterdex".into(),
+                key,
+                ..Default::default()
+            };
+            assert!(!cosigned_ready(&init));
+        }
+    }
     #[derive(Clone, Default)]
     struct Requests(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 

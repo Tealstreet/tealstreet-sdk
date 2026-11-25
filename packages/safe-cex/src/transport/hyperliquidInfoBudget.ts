@@ -19,7 +19,12 @@ const capacity = (readClass: InfoReadClass) =>
   readClass === 'critical' || readClass === 'reconciliation' ? 1000 : 800;
 type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass };
 let indexedDBOpenedInRealm = false;
+// c0705fca9 replaces d732927cb30's established-store blackout: local admission
+// spends twice the clock debt, halving burst and refill without weakening known pauses.
+const admissionCost = (weight: number, shared: boolean) =>
+  weight * MS_PER_WEIGHT * (!shared && indexedDBOpenedInRealm ? 2 : 1);
 type BudgetState = {
+  legacyInherited?: boolean;
   nextAt: number;
   pausedUntil: number;
   generation: number;
@@ -28,6 +33,7 @@ type BudgetState = {
 };
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
 const mergeState = (a: BudgetState, b: BudgetState): BudgetState => ({
+  legacyInherited: a.legacyInherited || b.legacyInherited,
   nextAt: Math.max(a.nextAt, b.nextAt),
   pausedUntil: Math.max(a.pausedUntil, b.pausedUntil),
   generation: Math.max(a.generation, b.generation),
@@ -51,6 +57,7 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
   const timestamp = (value: number | undefined, maximum: number) =>
     typeof value === 'number' && Number.isFinite(value) ? Math.max(now, Math.min(value, now + maximum)) : now;
   return {
+    legacyInherited: raw.legacyInherited === true || undefined,
     dispatchQueue: Array.isArray(raw.dispatchQueue)
       ? raw.dispatchQueue
           .filter(
@@ -287,18 +294,57 @@ const LIST_READS = new Set([
   'validatorStats',
 ]);
 
+const MINUTE_MS = 60_000;
+const DAY_MS = 1440 * MINUTE_MS;
+// Hyperliquid's 1M candle is a fixed, epoch-aligned 30-day bucket, not a calendar month.
+const CANDLE_STEP_MS = new Map([
+  ['1m', MINUTE_MS],
+  ['3m', 3 * MINUTE_MS],
+  ['5m', 5 * MINUTE_MS],
+  ['15m', 15 * MINUTE_MS],
+  ['30m', 30 * MINUTE_MS],
+  ['1h', 60 * MINUTE_MS],
+  ['2h', 120 * MINUTE_MS],
+  ['4h', 240 * MINUTE_MS],
+  ['8h', 480 * MINUTE_MS],
+  ['12h', 720 * MINUTE_MS],
+  ['1d', DAY_MS],
+  ['3d', 3 * DAY_MS],
+  ['1w', 7 * DAY_MS],
+  ['1M', 30 * DAY_MS],
+]);
+
+// A full reply was seen past 5,000 rows (5,182), so the cap is 6,000 rows: 120 weight.
+const MAX_CANDLE_ROWS = 6000;
+const MAX_CANDLE_WEIGHT = 20 + MAX_CANDLE_ROWS / 60;
+
+/**
+ * 20 plus one per 60 candles, from the span the body asks for: both boundary candles
+ * are returned, so at most ceil(span/step)+1. A flat 104 queued a chart's 330-bar reads
+ * ~15 s each (AGT-113); an unreadable body reserves the maximum.
+ */
+function candleSnapshotWeight(req: unknown): number {
+  const { interval, startTime, endTime } = (req ?? {}) as Record<string, unknown>;
+  const step = typeof interval === 'string' ? CANDLE_STEP_MS.get(interval) : undefined;
+  if (!step || typeof startTime !== 'number' || typeof endTime !== 'number') return MAX_CANDLE_WEIGHT;
+  const span = endTime - startTime;
+  if (!Number.isFinite(span) || span < 0) return MAX_CANDLE_WEIGHT;
+  return 20 + Math.ceil(Math.min(MAX_CANDLE_ROWS, Math.ceil(span / step) + 1) / 60);
+}
+
 export function hyperliquidInfoWeight(body: string | undefined): number {
-  let type: unknown;
+  let parsed: { type?: unknown; req?: unknown };
   try {
-    type = JSON.parse(body ?? '{}').type;
+    parsed = JSON.parse(body ?? '{}') ?? {};
   } catch {
     return 20;
   }
+  const type = parsed.type;
   if (type === 'userRole') return 60;
   if (typeof type === 'string' && LOW_WEIGHT.has(type)) return 2;
-  // Reserve the SDK's maximum 2,000-row history page or 5,000-candle reply before sending.
+  // Reserve the SDK's maximum 2,000-row history page before sending.
   if (typeof type === 'string' && LIST_READS.has(type)) return 120;
-  if (type === 'candleSnapshot') return 104;
+  if (type === 'candleSnapshot') return candleSnapshotWeight(parsed.req);
   return 20;
 }
 
@@ -337,9 +383,79 @@ export type InfoBudgetGrant = {
   cancelWait?: () => void;
 };
 
+// Only an existing deadline refusal inside admission gets this diagnostic label.
+const infoAdmissionFailure = (error: unknown): unknown =>
+  error instanceof HttpPreparationError && error.code === 'HTTP_PREPARATION_TIMED_OUT'
+    ? new HttpPreparationError('timedOut', 'info_admission')
+    : error;
+
+/** Resolve one public network budget, never an account or credential identity. */
+export function hyperliquidInfoBudgetKey(origin: string, endpoint?: string, tunnel = false): string {
+  if (!endpoint) return origin;
+  const route = new URL(endpoint);
+  let egress = `${tunnel ? 'tunnel' : 'proxy'}:${route.origin}`;
+  // Tokyo's HOW regions/ports and HTTP private fallback use the same private fleet;
+  // its public CORS path leaves from the tunnel hosts instead (09bc5a90a regression).
+  if (route.hostname === 'fsjnpy143pbz-tyo.tealstreet.io') {
+    if (
+      (tunnel && /^\/tunnel(?:-staging)?\/?$/.test(route.pathname)) ||
+      (!tunnel && /^\/api\/exchange_proxy\/?$/.test(route.pathname))
+    )
+      egress = 'fleet:private:tyo';
+    else if (!tunnel && /^\/api\/public_proxy\/?$/.test(route.pathname)) egress = 'fleet:public:tyo';
+  }
+  return `${origin}|egress=${egress}`;
+}
+
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
+  private readonly inherited = new Map<string, Promise<boolean>>();
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
+
+  private update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T> {
+    const boundary = key.indexOf('|egress=');
+    if (boundary < 0) return this.backend.update(key, change);
+    return this.updateInherited(key, key.slice(0, boundary), change);
+  }
+
+  private async updateInherited<T>(
+    key: string,
+    legacyKey: string,
+    change: (state: BudgetState, shared: boolean) => T,
+  ): Promise<T> {
+    for (;;) {
+      let inherited = this.inherited.get(key);
+      if (!inherited) {
+        // Memory inheritance is provisional: only a shared legacy read followed
+        // by a committed shared target write may retire migration (e0166af6c).
+        inherited = this.backend
+          .update(legacyKey, (state, shared) => ({ state: { ...state, dispatchQueue: [] }, shared }))
+          .then((legacy) =>
+            this.backend.update(key, (state, shared) => {
+              if (state.legacyInherited) return true;
+              const durable = legacy.shared && shared;
+              Object.assign(state, mergeState(state, legacy.state), { legacyInherited: durable || undefined });
+              return durable;
+            }),
+          );
+        this.inherited.set(key, inherited);
+      }
+      try {
+        if (!(await inherited) && this.inherited.get(key) === inherited) this.inherited.delete(key);
+      } catch (error) {
+        if (this.inherited.get(key) === inherited) this.inherited.delete(key);
+        throw error;
+      }
+      const result = await this.backend.update(key, (state, shared) => {
+        // Recovery can happen after the provisional migration transaction.
+        // Read legacy shared state before admitting on the recovered backend.
+        if (shared && !state.legacyInherited) return { retry: true } as const;
+        return { retry: false, value: change(state, shared) } as const;
+      });
+      if (!result.retry) return result.value;
+      if (this.inherited.get(key) === inherited) this.inherited.delete(key);
+    }
+  }
 
   async wait(
     origin: string,
@@ -348,6 +464,8 @@ export class HyperliquidInfoBudget {
     signal: AbortSignal,
     readClass: InfoReadClass = 'normal',
   ): Promise<InfoBudgetGrant> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
     let waiterId: string | undefined;
@@ -357,21 +475,19 @@ export class HyperliquidInfoBudget {
       cancelled = true;
       signal.removeEventListener('abort', cancelWait);
       if (waiterId)
-        void this.backend
-          .update(origin, (state) => {
-            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
-          })
-          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+        void this.update(origin, (state) => {
+          state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
+        }).catch(() => warnHyperliquidInfoBudgetUnavailable());
     };
     try {
       for (;;) {
         signal.throwIfAborted();
-        const grant = await this.backend.update(origin, (state) => {
+        const grant = await this.update(origin, (state, shared) => {
           signal.throwIfAborted();
           const now = Date.now();
           const at = Math.max(
             now,
-            state.nextAt + weight * MS_PER_WEIGHT - capacity(readClass) * MS_PER_WEIGHT,
+            state.nextAt + admissionCost(weight, shared) - capacity(readClass) * MS_PER_WEIGHT,
             state.pausedUntil,
           );
           if (at >= deadline) throw new HttpPreparationError('timedOut');
@@ -398,14 +514,14 @@ export class HyperliquidInfoBudget {
           continue;
         }
         signal.throwIfAborted();
-        const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
+        const current = await this.update(origin, (state) => state.generation === grant.generation);
         if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
         if (current)
           return { generation: grant.generation, weight, readClass, ...(waiterId ? { waiterId, cancelWait } : {}) };
       }
     } catch (error) {
       cancelWait();
-      throw error;
+      throw abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     }
   }
 
@@ -417,24 +533,29 @@ export class HyperliquidInfoBudget {
     send: () => T,
     wasSent: () => boolean = () => true,
   ): Promise<T> {
-    const cost = grant.weight * MS_PER_WEIGHT;
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
+    let cost = 0;
     const readClass = grant.readClass ?? 'normal';
     const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
     let charged = false;
     let dispatched = false;
+    let handoffStarted = false;
     const active = () => {
       signal.throwIfAborted();
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
     };
-    const retryStorageAt = () => Math.min(deadline, Date.now() + 1000);
     try {
       for (;;) {
-        const reservation = await this.backend.update(origin, (state, shared) => {
+        const reservation = await this.update(origin, (state, shared) => {
           active();
-          // Once this realm joined IDB, local-only sends could exceed the peers' budget.
-          if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
+          const reservationCost = admissionCost(grant.weight, shared);
           const now = Date.now();
-          const at = Math.max(now, state.nextAt + cost - capacity(readClass) * MS_PER_WEIGHT, state.pausedUntil);
+          const at = Math.max(
+            now,
+            state.nextAt + reservationCost - capacity(readClass) * MS_PER_WEIGHT,
+            state.pausedUntil,
+          );
           if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
           const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
           const existing = queue.find((row) => row.id === waiterId);
@@ -455,7 +576,8 @@ export class HyperliquidInfoBudget {
           state.dispatchQueue.sort((a, b) => rank(a.readClass) - rank(b.readClass));
           if (state.dispatchQueue[0]?.id !== waiterId) return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
-          state.nextAt = Math.max(now, state.nextAt) + cost;
+          state.nextAt = Math.max(now, state.nextAt) + reservationCost;
+          cost = reservationCost;
           state.dispatchQueue = state.dispatchQueue.filter((row) => row.id !== waiterId);
           return undefined;
         });
@@ -468,22 +590,32 @@ export class HyperliquidInfoBudget {
       for (;;) {
         let handoffCalled = false;
         const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
-          void this.backend
-            .update(origin, (state, shared) => {
-              if (handoffCalled) return;
-              active();
-              if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
-              if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
-                throw new HttpPreparationError('timedOut');
-              handoffCalled = true;
-              try {
-                resolve({ value: send() });
-              } catch (error) {
-                reject(error);
-              } finally {
-                dispatched = wasSent();
-              }
-            })
+          void this.update(origin, (state, shared) => {
+            if (handoffCalled) return;
+            active();
+            if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
+              throw new HttpPreparationError('timedOut');
+            // Storage can fail after the reservation: charge its degraded remainder
+            // before the same synchronous handoff, never replaying a physical send.
+            const extraCost = Math.max(0, admissionCost(grant.weight, shared) - cost);
+            if (extraCost) {
+              const now = Date.now();
+              const at = Math.max(now, state.nextAt + extraCost - capacity(readClass) * MS_PER_WEIGHT);
+              if (at >= deadline) throw new HttpPreparationError('timedOut');
+              if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
+              state.nextAt = Math.max(now, state.nextAt) + extraCost;
+              cost += extraCost;
+            }
+            handoffCalled = true;
+            try {
+              handoffStarted = true;
+              resolve({ value: send() });
+            } catch (error) {
+              reject(error);
+            } finally {
+              dispatched = wasSent();
+            }
+          })
             .then((waiting) => {
               if (!handoffCalled && waiting) resolve(waiting);
             })
@@ -495,24 +627,24 @@ export class HyperliquidInfoBudget {
         if ('value' in decision) return await decision.value;
         await waitUntil(decision.at, signal);
       }
+    } catch (error) {
+      throw handoffStarted || abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {
-        await this.backend
-          .update(origin, (state) => {
-            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
-            // A 429 replaced the old token generation; refunds cannot weaken that floor.
-            if (charged && state.generation === grant.generation)
-              state.nextAt = Math.max(Date.now(), state.nextAt - cost);
-          })
-          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+        await this.update(origin, (state) => {
+          state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
+          // A 429 replaced the old token generation; refunds cannot weaken that floor.
+          if (charged && state.generation === grant.generation)
+            state.nextAt = Math.max(Date.now(), state.nextAt - cost);
+        }).catch(() => warnHyperliquidInfoBudgetUnavailable());
       }
     }
   }
 
   async response(origin: string, status: number, headers: string): Promise<void> {
     if (status >= 200 && status < 300) {
-      await this.backend.update(origin, (state) => {
+      await this.update(origin, (state) => {
         if (Date.now() >= state.pausedUntil) state.failures = 0;
       });
       return;
@@ -527,7 +659,7 @@ export class HyperliquidInfoBudget {
       .trim();
     const seconds = value === undefined ? NaN : Number(value);
     const delay = seconds > 0 ? Math.min(seconds * 1000, MAX_PAUSE_MS) : value ? Date.parse(value) - Date.now() : NaN;
-    await this.backend.update(origin, (state) => {
+    await this.update(origin, (state) => {
       state.failures = Math.min((state.failures ?? 0) + 1, 5);
       const fallback = Math.min(60_000, 5000 * 2 ** (state.failures - 1));
       const pause = Number.isFinite(delay) && delay > 0 ? Math.min(delay, MAX_PAUSE_MS) : fallback;

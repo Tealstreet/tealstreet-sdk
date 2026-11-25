@@ -5,7 +5,7 @@ import type {
   TimerLatenessBucket,
 } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import type { EngineEvent, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineEvent, HttpPreparationStage, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
@@ -39,7 +39,11 @@ import { observeBybitPublicRateLimit } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
-import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import {
+  HyperliquidInfoBudget,
+  hyperliquidInfoBudgetKey,
+  warnHyperliquidInfoBudgetUnavailable,
+} from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
@@ -194,10 +198,10 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
   )
     return;
   if (!exchange || (!secondaryReadHeaders[exchange] && exchange !== 'cryptocom')) {
-    throw new Error('Rust engine secondary signing keys are unsupported for this venue');
+    throw new Error('Extra read-only API keys aren’t supported for this exchange');
   }
   if (!options.secondary_key || !options.secondary_secret) {
-    throw new Error('Rust engine secondary signing keys require a nonempty key and secret');
+    throw new Error('The extra API credentials need both a key and secret');
   }
   if (
     [
@@ -215,7 +219,7 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
     ].includes(exchange) &&
     !(options.secondary_passphrase ?? options.passphrase)
   ) {
-    throw new Error('Rust engine secondary signing keys require a passphrase');
+    throw new Error('The extra API credentials need a passphrase');
   }
 };
 
@@ -487,9 +491,9 @@ const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =
     );
   });
 
-/** Reports a relay or proxy-authorization failure once per streak; an accepted response ends it. */
+/** Reports HTTP preparation, relay or proxy-authorization failure once per streak; an accepted response ends it. */
 interface ProxyAuthorizationNotice {
-  failed(message: string): void;
+  failed(message: string, source?: 'catalogue_coordination'): void;
   accepted(): void;
 }
 
@@ -628,6 +632,11 @@ const httpTransport = (
   type Reroute = { abandon?: AbortSignal; rerouted?: { startedAt: number } };
   const prepare = async (request: Request, intent?: CredentialIntent, reroute: Reroute = {}): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
+    const note = (stage: HttpPreparationStage, route?: 'direct' | 'proxy' | 'tunnel') => {
+      try { request.onPreparationStage?.(stage, route); }
+      catch { /* Diagnostics cannot change preparation or admission. */ }
+    };
+    note('route_resolve');
     let proxyRoute: RestTransport | undefined;
     try {
       proxyRoute = tunnelProxyRoute(request, intent, reroute.rerouted !== undefined);
@@ -655,6 +664,7 @@ const httpTransport = (
     let preparation: Preparation | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let catalogueRead: CatalogueRead | undefined;
+    let preparationSource: 'catalogue_coordination' | undefined;
     let physicalRequest = false;
     const settleDeadline = (deadlineFired = false) => {
       if (
@@ -771,7 +781,20 @@ const httpTransport = (
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
+      const routeKind = tunnelAdapter ? 'tunnel' : route.proxied ? 'proxy' : 'direct';
+      note('route_resolve', routeKind);
       const target = route.baseURL ?? request.url;
+      const budgetKey = infoBudget
+        ? hyperliquidInfoBudgetKey(
+            original.origin,
+            tunnelAdapter
+              ? tunnelEgressUrl(routing.howEgress)
+              : target === request.url
+                ? undefined
+                : target.slice(0, -request.url.length),
+            Boolean(tunnelAdapter),
+          )
+        : original.origin;
       const publicProxy = provider.publicCorsProxy();
       const payloadSigned = payloadSignedViaPublicProxy(exchange, options);
       const testnet = options.testnet;
@@ -803,11 +826,14 @@ const httpTransport = (
       };
       aliasHeaders(config.headers, aliases);
       const before = AxiosHeaders.from(config.headers.toJSON());
-      if (route.proxied && route.authorize)
+      if (route.proxied && route.authorize) {
+        note('proxy_token');
         await untilAborted(
           withProxyTokenProvider(proxyTokenProvider, () => route.authorize!(config)),
           signal,
         );
+        note('route_resolve');
+      }
       signal.throwIfAborted();
       if (remaining() <= 0) throw timeoutError();
       if (
@@ -849,6 +875,7 @@ const httpTransport = (
         return untilAborted(promise, signal);
       };
       if (infoBudget) {
+        note('catalogue_wait');
         catalogueRead = await untilAborted(
           sharedHyperliquidCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs),
           signal,
@@ -865,23 +892,30 @@ const httpTransport = (
           !routeEndpoint ||
           !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
         ) {
-          catalogueRead = await untilAborted(
-            sharedBinanceCatalogue.prepare(
-              { ...request, intent },
+          try {
+            note('catalogue_wait');
+            catalogueRead = await untilAborted(
+              sharedBinanceCatalogue.prepare(
+                { ...request, intent },
+                signal,
+                started + deadlineMs,
+                {
+                  network: options.testnet ? 'testnet' : 'mainnet',
+                  route: tunnelAdapter
+                    ? `how:${routing.howEgress}:${routeEndpoint!.href}`
+                    : routeEndpoint
+                      ? `proxy:${routeEndpoint.href}`
+                      : 'direct',
+                },
+                () => !disposed,
+              ),
               signal,
-              started + deadlineMs,
-              {
-                network: options.testnet ? 'testnet' : 'mainnet',
-                route: tunnelAdapter
-                  ? `how:${routing.howEgress}:${routeEndpoint!.href}`
-                  : routeEndpoint
-                    ? `proxy:${routeEndpoint.href}`
-                    : 'direct',
-              },
-              () => !disposed,
-            ),
-            signal,
-          );
+            );
+          } catch (error) {
+            // Attribute the failed await, never a field supplied by the error.
+            preparationSource = 'catalogue_coordination';
+            throw error;
+          }
         }
       }
       const cached = catalogueRead?.cached;
@@ -894,6 +928,7 @@ const httpTransport = (
       if (cached) {
         prepared = { kind: 'cached', response: cached };
       } else if (tunnelAdapter) {
+        note('tunnel');
         const candidate: unknown = Reflect.get(tunnelAdapter, intent === undefined ? 'prepareLegacy' : 'prepare');
         const prepareTunnel = isTunnelPreparation(candidate) ? candidate : undefined;
         prepared = {
@@ -907,6 +942,7 @@ const httpTransport = (
         };
         if (!prepareTunnel && intent !== undefined) throw new HttpPreparationError('unsupported');
       } else {
+        note('transport_prepare');
         const prepareDirect = transport.prepareHttp;
         if (intent !== undefined && !prepareDirect) throw new HttpPreparationError('unsupported');
         prepared = {
@@ -940,10 +976,12 @@ const httpTransport = (
         const budget = infoBudget;
         const read = infoRead;
         if (!read) throw new HttpPreparationError('invalid');
+        note('budget_wait');
         const generation = await untilAborted(
-          read.wait(() => budget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
+          read.wait(() => budget.wait(budgetKey, request.body, started + deadlineMs, signal, request.readClass)),
           signal,
         );
+        note('transport_prepare');
         pendingAdmission = { budget, read, generation };
       }
       const admission = pendingAdmission;
@@ -1060,16 +1098,18 @@ const httpTransport = (
               if (sent || admitting) throw new HttpPreparationError('invalid');
             });
             admitting = true;
+            note('budget_wait');
             try {
               const result = await untilAborted(
                 admission.read.wait(() =>
                   admission.budget.admitDispatch(
-                    original.origin,
+                    budgetKey,
                     admission.generation,
                     started + deadlineMs,
                     signal,
                     () => {
                       active();
+                      note('transport_prepare');
                       admitted = true;
                       try {
                         return { value: handoff() };
@@ -1150,7 +1190,7 @@ const httpTransport = (
                         if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
                       };
                       const recorded = Promise.resolve()
-                        .then(() => infoBudget.response(original.origin, value.status, value.headers ?? ''))
+                        .then(() => infoBudget.response(budgetKey, value.status, value.headers ?? ''))
                         .catch(reportFailure);
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
@@ -1190,9 +1230,21 @@ const httpTransport = (
             : `[${exchange}] ${PROXY_AUTHORIZATION_MISSING}: ${reason}`,
         );
       }
-      // The relay never prepared it, and nobody called it off: the relay is down.
-      if (tunnelAdapter && (preparation?.kind === 'cached' || !preparation?.resource) && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
-        proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
+      // Catalogue coordination may refuse locally before the selected relay is asked to prepare.
+      if (
+        tunnelAdapter &&
+        (preparation?.kind === 'cached' || !preparation?.resource) &&
+        !disposed &&
+        !request.signal?.aborted &&
+        !reroute.abandon?.aborted
+      ) {
+        if (preparationSource === 'catalogue_coordination')
+          proxyAuthorization?.failed(
+            `[${exchange}] Local catalogue coordination failed; the public catalogue request was not sent`,
+            'catalogue_coordination',
+          );
+        else proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
+      }
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw timeoutError();
       throw error;
     }
@@ -1253,7 +1305,7 @@ export const createEngineTransport = (
   options: ExchangeOptions,
   transport: Transport,
   credentials?: { hasSecondary: boolean },
-  onProxyAuthorizationFailure?: (message: string) => void,
+  onProxyAuthorizationFailure?: (message: string, source?: 'catalogue_coordination') => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
   onHttpTiming?: (event: EngineEvent) => void,
@@ -1331,11 +1383,12 @@ export const createEngineTransport = (
   const fallbacks = new Map<string, WsDirectFallback>();
   let proxyAuthorizationFailing = false;
   const proxyAuthorization: ProxyAuthorizationNotice = {
-    failed: (message) => {
+    failed: (message, source) => {
       if (proxyAuthorizationFailing) return;
       proxyAuthorizationFailing = true;
       try {
-        onProxyAuthorizationFailure?.(message);
+        if (source) onProxyAuthorizationFailure?.(message, source);
+        else onProxyAuthorizationFailure?.(message);
       } catch {
         /* A reporting listener cannot fail the request. */
       }

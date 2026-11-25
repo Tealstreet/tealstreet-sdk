@@ -289,18 +289,18 @@ pub enum MarginType {
     Cross,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MinMax {
     pub min: f64,
     pub max: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Min {
     pub min: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Precision {
     pub amount: f64,
     pub price: f64,
@@ -315,7 +315,7 @@ impl Precision {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Limits {
     pub amount: MinMax,
     pub leverage: MinMax,
@@ -420,7 +420,7 @@ pub struct PredictionHolding {
     pub mergeable: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Market {
     pub id: String,
@@ -732,6 +732,39 @@ impl PlaceOrderOpts {
         ) && self.trigger_price.is_some()
             && self.trigger_price == self.price
     }
+
+    /// AGT-115: a stop-type, trigger or trailing entry carrying a non-zero attached
+    /// stop-loss or take-profit. An adapter that would place it without those legs
+    /// refuses it before any write with [`stop_entry_legs_refusal`].
+    pub fn stop_entry_with_attached_legs(&self) -> bool {
+        !matches!(self.kind, OrderType::Limit | OrderType::Market) && self.has_attached_legs()
+    }
+
+    /// AGT-120: an order that can only reduce the position (`reduceOnly` or `close`)
+    /// carrying a non-zero stop-loss or take-profit. Its legs would outlive the position
+    /// as stray reduce-only triggers, so the engine refuses it before any venue sees it.
+    pub fn reduce_only_with_attached_legs(&self) -> bool {
+        (self.reduce_only == Some(true) || self.close == Some(true)) && self.has_attached_legs()
+    }
+
+    fn has_attached_legs(&self) -> bool {
+        [self.stop_loss, self.take_profit]
+            .iter()
+            .any(|leg| leg.is_some_and(|price| price != 0.0))
+    }
+}
+
+/// AGT-120: one copy for every venue. Like [`stop_entry_legs_refusal`] it omits "nothing
+/// was sent": the outcome is `NotSent` and the app's placement toast already says so.
+pub const REDUCE_ONLY_LEGS_REFUSAL: &str = "A stop-loss or take-profit can't be attached to a reduce-only order. Place it as its own order.";
+
+/// One refusal copy for every venue that cannot attach legs to a stop entry (AGT-115).
+/// It omits "nothing was sent": the outcome is `NotSent`, and the app's placement
+/// toast already says the order was not sent and nothing was placed.
+pub fn stop_entry_legs_refusal(venue: &str) -> String {
+    format!(
+        "Attaching a stop-loss or take-profit to a stop entry isn't supported on {venue}. Place the stop-loss after the entry fills."
+    )
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
@@ -784,6 +817,77 @@ mod tests {
         assert_eq!(
             closes,
             inline.iter().map(|row| row.close).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn only_a_non_plain_entry_with_a_non_zero_leg_is_a_stop_entry_bracket() {
+        let order = |kind: &str, legs: &str| -> PlaceOrderOpts {
+            serde_json::from_str(&format!(
+                r#"{{"symbol":"X","type":"{kind}","side":"buy","amount":1{legs}}}"#
+            ))
+            .unwrap()
+        };
+        for kind in [
+            "conditional",
+            "stop_market",
+            "take_profit_market",
+            "trailing_stop_market",
+        ] {
+            for legs in [
+                r#","stopLoss":1"#,
+                r#","takeProfit":2"#,
+                r#","stopLoss":0,"takeProfit":2"#,
+            ] {
+                assert!(
+                    order(kind, legs).stop_entry_with_attached_legs(),
+                    "{kind}{legs}"
+                );
+            }
+            for legs in ["", r#","stopLoss":0"#, r#","stopLoss":null,"takeProfit":0"#] {
+                assert!(
+                    !order(kind, legs).stop_entry_with_attached_legs(),
+                    "{kind}{legs}"
+                );
+            }
+        }
+        for kind in ["limit", "market"] {
+            assert!(
+                !order(kind, r#","stopLoss":1,"takeProfit":2"#).stop_entry_with_attached_legs()
+            );
+        }
+        for (reduce, legs, expected) in [
+            (r#","reduceOnly":true"#, r#","stopLoss":1"#, true),
+            (r#","close":true"#, r#","takeProfit":2"#, true),
+            (
+                r#","reduceOnly":true"#,
+                r#","stopLoss":0,"takeProfit":2"#,
+                true,
+            ),
+            (r#","reduceOnly":true"#, "", false),
+            (
+                r#","reduceOnly":true"#,
+                r#","stopLoss":0,"takeProfit":null"#,
+                false,
+            ),
+            (
+                r#","reduceOnly":false,"close":false"#,
+                r#","stopLoss":1"#,
+                false,
+            ),
+            ("", r#","stopLoss":1,"takeProfit":2"#, false),
+        ] {
+            for kind in ["limit", "market", "stop_market"] {
+                assert_eq!(
+                    order(kind, &format!("{reduce}{legs}")).reduce_only_with_attached_legs(),
+                    expected,
+                    "{kind}{reduce}{legs}"
+                );
+            }
+        }
+        assert_eq!(
+            stop_entry_legs_refusal("OKX"),
+            "Attaching a stop-loss or take-profit to a stop entry isn't supported on OKX. Place the stop-loss after the entry fills."
         );
     }
 

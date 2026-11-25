@@ -24,7 +24,8 @@ const CANCEL_ALL: &str = "/lite/v1/cancel_all_orders";
 const GET: &str = "/lite/v1/order";
 const OPEN: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -401,7 +402,7 @@ impl Grvt {
             return Err("Incomplete GRVT cancellation acknowledgement".into());
         }
         let reply: CancellationReply<'_> = serde_json::from_str(response.body)
-            .map_err(|_| "Malformed GRVT cancellation acknowledgement")?;
+            .map_err(|_| "GRVT’s cancellation reply couldn’t be read")?;
         if let Ok(ack) = serde_json::from_str::<Ack<'_>>(reply.result.get()) {
             return if ack.ack.yes() {
                 Ok(())
@@ -477,8 +478,8 @@ impl Grvt {
         read: &mut CancelRead,
         item: &str,
     ) -> Result<(), String> {
-        let scoped: ScopedOrder<'_> =
-            serde_json::from_str(item).map_err(|_| "Malformed GRVT cancellation order scope")?;
+        let scoped: ScopedOrder<'_> = serde_json::from_str(item)
+            .map_err(|_| "GRVT’s cancellation reply didn’t identify the requested orders")?;
         if scoped.has_ack
             || scoped.account != read.account
             || scoped.error
@@ -540,7 +541,7 @@ impl Grvt {
             return Err("Incomplete GRVT cancellation snapshot or changed account".into());
         }
         let _: OpenSnapshot<'_> = serde_json::from_str(response.body)
-            .map_err(|_| "Incomplete or malformed GRVT cancellation snapshot")?;
+            .map_err(|_| "GRVT didn’t return complete order details for cancellation")?;
         if let Some(error) = &read.failed {
             return Err(error.clone());
         }
@@ -1545,7 +1546,7 @@ impl Grvt {
                                 error: Some(Box::new(error.clone())),
                             }
                         } else {
-                            error.venue_message = Some(error.message.clone().into_boxed_str());
+                            error.venue_message = Some(error.message.clone().into());
                             error.message = UNKNOWN_TEXT.into();
                             error.outcome = Some(Outcome::Unknown);
                             cx.event(
@@ -1675,7 +1676,7 @@ impl Grvt {
             } else {
                 safe_cex_engine::error::order_gone_text(&order.symbol, unknown)
             };
-            format!("{gone}: {message}")
+            safe_cex_engine::error::with_detail(&gone, &message)
         } else {
             message
         };
@@ -1725,9 +1726,9 @@ impl Grvt {
                 }
                 Effect::Place(order) => {
                     let reply: Reply<'_> = serde_json::from_str(response.body)
-                        .map_err(|_| "Malformed GRVT create response")?;
+                        .map_err(|_| "GRVT’s new-order reply couldn’t be read")?;
                     let created: Created<'_> = serde_json::from_str(reply.result.get())
-                        .map_err(|_| "Malformed GRVT create identity")?;
+                        .map_err(|_| "GRVT’s new-order reply didn’t identify the order")?;
                     if request
                         .plan
                         .protection
@@ -1818,7 +1819,7 @@ impl Grvt {
                 }
                 Effect::Leverage { symbol, leverage } => {
                     let success: Success<'_> = serde_json::from_str(response.body)
-                        .map_err(|_| "Malformed GRVT leverage response")?;
+                        .map_err(|_| "GRVT’s leverage reply couldn’t be read")?;
                     if !success.success.yes() {
                         return Err("GRVT leverage update was rejected".into());
                     }
@@ -1829,7 +1830,7 @@ impl Grvt {
                 Effect::Inspect(amend) => {
                     self.guard_amend(cx, &amend.target)?;
                     let raw: Reply<'_> = serde_json::from_str(response.body)
-                        .map_err(|_| "Malformed GRVT order lookup")?;
+                        .map_err(|_| "GRVT’s order details couldn’t be read")?;
                     let decoded = decode_order(raw.result.get(), cx.store, cx.now)?;
                     let source = &decoded.order;
                     if self
@@ -1972,7 +1973,7 @@ impl Grvt {
                 Effect::Verify(target) => {
                     self.guard_amend(cx, target)?;
                     let raw: Reply<'_> = serde_json::from_str(response.body)
-                        .map_err(|_| "Malformed GRVT cancellation confirmation")?;
+                        .map_err(|_| "GRVT didn’t confirm the requested cancellation")?;
                     let decoded = decode_order(raw.result.get(), cx.store, cx.now)?;
                     ensure_identity(
                         target,
@@ -2051,7 +2052,7 @@ struct Status<'a> {
 }
 fn require_ack(body: &str) -> Result<(), String> {
     let reply: Reply<'_> =
-        serde_json::from_str(body).map_err(|_| "Malformed GRVT cancellation acknowledgement")?;
+        serde_json::from_str(body).map_err(|_| "GRVT’s cancellation reply couldn’t be read")?;
     let ack: Ack<'_> = serde_json::from_str(reply.result.get())
         .map_err(|_| "Missing GRVT cancellation acknowledgement")?;
     if ack.ack.yes() {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { BackpackExchange } from '../reference/backpack/backpack.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions } from '../../types';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 
 const mapOrder = (overrides: Record<string, unknown>) => {
   const exchange = new BackpackExchange(
     'backpack',
     { key: 'public-key', secret: 'secret', testnet: false } as ExchangeOptions,
-    new DefaultStore(),
+    new FrameStore(),
   );
   return (exchange as any).mapOrder({
     id: 'order-1',
@@ -33,8 +33,8 @@ describe('Backpack reduce-only mapping audit regression', () => {
 
   it('uses the trigger heuristic only when the response omits reduceOnly', () => {
     expect(mapOrder({ orderType: 'Market', triggerPrice: '90', triggerQuantity: '1' }).reduceOnly).toBe(true);
-    expect(mapOrder({ orderType: 'Market', triggerPrice: '90', triggerQuantity: '1', reduceOnly: false }).reduceOnly).toBe(
-      false,
-    );
+    expect(
+      mapOrder({ orderType: 'Market', triggerPrice: '90', triggerQuantity: '1', reduceOnly: false }).reduceOnly,
+    ).toBe(false);
   });
 });

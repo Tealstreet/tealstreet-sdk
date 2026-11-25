@@ -1,3 +1,4 @@
+import calculateUpnlFromLast from './exchange-display-policy.json';
 import type { AnyTimeframe } from './types';
 
 import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
@@ -391,7 +392,7 @@ const BybitMetadata: ExchangeMetadata = {
   tvMaxGetBarFetches: 20,
   supportsClosedPnLEndpoint: true,
   supportsKlineSeconds: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.bybit,
   supportsTPSLCloseAttribute: false,
   latencyDomain: 'api.bybit.com',
   features: {
@@ -518,7 +519,7 @@ const BinanceMetadata: ExchangeMetadata = {
   supportsPositionMargin: true,
   tickInterval: 500,
   supportsTunnel: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.binance,
   supportsTPSLCloseAttribute: true,
   doesNotSupportOpenInterest: true,
   latencyDomain: 'fapi.binance.com',
@@ -580,7 +581,7 @@ const BinancePMMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross],
   // supportsReadOnlyKey: true,
   hideMarginTypeSelector: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.binancepm,
   doesNotSupportOpenInterest: true,
   latencyDomain: 'papi.binance.com',
   features: {
@@ -624,7 +625,7 @@ const BinanceOptionsMetadata: ExchangeMetadata = {
   supportsInfinityStops: false,
   supportsTunnel: false,
   supportsTPSLCloseAttribute: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.binanceoptions,
   features: {
     kline: true,
     orderbook: false,
@@ -661,9 +662,10 @@ const BitunixMetadata: ExchangeMetadata = {
   tvMaxGetBarFetches: 10,
   supportsReadOnlyKey: false,
   supportsWsRoute: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.bitunix,
   forceAccountPositionModeChangeOnExchangeItself: true,
   hideLightweightChartsPopovers: true,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   autoDownSizeReduceOrders: true,
   latencyDomain: 'fapi.bitunix.com',
@@ -714,7 +716,7 @@ const WeexMetadata: ExchangeMetadata = {
   marginTypeIsGlobal: false,
   leverageIsGlobal: false,
   supportsFeeRates: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.weex,
   doesNotSupportOpenInterest: true,
   latencyDomain: 'api-contract.weex.com',
   features: {
@@ -768,7 +770,7 @@ const MexcMetadata: ExchangeMetadata = {
   leverageIsGlobal: false,
   supportsFeeRates: true,
   fetchLeverageOnMarginSymbolChange: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.mexc,
   doesNotSupportOpenInterest: false,
   latencyDomain: 'api.mexc.com',
   features: {
@@ -868,7 +870,7 @@ const BackpackMetadata: ExchangeMetadata = {
   leverageSliderDisabled: false,
   supportsFeeRates: false,
   supportsReadOnlyKey: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.backpack,
   features: {
     kline: true,
     orderbook: true,
@@ -922,7 +924,7 @@ const BitgetMetadata: ExchangeMetadata = {
   // Classic entry presets have no documented selector or proven default.
   // Account/path-aware callers use getExchangeMetadata for selectable TP/SL.
   supportedTPSLTriggerTypes: [],
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.bitget,
   latencyDomain: 'api.bitget.com',
   features: {
     kline: true,
@@ -1021,7 +1023,7 @@ const CryptocomMetadata: ExchangeMetadata = {
   leverageSliderDisabled: false,
   supportsFeeRates: false,
   supportsReadOnlyKey: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.cryptocom,
   // Isolated positions require per-order isolation_id/ISOLATED_MARGIN wiring;
   // the legacy change-margin-type endpoint no longer exists in Exchange v1.
   hideMarginTypeSelector: true,
@@ -1203,7 +1205,7 @@ const BlofinMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsPartialStops: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.blofin,
   fetchLeverageOnMarginSymbolChange: true,
   latencyDomain: 'openapi.blofin.com',
   features: {
@@ -1542,7 +1544,8 @@ const HyperliquidMetadata: ExchangeMetadata = {
   autoDownSizeReduceOrders: true,
   forbidCors: true,
   supportsVault: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.hyperliquid,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.hyperliquid.xyz',
   fetchLeverageOnMarginSymbolChange: false, // Using bulk activeAssetData subscriptions instead
@@ -1590,6 +1593,7 @@ const HyperliquidSpotMetadata: ExchangeMetadata = {
   forbidCors: true,
   hideMarginTypeSelector: true,
   hidePositionModeSelector: true,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.hyperliquid.xyz',
   requiresTickersForMarketsLoaded: true,
@@ -1650,7 +1654,7 @@ const GrvtMetadata: ExchangeMetadata = {
   leverageSliderDisabled: false,
   supportsFeeRates: false,
   supportsReadOnlyKey: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.grvt,
   hideMarginTypeSelector: true,
   hidePositionModeSelector: true,
   tvMaxGetBarFetches: 10,
@@ -1866,7 +1870,7 @@ const KucoinMetadata: ExchangeMetadata = {
   tickInterval: 500,
   tvMaxGetBarFetches: 10,
   supportsReadOnlyKey: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.kucoin,
   forceAccountPositionModeChangeOnExchangeItself: true,
   hideLightweightChartsPopovers: true,
   enforceWsTunnel: true,
@@ -1897,7 +1901,7 @@ const KucoinSpotMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Isolated],
   hideMarginTypeSelector: true,
   hidePositionModeSelector: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.kucoinspot,
   forceAccountPositionModeChangeOnExchangeItself: false,
   doesNotSupportOpenInterest: true,
   latencyDomain: 'api.kucoin.com',
@@ -2022,7 +2026,7 @@ const ParadexMetadata: ExchangeMetadata = {
   tickInterval: 500,
   tvMaxGetBarFetches: 10,
   supportsReadOnlyKey: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.paradex,
   // Paradex is a decentralized exchange on Starknet
   supportsPartialStops: true,
   supportsInfinityStops: false, // Paradex requires explicit TP/SL sizes
@@ -2115,7 +2119,7 @@ const AsterDEXMetadata: ExchangeMetadata = {
   supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice, OrderStopTriggerType.LastPrice],
   defaultTPTriggerType: OrderStopTriggerType.MarkPrice,
   defaultSLTriggerType: OrderStopTriggerType.MarkPrice,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.asterdex,
   enforceWsTunnel: true,
   latencyDomain: 'fapi.asterdex.com',
   features: {
@@ -2174,7 +2178,7 @@ const PolymarketMetadata: ExchangeMetadata = {
   klineCallbackResetThreshold: 20,
   disconnectWarningThreshold: 20 * 1000,
   supportsFeeRates: false,
-  alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.polymarket,
   privateProxyIps: [], // No proxy needed for Polygon
   latencyDomain: 'clob.polymarket.com',
   features: {
@@ -2237,7 +2241,7 @@ const LighterMetadata: ExchangeMetadata = {
   // Keep warning signal less noisy for normal quiet periods.
   disconnectWarningThreshold: 60 * 1000,
   supportsFeeRates: true,
-  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: calculateUpnlFromLast.lighter,
   fetchOHLCVInWorker: true,
   features: {
     kline: true,

@@ -1407,7 +1407,7 @@ impl Kucoin {
                         error.message
                     )
                 } else {
-                    format!("{gone}: {}", error.message)
+                    safe_cex_engine::error::with_detail(&gone, &error.message)
                 };
             }
             cx.command_error(request.command, &error.message);

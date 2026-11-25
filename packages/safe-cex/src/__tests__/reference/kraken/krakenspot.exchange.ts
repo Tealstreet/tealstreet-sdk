@@ -1,9 +1,12 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import { customAlphabet } from 'nanoid';
+import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -27,7 +30,8 @@ import {
 } from '../../../types';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
-import { BaseExchange } from '../../../exchanges/base';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './krakenspot.api';
 import {
   ENDPOINTS,
@@ -56,7 +60,7 @@ export class KrakenSpotExchange extends BaseExchange {
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
@@ -70,12 +74,20 @@ export class KrakenSpotExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+      applyReferenceFixture(
+        this.store,
+        { markets, loaded: { markets: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
 
-      this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+      applyReferenceFixture(
+        this.store,
+        { tickers, loaded: { tickers: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // Start public WebSocket for live tickers and orderbook
       this.publicWebsocket = new KrakenSpotPublicWebsocket(this);
@@ -89,9 +101,13 @@ export class KrakenSpotExchange extends BaseExchange {
     }
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -145,7 +161,7 @@ export class KrakenSpotExchange extends BaseExchange {
           contractSize: 1,
           isSpot: true,
           isInverse: false,
-          info: { ...p, pairName }, // Store original pair name for REST API calls
+          info: { ...p, pairName }, // FrameStore original pair name for REST API calls
         });
       }
 
@@ -279,12 +295,33 @@ export class KrakenSpotExchange extends BaseExchange {
 
   fetchAndSetOrders = async (): Promise<Order[]> => {
     const orders = await this.fetchOrders();
-    this.store.addOrUpdateOrdersFull(orders);
-    this.store.update({ loaded: { ...this.store.loaded, orders: true } });
+    (() => {
+      const incoming: StoreData['orders'] = orders;
+      return applyReferenceFixture(
+        this.store,
+        { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
+    applyReferenceFixture(
+      this.store,
+      { loaded: { orders: true } },
+      this.store.markets.map((row) => row.symbol),
+    );
     return orders;
   };
 
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     try {
       const market = this.store.marketsBySymbol[opts.symbol];
@@ -574,7 +611,9 @@ export class KrakenSpotExchange extends BaseExchange {
       for (const [asset, info] of Object.entries(currencies)) {
         if (['USD', 'USDT', 'USDC'].includes(asset)) continue;
 
-        const market = this.store.markets.find((market) => market.base === asset && ['USD', 'USDT'].includes(market.quote));
+        const market = this.store.markets.find(
+          (market) => market.base === asset && ['USD', 'USDT'].includes(market.quote),
+        );
         const ticker = market ? this.store.tickersBySymbol[market.symbol] : undefined;
 
         if (ticker && ticker.last > 0) {
@@ -601,7 +640,11 @@ export class KrakenSpotExchange extends BaseExchange {
   refreshBalance = async () => {
     try {
       const balance = await this.fetchBalance();
-      this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+      applyReferenceFixture(
+        this.store,
+        { balance, loaded: { balance: true } },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (_e) {
       // Will retry on next tick
     }
@@ -623,7 +666,7 @@ export class KrakenSpotExchange extends BaseExchange {
         leverage: 1,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         marginType: 'isolated' as any,
         positionMode: PositionMode.OneWay,
         info: {},
@@ -638,7 +681,7 @@ export class KrakenSpotExchange extends BaseExchange {
         leverage: 1,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         marginType: 'isolated' as any,
         positionMode: PositionMode.OneWay,
         info: {},
@@ -709,16 +752,52 @@ export class KrakenSpotExchange extends BaseExchange {
         if (count === 0 || count % 20 === 0) {
           await Promise.all([
             this.fetchOrders().then((orders) => {
-              this.store.addOrUpdateOrdersFull(orders);
-              this.store.update({ loaded: { ...this.store.loaded, orders: true } });
+              (() => {
+                const incoming: StoreData['orders'] = orders;
+                return applyReferenceFixture(
+                  this.store,
+                  {
+                    orders: incoming.map((row) => ({
+                      ...this.store.orders.find((old) => old.id === row.id),
+                      ...row,
+                    })),
+                  },
+                  this.store.markets.map((row) => row.symbol),
+                );
+              })();
+              applyReferenceFixture(
+                this.store,
+                { loaded: { orders: true } },
+                this.store.markets.map((row) => row.symbol),
+              );
             }),
             this.fetchPositions().then((positions) => {
-              this.store.addOrUpdatePositionsFull(positions);
-              this.store.update({ loaded: { ...this.store.loaded, positions: true } });
+              (() => {
+                const incoming: StoreData['positions'] = positions;
+                return applyReferenceFixture(
+                  this.store,
+                  {
+                    positions: incoming.map((row) => ({
+                      ...this.store.positions.find((old) => old.id === row.id),
+                      ...row,
+                    })),
+                  },
+                  this.store.markets.map((row) => row.symbol),
+                );
+              })();
+              applyReferenceFixture(
+                this.store,
+                { loaded: { positions: true } },
+                this.store.markets.map((row) => row.symbol),
+              );
             }),
             this.fetchBalance().then((balance) => {
               if (balance) {
-                this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+                applyReferenceFixture(
+                  this.store,
+                  { balance, loaded: { balance: true } },
+                  this.store.markets.map((row) => row.symbol),
+                );
               }
             }),
           ]);

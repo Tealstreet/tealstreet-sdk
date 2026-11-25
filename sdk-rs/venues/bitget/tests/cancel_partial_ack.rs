@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! A batch cancel Bitget acknowledges for only some orders: the rest may still rest.
 mod support;
 use safe_cex_engine::Command;
@@ -55,5 +56,5 @@ fn a_partly_acknowledged_cancel_names_the_rest_and_reads_orders_again() {
     );
     let error = h.failures.last().expect("the cancel fails").legacy_text();
     assert!(error.contains("BTCUSDT sell limit 2"), "{error}");
-    assert!(error.contains("may still be open"), "{error}");
+    assert!(error.contains("didn’t confirm cancellation"), "{error}");
 }

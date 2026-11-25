@@ -1,6 +1,9 @@
 use super::*;
 use safe_cex_remote_signer::SignerLink;
 
+#[path = "hosted_first_connect.rs"]
+mod hosted_first_connect;
+
 // The image workflow runs `cargo test -p safe-cex-exchange-server` alone: its
 // tests compete at full intra-crate parallelism and can starve each other,
 // unlike Rust / native test, which spreads the load across the workspace run.
@@ -172,7 +175,18 @@ async fn cosigned_probe_deadline_refuses_and_releases_its_engine() {
     session.verification_completed(completion).await.unwrap();
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::with_instance_id(envelope::init_unverified("acct", true), "timed-proof")
+        envelope::with_instance_id(
+            envelope::init_unverified(
+                "acct",
+                true,
+                envelope::InitRefusalReasonClass::Unknown,
+                envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::ProbeTimeout),
+                    ..Default::default()
+                }
+            ),
+            "timed-proof"
+        )
     );
     assert!(!link.is_available());
     assert!(session.pending_verifications.is_empty());
@@ -288,7 +302,12 @@ impl Drop for Resident {
 }
 
 fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: Option<&str>) {
-    let raw = envelope::init_unverified("acct", false);
+    let raw = envelope::init_unverified(
+        "acct",
+        false,
+        envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        private_read_metadata(10003),
+    );
     let expected = id.filter(|s| !s.is_empty()).map_or_else(
         || raw.clone(),
         |id| envelope::with_instance_id(raw.clone(), id),
@@ -485,12 +504,11 @@ async fn cosigned_test_admission_does_not_start_unavailable_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    // Hyro and KuCoin Spot now prove joins; Hyperliquid Spot still requires possession proof.
-    request.exchange_name = "hyperliquidspot".into();
+    // AsterDEX V1 is proved; keep this no-IO control on its excluded wallet shape.
+    request.exchange_name = "asterdex".into();
+    request.application_id = Some("synthetic-main-wallet".into());
     assert!(crate::delegated::enabled(&request.exchange_name));
-    assert!(!crate::delegated::probe::cosigned_ready(
-        &request.exchange_name
-    ));
+    assert!(!crate::delegated::probe::cosigned_ready(&request));
     session.init(request).await.unwrap();
     unattached_after_refusal(
         &f,
@@ -801,3 +819,53 @@ async fn shared_admission_uses_a_probe_after_the_resume_window() {
 
 #[path = "cosigned_mode_transitions.rs"]
 mod mode_transitions;
+
+#[tokio::test]
+async fn init_unverified_native_cosigned_classification_reaches_registration() {
+    for (code, transient) in [
+        (10003, false),
+        (10004, false),
+        (10010, false),
+        (10006, true),
+    ] {
+        let f = fixture_with_auth(true).await;
+        f.code.store(code, Ordering::SeqCst);
+        let (mut session, mut sent) = candidate(&f, "alice");
+        let mut done = session.take_verified();
+        session
+            .init(init(Some("metadata-registration")))
+            .await
+            .unwrap();
+        let mut device = Device::default();
+        let result = complete(
+            &mut session,
+            &mut sent,
+            &mut done,
+            &mut device,
+            Answer::Correct,
+            Some("metadata-registration"),
+        )
+        .await;
+        session.verification_completed(result).await.unwrap();
+        let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        let expected: Value = serde_json::from_str(&envelope::with_instance_id(
+            envelope::init_unverified(
+                "acct",
+                transient,
+                envelope::InitRefusalReasonClass::from_error(
+                    "bybit",
+                    private_read_metadata(code as i64).error_kind,
+                    Some(code as i64),
+                ),
+                private_read_metadata(code as i64),
+            ),
+            "metadata-registration",
+        ))
+        .unwrap();
+        assert_eq!(frame, expected);
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+        assert!(f.private_reads.load(Ordering::SeqCst) > 0);
+        assert!(session.joined.is_empty());
+        session.close();
+    }
+}

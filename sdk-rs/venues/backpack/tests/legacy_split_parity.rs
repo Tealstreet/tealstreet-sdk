@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
@@ -76,7 +77,8 @@ fn failure(out: &[Action]) -> Result<&VenueError> {
         .ok_or_else(|| "missing reporting-only terminal".into())
 }
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/__tests__/reference/backpack/backpack.exchange.ts:991-1025,1072-1079,1207-1229.
 fn unknown_stop(path: &str) -> Result {

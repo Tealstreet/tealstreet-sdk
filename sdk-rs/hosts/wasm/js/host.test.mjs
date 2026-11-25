@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
@@ -14,7 +15,7 @@ test('capabilities are read from the engine once and outlive disposal', () => {
   assert.equal(reads, 1);
   const disposed = new EngineHost({ capabilities: () => '{}' }, {});
   disposed.dispose();
-  assert.throws(() => disposed.capabilities(), /disposed/);
+  assert.throws(() => disposed.capabilities(), /The account was closed/);
 });
 
 for (const entry of ['legacy', 'actions', 'bytes']) {
@@ -413,7 +414,8 @@ test('synchronous transport errors release their request controller', async () =
   });
   host.execute({ op: 'http', request: 1, method: 'POST', url: 'https://example.test/order', headers: [] });
   await new Promise(setImmediate);
-  assert.deepEqual(failures, ['HTTP transport request failed']);
+  // Unrecognized provider text stays opaque; only the closed unknown label survives.
+  assert.deepEqual(failures, ['HTTP transport request failed (cause: unknown)']);
   assert.equal(host.requests.size, 0);
   host.dispose();
 });
@@ -479,7 +481,7 @@ test('already queued timers cannot enter the engine after disposal', () => {
   for (const callback of callbacks) callback();
   host.start();
   host.flush();
-  assert.throws(() => host.snapshot(), /disposed/);
+  assert.throws(() => host.snapshot(), /The account was closed/);
   assert.equal(calls, 0);
 });
 
@@ -534,7 +536,7 @@ test('health counters are parsed from the engine and unavailable after disposal'
   assert.deepEqual(host.health(), { wsOpened: 2, httpFailures: 1 });
   assert.equal(new EngineHost({}, {}).health(), undefined);
   host.dispose();
-  assert.throws(() => host.health(), /engine disposed/);
+  assert.throws(() => host.health(), /The account was closed/);
 });
 
 test('a terminal startup failure reaches the host with its structured detail', () => {
@@ -653,7 +655,8 @@ for (const failure of ['synchronous request', 'asynchronous request', 'response 
         })() });
       },
     }, { onLog: (_level, text) => logs.push(text) });
-    const expected = failure === 'response body' ? 'HTTP response body failed' : 'HTTP transport request failed';
+    // Request diagnostics now name the closed unknown fallback, never provider text.
+    const expected = failure === 'response body' ? 'HTTP response body failed' : 'HTTP transport request failed (cause: unknown)';
     await assert.rejects(host.command({ op: 'placeOrders', orders: [] }), (error) => error.message === expected);
     assert.deepEqual(delivered, [expected]);
     assert.deepEqual(logs, [expected]);

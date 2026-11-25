@@ -1,18 +1,59 @@
+export type HistoryFailureDetail = {
+  readonly operation: 'bybitClosedPnl' | 'bybitOrders' | 'bybitFills' | 'bybitIncome' | 'bybitTrades';
+  readonly kind: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' |
+    'authPermission' | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  readonly venueCode?: '10000' | '10001' | '10002' | '10003' | '10004' | '10005' | '10006' | '10010' |
+    '10016' | '10018' | '10024' | '10027' | '10028' | '10029' | '100028' | '33004' | '429' | 'other';
+};
+export function historyFailureOf(value: unknown): HistoryFailureDetail | undefined;
+
 /** Runs a WasmEngine against a transport. See host.mjs. */
-import type { EngineCapabilities } from './wire.mjs';
+import type { EngineCapabilities } from './capabilities.mjs';
 
 export type { EngineCapabilities };
 export type HistoryDecodeDetail = {
   schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
-    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
+    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome'
+    | 'bingxIncome' | 'bingxOrders';
   reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
     | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics'
     | 'quantityNegative' | 'quantityZero' | 'filledQuantityNegative' | 'filledQuantityExceedsQuantity'
-    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal';
+    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal'
+    | 'fieldType' | 'fieldValue' | 'envelopeShape' | 'envelopeCode' | 'dataShape';
+  shape?: {
+    field: 'root' | 'code' | 'msg' | 'data' | 'data.orders' | 'row' | 'row.symbol' | 'row.incomeType'
+      | 'row.income' | 'row.asset' | 'row.time' | 'row.tranId' | 'row.tradeId' | 'row.orderId'
+      | 'row.side' | 'row.type' | 'row.status' | 'row.price' | 'row.avgPrice' | 'row.origQty'
+      | 'row.executedQty' | 'row.reduceOnly' | 'row.positionSide' | 'row.updateTime';
+    expected: 'object' | 'array' | 'integer' | 'string' | 'numberOrNumericString' | 'stringOrInteger'
+      | 'booleanOrStringOrNull' | 'stringOrNull' | 'stringOrIntegerOrNull' | 'arrayOrObject';
+    actual: 'missing' | 'invalidJson' | 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+    envelopeCode: 'present' | 'absent' | 'unavailable';
+  };
 };
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
+export interface BingxWriteShapeDetail {
+  endpointFamily: 'order' | 'amend' | 'cancelReplace' | 'cancelAll';
+  method: 'DELETE' | 'POST';
+  parameterNames: Array<'cancelClientOrderId' | 'cancelOrderId' | 'cancelReplaceMode' | 'cancelRestrictions'
+    | 'clientOrderId' | 'closePosition' | 'orderId' | 'positionId' | 'positionSide' | 'price'
+    | 'priceProtect' | 'quantity' | 'reduceOnly' | 'side' | 'signature' | 'stopGuaranteed'
+    | 'stopPrice' | 'symbol' | 'timeInForce' | 'timestamp' | 'type' | 'workingType'>;
+  hasOtherParameters: boolean;
+  idClass: 'numeric' | 'other' | 'missing';
+  /** 64 means 64 or more digits; other/missing identities use zero. */
+  idDigits: number;
+  targetKind: 'limit' | 'takeProfit' | 'stopLoss' | 'trigger' | 'attached' | 'trailing' | 'other' | 'unavailable' | 'multiple';
+  symbolFormat: 'hyphenated' | 'compact' | 'other' | 'missing';
+  replacement: 'observed' | 'unobserved' | 'notApplicable';
+}
+export function bingxWriteShapeOf(value: unknown): BingxWriteShapeDetail | undefined;
+export function bingxWriteShapeFromError(value: unknown): BingxWriteShapeDetail | undefined;
+
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
+/** Closed caller write names only; never a payload, URL or native endpoint inference. */
+export function writeCommandOf(value: unknown): string | undefined;
 
 export interface Socket {
   send(text: string): void;
@@ -28,7 +69,8 @@ export interface HttpResponse {
 
 export class HttpPreparationError extends Error {
   readonly code: string;
-  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+  readonly cause?: 'info_admission';
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', cause?: 'info_admission');
 }
 
 export interface HttpPacket {
@@ -45,7 +87,11 @@ export interface HttpPacket {
   /** Native admission hint; never sent as an HTTP header or payload field. */
   readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
+  /** Host-only observation; never serialized or used for admission authority. */
+  onPreparationStage?(stage: HttpPreparationStage, route?: 'direct' | 'proxy' | 'tunnel'): void;
 }
+export type HttpPreparationStage = 'route_resolve' | 'proxy_token' | 'tunnel' | 'transport_prepare' | 'catalogue_wait' | 'budget_wait';
+
 export interface PreparedHttp {
   /** Optional absolute engine raw time. */
   expiresAt?: number;
@@ -104,6 +150,7 @@ export interface VenueErrorDetail {
   outcome?: 'notSent' | 'rejected' | 'unknown';
   causeCode?: string;
   historyDecode?: HistoryDecodeDetail;
+  bingxWriteShape?: BingxWriteShapeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -212,6 +259,7 @@ export interface CommandIdentity {
 
 /** A classified venue failure built from the engine's `detail`; `message` is unchanged venue text. */
 export class ExchangeError extends Error {
+  readonly command?: string;
   readonly code?: 'GRVT_BUILDER_UNAUTHORIZED';
   readonly reason?: BuilderAuthorizationDetail['reason'];
   readonly requiredRaw?: number;
@@ -222,6 +270,7 @@ export class ExchangeError extends Error {
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
   readonly causeCode?: string;
   readonly historyDecode?: HistoryDecodeDetail;
+  readonly bingxWriteShape?: BingxWriteShapeDetail;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;
@@ -533,7 +582,7 @@ export interface WasmEngineLike {
   httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
-  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
+  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'infoAdmissionTimedOut' | 'stale' | 'invalid' | 'network', now: number): string;
   /** Scalar status only: never drain work before the synchronous handoff. */
   httpClaim?(permit: string, now: number): string;
   httpGroupPending?(permit: string): boolean;

@@ -237,3 +237,57 @@ fn classic_preset_reads_use_returned_trigger_fields_and_never_invent_a_default()
         }
     }
 }
+
+// AGT-115, live on Bitget 2026-11-21: a stop_market with legs placed only the position
+// stop. Stop, take-profit and trailing payloads never carry legs, so on every product a
+// bracketed one refuses the whole command before any I/O, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_io() {
+    let stop_refusal = stop_entry_legs_refusal("Bitget");
+    // AGT-120: a reduce-only one is refused by the engine first, with its own copy.
+    for reduce in [false, true] {
+        let refusal = if reduce {
+            safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.to_owned()
+        } else {
+            stop_refusal.clone()
+        };
+        for (product, uta) in [
+            (Product::Usdt, false),
+            (Product::Usdt, true),
+            (Product::Usdc, false),
+            (Product::Usdc, true),
+            (Product::Inverse, false),
+        ] {
+            for kind in ["stop_market", "take_profit_market", "trailing_stop_market"] {
+                for legs in [
+                    json!({"stopLoss":80}),
+                    json!({"takeProfit":110}),
+                    json!({"stopLoss":0,"takeProfit":110}),
+                ] {
+                    let mut h = ready(product, uta);
+                    let symbol = h.engine.store().markets()[0].symbol.clone();
+                    let mut stop = json!({"symbol":symbol,"type":kind,"side":"sell","amount":0.01,"price":85,"reduceOnly":reduce});
+                    for (k, v) in legs.as_object().unwrap() {
+                        stop[k] = v.clone();
+                    }
+                    let plain = json!({"symbol":symbol,"type":"limit","side":"buy","amount":0.01,"price":90});
+                    h.command(Command::PlaceOrders {
+                        command: 501,
+                        orders: vec![
+                            serde_json::from_value(plain).unwrap(),
+                            serde_json::from_value(stop).unwrap(),
+                        ],
+                    });
+                    assert!(h.requests.is_empty(), "{product:?} {uta} {kind} {legs}");
+                    let error = h.failures.last().expect("refused before send");
+                    assert_eq!(
+                        error.legacy_text(),
+                        refusal,
+                        "{product:?} {uta} {kind} {legs}"
+                    );
+                    assert_eq!(error.outcome, Some(Outcome::NotSent));
+                }
+            }
+        }
+    }
+}

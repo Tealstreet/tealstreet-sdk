@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Drive actual preparation and claim boundaries; no immediate fixture claim.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Preparation, Prepared};
@@ -395,6 +399,7 @@ fn old_subscription_response_within_deadline_cannot_publish_to_new_subscriber() 
             })
             .unwrap();
         engine.take_frame(NOW + 122_000.);
+        let before_stats = engine.snapshot_frame(NOW).to_vec();
         if failed {
             engine.handle(
                 NOW + 122_001.,
@@ -406,7 +411,16 @@ fn old_subscription_response_within_deadline_cannot_publish_to_new_subscriber() 
         } else {
             reply_at(&mut engine, NOW + 122_001., &old_request, 200, CANDLES);
         }
-        assert!(engine.take_frame(NOW + 122_001.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            engine.take_frame(NOW + 122_001.),
+            NOW + 122_001.,
+            if failed {
+                [0, 0, 0, 1, 0]
+            } else {
+                [1, 0, 0, 0, 0]
+            },
+        );
         engine.drain_actions().for_each(drop);
         // Resubscription gets its own full quiet interval before another fallback.
         engine.handle(NOW + 240_004., Event::TimerFired { timer: poll });
@@ -479,7 +493,10 @@ fn command_entry_capacity_is_typed_before_native_validation_and_preserves_peers(
                 let error = result[0].as_ref().unwrap_err();
                 assert_eq!(error.kind, Some(ErrorKind::Internal));
                 assert_eq!(error.outcome, None, "Read refusal has no financial outcome");
-                assert_eq!(error.message, "Engine request capacity reached");
+                assert_eq!(
+                    error.message,
+                    "The account’s request queue is full. Try again shortly."
+                );
                 assert_eq!(
                     actions.len(),
                     1,
@@ -535,7 +552,7 @@ fn invalid_command_entry_clock_has_one_typed_read_refusal_and_no_owner() {
         let error = result[0].as_ref().unwrap_err();
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
         assert_eq!(error.outcome, None);
-        assert_eq!(error.message, "Invalid request context");
+        assert_eq!(error.message, "This request couldn’t be prepared");
         assert_eq!(actions.len(), 1, "invalid entry allocates no HTTP or timer");
         fetch(&mut engine, NOW + 1., 701);
         preparation(&engine.drain_actions().collect::<Vec<_>>());

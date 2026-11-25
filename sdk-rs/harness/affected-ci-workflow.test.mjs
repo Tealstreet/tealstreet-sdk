@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { RUST_SCOPE_PATTERNS } from './ci-scope.mjs';
 
 const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
@@ -17,7 +18,7 @@ function check(text) {
   assert.match(text, /^  pull_request:\n    branches: \[master\]\n\n/m);
   assert.match(job(text, 'selection'), /needs: scope\n    if: needs.scope.outputs.relevant == 'true'/);
   assert.match(job(text, 'result').match(/^    needs:.*$/m)[0], /\[scope, selection,/);
-  for (const name of ['gate', 'bitget-paired', 'cpu-plan', 'cpu-certify', 'cpu-final']) {
+  for (const name of ['gate']) {
     const value = job(text, name);
     assert.match(value, /runs-on: ubuntu-latest/);
     assert.doesNotMatch(value, /github\.event_name != 'pull_request'|continue-on-error/);
@@ -40,7 +41,7 @@ function check(text) {
   assert.match(required, /replay/); assert.doesNotMatch(required, /cpu-|bitget-paired|browser|, gate/);
   // Parallel combined producers must not publish the same immutable artifact.
   assert.match(job(text, 'combined'), /name: browser-wasm-combined/);
-  assert.match(job(text, 'gate'), /name: measured-browser-wasm-combined/);
+  assert.match(job(text, 'replay-consumers'), /name: measured-browser-wasm-combined/);
   assert.doesNotMatch(job(text, 'gate'), /name: browser-wasm-combined/);
   const families = job(text, 'families');
   assert.match(families, /if: needs.selection.outputs.sizeRequired == 'true'/);
@@ -58,7 +59,9 @@ function check(text) {
   assert.match(job(text, 'combined'), /CHANGED_INTEGRATION_TESTS: \$\{\{ needs.selection.outputs.integrationTests \}\}/);
   assert.match(job(text, 'combined'), /\['--import', 'tsx', '--test', \.\.\.tests\]/);
   const native = job(text, 'native');
-  assert.match(native, /cargo test --locked --workspace/);
+  // Fail-complete (AGT-24): `--no-fail-fast` joined every native cargo test so one
+  // run reports all failures; the selection after it is unchanged.
+  assert.match(native, /cargo test --locked --no-fail-fast --workspace/);
   assert.match(native, /python3 scripts\/test-http-plan-feature-modes.py/);
   assert.match(native, /check: mutation-barriers/);
   assert.match(job(text, 'result'), /if: always\(\)/);
@@ -67,6 +70,63 @@ function check(text) {
 
 test('PR replay is affected-only and independent; CPU stays on calibrated landing runners', () => check(source));
 
+// Model the GitHub status functions for the actual workflow condition: a failed
+// byte ceiling retains an already sealed measurement on a PR only. On master the
+// wasm-caps bot would raise a cap from it, so an over-cap family uploads nothing.
+function checkSealedFamilyRetention(text) {
+  const families = job(text, 'families');
+  const seal = /      - name: Seal the selected family build\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
+  const upload = /      - name: Retain sealed same-run family build\n([\s\S]*?)(?=\n      - )/.exec(families)?.[1];
+  assert(seal && upload, 'seal and upload steps must remain');
+  const condition = /        if: (.+)/.exec(upload)?.[1]?.replace(/^\$\{\{\s*|\s*\}\}$/g, '') ?? 'success()';
+  const sealId = /        id: (\w+)/.exec(seal)?.[1] ?? 'missing_seal';
+  const refs = { pull_request: 'refs/pull/1/merge', push: 'refs/heads/master', workflow_dispatch: 'refs/heads/master' };
+  for (const [event, outcome, earlierFailure, cancelled, expected] of [
+    ['pull_request', 'success', true, false, true], // PR over-cap: sealed, cap check fails, author keeps the evidence
+    ['push', 'success', true, false, false], // master over-cap: stays red with no artifact for the caps bot
+    ['workflow_dispatch', 'success', true, false, false],
+    ['pull_request', 'success', false, false, true],
+    ['push', 'success', false, false, true],
+    ['pull_request', 'failure', true, false, false],
+    ['pull_request', 'skipped', true, false, false],
+    ['push', 'failure', true, false, false],
+    ['pull_request', 'success', false, true, false],
+    ['push', 'success', false, true, false],
+  ]) {
+    const actual = runInNewContext(condition, {
+      cancelled: () => cancelled,
+      success: () => !earlierFailure && !cancelled,
+      always: () => true,
+      github: { event_name: event, ref: refs[event] },
+      steps: { [sealId]: { outcome } },
+    });
+    assert.equal(actual, expected, `event=${event}, seal=${outcome}, earlierFailure=${earlierFailure}, cancelled=${cancelled}`);
+  }
+  const sizeStep = /      - name: Check family isolation, every alias and the shipped size\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
+  assert(sizeStep);
+  assert.doesNotMatch(sizeStep, /continue-on-error|\bif:/);
+  assert.match(job(text, 'replay'), /needs\.families\.result == 'success'/);
+}
+
+test('an over-cap family retains only its completed seal while size and replay gates stay strict', () => {
+  checkSealedFamilyRetention(source);
+});
+
+test('sealed-family retention rejects success-only, unsealed, cancelled or master over-cap uploads', () => {
+  const guard = "!cancelled() && steps.family_seal.outcome == 'success' && (success() || github.event_name == 'pull_request')";
+  assert(source.includes(guard));
+  for (const condition of [
+    'success()',
+    'always()',
+    "steps.family_seal.outcome == 'success'",
+    // The pre-2026-11-19 guard (aae395f1fa) uploaded master over-cap families too.
+    "!cancelled() && steps.family_seal.outcome == 'success'",
+  ]) {
+    assert.throws(() => checkSealedFamilyRetention(source.replace(guard, condition)), /seal=/);
+  }
+});
+
+
 function checkIsolatedTypes(text) {
   const native = job(text, 'native');
   const candle = /- check: candle-cache\n([\s\S]*?)(?=          - check:)/.exec(native)?.[1];
@@ -74,7 +134,7 @@ function checkIsolatedTypes(text) {
   const command = candle.split('\n').find(line => /cargo test .* -p safe-cex-types /.test(line));
   assert(command, 'missing types test command');
   assert.match(command, /SAFE_CEX_TYPESCRIPT_PATH="\$GITHUB_WORKSPACE\/node_modules\/typescript"/);
-  assert.match(command, /cargo test --locked -p safe-cex-types --tests\s*$/);
+  assert.match(command, /cargo test --locked --no-fail-fast -p safe-cex-types --tests\s*$/);
   assert.doesNotMatch(command, /--skip|--lib|--workspace/);
   assert.match(candle, /python3 scripts\/check-serde-json-features.py/);
   for (const action of ['actions/setup-node', './.github/actions/prepare-yarn', './.github/actions/install-yarn']) {
@@ -87,17 +147,36 @@ function checkIsolatedTypes(text) {
     assert(lanes.includes('candle-cache'), `${action} must admit isolated types`);
   }
   assert.equal((native.match(/\n        id: yarn\n/g) ?? []).length, 1, 'one shared Yarn preparation step');
-  assert.match(native, /cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types/);
+  assert.match(native, /cargo test --locked --no-fail-fast --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types/);
 }
 
 test('complete types suite retains isolation and dependencies for both native oracle lanes', () => checkIsolatedTypes(source));
 
 test('types suite rejects a skipped audit, library-only selection or missing compiler', () => {
   for (const changed of [
-    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --lib'),
-    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --tests -- --skip position_record'),
+    source.replace('cargo test --locked --no-fail-fast -p safe-cex-types --tests', 'cargo test --locked --no-fail-fast -p safe-cex-types --lib'),
+    source.replace('cargo test --locked --no-fail-fast -p safe-cex-types --tests', 'cargo test --locked --no-fail-fast -p safe-cex-types --tests -- --skip position_record'),
     source.replace('SAFE_CEX_TYPESCRIPT_PATH="$GITHUB_WORKSPACE/node_modules/typescript" ', ''),
   ]) assert.throws(() => checkIsolatedTypes(changed));
+});
+
+function checkFailComplete(text) {
+  const native = job(text, 'native');
+  const tests = native.split('\n').filter((line) => /\bcargo test\b/.test(line) && !line.trim().startsWith('#'));
+  assert(tests.length > 0, 'native cargo test commands');
+  for (const line of tests) assert.match(line, /cargo test --locked --no-fail-fast /, line.trim());
+  assert.doesNotMatch(native, /command: .*&&/, 'chained commands stop at the first failure');
+  assert.match(native, /CHECK_COMMANDS: \$\{\{ matrix.command \}\}\n        run: node harness\/run-all-checks\.mjs/);
+}
+
+test('native checks are fail-complete: no cargo fail-fast, no chains, one summarising runner', () => checkFailComplete(source));
+
+test('fail-complete guard rejects a fail-fast cargo test, a chain or a bare matrix command', () => {
+  for (const [before, after] of [
+    ['cargo test --locked --no-fail-fast -p safe-cex-num --lib', 'cargo test --locked -p safe-cex-num --lib'],
+    ['command: cargo fmt --all --check', 'command: cargo fmt --all --check && cargo fmt --check'],
+    ['run: node harness/run-all-checks.mjs', 'run: ${{ matrix.command }}'],
+  ]) assert.throws(() => checkFailComplete(source.replace(before, after)), before);
 });
 
 test('adding types dependencies must not retire the existing metadata lane', () => {

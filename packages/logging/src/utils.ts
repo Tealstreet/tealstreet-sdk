@@ -1,7 +1,9 @@
+import { getDefaultStore } from 'jotai';
 import { nanoid } from 'nanoid';
 
 import { compress } from '@tealstreet/utils/src/compression';
 import { LogSeverity } from './LogSeverity';
+import { logAtom } from './logAtom';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -80,6 +82,32 @@ let logIngestTokenRequest: { userId: string; epoch: number; promise: Promise<Log
 let logIngestTokenEpoch = 0;
 
 const LOG_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+/** A 429 (the Worker's per-subject limit, or Loki's) pauses this owner's uploads, not drops them. */
+export const RATE_LIMIT_COOLDOWN_MS = 60_000;
+let rateLimitedUntil: (LoggingOwner & { until: number }) | undefined;
+let rateLimitResume: ReturnType<typeof setTimeout> | undefined;
+
+const clearRateLimit = () => {
+  rateLimitedUntil = undefined;
+  if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
+  rateLimitResume = undefined;
+};
+
+// Re-arms when it fires early (timers may), so the held batch never waits for an unrelated flush.
+// unref: safe-cex runs this in Node/Bun, where a pending pause must not keep the process alive.
+const scheduleRateLimitResume = (delayMs: number) => {
+  if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
+  rateLimitResume = setTimeout(() => {
+    rateLimitResume = undefined;
+    const remaining = rateLimitedUntil ? rateLimitedUntil.until - Date.now() : 0;
+    if (remaining > 0) scheduleRateLimitResume(remaining);
+    else void drainLogBatches();
+  }, delayMs);
+  (rateLimitResume as { unref?: () => void }).unref?.();
+};
+
+const isRateLimitedNow = (owner: LoggingOwner) =>
+  rateLimitedUntil !== undefined && sameLoggingOwner(rateLimitedUntil, owner) && Date.now() < rateLimitedUntil.until;
 
 function resetLogIngestToken() {
   logIngestTokenEpoch++;
@@ -104,6 +132,7 @@ export const resetLoggingStateForTests = () => {
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
   uploadInProgress = false;
+  clearRateLimit();
   resetLogIngestToken();
 };
 
@@ -199,6 +228,7 @@ function discardLoggingOwnerWork() {
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
+  clearRateLimit();
 }
 
 export const startLoggingToGrafana = (userId: string, username?: string) => {
@@ -332,6 +362,8 @@ const drainLogBatches = async () => {
   try {
     while (pendingLogBatches.length > 0 && isLoggingOwnerCurrent(owner.userId, owner.epoch)) {
       if (!isPageReadyForLogging()) return;
+      // Sending into a rate-limit window only earns another 429; the scheduled resume drains.
+      if (isRateLimitedNow(owner)) return;
       const batch = pendingLogBatches[0];
       if (batch) {
         if (!sameLoggingOwner(batch.owner, owner)) {
@@ -349,6 +381,21 @@ const drainLogBatches = async () => {
       void drainLogBatches();
     }
   }
+};
+
+/**
+ * A refusal resending cannot fix (AGT-67): a 4xx from the ingest Worker (malformed, too large,
+ * forbidden, rate limited) or a 502 carrying Loki's own 4xx. Retrying those five times only
+ * multiplied the load on a refusing sink. 401 (token refresh) and 408 stay retryable, as do
+ * 5xx and transport failures.
+ */
+const isRateLimit = (status: number | undefined, upstreamStatus: number | undefined) =>
+  status === 429 || (status === 502 && upstreamStatus === 429);
+
+const isRefusal = (status: number | undefined, upstreamStatus: number | undefined) => {
+  if (status === undefined || isRateLimit(status, upstreamStatus)) return false;
+  if (status >= 400 && status < 500) return status !== 401 && status !== 408;
+  return status === 502 && upstreamStatus !== undefined && upstreamStatus >= 400 && upstreamStatus < 500;
 };
 
 const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
@@ -374,6 +421,8 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
   if (queue.length === 0) return true;
 
   const maxRetries = MAX_RETRIES;
+  let failureStatus: number | undefined;
+  let failureUpstreamStatus: number | undefined;
   for (let retries = 0; retries <= maxRetries; retries++) {
     if (!isAuthorized()) return true;
     if (!isPageReadyForLogging()) return false;
@@ -405,6 +454,8 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
       ],
     };
     try {
+      failureStatus = undefined;
+      failureUpstreamStatus = undefined;
       loggingMetrics.uploadsStarted++;
       const baseUrl = typeof self !== 'undefined' && self.location?.origin ? self.location.origin : '';
       const logIngestOrigin = getLogIngestOrigin();
@@ -423,7 +474,15 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
         headers,
       });
       if (!isAuthorized()) return true;
-      if (!response.ok) throw new Error(`Logs API responded with status ${response.status}`);
+      failureStatus = response.status;
+      const upstreamStatus = response.headers?.get('X-Log-Ingest-Upstream-Status');
+      if (response.status === 502 && upstreamStatus && /^[45]\d{2}$/.test(upstreamStatus)) {
+        failureUpstreamStatus = Number(upstreamStatus);
+      }
+      if (!response.ok)
+        throw new Error(
+          `Logs API responded with status ${response.status}${failureUpstreamStatus === undefined ? '' : ` (upstream HTTP ${failureUpstreamStatus})`}`,
+        );
       if (isLoggingOwnerCurrent(userId, ownerEpoch)) {
         loggingMetrics.uploadsSucceeded++;
         if (metricsSnapshot) {
@@ -436,8 +495,32 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
       return true;
     } catch (error) {
       if (!isAuthorized()) return true;
-      if (retries === maxRetries) {
-        console.error(`Error in startLoggingToGrafana: ${error}. Dropping batch after ${maxRetries} retries`);
+      if (isRateLimit(failureStatus, failureUpstreamStatus)) {
+        // Keep the batch pending (the pending cap bounds memory) and resume after the window.
+        loggingMetrics.retries++;
+        rateLimitedUntil = { userId, epoch: ownerEpoch, until: Date.now() + RATE_LIMIT_COOLDOWN_MS };
+        scheduleRateLimitResume(RATE_LIMIT_COOLDOWN_MS);
+        console.error(`Error in startLoggingToGrafana: ${error}. Rate limited; pausing uploads for ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
+        return false;
+      }
+      const refused = isRefusal(failureStatus, failureUpstreamStatus);
+      // An expired or rotated ingest token is the one 4xx a fresh token can fix.
+      if (failureStatus === 401 && cachedLogIngestToken?.userId === userId && cachedLogIngestToken.epoch === ownerEpoch) {
+        cachedLogIngestToken = undefined;
+      }
+      if (retries === maxRetries || refused) {
+        loggingMetrics.droppedBatches++;
+        // Keep the failure in the existing local log; logging it through log()
+        // would enqueue another upload into the same failing sink.
+        const status = failureStatus === undefined ? '' : ` (HTTP ${failureStatus}${failureUpstreamStatus === undefined ? '' : `; upstream HTTP ${failureUpstreamStatus}`})`;
+        const message = refused
+          ? `Diagnostic log upload was refused; ${queue.length} log entries were dropped ${retries === 0 ? 'without retrying' : `after ${retries} ${retries === 1 ? 'retry' : 'retries'}`}${status}.`
+          : `Diagnostic log upload failed; ${queue.length} log entries were dropped after ${maxRetries} retries${status}.`;
+        const store = getDefaultStore();
+        store.set(logAtom, (previous) =>
+          previous.concat({ timestamp: Date.now(), message, severity: LogSeverity.Warning }).slice(-200),
+        );
+        console.error(message);
         return true;
       }
       const retryDelayMs = Math.min(1_000 * 2 ** retries, MAX_RETRY_DELAY_MS);

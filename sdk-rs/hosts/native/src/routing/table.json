@@ -284,7 +284,7 @@
       },
       "requiresCors": false,
       "enforceWsTunnel": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "blofin": {
@@ -462,7 +462,7 @@
       },
       "requiresCors": false,
       "enforceWsTunnel": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "hyperliquidspot": {
@@ -472,7 +472,7 @@
       },
       "requiresCors": false,
       "enforceWsTunnel": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "hyrotrader": {

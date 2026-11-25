@@ -50,7 +50,16 @@ pub fn enabled_for(venue: &str) -> bool {
 
 pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
     if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
-        PLACE_AND_CLOSE
+        // e2dab6ad16 made scope venue-generic; 17865385b5 enabled full writes.
+        // c4370459d pins metadata matching that runtime, with the same activation floor.
+        let actions_enabled = runtime_enabled();
+        DelegatedActions {
+            amend: actions_enabled,
+            cancel: actions_enabled,
+            cancel_all: actions_enabled,
+            nuke: actions_enabled,
+            ..PLACE_AND_CLOSE
+        }
     } else {
         DelegatedActions {
             place: false,
@@ -118,16 +127,161 @@ pub fn key_time(id: &str) -> Option<u64> {
     u64::from_str_radix(&id[..13].replace('-', ""), 16).ok()
 }
 
-pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
-    let created = key_time(id).ok_or("not sent: invalid intent key")?;
-    let age = now
-        .checked_sub(created)
-        .ok_or("not sent: invalid key time")?;
+pub(crate) fn key_age(created: u64, now: u64) -> Result<u64, &'static str> {
+    if created.saturating_sub(now) > 5_000 {
+        return Err("not sent: invalid key time");
+    }
+    let age = now.saturating_sub(created);
     if age >= 10_000 {
         Err("not sent: expired")
     } else {
-        Ok(())
+        Ok(age)
     }
+}
+
+pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
+    let created = key_time(id).ok_or("not sent: invalid intent key")?;
+    key_age(created, now)?;
+    let skew = created.saturating_sub(now);
+    if skew > 0 {
+        let bucket = match skew {
+            1..=1_000 => "le_1s",
+            1_001..=3_000 => "gt_1s_le_3s",
+            _ => "gt_3s_le_5s",
+        };
+        crate::state::Log::info(
+            &json!({"event":"order.intent_clock_skew","skew_bucket":bucket}).to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// #3630 audits native formats: keep all validated UUID bits in supported text
+/// IDs. Adapters without caller-ID support omit it; the router ledger still
+/// owns dedupe. IDs that cannot carry the intent losslessly are omitted.
+pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
+    let hex = || intent.replace('-', "");
+    match venue {
+        "hyperliquid" | "hyperliquidspot" => Some(format!("0x{}", hex())),
+        "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
+        | "blofin" | "binancepm" => Some(hex()),
+        "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        // WOO refuses the UUID, and router/outbox accept only lossless forms, so it
+        // omits the ID exactly as the action path's WOO limits already do.
+        "woo" => None,
+        // AGT-50: numeric-only Backpack/GRVT and no-ID HyroTrader cannot carry
+        // this UUID; use the existing null-receipt path without a lossy mapping.
+        "backpack" | "grvt" | "hyrotrader" => None,
+        _ => Some(intent.to_owned()),
+    }
+}
+
+/// Hyperliquid's native caller ID for a DELEGATED `place`/`close` order's
+/// `clientOrderId`. A valid cloid is sent verbatim; any other text becomes
+/// `0x` + the first 16 bytes of SHA-256(UTF-8 id), so the caller can recompute it.
+pub(crate) fn hyperliquid_cloid(client_order_id: &str) -> String {
+    let valid = client_order_id.len() == 34
+        && client_order_id.starts_with("0x")
+        && client_order_id[2..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if valid {
+        return client_order_id.to_owned();
+    }
+    let digest = safe_cex_crypto::sha256(client_order_id.as_bytes());
+    format!("0x{}", safe_cex_crypto::hex(&digest[..16]))
+}
+
+/// Map validated `place`/`close` arguments (an order array or one order) to the
+/// venue's caller-ID format. Absent IDs stay absent, so the venue still mints.
+pub(crate) fn venue_caller_ids(venue: &str, args: &mut [Value]) {
+    if !matches!(venue, "hyperliquid" | "hyperliquidspot") {
+        return;
+    }
+    let Some(first) = args.first_mut() else {
+        return;
+    };
+    let orders: Vec<&mut Value> = match first {
+        Value::Array(orders) => orders.iter_mut().collect(),
+        order => vec![order],
+    };
+    for order in orders {
+        if let Some(id) = order.get_mut("clientOrderId")
+            && let Some(text) = id.as_str()
+        {
+            *id = hyperliquid_cloid(text).into();
+        }
+    }
+}
+
+/// A trigger/protection type, or an attached trigger, stop-loss or take-profit.
+fn trigger_shape(order: &serde_json::Map<String, Value>) -> bool {
+    matches!(
+        order.get("type").and_then(Value::as_str),
+        Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
+    ) || ["triggerPrice", "stopLoss", "takeProfit"]
+        .iter()
+        .any(|field| order.get(*field).is_some_and(|value| !value.is_null()))
+}
+
+// 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
+pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
+    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot") && trigger_shape(order)
+}
+
+/// Venues whose native adapter refuses a caller ID by order shape, so those submits
+/// omit it. BloFin (AGT-46, #3754, first `blofin_trigger`), Phemex (#3758) and AGT-110:
+/// OKX, KuCoin, Bitget, Bitunix and Binance were reproduced live; the rest match by adapter
+/// source. Binance Options refuses every trigger outright, so it needs no entry.
+pub(crate) fn trigger_refuses_caller_id(
+    venue: &str,
+    order: &serde_json::Map<String, Value>,
+) -> bool {
+    let close = order.get("close").and_then(Value::as_bool) == Some(true);
+    match venue {
+        "blofin" | "phemex" | "okx" | "okxdemo" | "okxeu" | "okxeudemo" | "bitget"
+        | "bitgetusdc" | "bitgetinverse" | "kucoin" | "bitunix" | "apexomni" | "cryptocom"
+        | "binance" | "binancespot" | "binancepm" => trigger_shape(order),
+        "bingx" | "paradex" => trigger_shape(order) || close,
+        // Coinbase's adapter (futures and spot) refuses only a stop-market or close-only caller ID.
+        "coinbase" | "coinbasespot" => {
+            order.get("type").and_then(Value::as_str) == Some("stop_market") || close
+        }
+        _ => false,
+    }
+}
+
+/// Venues that place a bracket's stop-loss/take-profit as separate orders after the entry
+/// and complete with `[entry, ..protective]`, so one unsplit bracket names its entry first:
+/// OKX (AGT-111, as the TS reference), Binance and Kraken (each verified live 2026-11-20
+/// through `order.action`). Each adapter places one leg per non-zero price, never fewer.
+/// Hyperliquid groups legs into the entry's own write and replies with the entry's ID alone,
+/// so it counts none (AGT-117).
+pub(crate) fn bracket_protective_legs(venue: &str, command: &Value) -> usize {
+    let entries: &[&str] = match venue {
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => &["limit", "market"],
+        // AGT-112: Binance also derives legs after a stop-type entry (USD-M live 2026-11-21).
+        // With legs, OKX refuses every non-limit/market entry and Kraken any non-limit (AGT-115).
+        "binance" | "binancespot" | "binancepm" | "binanceinverse" => {
+            &["limit", "market", "stop_market", "take_profit_market"]
+        }
+        // Kraken refuses a bracket on a market entry before placing anything.
+        "kraken" => &["limit"],
+        _ => return 0,
+    };
+    let Some([order]) = command["orders"].as_array().map(Vec::as_slice) else {
+        return 0;
+    };
+    if !order["type"]
+        .as_str()
+        .is_some_and(|kind| entries.contains(&kind))
+    {
+        return 0;
+    }
+    ["stopLoss", "takeProfit"]
+        .iter()
+        .filter(|field| order[**field].as_f64().is_some_and(|v| v != 0.0))
+        .count()
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
@@ -254,6 +408,212 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
 
 #[cfg(test)]
 mod activation_tests {
+    #[test]
+    fn bybit_protection_missing_type_is_not_protection() {
+        let order = json!({});
+        assert!(!super::bybit_protection(
+            "bybit",
+            order.as_object().unwrap()
+        ));
+    }
+
+    #[test]
+    fn bybit_protection_omission_is_exact_and_keeps_plain_and_other_venues() {
+        let plain = json!({"type":"limit","amount":0.01,"price":55000});
+        for venue in ["bybit", "bybitdemo", "bybitinverse", "bybitspot"] {
+            assert!(!super::bybit_protection(venue, plain.as_object().unwrap()));
+            for field in ["triggerPrice", "stopLoss", "takeProfit"] {
+                let mut order = plain.clone();
+                order[field] = 55000.into();
+                assert!(super::bybit_protection(venue, order.as_object().unwrap()));
+                order[field] = Value::Null;
+                assert!(!super::bybit_protection(venue, order.as_object().unwrap()));
+            }
+            for kind in [
+                "stop_market",
+                "take_profit_market",
+                "trailing_stop_market",
+                "conditional",
+            ] {
+                let mut order = plain.clone();
+                order["type"] = kind.into();
+                assert!(super::bybit_protection(venue, order.as_object().unwrap()));
+                for other in ["okx", "binance", "hyperliquid", "not-bybit"] {
+                    assert!(!super::bybit_protection(other, order.as_object().unwrap()));
+                }
+            }
+        }
+    }
+
+    // AGT-46 (blofin-t), #3758 (phemex-t) and AGT-110 (okx, okxeu, kucoin, bitget,
+    // bitunix live 2026-11-20): trigger/bracket submits were refused for carrying a
+    // caller ID. Was `blofin_trigger_omission_*` (#3754); #3758 dropped "okx"/"bitget"
+    // from its negative list, and AGT-110 covers them and drops "binance" too.
+    #[test]
+    fn trigger_caller_id_omission_covers_triggers_and_attached_protection_only() {
+        let obj = |v: &Value| v.as_object().unwrap().clone();
+        let plain = json!({"type":"limit","amount":0.01,"price":0.05});
+        let market = json!({"type":"market","amount":0.01,"reduceOnly":true});
+        let close = json!({"type":"market","amount":0.01,"close":true});
+        let conditional = json!({"type":"conditional","side":"sell","amount":0.01,
+            "triggerPrice":0.04,"reduceOnly":true});
+        let mut stop_limit = conditional.clone();
+        stop_limit["price"] = 0.039.into();
+        let stop_market = json!({"type":"stop_market","side":"sell","amount":25,
+            "price":0.04,"reduceOnly":true});
+        let mut attached = Vec::new();
+        for field in ["stopLoss", "takeProfit"] {
+            let mut order = plain.clone();
+            order[field] = 0.04.into();
+            attached.push(order);
+        }
+        let mut null_field = plain.clone();
+        null_field["stopLoss"] = Value::Null;
+        let shape = [
+            &conditional,
+            &stop_limit,
+            &stop_market,
+            &attached[0],
+            &attached[1],
+        ];
+        for venue in [
+            "blofin",
+            "phemex",
+            "okx",
+            "okxdemo",
+            "okxeu",
+            "okxeudemo",
+            "bitget",
+            "bitgetusdc",
+            "bitgetinverse",
+            "kucoin",
+            "bitunix",
+            "apexomni",
+            "cryptocom",
+            "bingx",
+            "paradex",
+            "binance",
+            "binancespot",
+            "binancepm",
+        ] {
+            for order in [&plain, &market, &null_field] {
+                assert!(
+                    !super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
+            }
+            for order in shape {
+                assert!(
+                    super::trigger_refuses_caller_id(venue, &obj(order)),
+                    "{venue}"
+                );
+            }
+            let refuses_close = matches!(venue, "bingx" | "paradex");
+            assert_eq!(
+                super::trigger_refuses_caller_id(venue, &obj(&close)),
+                refuses_close,
+                "{venue}"
+            );
+        }
+        for venue in ["coinbase", "coinbasespot"] {
+            for order in [&stop_market, &close] {
+                assert!(super::trigger_refuses_caller_id(venue, &obj(order)));
+            }
+            for order in [&plain, &market, &conditional, &attached[0]] {
+                assert!(!super::trigger_refuses_caller_id(venue, &obj(order)));
+            }
+        }
+        for other in ["bybit", "hyperliquid", "kucoinspot", "bitrue", "weex"] {
+            for order in shape {
+                assert!(
+                    !super::trigger_refuses_caller_id(other, &obj(order)),
+                    "{other}"
+                );
+            }
+        }
+    }
+
+    // AGT-111: only a single limit/market bracket on a venue that lists its separately
+    // placed legs after the entry counts them (Kraken: limit only). Kraken and Binance
+    // were negatives here until their order was verified live; Binance stop-type entries
+    // until AGT-112.
+    #[test]
+    fn bracket_protective_legs_count_only_entry_first_single_brackets() {
+        let bracket = |extra: Value| {
+            let mut order =
+                json!({"symbol":"DOGEUSDT","type":"limit","side":"buy","amount":0.01,"price":0.04});
+            for (k, v) in extra.as_object().unwrap() {
+                order[k] = v.clone();
+            }
+            json!({"op":"placeOrders","orders":[order]})
+        };
+        let legs =
+            |venue: &str, extra: Value| super::bracket_protective_legs(venue, &bracket(extra));
+        for venue in [
+            "okx",
+            "okxdemo",
+            "okxeu",
+            "okxeudemo",
+            "binance",
+            "binancespot",
+            "binancepm",
+            "binanceinverse",
+            "kraken",
+        ] {
+            assert_eq!(legs(venue, json!({"stopLoss":0.03})), 1, "{venue}");
+            assert_eq!(
+                legs(venue, json!({"stopLoss":0.03,"takeProfit":0.05})),
+                2,
+                "{venue}"
+            );
+            assert_eq!(legs(venue, json!({})), 0, "{venue}");
+            assert_eq!(
+                legs(venue, json!({"stopLoss":0,"takeProfit":null})),
+                0,
+                "{venue}"
+            );
+            // AGT-112: only Binance lists its legs after a stop-type entry. A `conditional`
+            // entry carries none anywhere (OKX and Binance drop them, Kraken refuses).
+            let binance = venue.starts_with("binance");
+            for kind in ["stop_market", "take_profit_market"] {
+                assert_eq!(
+                    legs(
+                        venue,
+                        json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05})
+                    ),
+                    if binance { 2 } else { 0 },
+                    "{venue} {kind}"
+                );
+            }
+            for kind in ["conditional", "trailing_stop_market"] {
+                assert_eq!(
+                    legs(venue, json!({"type":kind,"stopLoss":0.03})),
+                    0,
+                    "{venue} {kind}"
+                );
+            }
+            let market = legs(venue, json!({"type":"market","stopLoss":0.03}));
+            assert_eq!(market, if venue == "kraken" { 0 } else { 1 }, "{venue}");
+            let two = json!({"op":"placeOrders","orders":[
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone(),
+                bracket(json!({"stopLoss":0.03}))["orders"][0].clone()]});
+            assert_eq!(super::bracket_protective_legs(venue, &two), 0, "{venue}");
+        }
+        for venue in ["bitget", "bybit", "blofin", "binanceoptions", "krakenspot"] {
+            assert_eq!(legs(venue, json!({"stopLoss":0.03})), 0, "{venue}");
+        }
+        // AGT-117: Hyperliquid groups a limit or market entry's legs into its own write, and
+        // the reply names only the entry (each leg answers `waitingForFill`/`waitingForTrigger`
+        // without an ID), so its whole bracket completes with exactly one ID. A refused leg is
+        // partial evidence, which `settle_intent` keeps unknown. Spot refuses a bracket whole.
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            for kind in ["limit", "market"] {
+                let extra = json!({"type":kind,"stopLoss":0.03,"takeProfit":0.05});
+                assert_eq!(legs(venue, extra), 0, "{venue} {kind}");
+            }
+        }
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -276,6 +636,94 @@ mod activation_tests {
             },
         )
         .await;
+    }
+
+    #[test]
+    fn client_ids_preserve_the_same_intent_bits_and_other_venues() {
+        for (intent, expected) in [
+            (
+                "018bcfe5-6800-7101-8101-010101010101",
+                "0x018bcfe5680071018101010101010101",
+            ),
+            (
+                "018bcfe5-6801-7abc-bdef-fedcba987654",
+                "0x018bcfe568017abcbdeffedcba987654",
+            ),
+        ] {
+            assert!(key_time(intent).is_some());
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                let first = client_order_id(venue, intent);
+                assert_eq!(first.as_deref(), Some(expected));
+                assert_eq!(client_order_id(venue, intent), first);
+                assert_eq!(&first.unwrap()[2..], intent.replace('-', ""));
+            }
+            for venue in ["bybit", "bybitinverse", "binance", "kucoin"] {
+                assert_eq!(client_order_id(venue, intent).as_deref(), Some(intent));
+            }
+            // 85b32c274 moved OKX to compact hex alongside Bitget/BloFin/PM;
+            // keep its lossless-bit assertion here rather than dropping it.
+            for venue in ["okx", "bitget", "blofin", "binancepm"] {
+                assert_eq!(
+                    client_order_id(venue, intent),
+                    Some(intent.replace('-', ""))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hyperliquid_cloids_are_deterministic_valid_and_keep_valid_caller_ids() {
+        let valid = |id: &str| {
+            id.len() == 34
+                && id.starts_with("0x")
+                && id[2..]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        // Pinned so a client (NX web/mobile) can check its own derivation.
+        let derived = hyperliquid_cloid("ts-caller-1");
+        assert_eq!(derived, "0x00c1a4116d5e3f23956990d13202b9dd");
+        assert_eq!(hyperliquid_cloid("ts-caller-1"), derived);
+        assert_ne!(hyperliquid_cloid("ts-caller-2"), derived);
+        let cloid = "0x0123456789abcdef0123456789abcdef";
+        assert_eq!(hyperliquid_cloid(cloid), cloid);
+        // Uppercase is not a cloid the venue echoes back, so it is hashed too.
+        assert_eq!(
+            hyperliquid_cloid("0xABCDEF0123456789ABCDEF0123456789"),
+            "0xe2dfdedc1918a1f4ca9f7dbea7f23d9e"
+        );
+        let uuid = "018bcfe5-6800-7101-8101-010101010101";
+        for id in [
+            "ts-caller-1",
+            cloid,
+            uuid,
+            "",
+            "x",
+            &"7".repeat(256),
+            "0x0123",
+        ] {
+            assert!(valid(&hyperliquid_cloid(id)), "{id}");
+        }
+    }
+
+    #[test]
+    fn venue_caller_ids_map_only_hyperliquid_supplied_ids() {
+        let derived = hyperliquid_cloid("ts-a");
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            let mut batch = vec![json!([
+                {"symbol":"BTC-PERP","clientOrderId":"ts-a"},
+                {"symbol":"ETH-PERP"},
+            ])];
+            venue_caller_ids(venue, &mut batch);
+            assert_eq!(batch[0][0]["clientOrderId"], derived);
+            assert!(batch[0][1].get("clientOrderId").is_none(), "venue mints");
+            let mut close = vec![json!({"symbol":"BTC-PERP","clientOrderId":"ts-a"})];
+            venue_caller_ids(venue, &mut close);
+            assert_eq!(close[0]["clientOrderId"], derived);
+        }
+        let mut bybit = vec![json!([{"symbol":"BTCUSDT","clientOrderId":"ts-a"}])];
+        venue_caller_ids("bybit", &mut bybit);
+        assert_eq!(bybit[0][0]["clientOrderId"], "ts-a");
     }
 
     #[test]
@@ -305,3 +753,11 @@ mod activation_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "client_order_ids_tests.rs"]
+mod client_order_ids_tests;
+
+#[cfg(test)]
+#[path = "order_key_time_tests.rs"]
+mod key_time_tests;

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { SPOT_ASSET_INDEX_OFFSET } from '../../exchanges/hyperliquid/hyperliquid.constants';
-import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions, OrderSide, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 
 /**
  * Oracle: live `POST /info { type: 'spotMetaAndAssetCtxs' }` against
@@ -92,7 +93,7 @@ const createExchange = (enableSpotMarkets = true): HyperliquidExchange => {
     tuning: { consoleLogging: false },
   };
 
-  const exchange = new HyperliquidExchange('hyperliquid', options, new DefaultStore());
+  const exchange = new HyperliquidExchange('hyperliquid', options, new FrameStore());
 
   (exchange as any).infoXhr = {
     post: async () => ({ data: [spotMetaFixture, spotAssetCtxsFixture] }),
@@ -283,21 +284,25 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     // `balance.upnl` / free margin (order sizing) and DisplayedMargin
     // exposure, and persists until the next authoritative snapshot.
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
-        {
-          id: '@1',
-          symbol: 'HFUN/USDC',
-          base: 'HFUN',
-          quote: 'USDC',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: { amount: { min: 0.01, max: 100 }, leverage: { min: 1, max: 1 } },
-          info: { hyperliquidId: 10001 },
-        },
-      ] as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: '@1',
+            symbol: 'HFUN/USDC',
+            base: 'HFUN',
+            quote: 'USDC',
+            active: true,
+            isSpot: true,
+            precision: { amount: 0.01, price: 0.0001 },
+            limits: { amount: { min: 0.01, max: 100 }, leverage: { min: 1, max: 1 } },
+            info: { hyperliquidId: 10001 },
+          },
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     const ws: any = (exchange as any).privateWebsocket;
     ws.applyOptimisticCorePositionFromFill(
@@ -344,22 +349,26 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     // Builder approval is an account fact, unrelated to the spot wire flags.
     (exchange as any)._builderFeeApproved = false;
 
-    exchange.store.update({
-      markets: [
-        {
-          id: '@1',
-          symbol: 'HFUN/USDC',
-          base: 'HFUN',
-          quote: 'USDC',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: { amount: { min: 0.01, max: 100 }, leverage: { min: 1, max: 1 } },
-          info: { hyperliquidId: 10001 },
-        },
-      ] as any,
-      tickers: [{ id: '@1', symbol: 'HFUN/USDC', last: 10, mark: 10, bid: 9.99, ask: 10.01 }] as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: '@1',
+            symbol: 'HFUN/USDC',
+            base: 'HFUN',
+            quote: 'USDC',
+            active: true,
+            isSpot: true,
+            precision: { amount: 0.01, price: 0.0001 },
+            limits: { amount: { min: 0.01, max: 100 }, leverage: { min: 1, max: 1 } },
+            info: { hyperliquidId: 10001 },
+          },
+        ] as any,
+        tickers: [{ id: '@1', symbol: 'HFUN/USDC', last: 10, mark: 10, bid: 9.99, ask: 10.01 }] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     const posted: any[] = [];
     (exchange as any).xhr = {
@@ -371,23 +380,25 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     // Bypass EIP-712 signing; we only care about the action payload.
     (exchange as any).generateNonce = () => 1;
 
-    await exchange
-      .placeOrder({
-        symbol: 'HFUN/USDC',
-        side: OrderSide.Buy,
-        type: OrderType.Limit,
-        amount: 1,
-        price: 9,
-        reduceOnly: true,
-        stopLoss: 8,
-        takeProfit: 12,
-      } as any)
-      .catch(() => undefined);
+    // AGT-120: a reduce-only order may not carry legs, so the reduce-only entry and the
+    // legs (which hardcode `true` on the perp path) are exercised as two placements.
+    for (const extra of [{ reduceOnly: true }, { stopLoss: 8, takeProfit: 12 }]) {
+      await exchange
+        .placeOrder({
+          symbol: 'HFUN/USDC',
+          side: OrderSide.Buy,
+          type: OrderType.Limit,
+          amount: 1,
+          price: 9,
+          ...extra,
+        } as any)
+        .catch(() => undefined);
+    }
 
     exchange.dispose();
 
     const wires = posted.flatMap((b) => b?.action?.orders ?? []);
-    expect(wires.length).toBeGreaterThan(0);
+    expect(wires.length).toBe(4);
     // `r` is the reduce-only flag. Spot has no position to reduce, so every
     // wire — the entry AND the TP/SL legs that hardcode `true` on the perp
     // path — must send false.
@@ -407,21 +418,25 @@ describe('hyperliquid spot markets merged into the perp container', () => {
       },
     };
 
-    exchange.store.update({
-      markets: [
-        {
-          id: '@1',
-          symbol: 'HFUN/USDC',
-          base: 'HFUN',
-          quote: 'USDC',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 1 } },
-          info: { hyperliquidId: 10001 },
-        },
-      ] as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: '@1',
+            symbol: 'HFUN/USDC',
+            base: 'HFUN',
+            quote: 'USDC',
+            active: true,
+            isSpot: true,
+            precision: { amount: 0.01, price: 0.0001 },
+            limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 1 } },
+            info: { hyperliquidId: 10001 },
+          },
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     await exchange.setLeverage('HFUN/USDC', 5);
     await exchange.changeMarginType(true, 'HFUN/USDC');
@@ -435,30 +450,34 @@ describe('hyperliquid spot markets merged into the perp container', () => {
   it('caps spot prices at 8 decimals and perp prices at 6', () => {
     const exchange = createExchange();
 
-    exchange.store.update({
-      markets: [
-        {
-          id: '@1',
-          symbol: 'HFUN/USDC',
-          base: 'HFUN',
-          quote: 'USDC',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 1 } },
-        },
-        {
-          id: 'BTC',
-          symbol: 'BTC-PERP',
-          base: 'BTC',
-          quote: 'USDC',
-          active: true,
-          isSpot: false,
-          precision: { amount: 0.01, price: 0.1 },
-          limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 50 } },
-        },
-      ] as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: '@1',
+            symbol: 'HFUN/USDC',
+            base: 'HFUN',
+            quote: 'USDC',
+            active: true,
+            isSpot: true,
+            precision: { amount: 0.01, price: 0.0001 },
+            limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 1 } },
+          },
+          {
+            id: 'BTC',
+            symbol: 'BTC-PERP',
+            base: 'BTC',
+            quote: 'USDC',
+            active: true,
+            isSpot: false,
+            precision: { amount: 0.01, price: 0.1 },
+            limits: { amount: { min: 0.01, max: 1 }, leverage: { min: 1, max: 50 } },
+          },
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     // amount precision 0.01 => 2 decimals. Spot budget 8-2=6, perp 6-2=4.
     const spotPrice = exchange.priceToPrecision('HFUN/USDC', 0.000123456789);

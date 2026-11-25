@@ -2077,7 +2077,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// Record a strictly executed placement ACK whose protocol returns native IDs
-    /// later. Missing/expired proof remains Unknown; this never supplies a fake ID.
+    /// later, or an amend ACK whose effect a later read proves (AGT-77).
+    /// Missing/expired proof remains Unknown; this never supplies a fake ID.
     /// The codec must validate the execution envelope before calling this method.
     pub fn http_pending_placement(
         &mut self,
@@ -2085,7 +2086,10 @@ impl<P> Cx<'_, P> {
     ) -> Result<crate::request_context::PendingPlacement, Error> {
         let core = self.core();
         let delivery = core.current_write_delivery(context)?;
-        if core.write_intent(context)? != crate::classify::Intent::Place {
+        if !matches!(
+            core.write_intent(context)?,
+            crate::classify::Intent::Place | crate::classify::Intent::Amend
+        ) {
             return Err(Error::Invalid);
         }
         let request = delivery.attempt.request;
@@ -2121,6 +2125,27 @@ impl<P> Cx<'_, P> {
             .as_mut()
             .ok_or(Error::State)?
             .resolve_placement(receipt.attempt, ids)
+    }
+
+    /// Refuse only this engine's still-live receipt after the codec proves, from
+    /// an authoritative read, that the acknowledged placement never took effect.
+    /// The error must be an effects-free `Rejected`; uncertainty stays pending.
+    pub fn reject_pending_placement(
+        &mut self,
+        receipt: crate::request_context::PendingPlacement,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        let registry = &mut self.io.core.request_contexts;
+        if registry.latest_write(&receipt.context)? != Some(receipt.attempt) {
+            return Err(Error::Revoked);
+        }
+        registry
+            .owner_entry_mut(receipt.context.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .reject_placement(receipt.attempt, error)
     }
 
     /// Check normalized native facts before synchronous codec-selected effects.
@@ -4162,6 +4187,69 @@ mod write_tests {
                 .unwrap_err(),
             Error::State
         );
+    }
+
+    #[test]
+    fn an_acknowledged_amend_can_wait_for_proof_but_a_cancel_cannot() {
+        use crate::classify::Intent;
+        let released = |intent: Intent| {
+            let mut io = super::super::Io::<()>::default();
+            io.core.request_contexts.dispatch = Some((7, intent));
+            let context = io
+                .core
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.core.request_contexts.dispatch = None;
+            let _ = io
+                .core
+                .request_contexts
+                .register_attempt(&context, RequestId(11), 0.);
+            *io.core
+                .request_contexts
+                .release_flag(&context, RequestId(11))
+                .unwrap()
+                .unwrap() = true;
+            io.core.http_delivery = Some(delivery(&context, 11));
+            io.core.http_write_reply = Some((200, String::new()));
+            (io, context)
+        };
+        let (mut io, context) = released(Intent::Cancel);
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert!(matches!(
+            cx.http_pending_placement(&context),
+            Err(Error::Invalid)
+        ));
+
+        // AGT-77: an amend ACK whose tx later fails is a definite refusal.
+        let (mut io, context) = released(Intent::Amend);
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let Ok(receipt) = cx.http_pending_placement(&context) else {
+            panic!("an amend ACK can wait for proof");
+        };
+        let refusal = VenueError::new("not changed")
+            .kind(crate::ErrorKind::Rejected)
+            .outcome(Outcome::Rejected);
+        cx.reject_pending_placement(receipt, refusal).unwrap();
+        let Seal::Failure(error, _) = cx.io.core.request_contexts.seal(
+            7,
+            Some(&delivery(&context, 11)),
+            Some(&context),
+            Some(VenueError::new("fallback")),
+        ) else {
+            panic!("a refused amend cannot seal success");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
     }
 
     #[test]

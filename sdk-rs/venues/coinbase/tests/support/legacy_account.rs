@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Offline regression oracles for legacy Advanced Trade codecs and trading.
 //! Production INTX startup is covered by private_drb; this unit fixture alone
 //! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.

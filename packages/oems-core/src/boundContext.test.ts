@@ -66,7 +66,7 @@ describe('boundOemsContext', () => {
   });
 
   it('rebuilds every row by name, so an extra field cannot ride along', () => {
-    const smuggled = { ...position(0), apiSecret: 'sk-live-should-never-appear' } as unknown as OemsPositionRef;
+    const smuggled = { ...position(0), apiSecret: 'sk-live-should-never-appear' };
     const bounded = boundOemsContext(context({ positions: [smuggled] }));
     expect(JSON.stringify(bounded)).not.toContain('sk-live');
     expect(Object.keys(bounded.positions[0])).not.toContain('apiSecret');

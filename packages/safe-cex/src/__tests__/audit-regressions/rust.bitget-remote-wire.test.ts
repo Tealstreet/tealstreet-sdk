@@ -57,7 +57,7 @@ it.each(aliases)('%s opaque HTTP work keeps its alias label and cannot acquire W
 it.each([seconds * 1000 + 1, (seconds + 1) * 1000])('contradictory native Bitget receipt %s refuses before callback', async (stampMs) => {
   const actual: RemoteSignerRequest[] = [];
   const provider = createRemoteSignerProvider({ exchangeName: 'bitget', identities: { primary: identity }, remoteSigner: remote(actual) });
-  await expect(provider(native(stampMs), signal())).rejects.toThrow('Remote signing request refused');
+  await expect(provider(native(stampMs), signal())).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
 });
 
@@ -86,7 +86,7 @@ it.each(aliases)('%s primary-only remote wire refuses required-secondary work be
   const provider = createRemoteSignerProvider({ exchangeName, identities: { primary: identity, secondary }, remoteSigner: remote(actual) });
   const work = login([`${seconds * 1000}GET/api/v2/mix/account/accounts`], seconds * 1000, secondary.signing);
   work.operations[0] = { kind: 'present', key: secondary.credential };
-  await expect(provider(work, signal())).rejects.toThrow('Remote signing request refused');
+  await expect(provider(work, signal())).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
 });
 

@@ -7,7 +7,7 @@ const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ERR_N
 const UNKNOWN_OUTCOME_VENUE_CODES = new Set([-1007]);
 // Hosted mode signs remotely: these fail BEFORE the send, so nothing can have landed.
 const NOT_SENT_MESSAGE =
-  /(Signing request \S+ timed out|Remote signer unavailable|Failed to send signing request|signing aborted)/;
+  /(Signing request \S+ timed out|Remote signer unavailable|Signing isn’t available for this account|Failed to send signing request|signing aborted)/;
 
 /** A hosted request that failed while getting its signature, so it never reached the venue. */
 export const isUnsentSigningFailure = (message: string | undefined): boolean => NOT_SENT_MESSAGE.test(message ?? '');
@@ -16,7 +16,7 @@ export const isUnsentSigningFailure = (message: string | undefined): boolean => 
 export const isUnknownOutcome = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false;
   // Rust venues classify the outcome themselves; text matching is the TS fallback.
-  const { outcome } = error as { outcome?: unknown };
+  const { outcome }: { outcome?: unknown } = error;
   if (outcome === 'unknown') return true;
   if (outcome === 'notSent' || outcome === 'rejected') return false;
   const { code, message, name, response } = error as {

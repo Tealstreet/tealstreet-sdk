@@ -52,6 +52,7 @@ fn pm_local() -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, PM_POSITION);
+    h.respond("/papi/v1/um/symbolConfig", 200, "[]");
     h.respond("/papi/v1/balance", 200, PM_BALANCE);
     h.respond("/papi/v1/um/openOrders", 200, PM_OPEN);
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, PM_CONDITIONAL);

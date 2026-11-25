@@ -1,5 +1,5 @@
-//! Hosted account registry with identity keys for enabled private Bybit accounts.
-//! Connections keep their labels; live and parked holders share the account actor.
+//! Hosted identity-keyed accounts retain connection-local labels, with
+//! DELEGATED retention independent of the socket resume grace.
 use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
 use crate::envelope::InitPayload;
 use crate::state::Log;
@@ -19,9 +19,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod admission;
+mod settings;
 mod signing;
+pub(crate) use settings::SettingsConflict;
 use signing::AccountSigner;
 mod proof_queue;
+mod retention;
 pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
 
@@ -43,7 +46,7 @@ pub(crate) enum SigningModeRefusalReason {
 
 enum DelegatedSetup {
     Pair(DelegatedPair),
-    Resident(Box<ResidentCopy>),
+    Resident(Arc<ResidentCopy>),
 }
 
 pub fn now_ms() -> u64 {
@@ -91,6 +94,8 @@ pub struct Account {
     /// Original browser link; permanently retired for signing after handover.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
+    /// Resolved account transport depends on the socket-issued proxy authority.
+    proxy_authority_required: bool,
     pub fingerprint: String,
     /// Live sockets carry their outbox and token; park holders carry none.
     holders: Mutex<Holders>,
@@ -206,6 +211,10 @@ pub enum Disposal {
     SignerFailures,
     /// No browser came back within the resume grace.
     NoBrowser,
+    /// No admitted client returned during DELEGATED retention.
+    NoClient48h,
+    /// Interim #3424: retained proxy authority expired; erase and stop.
+    ProxyTokenExpired,
     /// The page disposed it: the user removed or deactivated it, or the page dropped it.
     PageDisposed,
     /// The page's ping stopped listing it.
@@ -226,6 +235,8 @@ impl Disposal {
             Self::Replaced => "replaced",
             Self::SignerFailures => "signer_failures",
             Self::NoBrowser => "no_browser",
+            Self::NoClient48h => "no_client_48h",
+            Self::ProxyTokenExpired => "proxy_token_expired",
             Self::PageDisposed => "page_disposed",
             Self::Orphaned => "orphaned",
             Self::JoinFailed => "join_failed",
@@ -251,13 +262,24 @@ pub struct Live {
     pub token: Option<(String, u64)>,
 }
 
+type Confirmed = (
+    crate::envelope::AccountSigningMode,
+    Outbox,
+    Option<Arc<str>>,
+);
+
 #[derive(Default)]
 struct Holders {
+    retention: Option<retention::Retention>,
+    /// Departed identity aliases remain valid for explicit revocation.
+    departed_labels: std::collections::BTreeSet<String>,
+    disposed: bool,
     by_id: HashMap<u64, Option<Live>>,
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
     labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
-    confirmed: HashMap<(u64, String), (crate::envelope::AccountSigningMode, Outbox)>,
+    /// Each confirmed registration's requested mode, output and client `instanceId`.
+    confirmed: HashMap<(u64, String), Confirmed>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -269,6 +291,64 @@ impl Holders {
             self.init_order.push(id);
         }
         self.by_id.insert(id, live);
+    }
+
+    /// AGT-79: whether a live holder of another client registration confirmed a
+    /// DELEGATED request. A COSIGNED tab, or the leaving registration's own
+    /// half-open socket, never keeps the resident key alone.
+    fn delegated_live_besides(&self, leaving: &[Arc<str>]) -> bool {
+        self.confirmed
+            .iter()
+            .any(|((holder, label), (requested, _, registration))| {
+                *requested == crate::envelope::AccountSigningMode::Delegated
+                    && registration
+                        .as_ref()
+                        .is_none_or(|registration| !leaving.contains(registration))
+                    && self
+                        .labels
+                        .get(holder)
+                        .and_then(|labels| labels.get(label))
+                        .is_some_and(Option::is_some)
+            })
+    }
+
+    /// The client registrations `holder` confirmed, for `label` or all of them.
+    fn registrations(&self, holder: u64, label: Option<&str>) -> Vec<Arc<str>> {
+        self.confirmed
+            .iter()
+            .filter(|((id, held), _)| *id == holder && label.is_none_or(|label| held == label))
+            .filter_map(|(_, (_, _, registration))| registration.clone())
+            .collect()
+    }
+
+    /// Detaches the leaving registrations' labels on other sockets (their stale,
+    /// half-open copies) without touching those sockets' other registrations.
+    fn detach_registrations(&mut self, account: &Account, leaving: &[Arc<str>]) {
+        let stale: Vec<(u64, String)> = self
+            .confirmed
+            .iter()
+            .filter(|(_, (_, _, registration))| {
+                registration.as_ref().is_some_and(|r| leaving.contains(r))
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for (id, label) in stale {
+            self.confirmed.remove(&(id, label.clone()));
+            let remaining = self.labels.get_mut(&id).and_then(|labels| {
+                labels.remove(&label);
+                labels.values().find_map(Clone::clone)
+            });
+            if let Some(live) = remaining {
+                self.by_id.insert(id, Some(live.clone()));
+                if self.signing == Some(id) {
+                    account.sign_through(self, id, &live);
+                }
+            } else if self.by_id.contains_key(&id) {
+                self.remove(id);
+                self.labels.remove(&id);
+                account.hand_over(self, id);
+            }
+        }
     }
 
     fn remove(&mut self, id: u64) {
@@ -294,7 +374,7 @@ impl Holders {
 }
 
 impl Account {
-    pub fn delegated(&self) -> Option<ResidentCopy> {
+    pub fn delegated(&self) -> Option<Arc<ResidentCopy>> {
         self.signing.resident()
     }
 
@@ -312,6 +392,7 @@ impl Account {
         label: &str,
         requested: crate::envelope::AccountSigningMode,
         outbox: Outbox,
+        registration: Option<&str>,
     ) {
         // Serialize confirmations with broadcasts, so an old COSIGNED
         // confirmation cannot follow the newer DELEGATED state.
@@ -330,9 +411,10 @@ impl Account {
             return;
         }
         let actual = self.actual_signing_mode();
-        holders
-            .confirmed
-            .insert((holder, label.into()), (requested, outbox.clone()));
+        holders.confirmed.insert(
+            (holder, label.into()),
+            (requested, outbox.clone(), registration.map(Arc::from)),
+        );
         outbox(crate::envelope::account_signing_mode(
             label, requested, actual,
         ));
@@ -341,7 +423,7 @@ impl Account {
     fn broadcast_signing_mode(&self) {
         let holders = self.holders.lock().unwrap();
         let actual = self.actual_signing_mode();
-        for ((holder, label), (requested, outbox)) in &holders.confirmed {
+        for ((holder, label), (requested, outbox, _)) in &holders.confirmed {
             if holders
                 .labels
                 .get(holder)
@@ -371,6 +453,14 @@ impl Account {
 
     pub(crate) fn moving(&self) -> bool {
         self.handle.disposal_cause() == Some(DisposalCause::Moving)
+    }
+
+    fn proxy_authority_required(&self) -> bool {
+        self.proxy_authority_required
+    }
+
+    pub(crate) fn notify_scope(&self) -> crate::host_notify::Scope {
+        crate::host_notify::Scope::new(&self.user, &self.venue, self.registry_name())
     }
 
     pub fn is_public(&self) -> bool {
@@ -417,12 +507,41 @@ impl Account {
         }
     }
 
-    fn hold(&self, id: u64, live: Live) {
-        self.hold_label(id, live, &self.name);
+    fn hold(&self, id: u64, live: Live) -> bool {
+        self.hold_label(id, live, &self.name)
     }
 
-    fn hold_label(&self, id: u64, live: Live, label: &str) {
+    fn hold_before_publication(&self, id: u64, live: Live, label: &str) -> bool {
         let mut holders = self.holders.lock().unwrap();
+        // A settings successor may share a retained owner. Only publication
+        // admits it; a superseded build must leave the old deadline intact.
+        if self.delegated().as_ref().is_some_and(|resident| {
+            holders.disposed || holders.retention.is_some() || !resident.available()
+        }) {
+            return false;
+        }
+        self.record_hold(&mut holders, id, live, label);
+        true
+    }
+
+    fn hold_label(&self, id: u64, live: Live, label: &str) -> bool {
+        let mut holders = self.holders.lock().unwrap();
+        if self.delegated().as_ref().is_some_and(|resident| {
+            holders.disposed
+                || holders
+                    .retention
+                    .as_ref()
+                    .is_some_and(|retention| tokio::time::Instant::now() >= retention.deadline)
+                || !resident.admit()
+        }) {
+            return false;
+        }
+        holders.cancel_retention();
+        self.record_hold(&mut holders, id, live, label);
+        true
+    }
+
+    fn record_hold(&self, holders: &mut Holders, id: u64, live: Live, label: &str) {
         holders.confirmed.remove(&(id, label.into()));
         holders
             .labels
@@ -430,7 +549,51 @@ impl Account {
             .or_default()
             .insert(label.to_owned(), Some(live.clone()));
         holders.insert(id, Some(live.clone()));
-        self.sign_through(&mut holders, id, &live);
+        self.sign_through(holders, id, &live);
+    }
+
+    fn has_label(&self, name: &str) -> bool {
+        if self.name == name {
+            return true;
+        }
+        let holders = self.holders.lock().unwrap();
+        holders.departed_labels.contains(name)
+            || holders
+                .labels
+                .values()
+                .any(|labels| labels.contains_key(name))
+            || holders
+                .retention
+                .as_ref()
+                .is_some_and(|retention| retention.labels.contains(name))
+    }
+
+    /// Labels a park holder keeps; an unlabeled park holder holds the account name.
+    fn parked_labels(&self, park_holder: u64) -> Vec<String> {
+        let holders = self.holders.lock().unwrap();
+        if !holders.by_id.get(&park_holder).is_some_and(Option::is_none) {
+            return Vec::new();
+        }
+        match holders.labels.get(&park_holder) {
+            Some(labels) if !labels.is_empty() => labels.keys().cloned().collect(),
+            _ => vec![self.name.clone()],
+        }
+    }
+
+    /// Moves `label` off its park holder; true when that holder is now gone.
+    fn release_parked_label(&self, park_holder: u64, label: &str) -> bool {
+        let mut holders = self.holders.lock().unwrap();
+        let remaining = holders.labels.get_mut(&park_holder).map(|labels| {
+            labels.remove(label);
+            labels.len()
+        });
+        if remaining.unwrap_or(0) > 0 {
+            return false;
+        }
+        holders.remove(park_holder);
+        holders.labels.remove(&park_holder);
+        self.hand_over(&mut holders, park_holder);
+        true
     }
 
     pub(crate) fn labels(&self, id: u64) -> Vec<String> {
@@ -454,12 +617,8 @@ impl Account {
     }
 
     pub(crate) fn has_parked_holders(&self) -> bool {
-        self.holders
-            .lock()
-            .unwrap()
-            .by_id
-            .values()
-            .any(Option::is_none)
+        let holders = self.holders.lock().unwrap();
+        holders.retention.is_some() || holders.by_id.values().any(Option::is_none)
     }
 
     /// Sends a frame, if given, to every live socket holding this account.
@@ -557,6 +716,10 @@ struct Parked {
     user: String,
     accounts: Vec<(Arc<Account>, u64)>,
     alias_until: Option<u64>,
+    /// The one socket whose resume consumed this id; only it may claim DELEGATED labels.
+    resumed_by: Option<u64>,
+    /// In-band proof issued to the parking socket; never part of a URL.
+    proof: Option<String>,
 }
 
 type AccountEntries = HashMap<(String, String), Arc<Account>>;
@@ -578,6 +741,7 @@ struct InitAuthority {
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
     probe_deadline: Option<tokio::time::Instant>,
+    proved_registration: Option<Arc<safe_cex_crypto::admission::PublicKey>>,
 }
 
 impl InitAuthority {
@@ -653,12 +817,19 @@ impl InitAttempt<'_> {
     ) -> Result<Option<Arc<Account>>, String> {
         // Serialize the final check and insertion with a newer init's admission.
         let mut pending = self.pending.lock().unwrap();
+        let mut accounts = accounts.lock().unwrap();
         self.authority.check_admission()?;
         crate::auth::Verifier::check_expiry(self.expires_at_ms, now_ms())?;
-        let replaced = accounts
-            .lock()
-            .unwrap()
-            .insert(self.key.clone(), account.clone());
+        // Renewal and replacement are atomic with the old owner's retention
+        // cleanup. No failed or unpublished successor can renew that owner.
+        if account
+            .delegated()
+            .as_ref()
+            .is_some_and(|resident| !resident.admit())
+        {
+            return Err("account stopped".into());
+        }
+        let replaced = accounts.insert(self.key.clone(), account.clone());
         self.forget(&mut pending);
         self.published = true;
         Ok(replaced)
@@ -708,11 +879,13 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// AGT-37 box -> gateway lane; `None` emits nothing and arms no timer.
+    host_notify: Option<crate::host_notify::HostNotifier>,
     /// Seeded test accounts can retain their pre-admission fixture setup.
     #[cfg(any(test, feature = "test-support"))]
     join_admission_override: Option<bool>,
-    /// Unit-test loopback routing; the normal construction and transport run unchanged.
-    #[cfg(test)]
+    /// Test-only loopback routing; normal construction and transport run unchanged.
+    #[cfg(any(test, feature = "test-support"))]
     construction_test_plans: HashMap<String, RoutingPlan>,
     #[cfg(test)]
     e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
@@ -826,6 +999,12 @@ pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
 
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
+    if let Some(tuning) = &init.tuning {
+        options.insert(
+            "tuning".into(),
+            serde_json::to_value(tuning).expect("display tuning"),
+        );
+    }
     if !public_only && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot") {
         options.insert(
             "coinbaseJwtAlgorithm".into(),
@@ -835,6 +1014,9 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if !public_only {
         options.insert("key".into(), init.key.clone().into());
+        if crate::delegated::probe::asterdex_v1_init(init) {
+            options.insert("asterdex".into(), json!({"apiVersion":"v1"}));
+        }
     }
     let text = [
         ("passphrase", &init.passphrase),
@@ -991,7 +1173,17 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         Value::Object(options) => options,
         _ => Map::new(),
     };
+    settings::canonicalize_tuning(&mut fields, init);
     fields.insert("venue".into(), init.exchange_name.clone().into());
+    if matches!(
+        init.exchange_name.as_str(),
+        "hyperliquid" | "hyperliquidspot"
+    ) {
+        fields.insert(
+            "hyperliquidSignerAddress".into(),
+            init.hyperliquid_signer_address.clone().into(),
+        );
+    }
     // An init that cannot route is refused at build; its raw flags still tell inits apart.
     let routing = match routing_plan(init, public_only) {
         Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),
@@ -1089,9 +1281,10 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            host_notify: None,
             #[cfg(any(test, feature = "test-support"))]
             join_admission_override: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             construction_test_plans: HashMap::new(),
             #[cfg(test)]
             e2e_venue: None,
@@ -1107,6 +1300,23 @@ impl Registry {
         ));
         self.router_leases = Arc::new(crate::router_lease::Users::new(config));
         self
+    }
+
+    pub fn with_host_notify(mut self, notifier: Option<crate::host_notify::HostNotifier>) -> Self {
+        self.host_notify = notifier;
+        self
+    }
+
+    /// Queues one notification scoped to `account`; callers decide DELEGATED.
+    pub(crate) fn host_notify(&self, account: &Account, draft: crate::host_notify::Draft) {
+        if let Some(notifier) = &self.host_notify {
+            notifier.push(crate::host_notify::HostNotification::build(
+                &account.notify_scope(),
+                draft,
+                account.held.load(Ordering::Relaxed),
+                now_ms(),
+            ));
+        }
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
@@ -1140,6 +1350,7 @@ impl Registry {
                     &crate::telemetry::Report {
                         kind: "router_lease.fenced",
                         summary,
+                        user_id: (!account.public_only).then_some(account.user.as_str()),
                         user_tag: Some(tag.clone()),
                         venue: Some(&account.venue),
                         running_jobs: Some(running_jobs),
@@ -1273,7 +1484,7 @@ impl Registry {
             accounts.values().find(|account| {
                 account.user == user
                     && account.delegated().is_some()
-                    && account.name == init.account_name
+                    && account.has_label(&init.account_name)
             })
         })?;
         if public_only && account.delegated().is_none() {
@@ -1315,14 +1526,7 @@ impl Registry {
                     .find(|account| {
                         account.user == user
                             && account.identity.is_some()
-                            && (account.name == init.account_name
-                                || account
-                                    .holders
-                                    .lock()
-                                    .unwrap()
-                                    .labels
-                                    .values()
-                                    .any(|labels| labels.contains_key(&init.account_name)))
+                            && account.has_label(&init.account_name)
                     })
                     .cloned()
             } else {
@@ -1380,6 +1584,7 @@ impl Registry {
             admission_expires_at: None,
             probe_current: None,
             probe_deadline: None,
+            proved_registration: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1470,9 +1675,13 @@ impl Registry {
         }
         let setup = if let Some(resident) = &account.delegated() {
             resident.reconfigure(init)?;
-            Some(DelegatedSetup::Resident(Box::new(resident.clone())))
+            Some(DelegatedSetup::Resident(resident.clone()))
         } else {
-            prepare(init, false, Some(SignerLink::new(holder, outbox.clone())))?;
+            prepare(
+                init,
+                false,
+                Some(crate::signing_diagnostics::link(holder, outbox.clone())),
+            )?;
             None
         };
         self.obtain_with_setup(
@@ -1575,6 +1784,7 @@ impl Registry {
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt.authority.probe_deadline = proof.local_deadline;
+            attempt.authority.proved_registration = proof.registered_public.clone();
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
@@ -1604,10 +1814,23 @@ impl Registry {
                 if account.is_public()
                     || !same_handover_settings(&account.fingerprint, &fingerprint)
                 {
-                    return Err("Account settings differ; account not attached".into());
+                    return Err(settings::VERIFIED_SETTINGS_DIFFER.into());
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
+                if let Some(expected) = &attempt.authority.proved_registration {
+                    let actual = account
+                        .signing
+                        .public_binding(Family::Schnorr)
+                        .map_err(|_| "Signer registration unavailable")?
+                        .ok_or("Signer registration unavailable")?;
+                    if actual.as_bytes() != expected.as_bytes() {
+                        return Err("Signer registration changed during verification".into());
+                    }
+                }
                 if delegated && account.delegated().is_none() {
                     let resident = match setup {
                         Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
@@ -1621,18 +1844,24 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    let upgraded = match public {
-                        Some(proof) => account
+                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
+                    {
+                        (Some(proof), _) => account
                             .signing
                             .upgrade_proven(resident, Some(&proof.public)),
-                        None => account.signing.upgrade(resident),
+                        (None, Some(public)) => {
+                            account.signing.upgrade_proven(resident, Some(public))
+                        }
+                        (None, None) => account.signing.upgrade(resident),
                     }
                     .map_err(|reason| reason.reason().to_owned())?;
                     if upgraded {
                         account.broadcast_signing_mode();
                     }
                 }
-                account.hold_label(holder, Live { outbox, token }, &init.account_name);
+                if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
+                    return Err("account stopped".into());
+                }
                 return Ok(account);
             }
             if !account.is_public() && account.delegated().is_some() != delegated {
@@ -1640,7 +1869,9 @@ impl Registry {
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
-                account.hold_label(holder, Live { outbox, token }, &init.account_name);
+                if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
+                    return Err("account stopped".into());
+                }
                 return Ok(account);
             }
             if apply.is_none()
@@ -1690,16 +1921,20 @@ impl Registry {
             Arc::downgrade(&account),
         );
         if self.user_drains.get(user).latched() {
-            Self::stop(
+            self.stop(
                 &account,
                 "the user is draining",
                 None,
                 DisposalCause::Moving,
+                None,
             );
             return Err("The user is draining; reconnecting".into());
         }
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
-        account.hold_label(holder, live, &init.account_name);
+        if !account.hold_before_publication(holder, live, &init.account_name) {
+            account.handle.dispose();
+            return Err("account stopped".into());
+        }
         if let Some(remote) = remote {
             let registry = Arc::downgrade(self);
             let weak = Arc::downgrade(&account);
@@ -1736,6 +1971,60 @@ impl Registry {
         Ok(account)
     }
 
+    async fn registered_key_for_build(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        authority: &InitAuthority,
+    ) -> Result<safe_cex_crypto::admission::PublicKey, String> {
+        let account_index = init
+            .application_id
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration account")?;
+        let index = init
+            .api_key_index
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration index")?;
+        let captured = authority.clone();
+        let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            captured.check_admission().is_ok() && expiry.is_none_or(|expiry| expiry > now_ms())
+        });
+        let proxy_token = ProxyToken::new();
+        proxy_token.set(token);
+        let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+            .with_venue(&init.exchange_name)
+            .with_report_user(safe_cex_native::report::ReportUser::new(user))
+            .with_io_guard(allowed.clone());
+        #[cfg(test)]
+        let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+        let network = safe_cex_venues::lighter_registration::Network::from_options(
+            init.exchange_name == "lighter-robinhood",
+            init.testnet == Some(true),
+        );
+        let public = crate::admission::fetch_lighter_registered_key(
+            &transport,
+            network,
+            account_index,
+            index,
+            allowed,
+        )
+        .await
+        .map_err(|_| "Signer registration unavailable")?;
+        authority.check_admission()?;
+        crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+        if let Some(expected) = &authority.proved_registration
+            && expected.as_bytes() != public.as_bytes()
+        {
+            return Err("Signer registration changed during verification".into());
+        }
+        Ok(public)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
@@ -1763,10 +2052,28 @@ impl Registry {
                 DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
                 DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
             };
+            if authority.proved_registration.is_some() {
+                let public = self
+                    .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                    .await?;
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .ok_or("Signer registration unavailable")?
+                    .signing_ref()
+                    .map_err(|_| "Signer registration unavailable")?;
+                if !public
+                    .matches_provider(&resident.provider(), reference)
+                    .map_err(|_| "Signer registration unavailable")?
+                {
+                    return Err("Signer registration changed during verification".into());
+                }
+            }
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
-            let link = (!public_only).then(|| SignerLink::new(socket, outbox));
+            let link = (!public_only).then(|| crate::signing_diagnostics::link(socket, outbox));
             let Prepared {
                 plan,
                 options,
@@ -1774,46 +2081,9 @@ impl Registry {
             } = prepare(init, public_only, link.clone())?;
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
-                    let account_index = init
-                        .application_id
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration account")?;
-                    let index = init
-                        .api_key_index
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration index")?;
-                    let captured = authority.clone();
-                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
-                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                        captured.check_admission().is_ok()
-                            && expiry.is_none_or(|expiry| expiry > now_ms())
-                    });
-                    let proxy_token = ProxyToken::new();
-                    proxy_token.set(token.clone());
-                    let transport =
-                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
-                            .with_venue(&venue)
-                            .with_io_guard(allowed.clone());
-                    #[cfg(test)]
-                    let transport =
-                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
-                    let network = safe_cex_venues::lighter_registration::Network::from_options(
-                        venue == "lighter-robinhood",
-                        init.testnet == Some(true),
-                    );
-                    let public = crate::admission::fetch_lighter_registered_key(
-                        &transport,
-                        network,
-                        account_index,
-                        index,
-                        allowed,
-                    )
-                    .await
-                    .map_err(|_| "Signer registration unavailable")?;
-                    authority.check_admission()?;
-                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    let public = self
+                        .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                        .await?;
                     Some(
                         remote
                             .with_registered_public_key(&public)
@@ -1825,13 +2095,17 @@ impl Registry {
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
         };
-        let identities = serde_json::from_str::<Value>(&options)
-            .ok()
-            .and_then(|options| options.get("signing").cloned())
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|_| "Invalid signer identities".to_owned())?
-            .unwrap_or_default();
+        let identities = if let Some(resident) = &delegated {
+            resident.identities().clone()
+        } else {
+            serde_json::from_str::<Value>(&options)
+                .ok()
+                .and_then(|options| options.get("signing").cloned())
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "Invalid signer identities".to_owned())?
+                .unwrap_or_default()
+        };
         let signing = AccountSigner::new_bound(
             signer.clone(),
             identities,
@@ -1863,10 +2137,12 @@ impl Registry {
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
         config.trusted_signer_state = None;
+        config.trusted_signer_identities = None;
         if let Some(resident) = &delegated {
             resident.configure(&mut config);
         }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
+        config.report_user = (!public_only).then(|| safe_cex_native::report::ReportUser::new(user));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
@@ -1895,6 +2171,24 @@ impl Registry {
         running.attach_restores(self.interruptions.account(user, registry_name));
         let algo_running = running.clone();
         let algo_identity = identity.clone();
+        // A weak signer: the algo host must never extend the key owner's life.
+        let algo_notify = self
+            .host_notify
+            .clone()
+            .filter(|_| !public_only)
+            .map(|notifier| {
+                let signing = Arc::downgrade(&signing);
+                crate::algo_notify::AlgoNotify::new(
+                    notifier,
+                    crate::host_notify::Scope::new(user, &venue, registry_name),
+                    Arc::new(move || {
+                        signing
+                            .upgrade()
+                            .is_some_and(|signing| signing.resident().is_some())
+                    }),
+                    held.clone(),
+                )
+            });
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -1918,12 +2212,23 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let plan = self
             .construction_test_plans
             .get(user)
             .cloned()
             .unwrap_or(plan);
+        let proxy_authority_required = [
+            Some(&plan.http),
+            plan.public_http.as_ref(),
+            plan.read_http.as_ref(),
+            plan.read_public_http.as_ref(),
+            plan.public_read_http.as_ref(),
+            plan.public_cors_http.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|route| route.authorize || route.tunnel_url.is_some());
         let authority = authority.clone();
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
@@ -1933,6 +2238,9 @@ impl Registry {
                 return;
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            if let Some(user) = &config.report_user {
+                transport = transport.with_report_user(user.clone());
+            }
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
@@ -1956,6 +2264,7 @@ impl Registry {
                                 algo_running,
                                 algo_twap_owner,
                                 algo_identity,
+                                algo_notify,
                                 inbox,
                             ));
                         }
@@ -1979,6 +2288,7 @@ impl Registry {
             public_only,
             signing,
             token: proxy_token,
+            proxy_authority_required,
             fingerprint,
             holders: Mutex::default(),
             algos,
@@ -2014,48 +2324,119 @@ impl Registry {
         holds.then_some(account)
     }
 
-    /// Lets go of one holder; the last one disposes the account, for `disposal`.
-    pub fn release(&self, account: &Arc<Account>, holder: u64, disposal: Disposal) {
-        let empty = {
+    /// Releases a holder; DELEGATED disconnects start their separate retention clock.
+    pub fn release(self: &Arc<Self>, account: &Arc<Account>, holder: u64, disposal: Disposal) {
+        self.release_with_labels(account, holder, disposal, Vec::new(), Vec::new());
+    }
+
+    fn release_with_labels(
+        self: &Arc<Self>,
+        account: &Arc<Account>,
+        holder: u64,
+        disposal: Disposal,
+        mut labels: Vec<String>,
+        mut leaving: Vec<Arc<str>>,
+    ) {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned);
+        let (last, stopped, delegated_live) = {
             let mut holders = account.holders.lock().unwrap();
+            let removed = holders.by_id.get(&holder).cloned();
+            leaving.extend(holders.registrations(holder, None));
             holders.remove(holder);
-            holders.labels.remove(&holder);
+            if let Some(held) = holders.labels.remove(&holder) {
+                labels.extend(held.into_keys());
+            }
+            if removed.is_none() && account.delegated().is_some() {
+                return;
+            }
             account.hand_over(&mut holders, holder);
-            holders.by_id.is_empty()
+            if page_dispose && account.delegated().is_some() {
+                // The leaving registration's stale copies leave with it, before the
+                // keep decision, so a removed socket can never be what keeps the key.
+                holders.detach_registrations(account, &leaving);
+            }
+            let delegated_live = holders.delegated_live_besides(&leaving);
+            let last = if account.delegated().is_some() {
+                holders.by_id.values().all(Option::is_none)
+            } else {
+                holders.by_id.is_empty()
+            };
+            (last, holders.disposed, delegated_live)
         };
-        if empty {
+        if account.delegated().is_some() {
+            // AGT-79: a page dispose detaches only its own holder. The account and its
+            // resident signer stop with the last live DELEGATED holder; a parked one may
+            // be this device's own stale socket and must not keep a removed key resident.
+            if page_dispose {
+                let keep = if stopped { !last } else { delegated_live };
+                if !keep {
+                    self.dispose_for(account, disposal, "account disposed", None);
+                } else {
+                    Log::info(&format!(
+                        "detach {}: holder {holder} left, a DELEGATED holder keeps it (disposal={})",
+                        account.name,
+                        disposal.as_str()
+                    ));
+                }
+                return;
+            }
+            if disposal == Disposal::SocketClosed && !stopped {
+                self.retain_delegated(account, labels);
+                return;
+            }
+        }
+        if last {
             self.dispose_for(account, disposal, "account disposed", None);
         }
     }
 
     pub(crate) fn release_label(
-        &self,
+        self: &Arc<Self>,
         account: &Arc<Account>,
         holder: u64,
         label: &str,
         disposal: Disposal,
     ) {
-        let still_held = {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned)
+            && account.delegated().is_some();
+        let (still_held, leaving, stop) = {
             let mut holders = account.holders.lock().unwrap();
+            let leaving = holders.registrations(holder, Some(label));
             holders.confirmed.remove(&(holder, label.into()));
-            let remaining = if let Some(labels) = holders.labels.get_mut(&holder) {
-                labels.remove(label);
-                labels.values().find_map(Clone::clone)
+            let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
+                let removed = labels.remove(label).is_some();
+                (labels.values().find_map(Clone::clone), removed)
             } else {
-                None
+                (None, false)
             };
+            if removed
+                && disposal == Disposal::SocketClosed
+                && account.delegated().is_some()
+                && !holders.disposed
+            {
+                holders.departed_labels.insert(label.to_owned());
+            }
             if let Some(live) = remaining {
                 holders.by_id.insert(holder, Some(live.clone()));
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
                 }
-                true
+                // AGT-79: this socket keeps another alias, but the disposed
+                // registration's stale copies still leave, and a remaining COSIGNED
+                // alias never keeps the resident key alone.
+                let stop = page_dispose && !holders.disposed && {
+                    holders.detach_registrations(account, &leaving);
+                    !holders.delegated_live_besides(&leaving)
+                };
+                (true, leaving, stop)
             } else {
-                false
+                (false, leaving, false)
             }
         };
-        if !still_held {
-            self.release(account, holder, disposal);
+        if stop {
+            self.dispose_for(account, disposal, "account disposed", None);
+        } else if !still_held {
+            self.release_with_labels(account, holder, disposal, vec![label.to_owned()], leaving);
         }
     }
 
@@ -2179,12 +2560,39 @@ impl Registry {
     }
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
+    /// `server_stopped` marks a stop the box itself made (`AlgoInput::Dispose`).
     fn stop(
-        account: &Account,
+        &self,
+        account: &Arc<Account>,
         reason: &str,
         stopped: Option<crate::algos::StopNotice>,
         cause: DisposalCause,
+        server_stopped: Option<tokio::sync::oneshot::Sender<()>>,
     ) {
+        if let Some(resident) = &account.delegated() {
+            let mut accounts = self.accounts.lock().unwrap();
+            let mut holders = account.holders.lock().unwrap();
+            holders.cancel_retention();
+            holders.disposed = true;
+            let key = (account.user.clone(), account.registry_name().to_owned());
+            let transferred = accounts.get(&key).is_some_and(|current| {
+                !Arc::ptr_eq(current, account)
+                    && current
+                        .delegated()
+                        .as_ref()
+                        .is_some_and(|next| Arc::ptr_eq(next, resident))
+            });
+            if !transferred {
+                resident.revoke();
+            }
+            if holders.by_id.values().all(Option::is_none)
+                && accounts
+                    .get(&key)
+                    .is_some_and(|current| Arc::ptr_eq(current, account))
+            {
+                accounts.remove(&key);
+            }
+        }
         account.handle.begin_disposal(cause);
         if !account.running.io_allowed() {
             let stopped = stopped.unwrap_or_else(|| Box::new(|_| {}));
@@ -2205,6 +2613,7 @@ impl Registry {
                 .send(crate::algos::AlgoInput::Dispose {
                     reason: reason.to_owned(),
                     stopped,
+                    server_stopped,
                 })
                 .is_ok()
         });
@@ -2224,6 +2633,7 @@ impl Registry {
             &crate::telemetry::Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
+                user_id: Some(&account.user),
                 user_tag: Some(user_tag(&account.user)),
                 venue: Some(&account.venue),
                 ..Default::default()
@@ -2260,6 +2670,18 @@ impl Registry {
     /// Whether `holder` still holds `account`; disposing drops every holder.
     pub fn holds(&self, account: &Account, holder: u64) -> bool {
         account.holders.lock().unwrap().by_id.contains_key(&holder)
+    }
+
+    /// Whether `holder` still holds `account` under `label`. AGT-79 can detach a
+    /// stale DELEGATED label while its socket keeps another alias.
+    pub fn holds_label(&self, account: &Account, holder: u64, label: &str) -> bool {
+        let holders = account.holders.lock().unwrap();
+        holders.by_id.contains_key(&holder)
+            && (account.delegated().is_none()
+                || holders
+                    .labels
+                    .get(&holder)
+                    .is_none_or(|labels| labels.contains_key(label)))
     }
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
@@ -2348,8 +2770,18 @@ impl Registry {
         {
             accounts.remove(&key);
         }
+        if account.delegated().is_some() {
+            let mut holders = account.holders.lock().unwrap();
+            holders.cancel_retention();
+            *holders = Holders {
+                disposed: true,
+                ..Default::default()
+            };
+        }
         drop(accounts);
-        *account.holders.lock().unwrap() = Holders::default();
+        if account.delegated().is_none() {
+            *account.holders.lock().unwrap() = Holders::default();
+        }
         let stopped = if stopped.is_none() && !account.running.io_allowed() {
             Some(self.keep_notice(account, "router-lease"))
         } else {
@@ -2360,7 +2792,7 @@ impl Registry {
         } else {
             DisposalCause::Stopped
         };
-        Self::stop(account, reason, stopped, cause);
+        self.stop(account, reason, stopped, cause, None);
     }
 
     /// The process is stopping: every account's algos settle and its engine ends,
@@ -2370,22 +2802,54 @@ impl Registry {
         self.stopping.store(true, Ordering::Relaxed);
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
+        let mut queued = Vec::new();
         for account in &accounts {
-            Self::stop(
+            let server_stopped = if account.delegated().is_some() {
+                self.host_notify(account, crate::host_notify::restart_shutdown());
+                self.host_notify.as_ref().map(|_| {
+                    let (sender, receiver) = tokio::sync::oneshot::channel();
+                    queued.push(receiver);
+                    sender
+                })
+            } else {
+                None
+            };
+            self.stop(
                 account,
                 "the server is restarting",
                 None,
                 DisposalCause::Stopped,
+                server_stopped,
             );
         }
         let until = tokio::time::Instant::now() + deadline;
-        while self.threads.accounts() > 0 {
-            if tokio::time::Instant::now() >= until {
-                return false;
+        let stopped = async {
+            while self.threads.accounts() > 0 {
+                if tokio::time::Instant::now() >= until {
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        true
+            true
+        };
+        // Best-effort and bounded; it runs beside, never after, the engine wait.
+        // Each algo host queues its `algoStopped` notices first; a host that is
+        // gone drops its sender, which ends that wait too.
+        let flushed = async {
+            if let Some(notifier) = &self.host_notify {
+                let until = tokio::time::Instant::now() + crate::host_notify::RESTART_FLUSH;
+                let _ = tokio::time::timeout_at(until, async {
+                    for receiver in queued {
+                        let _ = receiver.await;
+                    }
+                })
+                .await;
+                notifier
+                    .flush(until.saturating_duration_since(tokio::time::Instant::now()))
+                    .await;
+            }
+        };
+        tokio::join!(stopped, flushed).0
     }
 
     /// The operator drains the box: sockets move as their algos end, and only
@@ -2457,9 +2921,11 @@ impl Registry {
         let registry = self.clone();
         let (user, id) = (user.to_owned(), id.to_owned());
         Some(tokio::spawn(async move {
-            for account in accounts {
-                let keep = registry.keep_notice(&account, &id);
-                let weak = Arc::downgrade(&account);
+            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            let mut queued = Vec::new();
+            for account in &accounts {
+                let keep = registry.keep_notice(account, &id);
+                let weak = Arc::downgrade(account);
                 let stopped = Box::new(move |kept: crate::algos::Kept| {
                     if let Some(account) = weak.upgrade() {
                         for frame in kept.frames(&account.name) {
@@ -2468,14 +2934,25 @@ impl Registry {
                     }
                     keep(kept);
                 });
-                Self::stop(
-                    &account,
+                let (server_stopped, receiver) = tokio::sync::oneshot::channel();
+                queued.push(receiver);
+                registry.stop(
+                    account,
                     "the operator forced a user drain",
                     Some(stopped),
                     DisposalCause::Stopped,
+                    Some(server_stopped),
                 );
             }
-            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            // The host's DELEGATED check reads the signer weakly, and an absent user's
+            // account may have no other owner: hold it until its stops are queued.
+            let _ = tokio::time::timeout(crate::host_notify::RESTART_FLUSH, async {
+                for receiver in queued {
+                    let _ = receiver.await;
+                }
+            })
+            .await;
+            drop(accounts);
             let settled = loop {
                 if registry.user_drains.status(&user)["algosDone"] == true {
                     break true;
@@ -2538,15 +3015,27 @@ impl Registry {
     ) {
         let mut parked = Vec::with_capacity(accounts.len());
         for (account, holder) in accounts {
-            if parked
-                .iter()
-                .any(|(previous, _)| Arc::ptr_eq(previous, &account))
+            if account.user != user
+                || parked
+                    .iter()
+                    .any(|(previous, _)| Arc::ptr_eq(previous, &account))
             {
                 continue;
             }
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
+                if account.delegated().is_some() {
+                    if !holders.by_id.get(&holder).is_some_and(Option::is_some) {
+                        continue;
+                    }
+                    if holders.disposed {
+                        // Stopped accounts keep live holders only for their final notices.
+                        drop(holders);
+                        self.release(&account, holder, Disposal::SocketClosed);
+                        continue;
+                    }
+                }
                 holders.remove(holder);
                 if let Some(mut labels) = holders.labels.remove(&holder) {
                     for live in labels.values_mut() {
@@ -2557,6 +3046,7 @@ impl Registry {
                 holders.insert(park_holder, None);
                 account.hand_over(&mut holders, holder);
             }
+            self.retain_delegated(&account, Vec::new());
             parked.push((account, park_holder));
         }
         if parked.is_empty() {
@@ -2568,6 +3058,8 @@ impl Registry {
                 user: user.to_owned(),
                 accounts: parked,
                 alias_until: None,
+                resumed_by: None,
+                proof: None,
             },
         );
         let registry = self.clone();
@@ -2597,7 +3089,7 @@ impl Registry {
                         account.hand_over(&mut holders, park_holder);
                         holders.by_id.is_empty()
                     };
-                    if last {
+                    if last && account.delegated().is_none() {
                         let stopped = registry.keep_notice(&account, &resume_id);
                         registry.dispose_for(&account, Disposal::NoBrowser, &reason, Some(stopped));
                     }
@@ -2656,8 +3148,9 @@ impl Registry {
     }
 
     /// Takes back parked COSIGNED accounts for the same user. DELEGATED
-    /// accounts retain their parked holder until their original expiry and use
-    /// fresh admission. Unknown, expired and foreign ids return no accounts.
+    /// accounts retain their parked holder until their original expiry; only
+    /// this socket may claim them, one label at a time, with `resume_delegated`.
+    /// Unknown, expired and foreign ids return no accounts.
     pub fn resume(
         &self,
         resume_id: &str,
@@ -2681,6 +3174,7 @@ impl Registry {
             .extract_if(.., |(account, _)| account.delegated().is_none())
             .collect::<Vec<_>>();
         entry.alias_until = Some(now_ms() + 2 * self.resume_grace.as_millis() as u64);
+        entry.resumed_by = Some(holder);
         drop(parked);
         accounts
             .into_iter()
@@ -2718,6 +3212,108 @@ impl Registry {
             })
             .collect()
     }
+}
+
+impl Registry {
+    /// Binds the parking socket's in-band proof; called before `session_closed`.
+    pub fn bind_resume_proof(&self, resume_id: &str, proof: &str) {
+        if let Some(entry) = self.parked.lock().unwrap().get_mut(resume_id) {
+            entry.proof = Some(proof.to_owned());
+        }
+    }
+
+    /// DELEGATED labels still parked under `resume_id` that `socket` may claim.
+    pub fn delegated_resumable(&self, resume_id: &str, user: &str, socket: u64) -> Vec<String> {
+        let parked = self.parked.lock().unwrap();
+        let Some(entry) = parked
+            .get(resume_id)
+            .filter(|entry| entry.user == user && entry.resumed_by == Some(socket))
+        else {
+            return Vec::new();
+        };
+        let mut labels: Vec<String> = entry
+            .accounts
+            .iter()
+            .filter(|(account, _)| account.delegated().is_some())
+            .flat_map(|(account, park_holder)| account.parked_labels(*park_holder))
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    }
+
+    /// AGT-54: re-attaches one parked DELEGATED label to the socket that resumed
+    /// its session, keeping the resident signer. Owner, label, venue, identity
+    /// digest and settings must all match; anything else needs a fresh handover.
+    pub fn resume_delegated(
+        &self,
+        resume_id: &str,
+        user: &str,
+        socket: u64,
+        token: (String, u64),
+        init: &InitPayload,
+        outbox: Outbox,
+    ) -> Option<Arc<Account>> {
+        if crate::auth::Verifier::check_expiry(Some(token.1), now_ms()).is_err() {
+            return None;
+        }
+        let label = init.account_name.as_str();
+        let fingerprint = init.fingerprint();
+        let account = {
+            let mut parked = self.parked.lock().unwrap();
+            let entry = parked.get_mut(resume_id).filter(|entry| {
+                entry.user == user
+                    && entry.resumed_by == Some(socket)
+                    && proof_matches(entry.proof.as_deref(), init.resume_proof.as_deref())
+            })?;
+            let index = entry.accounts.iter().position(|(account, park_holder)| {
+                account.delegated().is_some()
+                    && account.venue == init.exchange_name
+                    && account.matches_init(user, init)
+                    && same_handover_settings(&account.fingerprint, &fingerprint)
+                    && account
+                        .parked_labels(*park_holder)
+                        .iter()
+                        .any(|parked| parked == label)
+            })?;
+            let (account, park_holder) = entry.accounts[index].clone();
+            // Lock order parked -> holders; nothing takes them in reverse.
+            if account.release_parked_label(park_holder, label) {
+                entry.accounts.remove(index);
+            }
+            account
+        };
+        let current = self
+            .accounts
+            .lock()
+            .unwrap()
+            .get(&(user.to_owned(), account.registry_name().to_owned()))
+            .is_some_and(|current| Arc::ptr_eq(current, &account));
+        // A disposed, replaced or expired account is never revived by a resume.
+        (current
+            && account.hold_label(
+                socket,
+                Live {
+                    outbox,
+                    token: Some(token),
+                },
+                label,
+            ))
+        .then_some(account)
+    }
+}
+
+/// Constant-time over equal lengths; a missing proof never matches.
+fn proof_matches(expected: Option<&str>, presented: Option<&str>) -> bool {
+    let (Some(expected), Some(presented)) = (expected, presented) else {
+        return false;
+    };
+    expected.len() == presented.len()
+        && expected
+            .bytes()
+            .zip(presented.bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
 }
 
 /// Engine/routing settings after possession proof; mode and passphrase are
@@ -2760,6 +3356,47 @@ pub fn resume_id() -> String {
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
+    /// Inspect real native account sections in transport fixtures. This creates
+    /// no production store message or mutable-store implementation.
+    pub fn native_frame_data(envelope: &serde_json::Value) -> Option<serde_json::Value> {
+        use base64::Engine;
+        if envelope["d"]["op"] != "frame" {
+            return None;
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(envelope["d"]["data"].as_str()?)
+            .ok()?;
+        let mut rows = serde_json::Map::new();
+        for (kind, payload) in safe_cex_engine::wire::sections(&bytes) {
+            let field = match kind {
+                26 => "socketHealth",
+                27 => "activeChasers",
+                28 => "activeTWAPs",
+                29 => "ordersRisk",
+                30 => "displayedPositions",
+                31 => "displayedMargin",
+                32 => "balanceInfo",
+                _ => continue,
+            };
+            let value = safe_cex_store_frames::decode_section(payload).expect("native section");
+            rows.insert(
+                field.into(),
+                serde_json::to_value(value).expect("fixture native value"),
+            );
+        }
+        Some(serde_json::Value::Object(rows))
+    }
+
+    /// Integration fixtures route real probe and resident transports to loopback.
+    /// This does not disable admission, replace proof strategies or inject outcomes.
+    pub fn set_routing(
+        registry: &mut super::Registry,
+        user: &str,
+        plan: safe_cex_native::RoutingPlan,
+    ) {
+        registry.construction_test_plans.insert(user.into(), plan);
+    }
+
     /// Synthetic venue fixtures have no real private-startup transport. The
     /// production proof requirement remains the default; legacy fixtures opt out explicitly.
     pub fn set_join_admission(registry: &mut super::Registry, enabled: bool) {
@@ -2822,10 +3459,19 @@ pub mod testing {
         user: &str,
         venue: crate::delegated_e2e_io::MockVenue,
     ) -> Arc<Registry> {
+        e2e_registry_with_grace(user, venue, Duration::from_secs(60))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn e2e_registry_with_grace(
+        user: &str,
+        venue: crate::delegated_e2e_io::MockVenue,
+        resume_grace: Duration,
+    ) -> Arc<Registry> {
         let mut registry = Registry::new(
             EngineThreads::start(1).unwrap(),
             Duration::from_millis(1),
-            Duration::from_secs(60),
+            resume_grace,
         );
         registry.e2e_venue = Some(venue);
         // A missing override must fail locally rather than reach a venue.
@@ -2905,6 +3551,7 @@ pub mod testing {
             signing: AccountSigner::new(None, Default::default(), link.clone(), None),
             link,
             token: ProxyToken::new(),
+            proxy_authority_required: false,
             fingerprint,
             holders: Mutex::default(),
             algos: Some(algos),
@@ -2944,6 +3591,49 @@ pub mod testing {
             running,
         );
         bind_identity(&mut account, init);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
+    #[cfg(test)]
+    pub(crate) fn registered_lighter_account(
+        registry: &Registry,
+        user: &str,
+        init: &InitPayload,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let (mut account, inbox) = account_on(
+            HeldLoad {
+                placed: Arc::default(),
+                load_after_ms: Some(0.),
+                ticker: true,
+            },
+            (user, &init.account_name, &init.exchange_name),
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let remote = remote_account(
+            link.clone(),
+            &init.exchange_name,
+            Some(init.account_name.clone()),
+            &engine_options(init, false).to_string(),
+        )
+        .unwrap()
+        .with_registered_public_key(public)
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let identities = serde_json::from_value(options["signing"].clone()).unwrap();
+        Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
+            Some(remote.provider.clone()),
+            identities,
+            Some(link.clone()),
+            None,
+            remote.public_binding_source(),
+        );
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
@@ -3185,6 +3875,16 @@ pub mod testing {
         link: Arc<SignerLink>,
         inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
     ) -> Arc<Account> {
+        run_algos_notifying(account, link, inbox, None)
+    }
+
+    /// `run_algos` with the host notification tap `build` adds when the lane is on.
+    pub(crate) fn run_algos_notifying(
+        account: Arc<Account>,
+        link: Arc<SignerLink>,
+        inbox: mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+        notify: Option<crate::algo_notify::AlgoNotify>,
+    ) -> Arc<Account> {
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         let owner = account.algo_owner.clone();
         let (emit, broadcast) = algo_reach(owner);
@@ -3204,6 +3904,7 @@ pub mod testing {
             account.running.clone(),
             account.twap_owner.clone(),
             account.identity.clone(),
+            notify,
             inbox,
         ));
         account
@@ -4062,6 +4763,72 @@ pub(crate) mod tests {
             .await;
     }
 
+    /// AGT-119: a box stop (drain, SIGTERM, a forced user drain) reports each chase
+    /// it cut short once, before the host settles, and the chase's own end adds none.
+    #[tokio::test(start_paused = true)]
+    async fn a_box_stop_reports_the_running_chase_its_algo_host_stops() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let link = SignerLink::new(7, Arc::new(|_| true));
+                let running = Arc::new(crate::algos::Running::default());
+                let venue = HeldLoad {
+                    placed: Arc::default(),
+                    load_after_ms: Some(0.),
+                    ticker: true,
+                };
+                let (account, inbox) =
+                    held_account_on(venue, Some(link.clone()), String::new(), running.clone());
+                let notifier = crate::host_notify::HostNotifier::unstarted();
+                let notify = crate::algo_notify::AlgoNotify::new(
+                    notifier.clone(),
+                    account.notify_scope(),
+                    Arc::new(|| true),
+                    account.held.clone(),
+                );
+                let account = testing::run_algos_notifying(account, link, inbox, Some(notify));
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                testing::algo_op(
+                    &account,
+                    "chaser:start",
+                    r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#,
+                );
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                assert_eq!(running.counts(), (1, 0), "the chase runs");
+                let (queued, done) = tokio::sync::oneshot::channel();
+                assert!(
+                    account
+                        .algos
+                        .as_ref()
+                        .unwrap()
+                        .send(crate::algos::AlgoInput::Dispose {
+                            reason: "the server is restarting".into(),
+                            stopped: None,
+                            server_stopped: Some(queued),
+                        })
+                        .is_ok()
+                );
+                done.await.expect("the host says once its stops are queued");
+                let stops = || -> Vec<Value> {
+                    notifier
+                        .queued()
+                        .iter()
+                        .map(|notification| serde_json::to_value(notification).unwrap())
+                        .filter(|notification| notification["kind"] == "algoStopped")
+                        .collect()
+                };
+                let first = stops();
+                assert_eq!(first.len(), 1, "{first:?}");
+                assert_eq!(
+                    first[0]["fields"],
+                    json!({"symbol":"BTCUSDT","side":"buy","verb":"stopped","algo":"chase","cause":"serverRestart"})
+                );
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                assert_eq!(running.counts(), (0, 0), "the host settled");
+                assert_eq!(stops(), first, "the settled chase's own end is not reported");
+            })
+            .await;
+    }
+
     pub(crate) fn registry() -> Arc<Registry> {
         let mut registry = Registry::new(
             EngineThreads::start(1).unwrap(),
@@ -4336,7 +5103,9 @@ pub(crate) mod tests {
                 );
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 match algos.try_recv() {
-                    Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                    Ok(crate::algos::AlgoInput::Dispose {
+                        reason, stopped, ..
+                    }) => {
                         assert!(stopped.is_some(), "expiry keeps a notice for the next init");
                         assert_eq!(reason, "no browser for 60s")
                     }
@@ -4580,19 +5349,16 @@ pub(crate) mod tests {
                         }),
                     );
                 }
-                account
-                    .algos
-                    .as_ref()
-                    .unwrap()
-                    .send(crate::algos::AlgoInput::Joined)
-                    .unwrap();
+                // A refused algo command is still a reply for every holder;
+                // native state itself now travels on each holder's SCXF pump.
+                testing::algo_op(&account, "chaser:start", "{}");
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let seen = seen.lock().unwrap();
                 for id in [8, 9] {
                     assert!(
                         seen.iter()
                             .any(|(holder, frame)| *holder == id
-                                && frame.contains(r#""op":"store""#)),
+                                && frame.contains(r#""op":"error""#)),
                         "holder {id}: {seen:?}"
                     );
                 }
@@ -5336,6 +6102,10 @@ mod delegated_accounts_tests;
 #[cfg(test)]
 #[path = "delegated_construction_tests.rs"]
 mod delegated_construction_tests;
+
+#[cfg(test)]
+#[path = "delegated_retention_tests.rs"]
+mod delegated_retention_tests;
 
 #[cfg(test)]
 mod apply_settings_tests {

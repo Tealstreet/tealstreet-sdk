@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
+import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from './reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../types';
 import { createPositionId } from '../utils/createPositionId';
+import { nativeFixture } from './cutover/nativeFixture';
+import { BitgetExchange } from './reference/bitget/bitget.exchange';
 
 const createAPIMock = vi.hoisted(() => vi.fn());
 
@@ -14,7 +15,7 @@ vi.mock('./reference/bitget/bitget.api', () => ({
 }));
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   createAPIMock.mockReturnValue(axios.create());
   const exchange = new BitgetExchange(
     'bitget' as any,
@@ -49,25 +50,30 @@ const stubClassicWithPositionResponse = (exchange: BitgetExchange, positionData:
   });
 };
 
-const seedExistingPosition = (store: DefaultStore, liquidationPrice: number) => {
-  store.update({
-    positions: [
+const seedExistingPosition = (store: FrameStore, liquidationPrice: number) => {
+  store.apply(
+    nativeFixture(
       {
-        id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        entryPrice: 50000,
-        notional: 50000,
-        leverage: 10,
-        unrealizedPnl: 0,
-        contracts: 1,
-        liquidationPrice,
-        marginType: MarginType.Cross,
-        positionMode: PositionMode.OneWay,
-        info: {},
+        positions: [
+          {
+            id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            entryPrice: 50000,
+            notional: 50000,
+            leverage: 10,
+            unrealizedPnl: 0,
+            contracts: 1,
+            liquidationPrice,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.OneWay,
+            info: {},
+          },
+        ],
       },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 };
 
 const rawPosition = (liquidationPrice: string) => ({
@@ -112,13 +118,14 @@ describe('Bitget liquidation price mapping', () => {
     expect(positions[0].liquidationPrice).toBe(45000);
   });
 
-  it('treats explicit zero liquidation price as authoritative', async () => {
+  it('clears a previous liquidation price when the venue reports zero', async () => {
     const { exchange, store } = createExchange();
     seedExistingPosition(store, 45000);
     stubClassicWithPositionResponse(exchange, [rawPosition('0')]);
 
     const positions = await exchange.fetchOpenPositions();
 
-    expect(positions[0].liquidationPrice).toBe(0);
+    // Rule 5 / native Position contract: a nonpositive liquidation price is unknown.
+    expect(positions[0].liquidationPrice).toBeNull();
   });
 });

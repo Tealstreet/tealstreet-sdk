@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { HyperliquidExchange } from './reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../store/store.base';
 
 // Core perps come from a module helper, not a method; this test is about the HIP-3
 // loop, so the core fetch is stubbed to a minimal valid shape.
@@ -19,7 +19,7 @@ vi.mock('./reference/hyperliquid/hyperliquid.market-startup-helpers', () => ({
 const DEXES = ['xyz', 'flx', 'vntl', 'hyna', 'km', 'abcd', 'cash', 'para', 'mkts', 'io'];
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new HyperliquidExchange(
     'hyperliquid',
     { testnet: false, tuning: { consoleLogging: false } } as any,

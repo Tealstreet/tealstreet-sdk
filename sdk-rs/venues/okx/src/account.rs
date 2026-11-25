@@ -2171,7 +2171,8 @@ impl Okx {
         if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
             entry.insert(cx.now);
             cx.fill(Fill {
-                id: None,
+                id: (!row.trade_id.is_empty() && row.trade_id != "0")
+                    .then(|| row.trade_id.to_owned()),
                 order_id: row.ord_id.into(),
                 symbol: m.symbol.clone(),
                 side: side(row.side),
@@ -2254,7 +2255,13 @@ impl Okx {
                         native_id.into(),
                         (self.account.revision, cx.now, terminal || triggered),
                     );
-                    for order in self.orders(cx, &row) {
+                    let orders = self.orders(cx, &row);
+                    if matches!(row.ord_type, "oco" | "conditional" | "trigger")
+                        && row.state == "live"
+                    {
+                        self.drop_deleted_legs(cx, row.algo_id, &orders);
+                    }
+                    for order in orders {
                         if terminal || triggered {
                             self.trading.algo_orders.remove(&order.id);
                         } else if matches!(
@@ -2530,6 +2537,25 @@ impl Okx {
                 native_upl,
             },
         ))
+    }
+
+    /// An amend-algos leg deletion leaves an `oco` a one-leg `conditional`; its
+    /// update no longer lists the deleted leg, so that row goes (AGT-98). A
+    /// reduce-only `trigger` amended across the reference price changes its
+    /// leg suffix the same way. The version keeps an older census from restoring it.
+    fn drop_deleted_legs(&mut self, cx: &mut Cx<'_, Pending>, algo_id: &str, listed: &[Order]) {
+        for suffix in ["_sl", "_tp"] {
+            let id = format!("{algo_id}{suffix}");
+            if listed.iter().any(|o| o.id == id) || cx.store.order(&id).is_none() {
+                continue;
+            }
+            cx.store.remove_orders(&[&id]);
+            self.trading.algo_orders.remove(&id);
+            self.account.order_leverage.remove(&id);
+            self.account
+                .order_versions
+                .insert(id, (self.account.revision, cx.now, false));
+        }
     }
 
     fn orders(&self, cx: &Cx<'_, Pending>, o: &OrderRow<'_>) -> Vec<Order> {

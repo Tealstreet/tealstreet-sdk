@@ -3,6 +3,7 @@
 //! browser's existing signing host answers it unchanged.
 mod apexomni;
 mod coinbase;
+mod kraken;
 mod orderly;
 use std::future::Future;
 use std::pin::Pin;
@@ -37,6 +38,7 @@ pub(crate) enum Family {
     Backpack,
     Coinbase,
     Kucoin,
+    Kraken,
     DoubleSha256,
     Hyperliquid,
     Grvt,
@@ -51,6 +53,7 @@ impl Family {
             "backpack" => Self::Backpack,
             "coinbase" | "coinbasespot" => Self::Coinbase,
             "kucoin" | "kucoinspot" => Self::Kucoin,
+            "kraken" => Self::Kraken,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
             "grvt" => Self::Grvt,
@@ -63,6 +66,7 @@ impl Family {
     fn algorithm(self) -> Algorithm {
         match self {
             Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
+            Self::Kraken => Algorithm::HmacSha512,
             Self::Backpack => Algorithm::Ed25519,
             Self::Coinbase => Algorithm::Es256,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
@@ -484,6 +488,7 @@ impl Inner {
         let request = Value::Object(request);
         // A declared fixed id (binanceSpot user data) waits for the previous
         // request with that id to settle rather than refusing.
+        let diagnostic_started = tokio::time::Instant::now();
         let deadline = Instant::now() + crate::link::SIGN_TIMEOUT;
         let response = loop {
             match self.link.round_trip(&id, &request).await {
@@ -498,7 +503,11 @@ impl Inner {
             Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
             // Silence is a slow page, not a failed signer: the socket's worker
             // answers echoes while the page's thread is too busy to sign.
-            Err(Failure::Duplicate | Failure::TimedOut) => {
+            Err(failure @ (Failure::Duplicate | Failure::TimedOut)) => {
+                if failure == Failure::Duplicate {
+                    self.link
+                        .note_timeout(&id, diagnostic_started, None, failure);
+                }
                 self.warn_sign("sign request timed out after 15s");
                 return Err(SignError::TimedOut);
             }
@@ -591,10 +600,14 @@ impl Inner {
             Family::Lighter => self.sign_lighter(&operations).await?,
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
+            Family::Hmac if self.venue == "asterdex" => {
+                self.sign_aster_v1(&operations, receipt).await?
+            }
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
             Family::ApexOmni => self.sign_apexomni(&operations).await?,
             Family::Orderly => return refused(),
             Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Kraken => self.sign_kraken(&operations, receipt).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
             Family::Coinbase => return refused(),
         };
@@ -945,6 +958,71 @@ impl Inner {
                 values.push(mac(value, Encoding::Base64)?);
             }
             Ok(values)
+        })
+        .await
+    }
+
+    async fn sign_aster_v1(
+        &self,
+        operations: &[Operation],
+        receipt: SignReceipt,
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || receipt.nonce.is_some()
+        {
+            return refused();
+        }
+        let [PayloadPart::Bytes { bytes }] = payload.as_slice() else {
+            return refused();
+        };
+        if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let descriptor = json!({"slot":"primary","payload":utf8(bytes)?}).to_string();
+        // The device limit includes the JSON envelope and escaping expansion.
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "asterdex-hmac", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Batch {
+                credential: String,
+                signature: String,
+            }
+            let text = value.as_str().ok_or(SignError::Refused)?;
+            let batch: Batch = serde_json::from_str(text).map_err(|_| SignError::Refused)?;
+            if batch.credential.as_bytes() != primary.public
+                || batch.signature.len() != 64
+                || !batch
+                    .signature
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return refused();
+            }
+            let signature = hex_bytes(&batch.signature).ok_or(SignError::Refused)?;
+            Ok(vec![primary.public.clone(), signature])
         })
         .await
     }

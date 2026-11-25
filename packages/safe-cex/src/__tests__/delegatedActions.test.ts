@@ -5,8 +5,13 @@ import { describe, expect, it } from 'vitest';
 
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
 import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
-import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
-import { DelegatedOutbox } from '../delegatedOutbox';
+import {
+  delegatedActionFingerprint,
+  isDelegatedAction,
+  isDelegatedActionResult,
+  isDelegatedFullWriteAction,
+} from '../delegatedActions';
+import { DELEGATED_RECEIPT_MAX_AGE_MS, DelegatedOutbox } from '../delegatedOutbox';
 import { OrderSide, OrderType } from '../types';
 
 const actions: DelegatedAction[] = [
@@ -86,6 +91,19 @@ const outcome = (id: string, action: DelegatedAction, seq = 1) => ({
 });
 
 describe('DELEGATED versioned actions', () => {
+  it('names unsupported algo amendment fields before durable enqueue or transmission', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    box.connect(f.connection);
+    for (const op of ['chaser:amend', 'twap:amend']) {
+      await expect(
+        Reflect.apply(box.enqueueAction, box, [{ kind: 'algo', op, data: { id: 'job', update: { size: 2 } } }]),
+      ).rejects.toThrow('unsupported amend field');
+    }
+    expect(f.rows.size).toBe(0);
+    expect(f.writes).toEqual([]);
+    box.close();
+  });
   it('preserves a typed unsupported v1 outcome across restore without replay or a fabricated notSent proof', async () => {
     const f = setup();
     const box = await DelegatedOutbox.open(f.options);
@@ -164,6 +182,30 @@ describe('DELEGATED versioned actions', () => {
     }
   });
 
+  it('accepts an ID-less applied amend of a protective position setting', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection);
+    const action: DelegatedAction = {
+      kind: 'amend',
+      order: { id: 'full-stop', symbol: 'BTCUSDT' },
+      update: { price: 48000 },
+    };
+    const id = await box.enqueueAction(action);
+    const reply = outcome(id, action);
+    await box.receive(c, {
+      ...reply,
+      d: { ...reply.d, result: { kind: 'amend', orderIds: [], protectionApplied: true } },
+    });
+    expect(box.entries()[0].state).toBe('applied');
+    box.close();
+    expect(isDelegatedActionResult({ kind: 'amend', orderIds: [] }, 'amend', action)).toBe(false);
+    expect(isDelegatedActionResult({ kind: 'amend', orderIds: ['x'], protectionApplied: true }, 'amend', action)).toBe(
+      false,
+    );
+    expect(isDelegatedActionResult({ kind: 'close', orderIds: [], protectionApplied: true }, 'close')).toBe(false);
+  });
+
   it.each(fullWrites)('pins full-write canonical hash for $method', ({ action, fingerprint }) => {
     expect(isDelegatedFullWriteAction(action as unknown as DelegatedAction)).toBe(true);
     expect(delegatedActionFingerprint('main', golden.key, action as unknown as DelegatedAction, 1)).toBe(fingerprint);
@@ -233,7 +275,8 @@ describe('DELEGATED versioned actions', () => {
     const box = await DelegatedOutbox.open(f.options);
     const c = box.connect(f.connection);
     await box.enqueueAction(actions[1]);
-    f.options.clock.now = () => 10_000;
+    // AGT-125: a handed-off intent's deadline is DELEGATED_RECEIPT_MAX_AGE_MS, not the 10 s admission budget.
+    f.options.clock.now = () => DELEGATED_RECEIPT_MAX_AGE_MS;
     f.timers[0]();
     await box.flush(c);
     expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: false });

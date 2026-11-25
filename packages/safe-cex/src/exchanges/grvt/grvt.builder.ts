@@ -13,6 +13,8 @@ import { BrowserProvider, Eip1193Provider, isAddress } from 'ethers';
 import { getTransport } from '../../transport/registry';
 import { BASE_URLS } from './grvt.types';
 
+declare const window: Window & { ethereum?: unknown };
+
 // Tealstreet builder wallet addresses
 export const TEALSTREET_GRVT_BUILDER_ADDRESS_MAINNET = '0xee8f3559f298fffa79b8253437969d15b5dccff3';
 export const TEALSTREET_GRVT_BUILDER_ADDRESS_TESTNET = '0xb0108ae4c07218ce320e5e22dd911a01c2042162';
@@ -368,7 +370,7 @@ const getEthereumProvider = (): Eip1193Provider | null => {
   if (typeof window === 'undefined') {
     return null;
   }
-  const ethereum = (window as unknown as Record<string, unknown>).ethereum;
+  const ethereum = window.ethereum;
   if (!ethereum) {
     return null;
   }

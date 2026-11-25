@@ -1184,6 +1184,7 @@ impl BybitLinear {
         let Some(side) = order_side(row.side.as_deref()) else {
             return true;
         };
+        // A cumulative order-row delta has no native execution identity.
         cx.fill(Fill {
             id: None,
             order_id: row.order_id.to_string(),
@@ -1415,13 +1416,17 @@ impl BybitLinear {
     }
 
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        self.fail_hyro_error(cx, VenueError::new(format!("HyroTrader {message}")));
+    }
+
+    fn fail_hyro_error(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
         self.account.hyro_transient = false;
         self.account.hyro_transient_streak = 0;
-        cx.notice(
-            Level::Error,
-            code::STREAM_UNAVAILABLE,
-            format!("HyroTrader {message}"),
-        );
+        if error.kind.is_some() {
+            cx.notice_error(Level::Error, code::STREAM_UNAVAILABLE, &error);
+        } else {
+            cx.notice(Level::Error, code::STREAM_UNAVAILABLE, error.message);
+        }
         if let Some(feed) = self.private.feed {
             cx.retire_socket(
                 feed,
@@ -1445,7 +1450,21 @@ impl BybitLinear {
             cx.clear_timer(timer);
         }
         if frame.success != Some(true) {
-            self.fail_hyro(cx, "private handshake rejected");
+            // An explicit auth denial refuses this admission without diagnosing
+            // why 10003 occurred or declaring the key invalid for another route.
+            if expected == "auth"
+                && frame.success == Some(false)
+                && frame.venue_code().as_deref() == Some("10003")
+            {
+                self.fail_hyro_error(
+                    cx,
+                    VenueError::new("HyroTrader private handshake rejected")
+                        .kind(ErrorKind::Rejected)
+                        .venue_code("10003"),
+                );
+            } else {
+                self.fail_hyro(cx, "private handshake rejected");
+            }
             return;
         }
         if expected == "auth" {
@@ -3672,7 +3691,8 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         return;
     };
     // Legacy frames without an execution ID cannot be deduplicated safely.
-    if let Some(id) = present(&row.exec_id) {
+    let execution = present(&row.exec_id);
+    if let Some(id) = execution {
         let key = (row.symbol.to_string(), id.to_owned());
         if !account.executions.insert(key.clone()) {
             return;
@@ -3685,7 +3705,7 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
         }
     }
     cx.fill(Fill {
-        id: None,
+        id: execution.map(str::to_owned),
         order_id: row.order_id.to_string(),
         symbol: row.symbol.to_string(),
         side,

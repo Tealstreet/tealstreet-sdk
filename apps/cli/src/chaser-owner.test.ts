@@ -1,9 +1,10 @@
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
-import type { ExchangeName, Market, Ticker } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BaseExchange } from '@tealstreet/safe-cex/src/exchanges/base';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
+import { FrameStore } from '@tealstreet/safe-cex/src/store/frameStore';
+import { nativeFixture } from '@tealstreet/safe-cex/src/__tests__/cutover/nativeFixture';
 import { OrderSide } from '@tealstreet/safe-cex/src/types';
 import { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import { chaserOrderManagerInstance as chasers } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
@@ -22,11 +23,42 @@ vi.mock('../../../packages/safe-cex/src/health/ExchangeHealthMonitor', () => ({
 const account: ExchangeAccountConfig = { name: 'Main', exchange: 'bitget', apiKey: 'fixture', apiSecret: 'fixture' };
 const options = { symbol: 'FILUSDT', size: 1, side: OrderSide.Buy, maxAttempts: 10, delay: 1000 };
 const makeExchange = (name: ExchangeName = 'bitget') => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [{ symbol: 'FILUSDT', precision: { price: 0.001, amount: 1 } } as Market],
-    tickers: [{ symbol: 'FILUSDT', bid: 5, ask: 5.001, last: 5 } as Ticker],
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [
+          {
+            id: 'FILUSDT',
+            symbol: 'FILUSDT',
+            base: 'FIL',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.001, amount: 1 },
+            limits: { amount: { min: 1, max: 10000 }, leverage: { min: 1, max: 100 } },
+          },
+        ],
+        tickers: [
+          {
+            id: 'FILUSDT',
+            symbol: 'FILUSDT',
+            bid: 5,
+            ask: 5 + 0.001,
+            last: 5,
+            mark: 5,
+            index: 5,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BaseExchange(name, { key: 'fixture', secret: 'fixture' }, store);
   vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
   return exchange;

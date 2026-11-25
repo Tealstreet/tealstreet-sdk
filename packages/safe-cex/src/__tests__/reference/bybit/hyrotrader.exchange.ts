@@ -1,11 +1,9 @@
+import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
+import type { StoreData } from '../../../generated/StoreData';
 import type { IncomeHistoryOptions, IncomeRecord, Order, PlaceOrderOpts } from '../../../types';
 import type { BybitCreateOrderResponse } from './bybit.exchange';
-import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
 
-import { PositionMode } from '../../../types';
 import { markBaseCapabilityFallback } from '../../../exchanges/base';
-import { BybitExchange } from './bybit.exchange';
-import { getBybitResponseMeta } from './bybit.response';
 import {
   ENDPOINTS,
   HYROTRADER_PROD_URL,
@@ -13,6 +11,11 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../../../exchanges/bybit/bybit.types';
+import { PositionMode } from '../../../types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, stopEntryLegsRefusal } from '../stopEntryLegs';
+import { BybitExchange } from './bybit.exchange';
+import { getBybitResponseMeta } from './bybit.response';
 import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recovery';
 import { HyroPrivateWebsocket } from './hyrotrader.ws-private';
 
@@ -107,7 +110,12 @@ export class HyrotraderExchange extends BybitExchange {
 
   fetchMarginAccountInfos = async () => {
     const balance = await this.fetchBalance();
-    if (!this.isDisposed) this.store.update({ balance });
+    if (!this.isDisposed)
+      applyReferenceFixture(
+        this.store,
+        { balance },
+        this.store.markets.map((row) => row.symbol),
+      );
   };
 
   private assertPrivateListResponse(data: any, endpoint: string) {
@@ -172,7 +180,10 @@ export class HyrotraderExchange extends BybitExchange {
       this.isFlatPositionRow(row) && (!this.isFiniteNumeric(row.leverage) || Number(row.leverage) <= 0)
         ? { ...row, leverage: this.store.positions.find((position) => position.symbol === row.symbol)?.leverage ?? 1 }
         : row;
-    this.assertPrivateListResponse({ retCode: 0, retMsg: 'OK', result: { list: [normalizedRow] } }, ENDPOINTS.POSITIONS);
+    this.assertPrivateListResponse(
+      { retCode: 0, retMsg: 'OK', result: { list: [normalizedRow] } },
+      ENDPOINTS.POSITIONS,
+    );
     const position = super.mapPosition({ ...normalizedRow, positionIdx: 0 });
     const fields = [
       position.entryPrice,
@@ -181,10 +192,10 @@ export class HyrotraderExchange extends BybitExchange {
       position.leverage,
       position.unrealizedPnl,
       position.realizedPnl,
-      position.liquidationPrice,
     ];
     if (
       fields.some((value) => !Number.isFinite(value)) ||
+      (position.liquidationPrice !== null && !Number.isFinite(position.liquidationPrice)) ||
       (position.marginSize !== undefined && !Number.isFinite(position.marginSize))
     ) {
       this.fail('HyroTrader position mapping contains invalid numeric fields');
@@ -263,12 +274,16 @@ export class HyrotraderExchange extends BybitExchange {
         return false;
       const formatted = this.formatBalance(rawBalance);
       const upnl = positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
-      this.store.update({
-        ...(orders ? { orders } : {}),
-        positions,
-        balance: { ...formatted, total: formatted.total + formatted.upnl - upnl, upnl },
-        loaded: { ...this.store.loaded, ...(orders ? { orders: true } : {}), positions: true, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          ...(orders ? { orders } : {}),
+          positions,
+          balance: { ...formatted, total: formatted.total + formatted.upnl - upnl, upnl },
+          loaded: { ...(orders ? { orders: true } : {}), positions: true, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       if (orders) this.ordersSnapshotVersion++;
       return true;
     } catch (error) {
@@ -337,9 +352,13 @@ export class HyrotraderExchange extends BybitExchange {
     if ('bybitBbo' in opts || 'bybitSlippageToleranceTicks' in opts) {
       this.fail('HyroTrader does not support Bybit BBO or TickSize slippage controls');
     }
+    // AGT-115: runs for single and batch placement before any write.
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('HyroTrader'));
   }
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     orders.forEach((order) => this.validateOrderCapabilities(order));
     const key = hyroSubmissionKey(orders);
@@ -390,9 +409,35 @@ export class HyrotraderExchange extends BybitExchange {
         const id = response.data.result.orderId;
         if (this.isDisposed || observations.has(id) || response.authoritativeSeen) return;
         if (response.terminal) {
-          this.store.removeOrders([{ id }, { id: `${id}__stop_loss` }, { id: `${id}__take_profit` }]);
+          (() => {
+            const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [
+              { id },
+              { id: `${id}__stop_loss` },
+              { id: `${id}__take_profit` },
+            ];
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         } else if (response.recoveredOrder) {
-          this.store.addOrUpdateOrders(this.mapValidatedOrders([response.recoveredOrder]));
+          (() => {
+            const incoming: StoreData['orders'] = this.mapValidatedOrders([response.recoveredOrder]);
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         } else if (!response.reconciled && !this.store.orders.some((order) => order.id === id)) {
           this.recordRecentlyPlacedOrderFromOpts(id, opts, response.payload);
         }

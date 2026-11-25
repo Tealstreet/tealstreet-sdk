@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 mod support;
 
@@ -378,6 +379,9 @@ fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
 #[test]
 fn legacy_cancel_envelope_selects_continue_or_stop() {
     // TS okx.exchange.ts:2355-2363,2375-2383 continues row errors; okx.api.ts:77-82 throws nonzero envelopes.
+    // AGT-69 (fix/agt-69-okx-partial-cancel): nonzero envelopes no longer stop. A
+    // code 1/2 batch with proven rows settles per row like code 0, so later
+    // batches still go; a refused row now fails the command at the end.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: okx | native cancellation runtime row refusal
     for code in ["0", "1", "2"] {
         for row_code in ["51000", "51400"] {
@@ -445,7 +449,6 @@ fn legacy_cancel_envelope_selects_continue_or_stop() {
                     if next.is_empty() {
                         break;
                     }
-                    assert_eq!(code, "0", "TS throws before later cancellation I/O");
                     let [request] = next.as_slice() else {
                         panic!("serial cancel")
                     };
@@ -490,20 +493,9 @@ fn legacy_cancel_envelope_selects_continue_or_stop() {
                             .map(|row| row[field].as_str().expect("target").to_owned()),
                     );
                 }
-                let expected_sizes = match (code, algo) {
-                    ("0", false) => vec![20, 1],
-                    ("0", true) => vec![10, 10, 1],
-                    (_, false) => vec![20],
-                    (_, true) => vec![10],
-                };
+                let expected_sizes = if algo { vec![10, 10, 1] } else { vec![20, 1] };
                 assert_eq!(batch_sizes, expected_sizes);
-                let sent_count = if code == "0" {
-                    21
-                } else if algo {
-                    10
-                } else {
-                    20
-                };
+                let sent_count = 21;
                 assert_eq!(
                     sent_ids,
                     (1..=sent_count)
@@ -523,7 +515,7 @@ fn legacy_cancel_envelope_selects_continue_or_stop() {
                         .count(),
                     1
                 );
-                if code != "0" {
+                if row_code == "51000" {
                     assert!(output.iter().any(|action| matches!(
                         action,
                         Action::Notice(Notice::CommandFailed { command: OWNER, .. })
@@ -601,7 +593,10 @@ fn native_code_zero_all_absent_cancels_continue_then_finish_empty_without_errors
 }
 
 #[test]
-fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
+fn native_code_one_all_refused_cancel_continues_and_restores_optimistic_status() {
+    // AGT-69 (fix/agt-69-okx-partial-cancel): was "..._stops_...". A refused code-1
+    // batch no longer withholds the next batch, so order 21 is still cancelled.
+    // Every row returns to Open until the stream confirms, as before.
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -629,15 +624,27 @@ fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
         &format!(r#"{{"code":"1","msg":"All operations failed","data":[{rows}]}}"#),
         6.,
     );
-    let output = prepared(&mut engine, 6.);
+    let second = prepared(&mut engine, 6.);
+    let Action::Http(last) = post(&second) else {
+        panic!("the sibling batch is still sent")
+    };
+    assert!(last.body.as_deref().unwrap().contains(r#""ordId":"21""#));
+    reply(
+        &mut engine,
+        post(&second),
+        r#"{"code":"0","data":[{"ordId":"21","sCode":"0","sMsg":""}]}"#,
+        7.,
+    );
+    let output = prepared(&mut engine, 7.);
     assert!(
         ids.iter()
-            .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open)
+            .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open),
+        "optimistic status is restored; the stream publishes the final state"
     );
     assert!(
         !output
             .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
     let errors: Vec<_> = output
         .iter()
@@ -650,7 +657,15 @@ fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
         })
         .collect();
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(
+        errors[0].message.contains("OKX left 20 of 21 orders open"),
+        "{errors:?}"
+    );
+    assert_ne!(
+        errors[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "order 21 was cancelled: a mixed result is never a whole rejection"
+    );
     assert!(!output.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { command: OWNER, .. })
@@ -860,7 +875,9 @@ fn failed(output: &[Action], command: u32) -> Vec<&safe_cex_engine::VenueError> 
 }
 
 #[test]
-fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
+fn a_managed_code_one_cancel_settles_rows_then_continues() {
+    // AGT-69 (fix/agt-69-okx-partial-cancel): was "..._fails_the_plan_without_continuing".
+    // A refused code-1 batch settles per row and the sibling batch still goes.
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -885,17 +902,37 @@ fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
         &format!(r#"{{"code":"1","msg":"All operations failed","data":[{rows}]}}"#),
         6.,
     );
-    let (output, continued) = release(&mut engine, 6.);
-    assert!(!continued, "code 1 never continues to the sibling batch");
+    let (second, continued) = release(&mut engine, 6.);
+    assert!(
+        continued,
+        "a proven code-1 batch still releases the sibling batch"
+    );
+    reply(
+        &mut engine,
+        post(&second),
+        r#"{"code":"0","data":[{"ordId":"21","sCode":"0","sMsg":""}]}"#,
+        7.,
+    );
+    let (output, continued) = release(&mut engine, 7.);
+    assert!(!continued);
     assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
-        ids.iter()
+        ids[..20]
+            .iter()
             .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open),
-        "native optimistic status is restored"
+        "refused rows' optimistic status is restored"
     );
     let errors = failed(&output, OWNER);
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(
+        errors[0].message.contains("OKX left 20 of 21 orders open"),
+        "{errors:?}"
+    );
+    assert_ne!(
+        errors[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "order 21 was cancelled: a mixed result is never a whole rejection"
+    );
 }
 
 #[test]
@@ -979,7 +1016,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         .collect();
     assert_eq!(
         cancel_all(&mut engine, 50, 7.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all")
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        )
     );
     let (later, _) = release(&mut engine, 8.);
     reads.extend(
@@ -1011,7 +1050,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
     }
     assert_ne!(
         cancel_all(&mut engine, 51, 10.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all"),
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        ),
         "the fresh snapshot clears the fence"
     );
 }
@@ -1079,7 +1120,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
     assert!(
         failures(&retry).iter().any(|error| {
             error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.legacy_text().contains("uncertain")
+                && error.legacy_text().contains("confirm")
         }),
         "the retry is refused NotSent with the reason"
     );
@@ -1349,7 +1390,7 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     );
     let failed = failures(&output);
     assert_eq!(failed.len(), 1);
-    support::assert_unknown_message(failed[0], support::ENGINE_UNKNOWN_TEXT);
+    support::assert_unknown_message(failed[0], support::ENGINE_HTTP_UNKNOWN_TEXT);
     assert!(
         failed
             .iter()
@@ -1378,7 +1419,7 @@ fn unknown_after_a_signature_refusal_keeps_the_engine_http_sealing_text() {
     assert_eq!(elements.len(), 1);
     assert!(matches!(&elements[0].result,
         safe_cex_engine::write_plan::ElementResult::Unknown { error }
-            if error.message.contains(support::ENGINE_UNKNOWN_TEXT)
+            if error.message.contains(support::ENGINE_HTTP_UNKNOWN_TEXT)
     ));
 }
 
@@ -1567,7 +1608,9 @@ fn a_census_begun_before_a_mark_cannot_release_it_from_a_later_page() {
 }
 
 #[test]
-fn a_stale_regular_row_in_code_one_stops_before_the_algo_cancels() {
+fn a_stale_regular_row_in_code_one_still_cancels_the_algo_orders() {
+    // AGT-69 (fix/agt-69-okx-partial-cancel): was "..._stops_before_the_algo_cancels",
+    // which pinned the round-3 bug: an already-gone limit left the SL open.
     let mut engine = trading_engine();
     engine.store_mut().upsert_order(stored("101"));
     engine.store_mut().upsert_order(Order {
@@ -1589,12 +1632,20 @@ fn a_stale_regular_row_in_code_one_stops_before_the_algo_cancels() {
         6.,
     );
     let second = prepared(&mut engine, 6.);
-    assert!(!second.iter().any(|action| matches!(action,
-        Action::Http(request) if request.method != safe_cex_engine::Method::Get
-    )));
-    assert!(second.iter().any(|action| matches!(
+    let Action::Http(algos) = post(&second) else {
+        panic!("the algo group still runs")
+    };
+    assert!(algos.url.ends_with("/cancel-algos"));
+    reply(
+        &mut engine,
+        post(&second),
+        r#"{"code":"0","data":[{"algoId":"202","sCode":"0","sMsg":""}]}"#,
+        7.,
+    );
+    let output = prepared(&mut engine, 7.);
+    assert!(output.iter().any(|action| matches!(
         action,
-        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        Action::Notice(Notice::CommandDone { command: OWNER, .. })
     )));
 }
 
@@ -1734,4 +1785,150 @@ fn engine_ambiguity_503_signature_working_control_never_resends() {
             .iter()
             .all(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
     );
+}
+
+// OKX v5 cancel-batch/cancel-algos return code/msg plus per-order sCode/sMsg.
+// https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-cancel-multiple-orders
+#[test]
+fn empty_code_one_absent_cancel_is_satisfied_without_retry() {
+    // AGT-69 (fix/agt-69-okx-partial-cancel): was "..._keeps_native_diagnostics_and_stops",
+    // which failed the command with outcome None (settled unknown on mobile). 51400 is
+    // a satisfied cancel intent in every envelope, so the command completes.
+    for algo in [false, true] {
+        let mut engine = trading_engine();
+        let id = if algo { "202_sl" } else { "101" };
+        engine.store_mut().upsert_order(Order {
+            kind: if algo {
+                OrderType::StopLoss
+            } else {
+                OrderType::Limit
+            },
+            ..stored(id)
+        });
+        engine.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: OWNER,
+                ids: vec![id.into()],
+            }),
+        );
+        let sent = prepared(&mut engine, 5.);
+        assert!(
+            matches!(post(&sent), Action::Http(request) if request.url.ends_with(
+                if algo { "/cancel-algos" } else { "/cancel-batch-orders" }
+            ))
+        );
+        let field = if algo { "algoId" } else { "ordId" };
+        let wire_id = if algo { "202" } else { "101" };
+        reply(
+            &mut engine,
+            post(&sent),
+            &serde_json::json!({
+                "code":"1", "msg":"", "data":[{
+                    field:wire_id, "sCode":"51400", "sMsg":"Order does not exist"
+                }]
+            })
+            .to_string(),
+            6.,
+        );
+        let output = prepared(&mut engine, 6.);
+        assert!(failures(&output).is_empty(), "{output:?}");
+        assert!(
+            output.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: OWNER, result }) if result == "[]")),
+            "an already-absent target satisfies the cancel: {output:?}"
+        );
+        assert!(
+            !output.iter().any(|a| matches!(a, Action::Http(r)
+            if r.method != safe_cex_engine::Method::Get)),
+            "never retry a settled cancel"
+        );
+    }
+}
+
+#[test]
+fn empty_partial_cancel_retains_applied_and_refused_order_diagnostics() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut engine = trading_engine();
+    for id in ["101", "102", "103"] {
+        engine.store_mut().upsert_order(stored(id));
+    }
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: vec!["101".into(), "102".into(), "103".into()],
+        }),
+    );
+    let sent = prepared(&mut engine, 5.);
+    reply(
+        &mut engine,
+        post(&sent),
+        r#"{"code":"2","msg":"","data":[
+        {"ordId":"101","sCode":"0","sMsg":""},
+        {"ordId":"102","sCode":"51000","sMsg":"Parameter error"},
+        {"ordId":"103","sCode":"51400","sMsg":"Order does not exist"}
+    ]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].message.contains("Parameter error"));
+    assert!(
+        !errors[0].message.contains("Order does not exist"),
+        "a satisfied sibling must not hide the real refusal: {errors:?}"
+    );
+    let elements = errors[0]
+        .elements
+        .as_ref()
+        .expect("one passive outcome per requested order");
+    assert_eq!(elements.len(), 3);
+    assert_eq!(errors[0].outcome, None);
+    assert_eq!(errors[0].partial.as_ref().unwrap().total, Some(3));
+    assert_eq!(errors[0].partial.as_ref().unwrap().failed_index, Some(1));
+    for index in [0, 2] {
+        assert!(matches!(&elements[index].result, ElementResult::Applied {
+            effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+        } if id == if index == 0 { "101" } else { "103" }));
+    }
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
+        if error.venue_code.as_deref() == Some("51000")
+        && error.venue_message.as_deref() == Some("Parameter error"))
+    );
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(r)
+        if r.method != safe_cex_engine::Method::Get)));
+}
+
+#[test]
+fn empty_operation_failure_without_usable_rows_has_a_nonblank_reason() {
+    for body in [
+        r#"{"code":"1","msg":"","data":[]}"#,
+        r#"{"code":"1","msg":""}"#,
+        r#"{"code":"1","msg":"","data":[{"sCode":null}]}"#,
+        r#"{"code":"1","msg":"","data":[{"ordId":"accepted","sCode":"0","sMsg":""}]}"#,
+        r#"{"code":"1","msg":"","data":[{"sCode":"0","ordId":"101","sMsg":""}]}"#,
+    ] {
+        let mut engine = trading_engine();
+        place(&mut engine, vec![order(1)]);
+        let sent = prepared(&mut engine, 5.);
+        reply(&mut engine, post(&sent), body, 6.);
+        let output = prepared(&mut engine, 6.);
+        let errors = failures(&output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].venue_code.as_deref(), Some("1"));
+        assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            errors[0].partial.is_none(),
+            "a contradictory envelope proves no accepted sibling"
+        );
+        let reason = errors[0]
+            .venue_message
+            .as_deref()
+            .unwrap_or(&errors[0].message);
+        assert!(reason.contains("per-order"), "{body}: {errors:?}");
+        assert!(!output.iter().any(|a| matches!(a, Action::Http(r)
+            if r.method != safe_cex_engine::Method::Get)));
+    }
 }

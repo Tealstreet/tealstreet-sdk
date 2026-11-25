@@ -1,5 +1,8 @@
 # ApeX Omni signing and socket liveness
 
+No-body REST requests use `application/json; charset=utf-8`. Form and multipart
+requests retain their own media types; unsigned klines retain no signing headers.
+
 ## Hosted and delegated signing
 
 RemoteSigner accounts use the same dispatch recipes as local accounts for every
@@ -37,11 +40,40 @@ account require a passphrase or fail private-mode validation.
 
 Native fixture signing compares local and device operations/signatures across
 REST reads, ordinary/protective orders, cancellation, cancel-all, leverage,
-cancel/proof/replacement amendments, signature-rejection re-signing and private
-socket login. Tests retain the independent npm zkLink golden signatures.
+cancel/proof/replacement amendments, write signature-rejection re-signing and private
+socket login. Signed reads never re-sign after a refusal: ApeX verifies the primary
+canonical text and refuses the whole-second legacy text wherever they differ (AGT-75). Tests retain the independent npm zkLink golden signatures.
 Malformed/canceled delegate results cannot publish partial signing batches or
 send a write; dispatched Unknown outcomes retain the existing reconciliation
 and no-replay behavior. Details: `docs/plans/callers/apexomni-hosted-signing.md`.
+
+## Unknown order status evidence
+
+Private-stream `row.skipped` warnings include only the rejected status token.
+Tokens of at most 32 printable ASCII bytes are quoted, with quotes and backslashes
+escaped, unless the generic notice formatter would attach IP whitelist advice.
+Those tokens, longer tokens, control characters and non-ASCII input use a
+placeholder containing the UTF-8 byte count and SHA-256 hash. The complete warning
+is bounded to 128 printable ASCII bytes and includes no other row fields. Unknown
+statuses remain refused; this diagnostic does not add status mappings or change
+orders. Real authentication refusals retain their existing advice.
+
+## Order status mapping
+
+The [official open-order and history status catalogue](https://api-docs.omni.apex.exchange/#get-open-orders)
+uses `PENDING`, `OPEN` (including partial fills), `UNTRIGGERED`, `FILLED`,
+`EXPIRED` and `CANCELED`. The mapper accepts those exact values in REST snapshots
+and private stream rows. Cancellation uses one `L`; no documented `CANCELLED`
+alias is assumed. Canceled and expired rows retain their reported fill quantities.
+
+`CANCELING` is undocumented but observed: the bounded diagnostic above captured
+`unknown order status: "CANCELING"` from apexomni-t on 2026-11-19 (exchange-01,
+11:16:55Z and 11:36:49Z) while a cancel was in flight. It maps to the
+non-terminal `Canceling`, so the order stays listed with its fills and cannot be
+amended; only a later `CANCELED` removes it.
+Unknown statuses produce `row.skipped` and preserve the existing live order;
+they cannot establish cancellation or another terminal outcome. A new mapping
+requires the actual venue value and evidence of its meaning.
 
 ## Socket supervision
 

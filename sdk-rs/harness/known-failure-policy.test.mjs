@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { assessGateReport, assessCorrectnessReport, diagnosticKey, validateKnownFailures } from './known-failure-policy.mjs';
 import { valueDifferences } from './snapshot-compare.mjs';
+import { buildAsterTape } from './private-tape-asterdex.mjs';
 
 const metric = (mode = 'correctness', amount = 10) => ({
   baselineKind: 'idle-loaded', measuredMode: mode,
@@ -21,6 +23,35 @@ const report = () => ({
 const manifest = () => ({ schema: 1, failures: [{ venue: 'example', tapeSha256: 'a'.repeat(64), diagnostics: [
   { key: 'account orders[0].clientOrderId', divergence: 'The production wire drops the native client ID.' },
 ] }] });
+
+test('Aster V3 known failures bind the current authentication tape without certifying parity', () => {
+  const declared = JSON.parse(readFileSync(new URL('./known-gate-failures.json', import.meta.url), 'utf8'));
+  const entry = declared.failures.find((row) => row.venue === 'asterdex'
+    && row.tape === 'sdk-rs/harness/tapes/asterdex-v3-private.jsonl');
+  const tape = buildAsterTape({ v3: true }).map((row) => JSON.stringify(row)).join('\n') + '\n';
+  const tapeSha256 = createHash('sha256').update(tape).digest('hex');
+  assert.equal(entry.tapeSha256, tapeSha256);
+  const keys = entry.diagnostics.flatMap((row) => row.keys ?? [row.key]);
+  // Accepted differences on the same tape (AGT-83 execution ids) must also reproduce.
+  const accepted = JSON.parse(readFileSync(new URL('./accepted-differences.json', import.meta.url), 'utf8'))
+    .differences.filter((row) => row.venue === entry.venue && row.tape === entry.tape && row.tapeSha256 === tapeSha256)
+    .flatMap((row) => row.diagnostics.flatMap((diagnostic) => diagnostic.failures));
+  const value = { ...report(), venue: entry.venue, tape: entry.tape, tapeSha256,
+    correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' },
+    failures: [...keys.map((key) => `${key}: ts=null rust="observed"`), ...accepted] };
+  const assessment = assessCorrectnessReport(value, declared);
+  assert.deepEqual(assessment.errors, []);
+  assert.equal(assessment.known.length, keys.length);
+  assert.deepEqual(assessment.resolved, []);
+  assert.equal(value.status, 'FAIL');
+  for (const change of [
+    { tapeSha256: '0'.repeat(64) },
+    { venue: 'other' },
+    { failures: [...value.failures, 'account orders[0].price: ts=1 rust=2'] },
+  ]) {
+    assert.match(assessCorrectnessReport({ ...value, ...change }, declared).errors.join('\n'), /unexpected/);
+  }
+});
 
 test('known failures are exact venue, tape hash and field declarations', () => {
   assert.deepEqual(assessGateReport(report(), manifest()).errors, []);

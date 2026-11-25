@@ -458,6 +458,7 @@ fn order_history_full_fill_and_rejected_edit_never_create_phantom_open_orders() 
     let (mut e, _) = ready();
     let r = query(&mut e, orders());
     let mut filled = event("e1", "filled", "OrderPlaced", NOW - 1.0);
+    filled["event"]["OrderPlaced"]["order"]["quantity"] = json!("0");
     filled["event"]["OrderPlaced"]["order"]["filled"] = json!("2");
     let mut edited = event("e2", "filled", "OrderEditRejected", NOW);
     let order = edited["event"]["OrderEditRejected"]["order"].take();
@@ -467,6 +468,7 @@ fn order_history_full_fill_and_rejected_edit_never_create_phantom_open_orders() 
     let rows = result(&mut e).unwrap();
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["status"], "closed");
+    assert_eq!(rows[0]["amount"], 2.0);
 }
 #[test]
 fn repeated_order_cursor_error_is_not_partial_success() {
@@ -1213,8 +1215,7 @@ fn history_refusals_keep_typed_kind_closed_cause_and_native_code() {
 fn order_row_refusal_names_the_closed_predicate_without_exposing_row_values() {
     for (field, value, reason) in [
         ("uid", json!(""), "identity"),
-        ("quantity", json!("0"), "quantityZero"),
-        ("filled", json!("3"), "filledQuantityExceedsQuantity"),
+        ("quantity", json!("-1"), "quantityNegative"),
         ("timestamp", json!("-1"), "timestamp"),
         (
             "lastUpdateTimestamp",
@@ -1311,6 +1312,7 @@ fn order_event_schema_control_accepts_present_identity_and_valid_decimals() {
         } else {
             "order"
         };
+        row["event"][variant][key]["quantity"] = json!("0");
         row["event"][variant][key]["filled"] = json!("173.25");
         answer(&mut e, &request, "elements", vec![row]);
         let rows = result(&mut e).unwrap();
@@ -1400,12 +1402,6 @@ fn order_refusal_message_identifies_identity_time_and_economics_predicates() {
                 "economics.filled.negative",
             ),
             (
-                "filled",
-                json!("999.5"),
-                "filledQuantityExceedsQuantity",
-                "economics.filled.exceedsQuantity",
-            ),
-            (
                 "timestamp",
                 json!(-1),
                 "timestamp",
@@ -1436,6 +1432,7 @@ fn order_refusal_message_identifies_identity_time_and_economics_predicates() {
             "order"
         };
         row["event"][variant][key]["quantity"] = json!("0");
+        row["event"][variant][key]["filled"] = json!("0");
         assert_order_diagnostic(row, "quantityZero", "economics.quantity.zeroForActiveOrder");
     }
 }
@@ -1553,4 +1550,58 @@ fn bad_order_row_rejects_its_entire_page_and_only_recovers_earlier_accepted_page
         assert!(requests(&mut e).is_empty());
         assert!(e.store().orders().is_empty());
     }
+}
+
+// Kraken's order-event `quantity` is the unfilled remainder (TEALSTREET-NEXT-DQM):
+// a full fill reports `quantity: "0"` beside its filled size. These rows used to
+// refuse as `quantityZero` and fail the whole history window.
+fn order_with(event_name: &str, order_id: &str, quantity: &str, filled: &str, time: f64) -> Value {
+    let mut row = event(&format!("e-{order_id}"), order_id, event_name, time);
+    let order = &mut row["event"][event_name]["order"];
+    order["quantity"] = json!(quantity);
+    order["filled"] = json!(filled);
+    if event_name == "OrderUpdated" {
+        let order = row["event"][event_name]["order"].take();
+        row["event"][event_name] = json!({"oldOrder":order.clone(),"newOrder":order,"reason":"full_fill","reducedQuantity":"0"});
+    }
+    row
+}
+
+#[test]
+fn zero_remainder_full_fills_map_to_closed_orders_with_their_filled_size() {
+    let (mut e, _) = ready();
+    let request = query(&mut e, orders());
+    let rows = vec![
+        order_with("OrderUpdated", "full-fill", "0", "0.001", NOW - 1.0),
+        order_with("OrderPlaced", "ioc-fill", "0", "0.1", NOW - 2.0),
+    ];
+    answer(&mut e, &request, "elements", rows);
+    let rows = result(&mut e).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for (id, size) in [("full-fill", 0.001), ("ioc-fill", 0.1)] {
+        let row = rows.iter().find(|row| row["id"] == id).unwrap();
+        assert_eq!(row["status"], "closed");
+        assert_eq!(row["amount"], size);
+        assert_eq!(row["filled"], size);
+    }
+}
+
+#[test]
+fn partially_filled_orders_report_remainder_plus_filled_and_only_terminal_rows_stage() {
+    let (mut e, _) = ready();
+    let request = query(&mut e, orders());
+    let rows = vec![
+        // Still resting: a partial fill is not a terminal historical order.
+        order_with("OrderPlaced", "resting", "0.3", "0.2", NOW - 1.0),
+        order_with("OrderCancelled", "partial-cancel", "0.3", "0.2", NOW - 2.0),
+    ];
+    answer(&mut e, &request, "elements", rows);
+    let rows = result(&mut e).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "partial-cancel");
+    assert_eq!(rows[0]["status"], "canceled");
+    assert_eq!(rows[0]["amount"], 0.5);
+    assert_eq!(rows[0]["filled"], 0.2);
 }

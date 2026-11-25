@@ -1,7 +1,9 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
+mod placement;
 pub(crate) mod protection;
 mod reference;
 use crate::{Lighter, Pending, sign};
+pub use placement::ProofRead;
 pub use reference::ReferenceRead;
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
@@ -17,7 +19,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
@@ -45,6 +48,8 @@ pub struct Trading {
     retired_snapshot: Option<u64>,
     retired_effects: Vec<Effect>,
     uncertain_settings: HashMap<String, u64>,
+    proof_timer: Option<TimerId>,
+    proof_token: u64,
 }
 struct PositionWait {
     command: CommandId,
@@ -78,13 +83,17 @@ struct Job {
     group_seen: HashSet<String>,
     /// The plan is parked in a settle-only wait for group proof.
     settled: bool,
+    /// An acknowledged ordinary placement awaiting venue proof.
+    proof: Option<placement::Proof>,
+    /// The settled placement call a released proof continues from.
+    handoff: Option<Context>,
 }
 // Field order preserves the sorted-key JSON used by the original journal.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UnknownJournal<'a> {
+struct UnknownJournal {
     not_sent: Vec<String>,
-    placed: Vec<&'a String>,
+    placed: Vec<String>,
     unknown: Vec<String>,
 }
 
@@ -95,14 +104,16 @@ impl Job {
             .iter()
             .all(|id| self.group_seen.contains(id))
     }
-    fn unknown_journal(&self) -> UnknownJournal<'_> {
+    fn unknown_journal(&self) -> UnknownJournal {
         let mut unknown: Vec<_> = self
             .group_accepted
             .iter()
             .filter(|id| !self.group_seen.contains(*id))
             .cloned()
             .collect();
-        let skip = if self.settled || self.steps.is_empty() {
+        unknown.extend(self.proof.iter().flat_map(placement::Proof::unresolved));
+        // While a proof owns the acknowledged step, the queue head was never sent.
+        let skip = if self.settled || self.proof.is_some() || self.steps.is_empty() {
             0
         } else {
             unknown.extend(
@@ -113,7 +124,13 @@ impl Job {
             );
             1
         };
-        let placed: Vec<_> = self.ids.iter().filter(|id| !unknown.contains(id)).collect();
+        let placed: Vec<_> = self
+            .ids
+            .iter()
+            .cloned()
+            .chain(self.proof.iter().flat_map(placement::Proof::live))
+            .filter(|id| !unknown.contains(id))
+            .collect();
         let not_sent: Vec<_> = self
             .steps
             .iter()
@@ -246,6 +263,14 @@ struct Integrator {
     max_perps_maker_fee: Option<Number>,
     #[serde(default, alias = "maxPerpsTakerFee")]
     max_perps_taker_fee: Option<Number>,
+}
+
+fn protection_unknown_text(message: &str) -> String {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
+        message.to_owned()
+    } else {
+        format!("{message}. {UNKNOWN_TEXT}")
+    }
 }
 
 impl Lighter {
@@ -691,8 +716,37 @@ impl Lighter {
                         },
                         trigger_price: orders[0].native.trigger_price,
                     })]);
-                } else {
+                } else if protection.is_some() {
                     steps.push_front(Step::Cancel(Box::new(old.clone())));
+                } else {
+                    // An unguarded cancel-then-replace loses the order when the
+                    // replacement is refused, so a plain limit edits in place.
+                    let modify = match (steps.front(), steps.len()) {
+                        (Some(Step::Place(orders)), 1)
+                            if orders.len() == 1
+                                && old.kind == OrderType::Limit
+                                && orders[0].native.order_type == 0 =>
+                        {
+                            old.id.parse::<u64>().ok().map(|index| sign::Modify {
+                                market_index: orders[0].native.market_id,
+                                index,
+                                base_amount: orders[0].native.amount,
+                                price: orders[0].native.price,
+                                trigger_price: 0,
+                            })
+                        }
+                        _ => None,
+                    };
+                    let Some(modify) = modify else {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter order not changed: this edit cannot be sent as one native modify; cancel and re-place it",
+                            ),
+                        );
+                        return;
+                    };
+                    steps = VecDeque::from([Step::Modify(modify)]);
                 }
                 amend = Some(old);
                 (command, steps)
@@ -775,7 +829,7 @@ impl Lighter {
         };
         let queued = self.trading.active.is_some() || !self.trading.queue.is_empty();
         if queued && cx.park_preflight_for(&preflight, None).is_err() {
-            let _ = cx.fail_preflight(&preflight, "Lighter FIFO admission failed");
+            let _ = cx.fail_preflight(&preflight, "Lighter couldn’t prepare this request");
             return;
         }
         self.trading.queue.push_back(Job {
@@ -801,6 +855,8 @@ impl Lighter {
             group_accepted: Vec::new(),
             group_seen: HashSet::new(),
             settled: false,
+            proof: None,
+            handoff: None,
         });
         if !queued {
             self.trade_kick(cx);
@@ -960,8 +1016,9 @@ impl Lighter {
             if present {
                 self.trading.active.as_mut().unwrap().steps.pop_front();
                 self.trade_kick(cx);
-            } else if *requested || cx.frame_fed() {
+            } else if *requested || cx.frame_fed() || job.handoff.is_some() {
                 // Frame-fed positions are the data source's; there is no read to wait for.
+                // A released proof has no call left to park a fresh read on either.
                 self.trade_finish(
                     cx,
                     not_sent("No open position available for this Lighter reduce-only order"),
@@ -1032,6 +1089,26 @@ impl Lighter {
                 cx,
                 not_sent(
                     "Lighter source order filled during amendment; replacement was not placed",
+                ),
+            );
+            return;
+        }
+        // A plain modify carries the size captured at preparation; a fill since
+        // then would make it send a size the caller never asked for.
+        if let Some(old) = job.amend.as_ref()
+            && job.protection.is_none()
+            && matches!(job.steps.front(), Some(Step::Modify(_)))
+            && (job.amend_filled
+                || cx.store.order(&old.id).is_some_and(|o| {
+                    o.filled > old.filled
+                        || o.status != OrderStatus::Open
+                        || o.remaining != old.remaining
+                }))
+        {
+            self.trade_finish(
+                cx,
+                not_sent(
+                    "Lighter order changed during amendment; it was not modified, retry the edit",
                 ),
             );
             return;
@@ -1155,12 +1232,12 @@ impl Lighter {
         {
             let message = if edit.canceled {
                 format!(
-                    "Your {} protection outcome unknown; check Open Orders",
+                    "Your {} protection wasn’t confirmed. Check your open orders before adding protection.",
                     edit.original.observed.symbol
                 )
             } else {
                 format!(
-                    "Your {} stop edit outcome unknown; check Open Orders",
+                    "Your {} stop edit wasn’t confirmed. Check your open orders before trying again.",
                     edit.original.observed.symbol
                 )
             };
@@ -1252,7 +1329,7 @@ impl Lighter {
                     .get(symbol)
                     .is_some_and(|epoch| self.account_setting_epoch(symbol) <= *epoch)
                 {
-                    return Err("Lighter account settings are awaiting reconciliation after an uncertain transaction".into());
+                    return Err("Lighter’s settings update hasn’t been confirmed. Wait for the account to refresh before changing settings again.".into());
                 }
                 let market = cx
                     .store
@@ -1340,7 +1417,7 @@ impl Lighter {
         let kind = &request;
         if matches!(response.status, 405 | 429) && !matches!(kind, Request::Submit(_)) {
             if matches!(kind, Request::CancelProof | Request::RestoreProof) {
-                self.trade_finish(cx, uncertain("Lighter protection proof outcome unknown after rate limit; check Open Orders").kind(ErrorKind::RateLimited));
+                self.trade_finish(cx, uncertain("Lighter’s rate limit prevented confirmation of your protection. Check your open orders before adding protection.").kind(ErrorKind::RateLimited));
                 return;
             }
             let parsed = serde_json::from_str::<Reply>(response.body).ok();
@@ -1461,7 +1538,7 @@ impl Lighter {
                             .original,
                     );
                 if !valid {
-                    self.trade_finish(cx, uncertain("Lighter cancellation outcome unknown; check Open Orders; replacement withheld"));
+                    self.trade_finish(cx, uncertain("Lighter didn’t confirm the cancellation, so no replacement was sent. Check your open orders before trying again."));
                     return;
                 }
                 let old = self
@@ -1575,20 +1652,25 @@ impl Lighter {
                     let present_unknown = matches!(code, Some(23000 | 23100))
                         || (unknown && self.trading.active.as_ref().unwrap().retried_nonce);
                     if present_unknown {
-                        message.push_str(". The outcome is unknown. Check Open Orders");
+                        message.push_str(". We couldn’t confirm this change. Check your open orders before trying again.");
                     }
                     let mut error = VenueError::new(message);
                     // Uncertainty must supersede an earlier nonce
                     // refusal's words; the journal still owns outcome and effects.
                     error.presents = present_unknown;
                     if matches!(submission.effect, Effect::Modify) {
+                        let noun = if self.trading.active.as_ref().unwrap().protection.is_some() {
+                            "stop"
+                        } else {
+                            "order"
+                        };
                         error.message = if unknown {
                             format!(
-                                "Lighter stop edit outcome unknown: {}; check Open Orders",
+                                "Your Lighter {noun} edit wasn’t confirmed: {}. Check your open orders before trying again.",
                                 error.message
                             )
                         } else {
-                            format!("Lighter stop not changed: {}", error.message)
+                            format!("Lighter {noun} not changed: {}", error.message)
                         };
                     }
                     if let Some(code) = code {
@@ -1642,15 +1724,50 @@ impl Lighter {
                     }
                     _ => Vec::new(),
                 };
-                self.trading
-                    .active
-                    .as_mut()
-                    .unwrap()
-                    .ids
-                    .extend(ids.iter().cloned());
-                if cx
-                    .http_write_fact(&context, WriteFact::Accepted { order_ids: ids }, None)
-                    .is_err()
+                let hashes: Vec<String> = match hashes {
+                    Some(Hashes::One(hash)) => vec![hash.clone()],
+                    Some(Hashes::Many(hashes)) => hashes.clone(),
+                    None => Vec::new(),
+                };
+                // The ACK proves the sequencer queued it, not that it rests or
+                // filled. Ordinary placements wait for venue proof; a put-back
+                // keeps its own RestoreProof, and groups their stream proof.
+                let job = self.trading.active.as_ref().unwrap();
+                let prove = matches!(job.steps.front(), Some(Step::Place(_)))
+                    && !job.protection.as_ref().is_some_and(|edit| edit.restoring);
+                // A plain limit modify the venue refuses (margin) fails its tx (AGT-77).
+                let prove_modify =
+                    matches!(job.steps.front(), Some(Step::Modify(_))) && job.protection.is_none();
+                let shapes: Vec<placement::Shape> = match job.steps.front() {
+                    Some(Step::Place(orders)) => orders
+                        .iter()
+                        .map(|p| placement::Shape::of(&p.native))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let receipt = if prove || prove_modify {
+                    cx.http_pending_placement(&context).ok()
+                } else {
+                    self.trading
+                        .active
+                        .as_mut()
+                        .unwrap()
+                        .ids
+                        .extend(ids.iter().cloned());
+                    None
+                };
+                if ((prove || prove_modify) && receipt.is_none())
+                    || (!prove
+                        && !prove_modify
+                        && cx
+                            .http_write_fact(
+                                &context,
+                                WriteFact::Accepted {
+                                    order_ids: ids.clone(),
+                                },
+                                None,
+                            )
+                            .is_err())
                     || cx.validate_http_write_effects(&context).is_err()
                 {
                     self.trade_finish(cx, uncertain("Invalid Lighter write evidence"));
@@ -1757,6 +1874,23 @@ impl Lighter {
                         }
                     }
                 }
+                if let Some(receipt) = receipt {
+                    if !prove_modify {
+                        self.trade_await_proof(cx, |deadline, token| {
+                            placement::Proof::new(receipt, ids, hashes, shapes, deadline, token)
+                        });
+                        return;
+                    }
+                    let (Some(id), Some(hash)) = (ids.first().cloned(), hashes.first().cloned())
+                    else {
+                        self.trade_finish(cx, uncertain("Invalid Lighter write evidence"));
+                        return;
+                    };
+                    self.trade_await_proof(cx, |deadline, token| {
+                        placement::Proof::modify(receipt, id, hash, deadline, token)
+                    });
+                    return;
+                }
                 let job = self.trading.active.as_mut().unwrap();
                 job.effective = true;
                 job.effect = None;
@@ -1774,6 +1908,41 @@ impl Lighter {
                 }
             }
         }
+    }
+
+    /// Settle the acknowledged placement or modify call and park its Plan until
+    /// the venue proves it; the bound's expiry reports Unknown.
+    fn trade_await_proof(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        proof: impl FnOnce(f64, u64) -> placement::Proof,
+    ) {
+        self.trading.proof_token += 1;
+        let token = self.trading.proof_token;
+        let job = self.trading.active.as_mut().unwrap();
+        job.effect = None;
+        let (Some(plan), Some(slot), Some(context)) =
+            (job.plan.clone(), job.slot.take(), job.live.take())
+        else {
+            self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
+            return;
+        };
+        match cx.serial_plan_settle_wait(&plan, &slot, &context, placement::PROOF_BOUND_MS) {
+            Ok(wait) => {
+                job.condition = Some(wait);
+                job.waiting_plan = true;
+                job.handoff = Some(context);
+                job.proof = Some(proof(cx.now + f64::from(placement::PROOF_BOUND_MS), token));
+            }
+            Err(_) => {
+                job.slot = Some(slot);
+                job.live = Some(context);
+                self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
+                return;
+            }
+        }
+        self.refresh_orders(cx);
+        self.proof_poll(cx);
     }
 
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1806,7 +1975,7 @@ impl Lighter {
             Request::Submit(s) => {
                 self.submission_uncertain(cx, &s.effect);
                 let error = uncertain(format!(
-                    "Uncertain Lighter transaction result: {error}; check open orders before retrying"
+                    "Lighter didn’t confirm this change: {error}. Check your open orders before trying again."
                 ));
                 let error = self.note_replacement_lost(&s.effect, error);
                 self.trade_finish(cx, error.kind(ErrorKind::Network));
@@ -1908,7 +2077,7 @@ impl Lighter {
             } else {
                 safe_cex_engine::error::order_gone_text(&old.symbol, unknown)
             };
-            error.message = format!("{gone}: {}", error.message);
+            error.message = safe_cex_engine::error::with_detail(&gone, &error.message);
         }
         error
     }
@@ -1920,6 +2089,9 @@ impl Lighter {
         }
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);
+        }
+        if let Some(timer) = self.trading.proof_timer.take() {
+            cx.clear_timer(timer);
         }
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
@@ -1933,10 +2105,7 @@ impl Lighter {
                     .venue_message
                     .get_or_insert_with(|| error.message.clone().into());
                 if job.protection.is_some() || job.amend.is_some() {
-                    if !error.message.contains(UNKNOWN_TEXT) {
-                        error.message.push_str(". ");
-                        error.message.push_str(UNKNOWN_TEXT);
-                    }
+                    error.message = protection_unknown_text(&error.message);
                 } else {
                     error.message = UNKNOWN_TEXT.into();
                 }
@@ -2007,6 +2176,9 @@ impl Lighter {
     }
 
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.proof_timer(cx, timer) {
+            return true;
+        }
         if self.trading.timer != Some(timer) {
             return false;
         }
@@ -2040,6 +2212,15 @@ impl Lighter {
             .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
         {
             return Err("Bybit BBO and TickSize controls are not supported by Lighter".into());
+        }
+        // AGT-115: legs attach only to a limit/market entry; any other entry would be placed
+        // without them, so refuse the whole command first. A reduce-only order with legs
+        // never reaches the venue: the engine refuses it for every venue (AGT-120).
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("Lighter"));
         }
         let batch = orders.len() > 1
             && orders.iter().all(|o| {
@@ -2395,7 +2576,7 @@ fn snap_leverage(requested: f64) -> f64 {
 /// Lighter lets a maker-only key send only 0ms speed-bump transactions.
 const MAKER_ONLY_MESSAGE: &str = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only";
 const UNCERTAIN_RESULT: &str =
-    "Uncertain Lighter transaction result; check open orders before retrying";
+    "Lighter didn’t confirm this change. Check your open orders before trying again.";
 
 /// Refused before any transaction was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
@@ -2444,6 +2625,24 @@ impl Lighter {
         operation: Operation,
         intent: Option<safe_cex_engine::classify::Intent>,
     ) -> Option<Context> {
+        let job = self.trading.active.as_mut()?;
+        if let Some(plan) = &job.plan
+            && job.live.is_none()
+            && job.slot.is_none()
+            && let Some(handoff) = job.handoff.take()
+        {
+            // Only from the released proof's ready callback; the leg is definitive.
+            match cx.continue_settled_serial_plan(plan, &handoff, serial_call(operation)) {
+                Ok(slot) => {
+                    job.slot = Some(slot);
+                    job.delay_ms = 0;
+                }
+                Err(error) => {
+                    self.trade_finish(cx, error.venue_error());
+                    return None;
+                }
+            }
+        }
         let job = self.trading.active.as_mut()?;
         let result = if let Some(plan) = &job.plan {
             if job.live.is_some() {
@@ -2704,6 +2903,23 @@ impl Lighter {
         }) else {
             return;
         };
+        if let Some(outcome) = job.proof.as_mut().and_then(|proof| proof.outcome.take()) {
+            job.condition = None;
+            job.waiting_plan = false;
+            if let Err(error) = outcome {
+                // The proof stays for the journal: its live and unresolved orders.
+                self.trade_finish(cx, error);
+            } else if let Some(wait) = self.trading.position_wait.take()
+                && wait.confirmed != Some(true)
+            {
+                self.trading.active.as_mut().unwrap().proof = None;
+                self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            } else {
+                self.trading.active.as_mut().unwrap().proof = None;
+                self.trade_kick(cx);
+            }
+            return;
+        }
         if job.settled {
             // A released settled Plan has no bound left: every path seals it.
             job.condition = None;
@@ -2811,7 +3027,7 @@ impl Lighter {
         let kind = &request;
         let error = if matches!(kind, Request::CancelProof | Request::RestoreProof) {
             uncertain(format!(
-                "Lighter protection proof outcome unknown: {}; check Open Orders",
+                "Lighter didn’t confirm your protection: {}. Check your open orders before adding protection.",
                 error.message
             ))
         } else {
@@ -2845,7 +3061,30 @@ impl Lighter {
         if !matches {
             return;
         }
-        if self.trading.active.as_ref().is_some_and(|job| job.settled) {
+        if let Some(proof) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.proof.as_ref())
+        {
+            let proven = proof.outcome.is_some();
+            self.trading.active.as_mut().unwrap().condition = None;
+            if !proven {
+                // The unproven transaction may yet fail without consuming its nonce.
+                self.trading.next_nonce.invalidate();
+            }
+            self.refresh_orders(cx);
+            let error = if proven {
+                // Only a held reduce-only position read outlives a concluded proof.
+                not_sent("Lighter account read timed out; reduce-only order was not sent")
+            } else {
+                uncertain(format!(
+                    "Lighter accepted the transaction but did not confirm the order within {} seconds",
+                    placement::PROOF_BOUND_MS / 1_000
+                ))
+            };
+            self.trade_finish(cx, error);
+        } else if self.trading.active.as_ref().is_some_and(|job| job.settled) {
             self.trading.active.as_mut().unwrap().condition = None;
             self.trade_group_unconfirmed(cx);
         } else {
@@ -2854,6 +3093,7 @@ impl Lighter {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod client_index_parity_tests {
     use super::*;
@@ -2915,5 +3155,26 @@ mod client_index_parity_tests {
             assert!(next > first && next <= MAX_CLIENT_INDEX);
         }));
         engine.start(1_700_000_000_000.);
+    }
+}
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(protection_unknown_text(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = protection_unknown_text("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
     }
 }

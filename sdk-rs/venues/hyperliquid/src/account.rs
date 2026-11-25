@@ -95,6 +95,14 @@ pub enum Request {
         id: String,
         amend: crate::trading::AmendRead,
     },
+    /// A protective amend's mark, read on demand when the stream's is too old.
+    AmendMark {
+        id: String,
+        amend: crate::trading::AmendRead,
+        symbol: String,
+        /// When it was queued: a mark the stream observed since then is newer.
+        issued_at: f64,
+    },
 }
 impl Request {
     /// Names the read in its `request.failed` notice, so a report shows which read failed.
@@ -110,11 +118,14 @@ impl Request {
             Self::Fees => "fees",
             Self::AmendSource { .. } => "amendSource",
             Self::AmendRole { .. } => "amendRole",
+            Self::AmendMark { .. } => "amendMark",
         }
     }
     pub(crate) fn amend_read(&self) -> Option<(&str, crate::trading::AmendRead)> {
         match self {
-            Self::AmendRole { id, amend } | Self::AmendSource { id, amend } => Some((id, *amend)),
+            Self::AmendRole { id, amend }
+            | Self::AmendSource { id, amend }
+            | Self::AmendMark { id, amend, .. } => Some((id, *amend)),
             _ => None,
         }
     }
@@ -400,7 +411,8 @@ impl Hyperliquid {
             match &account_request {
                 Request::Builder { .. }
                 | Request::AmendSource { .. }
-                | Request::AmendRole { .. } => {}
+                | Request::AmendRole { .. }
+                | Request::AmendMark { .. } => {}
                 _ => return,
             }
         }
@@ -412,7 +424,10 @@ impl Hyperliquid {
         let urgent = std::mem::take(&mut self.account.fence_read)
             || matches!(
                 &account_request,
-                Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
+                Request::AmendSource { .. }
+                    | Request::AmendRole { .. }
+                    | Request::AmendMark { .. }
+                    | Request::Asset { .. }
             );
         let financial = matches!(
             &account_request,
@@ -463,13 +478,14 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         body: String,
+        weight: u32,
         read: Box<crate::ManagedCandleRead>,
     ) {
         self.account.reads.push_back(QueuedRead {
             body,
             continuation: ReadContinuation::Candles(read),
             streamed: true,
-            weight: 104,
+            weight,
             priority: ReadPriority::Bulk,
         });
         self.pump_reads(cx);
@@ -997,6 +1013,41 @@ impl Hyperliquid {
         );
         self.account.fence_read = false;
     }
+    /// `activeAssetData` carries the coin's current mark.
+    pub(crate) fn read_amend_mark(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: crate::trading::AmendRead,
+        symbol: &str,
+    ) {
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            coin: &'a str,
+        }
+        let (Some(user), Some(coin)) = (self.user(), self.coin(cx, symbol)) else {
+            self.amend_mark_answered(cx, id, amend, symbol, Err("unresolved".to_owned()));
+            return;
+        };
+        let body = serde_json::to_string(&Read {
+            r#type: "activeAssetData",
+            user,
+            coin,
+        })
+        .unwrap();
+        self.read_body(
+            cx,
+            body,
+            Request::AmendMark {
+                id: id.to_owned(),
+                amend,
+                symbol: symbol.to_owned(),
+                issued_at: cx.now,
+            },
+        );
+    }
     pub(crate) fn builder(&self) -> crate::Builder {
         let mut builder = self
             .options
@@ -1147,6 +1198,16 @@ impl Hyperliquid {
             self.account.refresh_timer = Some(
                 cx.set_timer(500.0f64.max(1000.0 - (cx.now - self.account.last_order_refresh))),
             );
+        }
+    }
+    pub(crate) fn schedule_position_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if cx.frame_fed() {
+            return;
+        }
+        let dex = self.dex_of(cx, symbol).to_owned();
+        self.account.state_dirty.insert(dex);
+        if self.account.state_refresh_timer.is_none() {
+            self.account.state_refresh_timer = Some(cx.set_timer(350.0));
         }
     }
     /// TS `shouldTrackSpotHoldings`: spot is collateral (unified/portfolio) or the
@@ -1501,6 +1562,30 @@ impl Hyperliquid {
                     }
                     Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
+            }
+            Request::AmendMark {
+                id,
+                amend,
+                symbol,
+                issued_at,
+            } => {
+                if !self.amend_read_pending(cx, &id, amend) {
+                    return;
+                }
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Mark<'a> {
+                    #[serde(borrow)]
+                    coin: std::borrow::Cow<'a, str>,
+                    #[serde(deserialize_with = "crate::wire::number")]
+                    mark_px: f64,
+                }
+                let read = serde_json::from_str::<Mark>(raw)
+                    .ok()
+                    .filter(|row| self.symbol(&row.coin) == Some(symbol.as_str()))
+                    .map(|row| (row.mark_px, issued_at))
+                    .ok_or_else(|| "the mark read was unreadable".to_owned());
+                self.amend_mark_answered(cx, &id, amend, &symbol, read);
             }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
@@ -1908,6 +1993,14 @@ impl Hyperliquid {
                     return;
                 }
                 self.amend_source_read(cx, &id, amend, Err(error.to_owned()));
+            }
+            Request::AmendMark {
+                id, amend, symbol, ..
+            } => {
+                if !self.amend_read_current(&id, amend) {
+                    return;
+                }
+                self.amend_mark_answered(cx, &id, amend, &symbol, Err(error.to_owned()));
             }
             Request::Fees => {}
         }
@@ -3248,10 +3341,7 @@ impl Hyperliquid {
                 .and_modify(|time| *time = time.max(fill.time))
                 .or_insert(fill.time);
             *self.account.state_revision.entry(dex.into()).or_default() += 1;
-            self.account.state_dirty.insert(dex.into());
-            if self.account.state_refresh_timer.is_none() {
-                self.account.state_refresh_timer = Some(cx.set_timer(350.0));
-            }
+            self.schedule_position_refresh(cx, symbol);
             return;
         }
         let Some(start) = fill.start_position else {

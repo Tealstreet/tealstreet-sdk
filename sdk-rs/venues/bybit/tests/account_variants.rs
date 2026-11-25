@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Variant contracts from documented Bybit V5 payloads and Hyro's readiness contract.
 mod support;
 use safe_cex_engine::{Command, Event};
@@ -657,6 +658,56 @@ fn malformed_execution_does_not_consume_identity_and_missing_ids_stay_distinct()
     );
 }
 
+// AGT-83: equal partial executions of one order must stay distinguishable from a replay.
+#[test]
+fn execution_id_is_the_fill_identity_and_the_order_id_is_kept() {
+    for variant in [
+        Variant::Linear,
+        Variant::Demo,
+        Variant::Inverse,
+        Variant::Spot,
+    ] {
+        let mut h = startup(variant);
+        authenticate(&mut h);
+        emitted_fills(&mut h);
+        let (category, symbol) = if variant.is_inverse() {
+            ("inverse", "BTCUSD")
+        } else if variant.is_spot() {
+            ("spot", "BTCUSDT")
+        } else {
+            ("linear", "BTCUSDT")
+        };
+        let row = |exec: &str| {
+            format!(
+                r#"{{"category":"{category}","symbol":"{symbol}","orderId":"order-1",{exec}"side":"Buy","execQty":"2","execPrice":"50000","execType":"Trade"}}"#
+            )
+        };
+        let packet = format!(
+            r#"{{"topic":"execution","data":[{},{},{}]}}"#,
+            row(r#""execId":"exec-a","#),
+            row(r#""execId":"exec-b","#),
+            row(r#""execId":"","#)
+        );
+        h.message("/v5/private", &packet);
+        let frame = h.engine.take_frame(h.now).unwrap();
+        let fills = safe_cex_engine::wire::fills(frame).unwrap();
+        let identities: Vec<_> = fills
+            .iter()
+            .map(|fill| (fill.id.as_deref(), fill.order_id.as_str(), fill.amount))
+            .collect();
+        // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+        assert_eq!(
+            identities,
+            vec![
+                (Some("exec-a"), "order-1", 2.0),
+                (Some("exec-b"), "order-1", 2.0),
+                (Some("order-1"), "order-1", 2.0),
+            ],
+            "{variant:?}"
+        );
+    }
+}
+
 #[test]
 fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
     let mut h = startup(Variant::Inverse);
@@ -983,7 +1034,7 @@ fn capacity_refusals(h: &mut Harness) -> usize {
             (3_000..3_300).contains(command)
                 && result
                     .as_ref()
-                    .is_err_and(|error| error.contains("capacity"))
+                    .is_err_and(|error| error.contains("request queue is full"))
         })
         .count()
 }
@@ -1283,5 +1334,136 @@ fn hyro_v1_optional_position_fields_still_reject_supplied_nonfinite_numbers() {
         );
         assert!(!h.closed.is_empty());
         assert_eq!(h.engine.store().positions()[0].contracts, 1.);
+    }
+}
+
+#[test]
+fn hyro_explicit_handshake_refusal_is_typed_without_condemning_the_key() {
+    use safe_cex_engine::{Notice, log::Value};
+    for code in [serde_json::json!(10003), serde_json::json!("10003")] {
+        let op = "auth";
+        let mut h = startup(Variant::Hyrotrader);
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        let sent: serde_json::Value = serde_json::from_str(
+            h.sent_on("/v5/private")
+                .iter()
+                .rev()
+                .find(|text| text.contains(&format!("\"op\":\"{op}\"")))
+                .unwrap(),
+        )
+        .unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({
+                "op":op, "req_id":sent["req_id"], "success":false,
+                "ret_code":code, "ret_msg":""
+            })
+            .to_string(),
+        );
+        let errors: Vec<_> = h
+            .notices
+            .iter()
+            .filter_map(|notice| match notice {
+                Notice::Event(event) if event.code == "stream.unavailable" => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "one original refusal event");
+        assert!(
+            errors[0].fields.iter().any(|(name, value)| *name == "kind"
+                && matches!(value, Value::Str(text) if text == "rejected")),
+            "an explicit handshake refusal must settle the admission: {errors:?}"
+        );
+        assert!(
+            errors[0]
+                .fields
+                .iter()
+                .any(|(name, value)| *name == "venueCode"
+                    && matches!(value, Value::Str(text) if text == "10003"))
+        );
+        assert!(!h.deactivated, "a refusal does not diagnose the key or IP");
+        assert!(h.closed.contains(&socket));
+        assert!(!h.has_request("/v5/order/realtime"));
+        assert!(!h.engine.store().loaded().balance);
+        assert!(!h.engine.store().loaded().orders);
+        assert!(!h.engine.store().loaded().positions);
+    }
+}
+
+#[test]
+fn hyro_uncertain_or_foreign_handshake_frames_never_claim_typed_rejection() {
+    use safe_cex_engine::Notice;
+    for (success, foreign, op, code) in [
+        (None, false, "auth", serde_json::json!(10003)),
+        (
+            Some(serde_json::Value::Null),
+            false,
+            "auth",
+            serde_json::json!(10003),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            true,
+            "auth",
+            serde_json::json!(10003),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!(10006),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!(10016),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!("10003junk"),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "subscribe",
+            serde_json::json!(10003),
+        ),
+    ] {
+        let mut h = startup(Variant::Hyrotrader);
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        if op == "subscribe" {
+            ack(&mut h, "auth");
+        }
+        let sent: serde_json::Value = serde_json::from_str(
+            h.sent_on("/v5/private")
+                .iter()
+                .rev()
+                .find(|text| text.contains(&format!("\"op\":\"{op}\"")))
+                .unwrap(),
+        )
+        .unwrap();
+        let mut frame = serde_json::json!({
+            "op":op, "req_id":if foreign {serde_json::json!("retired-session")} else {sent["req_id"].clone()},
+            "ret_code":code
+        });
+        if let Some(success) = success {
+            frame["success"] = success;
+        }
+        h.message("/v5/private", &frame.to_string());
+        assert!(h.notices.iter().all(|notice| match notice {
+            Notice::Event(event) if event.code == "stream.unavailable" =>
+                event.fields.iter().all(|(name, _)| *name != "kind"),
+            _ => true,
+        }));
+        assert!(!h.deactivated);
+        assert!(!h.has_request("/v5/order/realtime"));
+        if foreign {
+            assert!(!h.closed.contains(&socket));
+        }
     }
 }

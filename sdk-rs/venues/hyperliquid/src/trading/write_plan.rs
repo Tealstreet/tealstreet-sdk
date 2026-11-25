@@ -13,7 +13,8 @@ fn clients(step: &Step) -> Vec<Option<String>> {
     match step {
         Step::Place(opts) => {
             let mut clients = vec![opts.client_order_id.clone()];
-            if opts.kind == OrderType::Limit {
+            // Mirrors `wires`: limit and market entries carry their legs (AGT-117).
+            if matches!(opts.kind, OrderType::Limit | OrderType::Market) {
                 for price in [opts.stop_loss, opts.take_profit].into_iter().flatten() {
                     if price > 0. {
                         clients.push(None);
@@ -22,6 +23,10 @@ fn clients(step: &Step) -> Vec<Option<String>> {
             }
             clients
         }
+        Step::Places(orders) => orders
+            .iter()
+            .map(|order| order.client_order_id.clone())
+            .collect(),
         Step::Cancel(orders) => orders
             .iter()
             .map(|order| order.client_order_id.clone())

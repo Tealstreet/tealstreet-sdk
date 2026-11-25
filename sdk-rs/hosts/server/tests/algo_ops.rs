@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Every hosted algo op with the exact payload the web sends (NX call sites named
 //! on each test), through the server's algo host, asserting no refusal and the
 //! reply and event shapes the web's handlers read. The live e2e cannot exercise
@@ -135,6 +136,7 @@ struct Algos {
     inbox: mpsc::UnboundedSender<AlgoInput>,
     out: mpsc::UnboundedReceiver<String>,
     seen: Vec<Value>,
+    pending_events: Vec<Value>,
     commands: Arc<Mutex<Vec<String>>>,
     owner: Arc<safe_cex_exchange_server::twap_owner::Binding>,
 }
@@ -167,7 +169,35 @@ impl Algos {
         };
         let (handle, _task) =
             safe_cex_native::spawn_account(Host::new(engine, Quiet), config).unwrap();
+        handle.configure_store_frames("acct", "bybit");
+        let mut frames = handle.join(2, true).await.unwrap();
         let (tx, out) = mpsc::unbounded_channel::<String>();
+        let frame_tx = tx.clone();
+        tokio::task::spawn_local(async move {
+            let mut rows = json!({"activeChasers":[], "activeTWAPs":[]});
+            while let Some(item) = frames.outgoing.recv().await {
+                let safe_cex_native::Outgoing::Frame(bytes) = item else {
+                    continue;
+                };
+                let mut changed = false;
+                for (kind, payload) in safe_cex_engine::wire::sections(&bytes) {
+                    let field = match kind {
+                        27 => "activeChasers",
+                        28 => "activeTWAPs",
+                        _ => continue,
+                    };
+                    rows[field] = serde_json::to_value(
+                        safe_cex_store_frames::decode_section(payload).unwrap(),
+                    )
+                    .unwrap();
+                    changed = true;
+                }
+                if changed {
+                    let _ = frame_tx
+                        .send(json!({"t":"msg","d":{"op":"frame","data":rows}}).to_string());
+                }
+            }
+        });
         let (inbox, inbox_rx) = mpsc::unbounded_channel();
         tokio::task::spawn_local(algos::run(
             handle,
@@ -205,6 +235,7 @@ impl Algos {
             inbox,
             out,
             seen: Vec::new(),
+            pending_events: Vec::new(),
             commands,
             owner,
         }
@@ -225,6 +256,14 @@ impl Algos {
 
     /// The `d` of the next envelope with `op` whose data matches, never past a refusal.
     async fn next(&mut self, op: &str, matches: impl Fn(&Value) -> bool) -> Value {
+        if op != "frame"
+            && let Some(i) = self
+                .pending_events
+                .iter()
+                .position(|d| d["op"] == op && matches(&d["data"]))
+        {
+            return self.pending_events.remove(i);
+        }
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let text = self.out.recv().await.expect("algo host alive");
@@ -234,6 +273,9 @@ impl Algos {
                 self.seen.push(d.clone());
                 if d["op"] == op && matches(&d["data"]) {
                     return d;
+                }
+                if d["op"] != "frame" {
+                    self.pending_events.push(d);
                 }
             }
         })
@@ -338,7 +380,7 @@ async fn chaser_start_from_the_order_form_lists_an_active_chaser() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             let row = &active_chasers(&store["data"])[0];
             assert_chaser_row(row);
@@ -360,7 +402,7 @@ async fn chaser_start_from_cross_trade_has_no_origin_and_still_runs() {
                     "reduceOnly":true,"delay":1000}),
             );
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             assert_chaser_row(&active_chasers(&store["data"])[0]);
         })
@@ -374,7 +416,7 @@ async fn chaser_terminate_by_id_completes_with_the_tp_sl_client_id() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(Some("track-1")));
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             let id = active_chasers(&store["data"])[0]["id"].clone();
             // ActiveChasers.tsx / useActiveChasersColumns.tsx emit the bare id.
@@ -394,14 +436,16 @@ async fn chaser_terminate_by_id_completes_with_the_tp_sl_client_id() {
             ] {
                 assert!(check(&event[field]), "chaser:complete.{field}: {event}");
             }
-            // As TS, the stopped chase stays listed, marked stopped with its reason.
-            let stopped = algos
-                .seen
-                .iter()
-                .rev()
-                .find(|d| d["op"] == "store" && !active_chasers(&d["data"]).is_empty())
-                .map(|d| active_chasers(&d["data"])[0].clone())
-                .unwrap();
+            // Native publication is on the account cadence; the completion
+            // event can arrive before its stopped-row frame.
+            let frame = algos
+                .next("frame", |data| {
+                    active_chasers(data)
+                        .iter()
+                        .any(|row| row["isStopped"] == true)
+                })
+                .await;
+            let stopped = active_chasers(&frame["data"])[0].clone();
             assert_eq!(stopped["isStopped"], true);
             assert_eq!(stopped["stopReason"], "User cancelled");
         })
@@ -415,7 +459,7 @@ async fn twap_start_from_the_form_lists_a_twap_and_persists_its_state() {
             let mut algos = Algos::start().await;
             algos.op("twap:start", web_twap());
             let store = algos
-                .next("store", |data| !active_twaps(data).is_empty())
+                .next("frame", |data| !active_twaps(data).is_empty())
                 .await;
             assert_twap_row(&active_twaps(&store["data"])[0]);
             // exchangeAccountController persists a Record<id, {options, state}> per account.
@@ -436,13 +480,13 @@ async fn twap_pause_resume_stop_and_cleanup_take_the_bare_id() {
             let mut algos = Algos::start().await;
             algos.op("twap:start", web_twap());
             let store = algos
-                .next("store", |data| !active_twaps(data).is_empty())
+                .next("frame", |data| !active_twaps(data).is_empty())
                 .await;
             let id = active_twaps(&store["data"])[0]["id"].clone();
             // useTwapColumns.tsx: pause, resume, stop, cleanup with instance.id.
             algos.op("twap:pause", id.clone());
             algos
-                .next("store", |data| {
+                .next("frame", |data| {
                     active_twaps(data)
                         .first()
                         .is_some_and(|row| row["status"] == "paused")
@@ -450,7 +494,7 @@ async fn twap_pause_resume_stop_and_cleanup_take_the_bare_id() {
                 .await;
             algos.op("twap:resume", id.clone());
             algos
-                .next("store", |data| {
+                .next("frame", |data| {
                     active_twaps(data)
                         .first()
                         .is_some_and(|row| row["status"] == "running")
@@ -460,7 +504,7 @@ async fn twap_pause_resume_stop_and_cleanup_take_the_bare_id() {
             algos.op("twap:stop", id.clone());
             algos.op("twap:cleanup", id.clone());
             algos
-                .next("store", |data| active_twaps(data).is_empty())
+                .next("frame", |data| active_twaps(data).is_empty())
                 .await;
         })
         .await;
@@ -496,7 +540,7 @@ async fn bound_twap_host_resumes_only_matching_persisted_ownership() {
                 algos.op("twap:state", json!([row]));
                 if case == "same" {
                     algos
-                        .next("store", |data| !active_twaps(data).is_empty())
+                        .next("frame", |data| !active_twaps(data).is_empty())
                         .await;
                     tokio::time::sleep(Duration::from_millis(150)).await;
                     assert!(
@@ -549,23 +593,32 @@ async fn a_twap_queued_before_rebind_is_dropped_instead_of_adopted() {
                     algos.owner.rebind_owner("other-user");
                     let refusal = tokio::time::timeout(Duration::from_secs(2), async {
                         loop {
-                            let message: Value = serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
+                            let message: Value =
+                                serde_json::from_str(&algos.out.recv().await.unwrap()).unwrap();
                             if message["d"]["op"] == "error" {
                                 break message["d"]["data"].clone();
                             }
                         }
-                    }).await.unwrap();
-                    assert_eq!(refusal[0], "Algo operation cancelled-for-owner-change: authenticated connection binding changed");
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(
+                        refusal[0],
+                        "The automated-order request stopped because its account connection changed"
+                    );
                     assert_eq!(refusal[1]["forceToast"], true);
                     tokio::time::sleep(Duration::from_millis(150)).await;
                     assert!(algos.commands.lock().unwrap().is_empty());
                     // A newly captured op still works under the new generation.
                     algos.op("twap:start", web_twap());
                 }
-                algos.next("store", |data| !active_twaps(data).is_empty()).await;
+                algos
+                    .next("frame", |data| !active_twaps(data).is_empty())
+                    .await;
                 assert_eq!(algos.commands.lock().unwrap().len(), 1);
             }
-        }).await;
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -577,14 +630,14 @@ async fn a_same_user_resume_keeps_a_running_twap() {
             // A same-user reconnect/resume inside the 60-second window is not an owner change.
             assert!(!algos.owner.rebind_owner("u"));
             algos
-                .next("store", |data| !active_twaps(data).is_empty())
+                .next("frame", |data| !active_twaps(data).is_empty())
                 .await;
             assert_eq!(algos.commands.lock().unwrap().len(), 1);
             assert!(
                 !algos
                     .seen
                     .iter()
-                    .any(|event| event.to_string().contains("cancelled-for-owner-change")),
+                    .any(|event| event.to_string().contains("account connection changed")),
                 "a same-user resume cancelled the TWAP"
             );
         })
@@ -619,7 +672,7 @@ async fn twap_state_restores_the_rows_its_own_state_updates_persisted() {
             saved["id"] = id.clone().into();
             restored.op("twap:state", json!([saved]));
             let store = restored
-                .next("store", |data| !active_twaps(data).is_empty())
+                .next("frame", |data| !active_twaps(data).is_empty())
                 .await;
             let twap = &active_twaps(&store["data"])[0];
             assert_eq!(twap["id"], id);
@@ -674,12 +727,9 @@ async fn an_exec_sleep_cannot_start_a_twap_after_its_binding_is_retired() {
                 let result = first(&result["data"]);
                 assert_eq!(result["success"], !rebind, "{result}");
                 if rebind {
-                    assert!(
-                        result["error"]
-                            .as_str()
-                            .unwrap()
-                            .contains("cancelled-for-owner-change")
-                    );
+                    assert!(result["error"].as_str().unwrap().contains(
+                        "The TWAP couldn’t start because the account connection changed"
+                    ));
                     assert!(algos.commands.lock().unwrap().is_empty());
                 } else {
                     assert!(algos.seen.iter().any(|event| {
@@ -740,11 +790,11 @@ async fn twap_state_restores_a_row_the_ts_worker_persisted() {
                 json!([{"id":"ts-twap-1","ownerId":"u","ownerGeneration":algos.owner.snapshot().generation,"options":options,"state":state}]),
             );
             let store = algos
-                .next("store", |data| !active_twaps(data).is_empty())
+                .next("frame", |data| !active_twaps(data).is_empty())
                 .await;
             let twap = &active_twaps(&store["data"])[0];
             assert_eq!(twap["id"], "ts-twap-1");
-            assert_eq!(twap["ordersExecuted"], 3);
+            assert_eq!(twap["ordersExecuted"].as_f64(), Some(3.0));
             assert_twap_row(twap);
         })
         .await;
@@ -758,11 +808,11 @@ async fn a_joining_socket_sees_the_running_chases_again() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             algos.inbox.send(AlgoInput::Joined).unwrap();
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             assert_eq!(active_chasers(&store["data"]).len(), 1);
         })
@@ -778,12 +828,13 @@ async fn a_dispose_settles_a_running_chase_well_inside_its_deadline() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             algos
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -814,12 +865,13 @@ async fn disposing_for_no_browser_stops_the_chases_and_says_why() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             algos
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -856,7 +908,7 @@ async fn a_chase_that_ended_with_no_browser_is_kept_past_the_dispose() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             let id = active_chasers(&store["data"])[0]["id"].clone();
             algos.op("chaser:terminate", id.clone());
@@ -867,6 +919,7 @@ async fn a_chase_that_ended_with_no_browser_is_kept_past_the_dispose() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: Some(Box::new(move |notice| {
                         if let Some(kept) = kept.lock().unwrap().take() {
                             let _ = kept.send(notice);
@@ -897,7 +950,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
             let mut algos = Algos::start().await;
             algos.op("chaser:start", web_chase(None));
             let store = algos
-                .next("store", |data| !active_chasers(data).is_empty())
+                .next("frame", |data| !active_chasers(data).is_empty())
                 .await;
             let id = active_chasers(&store["data"])[0]["id"].clone();
             let (kept, notice) = tokio::sync::oneshot::channel();
@@ -906,6 +959,7 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "no browser for 60s".into(),
+                    server_stopped: None,
                     stopped: Some(Box::new(move |text| {
                         if let Some(kept) = kept.lock().unwrap().take() {
                             let _ = kept.send(text);
@@ -920,7 +974,8 @@ async fn with_no_browser_the_stop_notice_is_kept_instead_of_sent() {
             assert_eq!(
                 kept.notices,
                 [algos::Notice {
-                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open: check it.".into(),
+                    text: "Chase on BTCUSDT stopped: no browser for 60s. Its order may still be open. Check your open orders."
+                        .into(),
                     algo: Some(algos::AlgoRef {
                         kind: "chase",
                         id: id.as_str().unwrap().to_owned(),
@@ -949,7 +1004,7 @@ async fn each_stopped_chase_and_twap_is_its_own_notice_naming_its_algo() {
             algos.op("chaser:start", web_chase(None));
             algos.op("twap:start", web_twap());
             let store = algos
-                .next("store", |data| {
+                .next("frame", |data| {
                     active_chasers(data).len() == 2 && active_twaps(data).len() == 1
                 })
                 .await;
@@ -967,6 +1022,7 @@ async fn each_stopped_chase_and_twap_is_its_own_notice_naming_its_algo() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -1011,7 +1067,7 @@ async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
             twap["useChaserOrders"] = true.into();
             algos.op("twap:start", twap);
             let store = algos
-                .next("store", |data| {
+                .next("frame", |data| {
                     active_chasers(data).len() == 2 && active_twaps(data).len() == 1
                 })
                 .await;
@@ -1026,6 +1082,7 @@ async fn a_twap_slice_chase_names_its_twap_and_its_stop_is_told_by_the_twap() {
                 .inbox
                 .send(AlgoInput::Dispose {
                     reason: "the server is restarting".into(),
+                    server_stopped: None,
                     stopped: None,
                 })
                 .unwrap();
@@ -1088,7 +1145,10 @@ async fn router_fence_parks_a_pending_slice_and_chase_without_any_cancel_or_repl
                 .await
                 .unwrap()
                 .unwrap();
-            assert!(kept.summary().contains("Resting orders were kept"));
+            assert!(
+                kept.summary()
+                    .contains("without cancelling existing orders")
+            );
             let mut frames = Vec::new();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while let Some(text) = algos.out.recv().await {
@@ -1114,7 +1174,7 @@ async fn router_fence_parks_a_pending_slice_and_chase_without_any_cancel_or_repl
                 "{frames:?}"
             );
             assert!(
-                frames.iter().any(|frame| frame["d"]["op"] == "store"
+                frames.iter().any(|frame| frame["d"]["op"] == "frame"
                     && frame["d"]["data"]["activeChasers"] == json!([])
                     && frame["d"]["data"]["activeTWAPs"]
                         .as_array()

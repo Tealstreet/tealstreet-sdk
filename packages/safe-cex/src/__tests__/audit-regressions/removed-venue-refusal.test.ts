@@ -8,7 +8,7 @@ import { serializeCommandError } from '../../commandOutcome';
 import { accountToExchangeOptions, createExchangeFromAccount } from '../../createExchangeFromAccount';
 import { exchangePrettyNames, getExchangeMetadata, isExchangeSupportedOnMobile } from '../../exchangeMetadata';
 import { buildPublicExchangeOptions, createExchange, createPublicExchange, preloadExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { virtualClock } from '../../utils/virtualClock';
 
 // Retired venues (BitMEX closed 2026-09-23) are still saved on user accounts.
@@ -107,7 +107,7 @@ describe.each(REMOVED)('removed venue %s', (name) => {
     const { RustEngineExchange } = await vi.importActual<typeof import('../../exchanges/rust/rust.exchange')>(
       '../../exchanges/rust/rust.exchange',
     );
-    typedRefusal(() => new RustEngineExchange(name, { key: 'k', secret: 's' }, new DefaultStore()));
+    typedRefusal(() => new RustEngineExchange(name, { key: 'k', secret: 's' }, new FrameStore()));
   });
 
   it('fails worker startup cleanly instead of rejecting out of start()', async () => {

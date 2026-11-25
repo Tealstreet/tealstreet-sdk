@@ -5,7 +5,9 @@ use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then};
-use safe_cex_engine::history::{CursorAdmission, CursorHistory, ReadCompletion, ReadCursorHistory};
+use safe_cex_engine::history::{
+    CursorAdmission, CursorHistory, IncompleteReason, ReadCompletion, ReadCursorHistory,
+};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
 use safe_cex_engine::request_context::{Context, Owner, Pacing};
@@ -16,6 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Bybit treats both window bounds as inclusive and refuses wider ones.
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
+const TERMINAL_RETENTION_MS: f64 = 24.0 * 3_600_000.0;
 /// Windows a range may span; a larger range keeps one window for Bybit to reject.
 const MAX_WINDOWS: usize = 10_000;
 const FILLS_PAGE_LIMIT: u32 = 100;
@@ -47,7 +50,8 @@ struct Execution {
     price: f64,
     qty: f64,
     side: &'static str,
-    commission: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commission: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     commission_asset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,8 +141,15 @@ impl RowKind {
         } else {
             MAX_PAGES_PER_WINDOW
         };
+        use safe_cex_engine::history::HistoryOperation;
+        let operation = match self {
+            Self::Orders => HistoryOperation::BybitOrders,
+            Self::Fills => HistoryOperation::BybitFills,
+            Self::Income => HistoryOperation::BybitIncome,
+            Self::Trades => HistoryOperation::BybitTrades,
+        };
         CursorHistory::new(
-            completion,
+            completion.with_operation(operation),
             CursorWalk::new(max_pages),
             |reason| {
                 match reason {
@@ -253,6 +264,8 @@ struct Walk {
     categories: VecDeque<Category>,
     order_statuses: VecDeque<&'static str>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
+    terminal_windows: VecDeque<(Option<f64>, Option<f64>)>,
+    retention_from: Option<f64>,
 }
 
 impl Walk {
@@ -263,9 +276,13 @@ impl Walk {
     }
 
     fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        let gap = self.retention_from
+            .filter(|from| *from < cx.protocol_now() - TERMINAL_RETENTION_MS)
+            .map(|_| (IncompleteReason::RetentionLimit,
+                "Bybit retains unfilled Cancelled/Rejected/Deactivated orders for only 24 hours; older terminal rows are unavailable".into()));
         let _ = self
             .history
-            .finish_with(cx, result, |rows| self.kind.encode(rows, self.cap));
+            .finish_with_coverage(cx, result, gap, |rows| self.kind.encode(rows, self.cap));
     }
 }
 
@@ -301,6 +318,33 @@ pub(crate) fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f6
     })
     // An inverted or too-large range keeps one window for Bybit to reject.
     .unwrap_or_else(|| VecDeque::from([(Some(from), Some(to))]))
+}
+
+fn terminal_windows(
+    from: Option<f64>,
+    to: Option<f64>,
+    now: f64,
+) -> VecDeque<(Option<f64>, Option<f64>)> {
+    // Retention clips the lower bound; explicit future endTime remains caller-owned.
+    // Existing splitting keeps pages valid; wholly future slices have no terminal records.
+    let from = from
+        .unwrap_or(now - TERMINAL_RETENTION_MS)
+        .max(now - TERMINAL_RETENTION_MS);
+    let to = to.unwrap_or(now);
+    if from > to {
+        VecDeque::new()
+    } else {
+        windows(Some(from), Some(to))
+            .into_iter()
+            .filter(|(from, _)| from.is_some_and(|from| from <= now))
+            .map(|(from, to)| {
+                (
+                    from.map(safe_cex_engine::time::wire_stamp_ms),
+                    to.map(safe_cex_engine::time::wire_stamp_ms),
+                )
+            })
+            .collect()
+    }
 }
 
 fn nontrade_execution(kind: &str) -> bool {
@@ -484,6 +528,8 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: VecDeque::new(),
+                    retention_from: None,
                     axis_rows_start: 0,
                     path: "/v5/execution/list",
                     signed: true,
@@ -510,6 +556,9 @@ impl BybitLinear {
                 // An omitted limit reads the whole window (bounded by the page guard), as TS does.
                 let cap = limit.unwrap_or(0) as usize;
                 let to_ms = to_ms.or(from_ms.map(|_| now));
+                // With no start bound, V5 defaults to seven days before the end.
+                let requested_from =
+                    from_ms.unwrap_or(to_ms.unwrap_or(now) - 7.0 * TERMINAL_RETENTION_MS);
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
@@ -517,6 +566,8 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: terminal_windows(from_ms, to_ms, now),
+                    retention_from: Some(requested_from),
                     axis_rows_start: 0,
                     path: "/v5/order/history",
                     signed: true,
@@ -567,6 +618,8 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: VecDeque::new(),
+                    retention_from: None,
                     axis_rows_start: 0,
                     path: "/v5/account/transaction-log",
                     signed: true,
@@ -589,6 +642,8 @@ impl BybitLinear {
                 categories: VecDeque::new(),
                 order_statuses: VecDeque::new(),
                 original_windows: VecDeque::new(),
+                terminal_windows: VecDeque::new(),
+                retention_from: None,
                 axis_rows_start: 0,
                 path: "/v5/market/recent-trade",
                 signed: false,
@@ -612,7 +667,7 @@ impl BybitLinear {
                 history: RowKind::Trades.owner(completion),
             },
         };
-        if matches!(walk.kind, RowKind::Orders) {
+        if matches!(walk.kind, RowKind::Orders) && !walk.terminal_windows.is_empty() {
             walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
         }
         walk.original_windows = walk.windows.clone();
@@ -648,14 +703,16 @@ impl BybitLinear {
                     walk.params.retain(|(key, _)| *key != "orderStatus");
                     walk.params.push(("orderStatus", status.into()));
                     walk.axis_rows_start = walk.history.accepted_len();
-                    walk.windows = walk.original_windows.clone();
+                    walk.windows = walk.terminal_windows.clone();
                     self.next_window(cx, command);
                     return;
                 }
                 if let Some(category) = walk.categories.pop_front() {
                     if matches!(walk.kind, RowKind::Orders) {
                         walk.params.retain(|(key, _)| *key != "orderStatus");
-                        walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+                        if !walk.terminal_windows.is_empty() {
+                            walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+                        }
                     }
                     if let Some((_, value)) =
                         walk.params.iter_mut().find(|(key, _)| *key == "category")
@@ -846,16 +903,20 @@ fn page(walk: &Walk, body: &str) -> serde_json::Result<(Rows, Option<String>)> {
                 rows.push(Execution {
                     id: e.exec_id.as_deref().unwrap_or_default().to_owned(),
                     timestamp: if time > 100_000_000_000.0 {
-                        (time / 1000.0).floor()
+                        time / 1000.0
                     } else {
-                        time.floor()
+                        time
                     },
                     symbol: e.symbol.into_owned(),
                     order_id: e.order_id.into_owned(),
                     price,
                     qty,
                     side: side_name(side),
-                    commission: or_zero(&e.exec_fee).abs(),
+                    // Positive is a cost; negative is a rebate, opposite to income cash flow.
+                    commission: {
+                        let fee = float_of(&e.exec_fee);
+                        fee.is_finite().then_some(fee)
+                    },
                     commission_asset: present(&e.fee_currency).map(str::to_owned),
                     maker: e.is_maker,
                 });

@@ -9,7 +9,7 @@ export const readBlob = async (blob: Blob): Promise<string> => {
   // Pako
   const inflatedData = inflate(binData);
 
-  const uint16Array = new Uint16Array(inflatedData) as any as number[];
+  const uint16Array = new Uint16Array(inflatedData);
 
   // Convert gunzipped byteArray back to ascii string:
   return uint16Array.reduce((acc, i) => (acc += String.fromCharCode.apply(null, [i])), '');
