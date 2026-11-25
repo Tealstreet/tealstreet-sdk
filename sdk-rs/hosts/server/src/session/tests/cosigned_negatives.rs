@@ -172,7 +172,10 @@ async fn cosigned_probe_deadline_refuses_and_releases_its_engine() {
     session.verification_completed(completion).await.unwrap();
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::with_instance_id(envelope::init_unverified("acct", true), "timed-proof")
+        envelope::with_instance_id(
+            envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown),
+            "timed-proof"
+        )
     );
     assert!(!link.is_available());
     assert!(session.pending_verifications.is_empty());
@@ -288,7 +291,11 @@ impl Drop for Resident {
 }
 
 fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: Option<&str>) {
-    let raw = envelope::init_unverified("acct", false);
+    let raw = envelope::init_unverified(
+        "acct",
+        false,
+        envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+    );
     let expected = id.filter(|s| !s.is_empty()).map_or_else(
         || raw.clone(),
         |id| envelope::with_instance_id(raw.clone(), id),
