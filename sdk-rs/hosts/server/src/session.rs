@@ -4645,7 +4645,7 @@ mod tests {
             ..acct_init()
         };
         let account_a = if held_load {
-            let (account, inbox) = crate::accounts::testing::account_on(
+            let (mut account, inbox) = crate::accounts::testing::account_on(
                 crate::accounts::testing::HeldLoad {
                     placed: Arc::default(),
                     load_after_ms: None,
@@ -4660,6 +4660,7 @@ mod tests {
                 Arc::default(),
             );
             drop(inbox);
+            crate::accounts::testing::bind_identity(&mut account, &first);
             crate::accounts::tests::register(&registry, &account);
             account
         } else {
@@ -4675,6 +4676,7 @@ mod tests {
             session.take_dropped()
         };
         session.init(first.clone()).await.unwrap();
+        assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_a));
         let client_a = session.joined["acct"].client.id;
         if held_load {
             let mut hold = Some(Hold {
