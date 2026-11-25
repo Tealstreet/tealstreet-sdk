@@ -151,8 +151,10 @@ keeps it only while the row is unknown. A leg may also carry an optional `role`
 (`entry`, `takeProfit`, `stopLoss` or `other`, AGT-214) where the venue split an
 attached TP/SL into its own legs, only on that bracketed order's own rows; readers
 drop an unrecognised role, never the leg, and fall back to generic wording when it is
-absent. The box sheds roles before it drops a list over 4 KiB or a receipt over
-`OUTCOME_MAX`. Wire names: `sdk-rs/engine/tests/fixtures/leg-roles.json`. The router must record and replay
+absent. The box does not send `role` yet (`DELEGATED_LEG_ROLES` is off): the live
+router's strict leg reader drops a whole list carrying an unknown key. Once enabled, it
+sheds roles before it drops a list over 4 KiB or a receipt over `OUTCOME_MAX`. LOCAL/wasm
+carries roles now. Wire names: `sdk-rs/engine/tests/fixtures/leg-roles.json`. The router must record and replay
 `refused`/`rejected` like any other box outcome. Receipts echo the input
 `seq`. `outcomeSeq` is a positive JS-safe transport delivery counter, not part
 of a business result or its fingerprint. The box numbers its registration output;

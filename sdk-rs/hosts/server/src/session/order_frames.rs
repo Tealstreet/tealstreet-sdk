@@ -362,6 +362,41 @@ pub(super) fn settle_intent(
     protective_legs: usize,
     answer: Result<Value, Value>,
 ) -> bool {
+    let receipt = Receipt {
+        out,
+        name,
+        id,
+        client_id,
+        seq,
+    };
+    settle(receipt, protective_legs, answer, DELEGATED_LEG_ROLES)
+}
+
+/// Whether the box sends each leg's `role` to the router (AGT-214). Off until the live
+/// exchange router accepts it: its strict leg reader (tealstreet-next `legResultsOf`)
+/// drops a whole leg list carrying an unknown key. LOCAL/wasm keeps roles regardless.
+const DELEGATED_LEG_ROLES: bool = false;
+
+struct Receipt<'a> {
+    out: &'a Out,
+    name: &'a str,
+    id: &'a Value,
+    client_id: Option<&'a str>,
+    seq: u64,
+}
+
+fn settle(
+    Receipt {
+        out,
+        name,
+        id,
+        client_id,
+        seq,
+    }: Receipt<'_>,
+    protective_legs: usize,
+    answer: Result<Value, Value>,
+    leg_roles: bool,
+) -> bool {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
@@ -408,7 +443,7 @@ pub(super) fn settle_intent(
             data["error"] = json!({"message":message,"outcome":outcome});
             // The receipt stays unknown; the legs' results only let the client say which landed.
             if outcome == "unknown"
-                && let Some(elements) = leg_results(&error["elements"])
+                && let Some(elements) = leg_results(&error["elements"], leg_roles)
             {
                 data["error"]["elements"] = elements;
             }
@@ -422,7 +457,7 @@ const LEG_ROLES: [&str; 4] = ["entry", "takeProfit", "stopLoss", "other"];
 
 /// Each leg's result, projected to the fields the client reads, or `None` when any
 /// leg is unreadable or the list would not fit inside the receipt limit (AGT-185).
-fn leg_results(elements: &Value) -> Option<Value> {
+fn leg_results(elements: &Value, roles: bool) -> Option<Value> {
     const LEGS_MAX: usize = 32;
     const LEGS_BYTES_MAX: usize = 4 * 1024;
     const REASON_CHARS_MAX: usize = 160;
@@ -442,7 +477,8 @@ fn leg_results(elements: &Value) -> Option<Value> {
                 out["clientOrderId"] = Some(id).filter(|id| bounded_id(id))?.clone();
             }
             // Display-only (AGT-214): an unrecognised role is left out, never the leg.
-            if let Some(role) = leg["role"]
+            if roles
+                && let Some(role) = leg["role"]
                 .as_str()
                 .filter(|role| LEG_ROLES.contains(role))
             {
@@ -516,6 +552,22 @@ mod tests {
         let (out, mut sent, _) = Out::channel(1);
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
         settle_intent(&out, "a", &id, None, 1, 0, Err(error));
+        let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        frame["d"].clone()
+    }
+
+    /// As `settled`, with the box sending roles as it will once the router accepts them.
+    async fn settled_with_roles(error: Value) -> Value {
+        let (out, mut sent, _) = Out::channel(1);
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let receipt = Receipt {
+            out: &out,
+            name: "a",
+            id: &id,
+            client_id: None,
+            seq: 1,
+        };
+        settle(receipt, 0, Err(error), true);
         let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         frame["d"].clone()
     }
@@ -656,7 +708,7 @@ mod tests {
     #[tokio::test]
     async fn each_legs_role_is_carried_and_an_unknown_role_is_left_out() {
         let refusal = "OKX 51279: TP trigger price cannot be lower than the last price";
-        let frame = settled(json!({"message":"m","partialOrderIds":["entry","sl"],
+        let frame = settled_with_roles(json!({"message":"m","partialOrderIds":["entry","sl"],
             "elements":[
                 {"index":0,"clientOrderId":"c0","role":"entry","status":"placed","orderIds":["entry"]},
                 {"index":1,"clientOrderId":"c1","role":"stopLoss","status":"placed","orderIds":["sl"]},
@@ -678,6 +730,27 @@ mod tests {
                 {"index":4,"status":"unknown","error":{"message":"timed out"}},
                 {"index":5,"status":"applied"}])
         );
+    }
+
+    // AGT-214 round 3: the live exchange router drops a whole leg list that carries an
+    // unknown key, so by default the box sends each leg without its role.
+    #[tokio::test]
+    async fn the_box_sends_no_leg_roles_until_the_router_accepts_them() {
+        const { assert!(!DELEGATED_LEG_ROLES) };
+        let error = json!({"message":"m","partialOrderIds":["entry"],
+            "elements":[
+                {"index":0,"role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"role":"takeProfit","status":"notSent","error":{"message":"no"}}]});
+        let by_default = settled(error.clone()).await;
+        assert_eq!(
+            by_default["error"]["elements"],
+            json!([
+                {"index":0,"status":"placed","orderIds":["entry"]},
+                {"index":1,"status":"notSent","error":{"message":"no"}}])
+        );
+        let enabled = settled_with_roles(error).await;
+        assert_eq!(enabled["error"]["elements"][0]["role"], "entry");
+        assert_eq!(enabled["error"]["elements"][1]["role"], "takeProfit");
     }
 
     #[test]
@@ -763,10 +836,11 @@ mod tests {
             size(legs(id_len, true)) > 4 * 1024,
             "the control needs roles to overflow"
         );
-        let kept = leg_results(&Value::Array(legs(id_len, true))).expect("legs that fit today");
+        let kept =
+            leg_results(&Value::Array(legs(id_len, true)), true).expect("legs that fit today");
         assert_eq!(kept, Value::Array(legs(id_len, false)));
         // A list that fits with its roles keeps them.
-        let kept = leg_results(&Value::Array(legs(id_len - 20, true))).unwrap();
+        let kept = leg_results(&Value::Array(legs(id_len - 20, true)), true).unwrap();
         assert!(
             kept.as_array()
                 .unwrap()
@@ -786,14 +860,22 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            leg_results(&Value::Array(elements.clone())),
+            leg_results(&Value::Array(elements.clone()), true),
             Some(Value::Array(elements.clone()))
         );
         let state = |message: &str| {
             let (out, mut sent, _) = Out::channel(1);
             let out = out.with_instance_id(Some(&"\u{1}".repeat(128)));
             let error = json!({"message":message,"partialOrderIds":["e"],"elements":elements});
-            settle_intent(&out, &"\u{1}".repeat(256), &id, None, 1, 0, Err(error));
+            let name = "\u{1}".repeat(256);
+            let receipt = Receipt {
+                out: &out,
+                name: &name,
+                id: &id,
+                client_id: None,
+                seq: 1,
+            };
+            settle(receipt, 0, Err(error), true);
             let text = sent.try_recv().unwrap();
             assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
             let frame: Value = serde_json::from_str(&text).unwrap();
@@ -821,7 +903,7 @@ mod tests {
         let elements: Vec<Value> = (0..32)
             .map(|index| json!({"index":index,"status":"placed","orderIds":["e".repeat(75)]}))
             .collect();
-        assert!(leg_results(&Value::Array(elements.clone())).is_some());
+        assert!(leg_results(&Value::Array(elements.clone()), false).is_some());
         let receipt = |instance: &str, name: &str, message: &str| {
             let (out, mut sent, _) = Out::channel(1);
             let out = out.with_instance_id(Some(instance));

@@ -65,6 +65,8 @@ A split bracket's own entry and legs, never another order's rows, carry an optio
 `role` (`entry`/`takeProfit`/`stopLoss`/`other`) on OKX, Binance, BingX futures, AsterDEX,
 GRVT, Backpack limit entries, Hyperliquid and WOO, whose one positional algo holding both
 legs is `other`. Display data only, never outcome evidence (AGT-214; `delegated-order-frames.md`).
+The hosted box withholds `role` from DELEGATED receipts (`DELEGATED_LEG_ROLES` off) until the
+live exchange router's strict leg reader accepts it; LOCAL/wasm carries it now.
 
 Bitunix keeps one position TP/SL order per position, both legs under one id, and
 a placement without a leg replaces it. The REST pending list has no `type`, so

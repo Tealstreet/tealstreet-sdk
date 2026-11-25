@@ -353,18 +353,18 @@ fn a_leg_role_serializes_only_when_the_venue_names_one() {
 #[test]
 fn leg_role_wire_names_match_the_shared_fixture() {
     use safe_cex_engine::write_plan::LegRole;
-    // A new variant fails to compile here; its arm must give its place in `ALL`.
-    let position = |role: LegRole| match role {
-        LegRole::Entry => 0,
-        LegRole::TakeProfit => 1,
-        LegRole::StopLoss => 2,
-        LegRole::Other => 3,
+    // An exhaustive match: a new variant fails to compile until its arm links it into
+    // this chain. The variants and their count come from walking it.
+    let next = |role: Option<LegRole>| match role {
+        None => Some(LegRole::Entry),
+        Some(LegRole::Entry) => Some(LegRole::TakeProfit),
+        Some(LegRole::TakeProfit) => Some(LegRole::StopLoss),
+        Some(LegRole::StopLoss) => Some(LegRole::Other),
+        Some(LegRole::Other) => None,
     };
-    const VARIANTS: usize = 4; // the number of arms above
-    assert_eq!(LegRole::ALL.len(), VARIANTS);
-    for (index, role) in LegRole::ALL.into_iter().enumerate() {
-        assert_eq!(position(role), index, "{role:?}");
-    }
+    let variants: Vec<LegRole> =
+        std::iter::successors(next(None), |role| next(Some(*role))).collect();
+    assert_eq!(variants, LegRole::ALL);
     let fixture: Vec<String> =
         serde_json::from_str(include_str!("fixtures/leg-roles.json")).unwrap();
     let names: Vec<String> = LegRole::ALL
