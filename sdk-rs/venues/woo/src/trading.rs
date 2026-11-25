@@ -14,7 +14,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 enum Accepted {
-    Regular(Option<OrderIdentityReceipt>),
+    /// Reporting only: a bracketed order's entry lots carry `Entry` (AGT-214).
+    Regular(Option<OrderIdentityReceipt>, Option<LegRole>),
     /// Reporting only: an entry's positional TP/SL carries its part in the split (AGT-214).
     Algo(Option<LegRole>),
     Ids(Vec<String>),
@@ -468,6 +469,7 @@ impl Woo {
                 } else {
                     "LIMIT"
                 };
+                let lots = steps.len();
                 for quantity in quantities(o.amount, m)? {
                     let mut params = vec![
                         ("symbol".into(), symbol.clone()),
@@ -493,18 +495,30 @@ impl Woo {
                         "/v1/order",
                         params,
                         None,
-                        Accepted::Regular(o.client_order_id.as_ref().map(|identity| {
-                            OrderIdentityReceipt {
-                                symbol: o.symbol.clone(),
-                                kind: OrderIdentityKind::ClientOrderId,
-                                identity: identity.clone(),
-                            }
-                        })),
+                        Accepted::Regular(
+                            o.client_order_id
+                                .as_ref()
+                                .map(|identity| OrderIdentityReceipt {
+                                    symbol: o.symbol.clone(),
+                                    kind: OrderIdentityKind::ClientOrderId,
+                                    identity: identity.clone(),
+                                }),
+                            None,
+                        ),
                     ));
                 }
                 let sl = o.stop_loss.is_some_and(|v| v > 0.0);
                 let tp = o.take_profit.is_some_and(|v| v > 0.0);
                 if sl || tp {
+                    for lot in steps.range_mut(lots..) {
+                        if let Step::Write {
+                            accepted: Accepted::Regular(_, role),
+                            ..
+                        } = lot
+                        {
+                            *role = Some(LegRole::Entry);
+                        }
+                    }
                     let mut closing = o.clone();
                     closing.side = o.side.opposite();
                     let mut legs = self.positional(
@@ -1051,26 +1065,14 @@ impl Woo {
                         std::mem::take(&mut self.trading.active.as_mut().unwrap().touches);
                     match self.build_places(cx, orders, &touches) {
                         Ok(steps) => {
-                            let split = steps.iter().any(|step| {
-                                matches!(
-                                    step,
-                                    Step::Write {
-                                        accepted: Accepted::Algo(Some(_)),
-                                        ..
-                                    }
-                                )
-                            });
                             let elements = steps
                                 .iter()
                                 .filter_map(|step| match step {
                                     Step::Write { accepted, .. } => Some(match accepted {
-                                        Accepted::Regular(receipt) => (
-                                            receipt.as_ref().map(|r| r.identity.clone()),
-                                            Some(LegRole::Entry),
-                                        ),
-                                        Accepted::Algo(role) => {
-                                            (None, role.or(Some(LegRole::Other)))
+                                        Accepted::Regular(receipt, role) => {
+                                            (receipt.as_ref().map(|r| r.identity.clone()), *role)
                                         }
+                                        Accepted::Algo(role) => (None, *role),
                                         _ => (None, None),
                                     }),
                                     _ => None,
@@ -1080,7 +1082,7 @@ impl Woo {
                                     safe_cex_engine::write_plan::Element {
                                         index,
                                         client_order_id,
-                                        role: role.filter(|_| split),
+                                        role,
                                     }
                                 })
                                 .collect();
@@ -1138,7 +1140,7 @@ impl Woo {
                         }
                     }
                     if let Step::Write {
-                        accepted: Accepted::Regular(Some(receipt)),
+                        accepted: Accepted::Regular(Some(receipt), None),
                         ..
                     } = &outbound
                     {
@@ -1470,7 +1472,7 @@ impl Woo {
                         return Err("WOO mutation was not accepted".into());
                     }
                     match accepted {
-                        Accepted::Regular(_) => {
+                        Accepted::Regular(..) => {
                             #[derive(Deserialize)]
                             struct Placed {
                                 #[serde(deserialize_with = "id")]

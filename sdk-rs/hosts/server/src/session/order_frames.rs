@@ -473,8 +473,23 @@ fn leg_results(elements: &Value) -> Option<Value> {
             Some(out)
         })
         .collect::<Option<Vec<_>>>()?;
-    let projected = Value::Array(projected);
-    (projected.to_string().len() <= LEGS_BYTES_MAX).then_some(projected)
+    let fits = |legs: &Vec<Value>| Value::from(legs.as_slice()).to_string().len() <= LEGS_BYTES_MAX;
+    if fits(&projected) {
+        return Some(Value::Array(projected));
+    }
+    // Roles cost ~20 bytes a leg (AGT-214): shed them before the list that fit without them.
+    let roleless = strip_roles(projected);
+    fits(&roleless).then_some(Value::Array(roleless))
+}
+
+/// The same legs without their display-only roles.
+pub(crate) fn strip_roles(mut legs: Vec<Value>) -> Vec<Value> {
+    for leg in &mut legs {
+        if let Some(leg) = leg.as_object_mut() {
+            leg.remove("role");
+        }
+    }
+    legs
 }
 
 /// Native evidence that some part of the command took effect at the venue.
@@ -725,6 +740,81 @@ mod tests {
         );
         let text = sent.recv().await.unwrap();
         assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
+    }
+
+    // AGT-214 review: roles cost ~20 bytes a leg. A list that fits the 4 KiB bound
+    // without them keeps every leg and sheds the roles instead of being dropped.
+    #[test]
+    fn a_leg_list_that_fits_only_without_roles_keeps_its_legs() {
+        let legs = |id_len: usize, role: bool| -> Vec<Value> {
+            (0..32)
+                .map(|index| {
+                    let mut leg =
+                        json!({"index":index,"status":"placed","orderIds":["e".repeat(id_len)]});
+                    if role {
+                        leg["role"] = "takeProfit".into();
+                    }
+                    leg
+                })
+                .collect()
+        };
+        let size = |legs: Vec<Value>| Value::Array(legs).to_string().len();
+        let id_len = (1..=256)
+            .rev()
+            .find(|len| size(legs(*len, false)) <= 4 * 1024)
+            .unwrap();
+        assert!(
+            size(legs(id_len, true)) > 4 * 1024,
+            "the control needs roles to overflow"
+        );
+        let kept = leg_results(&Value::Array(legs(id_len, true))).expect("legs that fit today");
+        assert_eq!(kept, Value::Array(legs(id_len, false)));
+        // A list that fits with its roles keeps them.
+        let kept = leg_results(&Value::Array(legs(id_len - 20, true))).unwrap();
+        assert!(
+            kept.as_array()
+                .unwrap()
+                .iter()
+                .all(|leg| leg["role"] == "takeProfit")
+        );
+    }
+
+    // AGT-214 review: near the receipt limit the roles go before the leg list does.
+    #[tokio::test]
+    async fn a_receipt_near_its_limit_sheds_roles_before_the_leg_list() {
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        let elements: Vec<Value> = (0..32)
+            .map(|index| {
+                json!({"index":index,"role":"takeProfit","status":"placed",
+                    "orderIds":["e".repeat(60)]})
+            })
+            .collect();
+        assert_eq!(
+            leg_results(&Value::Array(elements.clone())),
+            Some(Value::Array(elements.clone()))
+        );
+        let state = |message: &str| {
+            let (out, mut sent, _) = Out::channel(1);
+            let out = out.with_instance_id(Some(&"\u{1}".repeat(128)));
+            let error = json!({"message":message,"partialOrderIds":["e"],"elements":elements});
+            settle_intent(&out, &"\u{1}".repeat(256), &id, None, 1, 0, Err(error));
+            let text = sent.try_recv().unwrap();
+            assert!(text.len() <= order_contract::OUTCOME_MAX, "{}", text.len());
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame["d"]["outcome"], "unknown");
+            match frame["d"]["error"]["elements"].as_array() {
+                Some(legs) if legs.iter().all(|leg| leg["role"] == "takeProfit") => 0,
+                Some(legs) if legs.iter().all(|leg| leg.get("role").is_none()) => 1,
+                Some(legs) => panic!("partly shed roles: {legs:?}"),
+                None => 2,
+            }
+        };
+        let states: Vec<u8> = (0..=512).map(|chars| state(&"𐐀".repeat(chars))).collect();
+        assert!(
+            states.is_sorted(),
+            "roles go first, then the list: {states:?}"
+        );
+        assert!(states.contains(&0) && states.contains(&1), "{states:?}");
     }
 
     // A kept list under its own 4 KiB bound can still push maximal, escape-heavy

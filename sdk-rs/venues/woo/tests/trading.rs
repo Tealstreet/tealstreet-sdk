@@ -2264,3 +2264,46 @@ fn a_split_bracket_names_its_entry_and_positional_legs() {
         assert!(!matches!(rows[1].result, ElementResult::Placed { .. }));
     }
 }
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's entry and positional legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_beside_a_reduce_only_order() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut e = engine();
+    let mut bracket = opts();
+    bracket.take_profit = Some(62000.0);
+    let mut close = opts();
+    close.side = OrderSide::Sell;
+    close.price = Some(61000.0);
+    close.reduce_only = Some(true);
+    let a = placed(&mut e, vec![bracket, close]);
+    let r = req(&a, Method::Post, "/v1/order");
+    let a = reply(&mut e, &r, 1010.0, r#"{"success":true,"order_id":1}"#);
+    let a = tick(&mut e, &a);
+    let r = req(&a, Method::Post, "/v3/algo/order");
+    let a = reply(
+        &mut e,
+        &r,
+        1020.0,
+        r#"{"success":false,"code":-1103,"message":"The order does not meet the price filter requirement."}"#,
+    );
+    let a = if a.iter().any(|a| matches!(a, Action::SetTimer { .. })) {
+        let a = tick(&mut e, &a);
+        let r = req(&a, Method::Post, "/v1/order");
+        reply(&mut e, &r, 1030.0, r#"{"success":true,"order_id":2}"#)
+    } else {
+        a
+    };
+    let roles: Vec<_> = failure(&a)
+        .elements
+        .as_ref()
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [Some(LegRole::Entry), Some(LegRole::TakeProfit), None]
+    );
+}

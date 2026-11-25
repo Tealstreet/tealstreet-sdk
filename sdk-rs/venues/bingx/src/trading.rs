@@ -1451,13 +1451,12 @@ impl Trading {
             continue_after_refusal: true,
             ..Job::default()
         };
-        let split = orders.iter().any(PlaceOrderOpts::has_attached_legs);
         for o in orders {
             let mut steps = self.format(cx, o)?;
-            if split {
-                // Bracket legs already carry theirs; the rest are the caller's own orders.
+            if o.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
                 for step in &mut steps {
-                    step.role.get_or_insert(LegRole::of_kind(o.kind));
+                    step.role.get_or_insert(LegRole::Entry);
                 }
             }
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {

@@ -196,3 +196,46 @@ fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
         );
     }
 }
+
+#[test]
+// AGT-214 review: a reduce-only order batched beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = ready(Variant::UsdM);
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 77,
+        orders: serde_json::from_str(r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":5,"price":100,"stopLoss":90,"takeProfit":110},{"symbol":"BTCUSDT","type":"limit","side":"sell","amount":5,"price":120,"reduceOnly":true}]"#).unwrap(),
+    }));
+    let batch = h.take("/fapi/v1/batchOrders");
+    h.reply(batch.id, 200, "", r#"[{"orderId":1},{"orderId":2}]"#);
+    let sl = h.take("/fapi/v1/algoOrder");
+    h.reply(sl.id, 200, "", r#"{"algoId":3}"#);
+    let tp = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        tp.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let failures: Vec<_> = h.failures.iter().filter(|(id, _)| *id == 77).collect();
+    let [(_, error)] = failures.as_slice() else {
+        panic!("one partial failure")
+    };
+    let roles: Vec<_> = error
+        .elements
+        .as_ref()
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            None,
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+}

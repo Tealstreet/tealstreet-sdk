@@ -346,3 +346,35 @@ fn a_leg_role_serializes_only_when_the_venue_names_one() {
         ]
     );
 }
+
+// AGT-214 review: the JS readers (`host.mjs`, safe-cex `delegatedLegResults`) check
+// their role names against this same fixture, so a rename cannot drop roles silently.
+#[test]
+fn leg_role_wire_names_match_the_shared_fixture() {
+    use safe_cex_engine::write_plan::LegRole;
+    let every = [
+        LegRole::Entry,
+        LegRole::TakeProfit,
+        LegRole::StopLoss,
+        LegRole::Other,
+    ];
+    // A new variant fails to compile here until `every` and the fixture name it.
+    for role in every {
+        match role {
+            LegRole::Entry | LegRole::TakeProfit | LegRole::StopLoss | LegRole::Other => {}
+        }
+    }
+    let fixture: Vec<String> =
+        serde_json::from_str(include_str!("fixtures/leg-roles.json")).unwrap();
+    let names: Vec<String> = every
+        .iter()
+        .map(|role| {
+            serde_json::to_value(role)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(names, fixture);
+}

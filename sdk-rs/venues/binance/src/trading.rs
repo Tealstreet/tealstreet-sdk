@@ -1770,7 +1770,6 @@ impl BinanceFutures {
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
         let replaces_close_orders = !pm && !self.is_spot() && !self.is_options();
-        let split = orders.iter().any(PlaceOrderOpts::has_attached_legs);
         for opts in orders {
             if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
@@ -1788,10 +1787,10 @@ impl BinanceFutures {
             } else {
                 self.format_order(cx, opts)?
             };
-            if split {
-                // Bracket legs already carry theirs; the rest are the caller's own orders.
+            if opts.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
                 for params in r.iter_mut().chain(a.iter_mut()) {
-                    params.1.get_or_insert(LegRole::of_kind(opts.kind));
+                    params.1.get_or_insert(LegRole::Entry);
                 }
             }
             regular.extend(r);

@@ -1732,7 +1732,6 @@ impl AsterDex {
             continue_on_error: true,
             ..Job::default()
         };
-        let split = orders.iter().any(PlaceOrderOpts::has_attached_legs);
         for opts in orders {
             if opts.kind == OrderType::TrailingStopLoss {
                 job.error = Some(not_sent("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable").kind(ErrorKind::Unsupported));
@@ -1819,7 +1818,9 @@ impl AsterDex {
                                     symbol: child.symbol.clone(),
                                     position_side,
                                 },
-                                role: split.then_some(LegRole::of_kind(child.kind)),
+                                role: opts
+                                    .has_attached_legs()
+                                    .then_some(LegRole::of_kind(child.kind)),
                             });
                         }
                     }

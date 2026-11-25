@@ -903,3 +903,63 @@ fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
     assert_eq!(elements.len(), 3);
     assert!(elements.iter().all(|row| row.element.role.is_none()));
 }
+
+// AGT-214 review: a reduce-only order batched beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut bracket = limit(4.);
+    bracket["stopLoss"] = json!(36000);
+    bracket["takeProfit"] = json!(42000);
+    let mut close = limit(4.);
+    close["side"] = json!("sell");
+    close["reduceOnly"] = json!(true);
+    let mut engine = ready(instrument());
+    let mut transport = ScriptedTransport::default();
+    let mut pending = transport.record(&submit(&mut engine, vec![bracket, close]));
+    let mut output = Vec::new();
+    for (at, ack) in [
+        (
+            6.,
+            json!({"code":"0","data":[{"ordId":"entry","sCode":"0"},{"ordId":"close","sCode":"0"}]}),
+        ),
+        (7., json!({"code":"0","data":[{"algoId":"sl","sCode":"0"}]})),
+        (
+            8.,
+            json!({"code":"1","data":[{"algoId":"","sCode":"51279","sMsg":"refused"}]}),
+        ),
+    ] {
+        let [request] = pending.as_slice() else {
+            panic!("one native write at a time")
+        };
+        reply(
+            &mut engine,
+            &Action::Http(request.clone()),
+            &ack.to_string(),
+            at,
+        );
+        output = prepared(&mut engine, at);
+        pending = transport.record(&output);
+    }
+    let results = terminals(&output, 17);
+    let [Err(error)] = results.as_slice() else {
+        panic!("one partial terminal")
+    };
+    let roles: Vec<_> = error
+        .elements
+        .as_ref()
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            None,
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+}

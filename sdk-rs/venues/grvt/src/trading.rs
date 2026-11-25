@@ -1165,9 +1165,15 @@ impl Grvt {
                 }
                 // Describe prepared native creates, including bracket children;
                 // reporting never controls the existing sequential dispatch.
-                let split = plan.steps.iter().any(
-                    |step| matches!(&step.effect, Effect::Place(order) if order.parent_id.is_some()),
-                );
+                // Only a bracketed entry and its own children are named.
+                let parents: HashSet<String> = plan
+                    .steps
+                    .iter()
+                    .filter_map(|step| match &step.effect {
+                        Effect::Place(order) => order.parent_id.clone(),
+                        _ => None,
+                    })
+                    .collect();
                 plan.create_report = Some(CreateReport {
                     journal: WritePlan::new(
                         plan.steps
@@ -1180,7 +1186,11 @@ impl Grvt {
                                 Element {
                                     index,
                                     client_order_id: Some(order.id.clone()),
-                                    role: split.then_some(LegRole::of_kind(order.kind)),
+                                    role: if order.parent_id.is_some() {
+                                        Some(LegRole::of_kind(order.kind))
+                                    } else {
+                                        parents.contains(&order.id).then_some(LegRole::Entry)
+                                    },
                                 }
                             })
                             .collect(),

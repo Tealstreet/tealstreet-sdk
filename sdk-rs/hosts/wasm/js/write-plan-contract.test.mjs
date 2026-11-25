@@ -118,3 +118,15 @@ test('leg roles survive the host boundary; an unrecognised role drops only itsel
     ],
   );
 });
+
+// AGT-214 review: every role the engine emits (its shared fixture) survives this reader.
+test('the reader keeps every engine leg role', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { writePlanElementsOf } = await import('./host.mjs');
+  const roles = JSON.parse(
+    readFileSync(new URL('../../../engine/tests/fixtures/leg-roles.json', import.meta.url), 'utf8'),
+  );
+  assert.ok(roles.length > 0);
+  const rows = roles.map((role, index) => ({ index, role, status: 'notSent' }));
+  assert.deepEqual(writePlanElementsOf(rows), rows);
+});
