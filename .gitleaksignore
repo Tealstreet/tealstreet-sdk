@@ -167,3 +167,9 @@ e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-r
 33cb8041b37e0d9a7d627a7d9eddcaa982e68110:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:7
 eca6d2b298b82cc8d67908f8021b791b7818072d:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:30
 e58c09fb7eb25c7fe1fee848d0ece2bdef59e52c:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:57
+
+# Paradex subkey in the key-only DELEGATED wallet handover vector: the Stark public
+# key of synthetic scalar 1 (the STARK curve generator's x-coordinate). Public value.
+9fa19b50805eebdd818be12b825ab957fd1135b0:sdk-rs/hosts/server/tests/fixtures/delegated-wallet-handover.json:generic-api-key:9
+9fa19b50805eebdd818be12b825ab957fd1135b0:sdk-rs/hosts/server/tests/fixtures/delegated-wallet-handover.json:generic-api-key:19
+9fa19b50805eebdd818be12b825ab957fd1135b0:sdk-rs/hosts/server/tests/fixtures/delegated-wallet-handover.json:generic-api-key:21
