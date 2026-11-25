@@ -480,6 +480,10 @@ pub struct AlgoUpdate<'a> {
     pub aid: Id,
     #[serde(borrow, default)]
     pub caid: Option<Str<'a>>,
+    /// The order the trigger placed in the matching engine; empty before it
+    /// fires. Raw, so an unexpected shape never drops the whole update.
+    #[serde(borrow, default)]
+    pub ai: Option<&'a serde_json::value::RawValue>,
     #[serde(borrow, default)]
     pub aq: Option<Str<'a>>,
     #[serde(borrow, default)]

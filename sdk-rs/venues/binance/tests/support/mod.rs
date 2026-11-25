@@ -113,6 +113,8 @@ pub struct Harness {
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
     pub deferred: Option<Deferred>,
+    /// `Notice::OrderTriggered`: (symbol, order id, its algo's identities).
+    pub triggered: Vec<(String, String, Vec<String>)>,
 }
 
 impl Harness {
@@ -189,6 +191,7 @@ impl Harness {
             progress: Vec::new(),
             progress_at_request: Vec::new(),
             deferred,
+            triggered: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -309,7 +312,12 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::AccountAuth { .. } | Notice::OrderTriggered { .. }) => {}
+                Action::Notice(Notice::AccountAuth { .. }) => {}
+                Action::Notice(Notice::OrderTriggered {
+                    symbol,
+                    order_id,
+                    by,
+                }) => self.triggered.push((symbol, order_id, by)),
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
                     self.progress.push((command, receipts))
                 }

@@ -2674,6 +2674,12 @@ impl BinanceFutures {
     fn on_algo_update(&mut self, cx: &mut Cx<'_, Pending>, o: AlgoUpdate<'_>) {
         let id = o.aid.to_string();
         cx.store.invalidate_order_snapshots();
+        // A fired trigger's order fills under its own matching-engine id, so
+        // its fills name the algo that placed it (AGT-196).
+        let child = o.ai.map(|ai| ai.get().trim_matches('"'));
+        if let Some(child) = child.filter(|child| !child.is_empty() && *child != "0") {
+            cx.order_triggered(&o.s, child, [id.as_str(), o.caid.as_deref().unwrap_or("")]);
+        }
         if matches!(
             o.status.as_ref(),
             "TRIGGERED"
