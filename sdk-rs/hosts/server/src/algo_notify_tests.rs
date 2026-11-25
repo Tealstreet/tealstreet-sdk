@@ -3,15 +3,40 @@ use safe_cex_engine::error::VenueError;
 use safe_cex_engine::model::{Order, OrderStatus, OrderType};
 use serde_json::json;
 
+/// The orders the fill tests below placed through this account (AGT-196).
+const PLACED_HERE: [&str; 8] = [
+    "order-secret-1",
+    "order-2",
+    "o",
+    "ioc-removed",
+    "ioc-kept",
+    "kept-closed",
+    "seen-later",
+    "vanished",
+];
+
 fn tap(delegated: bool, held: bool) -> (Rc<Tap>, HostNotifier) {
+    let placements = Placements::default();
+    for id in PLACED_HERE {
+        placements.lock().unwrap().record(id);
+    }
+    tap_for("auth0|u1", delegated, held, placements)
+}
+
+fn tap_for(
+    user: &str,
+    delegated: bool,
+    held: bool,
+    placements: Placements,
+) -> (Rc<Tap>, HostNotifier) {
     let notifier = HostNotifier::unstarted();
     let notify = AlgoNotify::new(
         notifier.clone(),
-        Scope::new("auth0|u1", "bybit", "synthetic-main"),
+        Scope::new(user, "bybit", "synthetic-main"),
         Arc::new(move || delegated),
         Arc::new(AtomicBool::new(held)),
     );
-    (Rc::new(Tap::new(notify)), notifier)
+    (Rc::new(Tap::new(notify, placements)), notifier)
 }
 
 fn sent(notifier: &HostNotifier) -> Vec<Value> {
@@ -580,4 +605,80 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
         verbs[&id("vanished", "partiallyFilled\x001")],
         "partiallyFilled"
     );
+}
+
+/// AGT-196: two Tealstreet users connected to ONE venue account each run their
+/// own resident, and both private streams carry every fill on that account.
+/// Before this, the user who did not place the order was pushed "Fill on ..."
+/// for the other user's trade.
+#[tokio::test(start_paused = true)]
+async fn a_shared_venue_accounts_fill_reaches_only_the_user_who_placed_the_order() {
+    let placer_orders = Placements::default();
+    placer_orders.lock().unwrap().record("shared-order");
+    let (placer, placer_sent) = tap_for("auth0|placer", true, false, placer_orders);
+    let (other, other_sent) = tap_for("auth0|other", true, false, Placements::default());
+    let venue_account = store(vec![order("shared-order", 1.0, 1.0)]);
+    for tap in [&placer, &other] {
+        tap.record_fills(&[fill("shared-order", 1.0)], &venue_account);
+        tokio::time::advance(FILL_DEBOUNCE).await;
+        tap.flush_fills(&venue_account, false);
+    }
+    assert_eq!(sent(&placer_sent).len(), 1, "the placer is told");
+    assert!(
+        sent(&other_sent).is_empty(),
+        "another user on the same venue account is not: {:?}",
+        sent(&other_sent)
+    );
+}
+
+/// An order placed here is known by its client order id (the dispatch receipt)
+/// or its native id (the completion); its attached legs are the user's too.
+#[tokio::test(start_paused = true)]
+async fn placed_here_covers_client_ids_and_attached_legs() {
+    let placements = Placements::default();
+    placements.lock().unwrap().record("client-secret");
+    placements.lock().unwrap().record("entry");
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
+    let mut by_client = order("venue-assigned", 1.0, 1.0);
+    by_client.client_order_id = Some("client-secret".into());
+    let mut leg = order("venue-leg", 1.0, 1.0);
+    leg.client_order_id = None;
+    leg.parent_id = Some("entry".into());
+    let mut foreign = order("foreign", 1.0, 1.0);
+    foreign.client_order_id = Some("someone-else".into());
+    let rows = store(vec![by_client, leg, foreign]);
+    tap.record_fills(
+        &[
+            fill("venue-assigned", 1.0),
+            fill("venue-leg", 1.0),
+            fill("entry_sl", 1.0),
+            fill("foreign", 1.0),
+        ],
+        &rows,
+    );
+    tap.flush_fills(&rows, true);
+    assert_eq!(sent(&notifier).len(), 3, "{:?}", sent(&notifier));
+}
+
+/// A fill can arrive before its placement completes; it waits for the ids
+/// while a placement is in flight, and is withheld once none can name it.
+#[tokio::test(start_paused = true)]
+async fn an_unknown_fill_waits_for_an_in_flight_placement_then_is_withheld() {
+    let placements = Placements::default();
+    placements.lock().unwrap().begin();
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
+    tap.record_fills(&[fill("racing", 1.0)], &store(Vec::new()));
+    tap.record_fills(&[fill("never-ours", 1.0)], &store(Vec::new()));
+    tokio::time::advance(FILL_DEBOUNCE).await;
+    tap.flush_fills(&store(Vec::new()), false);
+    assert!(sent(&notifier).is_empty(), "both wait while a placement is in flight");
+    {
+        let mut placements = placements.lock().unwrap();
+        placements.record("racing");
+        placements.end();
+    }
+    tokio::time::advance(FILL_DEBOUNCE).await;
+    tap.flush_fills(&store(Vec::new()), false);
+    assert_eq!(sent(&notifier).len(), 1, "the completed placement's fill is sent");
+    assert_eq!(tap.next_fill_due(), None, "the other is withheld, not held forever");
 }

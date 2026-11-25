@@ -9,6 +9,7 @@ use safe_cex_engine::ControlFrame;
 
 mod how_pool;
 mod managed_http;
+pub mod own_placements;
 pub mod report;
 mod routing;
 mod server;

@@ -425,6 +425,7 @@ pub struct AccountHandle {
     events: crate::Events,
     sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
     store_inputs: Arc<std::sync::Mutex<safe_cex_store_frames::Inputs>>,
+    placements: crate::own_placements::Placements,
 }
 
 /// The first disposal request or unrequested actor termination owns this cause.
@@ -480,6 +481,7 @@ fn spawn_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
     *actor.store_inputs.lock().unwrap() = inputs;
     let disposal = actor.disposal.clone();
     let store_inputs = actor.store_inputs.clone();
+    let placements = actor.placements.clone();
     let task = tokio::task::spawn_local(async move {
         #[cfg(not(feature = "address-nonce"))]
         {
@@ -498,6 +500,7 @@ fn spawn_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
         events,
         sockets,
         store_inputs,
+        placements,
     };
     Ok((handle, task))
 }
@@ -575,6 +578,11 @@ pub struct InputRefused {
 }
 
 impl AccountHandle {
+    /// The order identities this account's own clients placed (AGT-196).
+    pub fn placements(&self) -> crate::own_placements::Placements {
+        self.placements.clone()
+    }
+
     /// Configure account labels for the native UI sections before clients join.
     pub fn configure_store_frames(&self, account: &str, venue: &str) {
         self.store_inputs.lock().unwrap().configure(account, venue);
@@ -807,6 +815,8 @@ struct Peer {
 struct Pending {
     client: Option<u64>,
     original: u32,
+    /// A `PlaceOrders`: its receipts and result ids are this account's own orders.
+    placement: bool,
 }
 
 struct StartupFailure {
@@ -882,6 +892,7 @@ struct Account<V: Venue, T: Transport> {
     disposal: Arc<OnceLock<DisposalCause>>,
     store_inputs: Arc<std::sync::Mutex<safe_cex_store_frames::Inputs>>,
     store_frames: safe_cex_store_frames::Emitter,
+    placements: crate::own_placements::Placements,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -906,6 +917,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             disposal: Arc::default(),
             store_inputs: Arc::default(),
             store_frames: Default::default(),
+            placements: Arc::default(),
         }
     }
 
@@ -1093,7 +1105,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
         for notice in notices {
             match notice {
                 Notice::CommandDone { command, result } => {
-                    if let Some(pending) = self.pending.remove(&command)
+                    let pending = self.pending.remove(&command);
+                    if let Some(pending) = &pending
+                        && pending.placement
+                    {
+                        let mut placements = self.placements.lock().unwrap();
+                        placements.end();
+                        for id in crate::own_placements::result_ids(&result) {
+                            placements.record(&id);
+                        }
+                    }
+                    if let Some(pending) = pending
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1107,7 +1129,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandFailed { command, error } => {
-                    if let Some(pending) = self.pending.remove(&command)
+                    let pending = self.pending.remove(&command);
+                    if pending.as_ref().is_some_and(|pending| pending.placement) {
+                        self.placements.lock().unwrap().end();
+                    }
+                    if let Some(pending) = pending
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1121,6 +1147,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandProgress { command, receipts } => {
+                    if self.pending.get(&command).is_some_and(|pending| pending.placement) {
+                        let mut placements = self.placements.lock().unwrap();
+                        for receipt in &receipts {
+                            placements.record(&receipt.identity);
+                        }
+                    }
                     if let Some(pending) = self.pending.get(&command)
                         && let Some(client) = pending.client
                     {
@@ -1282,6 +1314,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
             // once without fabricating a NotSent result or a new engine turn.
             let pending: Vec<_> = self.pending.drain().map(|(_, pending)| pending).collect();
             for pending in pending {
+                if pending.placement {
+                    self.placements.lock().unwrap().end();
+                }
                 if let Some(client) = pending.client {
                     let text = encode_notice(ServerNotice::Done {
                         command: pending.original,
@@ -1767,11 +1802,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
         };
         self.next_command = internal;
         *id = internal;
+        let placement = matches!(command, Command::PlaceOrders { .. });
+        if placement {
+            self.placements.lock().unwrap().begin();
+        }
         self.pending.insert(
             internal,
             Pending {
                 client: Some(client),
                 original,
+                placement,
             },
         );
         self.handle(command);

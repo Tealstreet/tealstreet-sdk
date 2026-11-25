@@ -8,6 +8,7 @@ use safe_cex_algos::{AccountPort, AlgoStore, Change, CommandFuture};
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::Outcome;
 use safe_cex_engine::model::OrderSide;
+use safe_cex_native::own_placements::Placements;
 use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,11 @@ pub const FILL_DEBOUNCE: Duration = Duration::from_secs(2);
 pub const REJECT_REPEAT: Duration = Duration::from_secs(60);
 /// Past this many orders waiting out the debounce, the earliest is sent now.
 const MAX_PENDING_FILLS: usize = 512;
+/// How long a fill of an order not yet known as this account's own may wait
+/// for a placement still in flight to name it, before it is withheld.
+/// RED checkpoint only: today's behaviour, every account fill is the user's.
+const RED_IGNORES_OWNERSHIP: bool = true;
+pub const OWNERSHIP_WAIT: Duration = Duration::from_secs(10);
 
 /// Chase stop reasons that are an explicit client stop, never an `algoStopped`.
 /// They are the literal reasons `safe_cex_chaser` and exec's nuke record; a
@@ -79,6 +85,11 @@ struct PendingFill {
     /// The order row (amount, filled) right after its latest fill applied, if
     /// the store still held it. Only the order's own fields share a unit.
     row: Option<(f64, f64)>,
+    /// The row's client order id and parent order, kept for the ownership
+    /// check after the venue may have removed a filled row.
+    client_order_id: Option<String>,
+    parent_id: Option<String>,
+    first: Instant,
     due: Instant,
 }
 
@@ -104,6 +115,10 @@ struct TwapSeen {
 /// The algo host's observer, on its engine thread.
 pub(crate) struct Tap {
     notify: AlgoNotify,
+    /// Orders this account's own clients placed (AGT-196). Another Tealstreet
+    /// user connected to the same venue account sees the same fills on its own
+    /// account; only a fill of an order placed here is this user's.
+    placements: Placements,
     /// The main loop ended: disposal's stops are not ordinary ends. Only a box
     /// stop reports them (`server_stopped`).
     ended: Cell<bool>,
@@ -115,6 +130,15 @@ pub(crate) struct Tap {
     rejected: RefCell<HashMap<(Algo, String, Side), Instant>>,
     /// A TWAP slice chase reports through its TWAP, and its rejections as `twap`.
     chases: RefCell<Option<ActiveChases>>,
+}
+
+/// The row's client order id and parent order, when the store holds it.
+fn identities(store: &AlgoStore, order_id: &str) -> Option<(Option<String>, Option<String>)> {
+    store
+        .orders
+        .iter()
+        .find(|order| order.id == order_id)
+        .map(|order| (order.client_order_id.clone(), order.parent_id.clone()))
 }
 
 fn row(store: &AlgoStore, order_id: &str) -> Option<(f64, f64)> {
@@ -171,9 +195,10 @@ fn stopped(algo: Algo, symbol: &str, side: Option<Side>, end: End) -> (Fields, S
 }
 
 impl Tap {
-    pub(crate) fn new(notify: AlgoNotify) -> Self {
+    pub(crate) fn new(notify: AlgoNotify, placements: Placements) -> Self {
         Self {
             notify,
+            placements,
             ended: Cell::new(false),
             fills: RefCell::default(),
             wake: tokio::sync::Notify::new(),
@@ -231,12 +256,19 @@ impl Tap {
                     side: fill.side,
                     filled: 0.0,
                     row: None,
+                    client_order_id: None,
+                    parent_id: None,
+                    first: Instant::now(),
                     due,
                 });
             if fill.amount.is_finite() && fill.amount > 0.0 {
                 entry.filled += fill.amount;
             }
             entry.row = row(store, &fill.order_id);
+            if let Some((client_order_id, parent_id)) = identities(store, &fill.order_id) {
+                entry.client_order_id = client_order_id;
+                entry.parent_id = parent_id;
+            }
             entry.due = due;
         }
         drop(pending);
@@ -273,7 +305,25 @@ impl Tap {
                 .collect()
         };
         ready.sort_by_key(|(_, fill)| fill.due);
-        for (order_id, fill) in ready {
+        let mut withheld = 0;
+        for (order_id, mut fill) in ready {
+            if let Some((client_order_id, parent_id)) = identities(store, &order_id) {
+                fill.client_order_id = client_order_id;
+                fill.parent_id = parent_id;
+            }
+            if !self.placed_here(&order_id, &fill) {
+                let waiting = !all
+                    && now.duration_since(fill.first) < OWNERSHIP_WAIT
+                    && self.placements.lock().unwrap().in_flight();
+                if waiting {
+                    fill.due = now + FILL_DEBOUNCE;
+                    self.fills.borrow_mut().insert(order_id, fill);
+                    self.wake.notify_one();
+                } else {
+                    withheld += 1;
+                }
+                continue;
+            }
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
             let (verb, natural_key) = match row(store, &order_id).or(fill.row) {
@@ -302,6 +352,26 @@ impl Tap {
                 )),
             });
         }
+        if withheld > 0 {
+            crate::state::Log::info(&format!(
+                "{withheld} fill notification(s) withheld: orders not placed through this account"
+            ));
+        }
+    }
+
+    /// AGT-196: only an order this account placed, or a leg or child of one,
+    /// is the user's own. Anything else on a shared venue account is not.
+    fn placed_here(&self, order_id: &str, fill: &PendingFill) -> bool {
+        if RED_IGNORES_OWNERSHIP {
+            return true;
+        }
+        let placements = self.placements.lock().unwrap();
+        placements.placed(order_id)
+            || fill
+                .client_order_id
+                .as_deref()
+                .is_some_and(|id| placements.placed(id))
+            || fill.parent_id.as_deref().is_some_and(|id| placements.placed(id))
     }
 
     /// A server-initiated placement the venue refused outright.
