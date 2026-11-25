@@ -693,6 +693,7 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                 "backpack",
                 "grvt",
                 "hyrotrader",
+                "bitrue",
             ] {
                 for unknown in [false, true] {
                     let registry = crate::accounts::tests::registry();

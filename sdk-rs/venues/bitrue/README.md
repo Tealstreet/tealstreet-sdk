@@ -25,6 +25,9 @@ freezes each dispatch timestamp and rejects stale signing completions.
 
 Standalone Client construction and hosted-signing capture use opaque identities
 with the same native dispatch recipes; Hosted admission follows the SDK roster.
+The hosted server's native REST origin is `https://fapi.bitrue.com`; testnet has
+no origin and refuses before I/O. Hosted DELEGATED submits omit the caller ID,
+since this adapter refuses one over 31 characters. COSIGNED stays proof-unavailable.
 Only the provider owns the signing material. RemoteSigner
 receives the canonical payload through the existing `ws-auth` / `hex` envelope;
 no secret or opaque signing ref crosses that wire. Browser `signHttpRequest`

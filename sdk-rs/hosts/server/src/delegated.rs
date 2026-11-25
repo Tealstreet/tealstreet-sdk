@@ -531,7 +531,10 @@ pub(crate) mod tests {
     fn bitrue_origin_enables_hosted_support_without_claiming_cosigned_readiness() {
         assert!(safe_cex_venues::supported("bitrue"));
         assert!(enabled("bitrue"));
-        assert!(!probe::cosigned_ready("bitrue"));
+        assert!(!probe::cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "bitrue".into(),
+            ..Default::default()
+        }));
         assert_eq!(
             safe_cex_native::resolve::rest_base_url("bitrue", true),
             Err(safe_cex_native::resolve::RoutingError::NoBaseUrl(

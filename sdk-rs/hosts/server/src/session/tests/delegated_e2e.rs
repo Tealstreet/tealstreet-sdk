@@ -275,9 +275,10 @@ async fn delegated_refusal_case(case: &str) {
         fields["secret"] = "synthetic-other-material".into();
         bytes = serde_json::to_vec(&fields).unwrap();
     }
-    // Hyro is now hosted; compiled Bitrue retains the missing-origin refusal control.
+    // Hyro and Bitrue are now hosted, leaving no compiled remote-signing venue
+    // without an origin; compiled, admitted Kraken Spot keeps the hosted-gate refusal.
     let name = if case == "other-venue" {
-        "bitrue"
+        "krakenspot"
     } else {
         "bybit"
     };
@@ -365,7 +366,7 @@ async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
 }
 
 #[tokio::test]
-async fn delegated_e2e_unhosted_bitrue_refuses_without_native_setup() {
+async fn delegated_e2e_unhosted_krakenspot_refuses_without_native_setup() {
     delegated_refusal_case("other-venue").await;
 }
 

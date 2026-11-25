@@ -83,6 +83,14 @@ fn client_id_bitgetusdc() {
     assert_eq!(actual, json!(HEX), "bitgetusdc: native hex contract");
 }
 
+// Bitrue's native adapter refuses caller IDs over 31 characters, so the 36-character
+// UUID (or its 32 hex digits) would refuse every hosted submit before the venue.
+#[test]
+fn client_id_bitrue() {
+    let actual = serde_json::to_value(client_order_id("bitrue", INTENT)).unwrap();
+    assert_eq!(actual, Value::Null, "bitrue: native none contract");
+}
+
 #[test]
 fn client_id_bitunix() {
     let actual = serde_json::to_value(client_order_id("bitunix", INTENT)).unwrap();
@@ -272,6 +280,7 @@ fn client_id_audit_covers_every_hosted_delegated_venue() {
         "bitget",
         "bitgetinverse",
         "bitgetusdc",
+        "bitrue",
         "bitunix",
         "blofin",
         "bybit",
@@ -308,9 +317,7 @@ fn client_id_audit_covers_every_hosted_delegated_venue() {
             .collect::<std::collections::BTreeSet<_>>(),
         audited
     );
-    // 058ce5b07 initially counted Bitrue; its missing native origin keeps it
-    // with the unhosted declarations, outside the active derivation census.
-    for venue in ["bingxspot", "txflow", "bitrue"] {
+    for venue in ["bingxspot", "txflow"] {
         assert!(!crate::delegated::enabled(venue));
     }
 }
