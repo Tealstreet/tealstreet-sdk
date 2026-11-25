@@ -644,6 +644,9 @@ fn encode(actions: &[Action]) -> String {
                     receipts,
                 }
             }
+            // Native-only (AGT-196): a WASM engine never emits it.
+            #[cfg(not(target_arch = "wasm32"))]
+            Action::Notice(Notice::OrderTriggered { .. }) => std::process::abort(),
         })
         .collect();
     serde_json::to_string(&out).unwrap_or_default()
