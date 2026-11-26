@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 fn scope() -> Scope {
-    Scope::new("auth0|u1", "bybit", "synthetic-main")
+    Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account")
 }
 
 fn draft(natural_key: &str) -> Draft {
@@ -118,7 +118,7 @@ fn ids_follow_the_contract_hash_and_are_deterministic() {
     assert_eq!(notification("k").id, notification("k").id);
     assert_ne!(notification("k").id, notification("k2").id);
     let other_user = HostNotification::build(
-        &Scope::new("auth0|u2", "bybit", "synthetic-main"),
+        &Scope::new("auth0|u2", "bybit", "synthetic-main", "venue-account"),
         draft("k"),
         false,
         1,
@@ -248,9 +248,9 @@ fn symbols_and_venues_that_are_not_plain_names_are_omitted() {
     for good in ["BTCUSDT", "BTC-USDT-SWAP", "BTC/USDT:USDT", "1000PEPE_USDT"] {
         assert_ne!(Fields::default().symbol(good), Fields::default(), "{good}");
     }
-    assert_eq!(Scope::new("u", "by bit", "a").venue, "unknown");
+    assert_eq!(Scope::new("u", "by bit", "a", "v").venue, "unknown");
     assert_eq!(
-        Scope::new("u", "lighter-robinhood", "a").venue,
+        Scope::new("u", "lighter-robinhood", "a", "v").venue,
         "lighter-robinhood"
     );
 }

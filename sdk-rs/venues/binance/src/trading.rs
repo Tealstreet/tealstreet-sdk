@@ -1142,6 +1142,12 @@ impl BinanceFutures {
                 Ok(body),
             ) if self.is_spot() => match serde_json::from_str::<PlacedOrder>(body) {
                 Ok(placed) if placed.order_id.is_some() => {
+                    // Spot keys the order by this client id; the placer claims
+                    // its native id (AGT-196). Native only.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let (Some(native), Some(symbol)) = (placed.order_id, &placed.symbol) {
+                        cx.placement_native_id(command, symbol, &id, &native.to_string());
+                    }
                     ids.push(id);
                     None
                 }
@@ -1154,14 +1160,24 @@ impl BinanceFutures {
                 Call::PlaceOne {
                     client_id: Some(id),
                 },
-                Ok(_),
+                Ok(_body),
             )
             | (
                 Call::PlaceAlgo {
                     client_id: Some(id),
                 },
-                Ok(_),
+                Ok(_body),
             ) => {
+                // Portfolio margin keys the order by this client id; the placer
+                // claims its native order or algo id (AGT-196). An ack without
+                // one claims nothing. Native only.
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Ok(placed) = serde_json::from_str::<PlacedOrder>(_body)
+                    && let (Some(native), Some(symbol)) =
+                        (placed.order_id.or(placed.algo_id), &placed.symbol)
+                {
+                    cx.placement_native_id(command, symbol, &id, &native.to_string());
+                }
                 ids.push(id);
                 None
             }

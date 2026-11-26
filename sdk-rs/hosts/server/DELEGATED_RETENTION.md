@@ -119,6 +119,36 @@ never from a snapshot or a rejoin replay:
   IOC or capped market order whose remainder was cancelled in the fill's own
   batch, and a full fill whose row the venue removed in that batch. It collapses per order through an
   opaque hash; order ids, prices and sizes stay on the box.
+  **Each fill carries a placement claim (AGT-196).** Two Tealstreet users can
+  connect the same venue account; each gets its own resident and both private
+  streams carry every fill on it. The box reports every fill, as before, plus
+  `fillKey` and `placedHere`. `fillKey` is a domain-separated hash of the
+  venue account, venue, symbol and the venue's own order id: the same on every
+  resident of that venue account and on no other, so per-symbol order ids
+  (Binance USDⓈ-M) cannot collide across unrelated accounts. Binance spot and
+  portfolio margin, and GRVT, key orders by a reusable client id, so there the key uses
+  the native id their fill frames carry (`Notice::OrderNativeId`): two orders
+  reusing `desk` never share a key. The venue account (`accounts::identity::venue_account`) hashes the
+  venue, network, Bybit site, subaccount, vault and API key, never the
+  Tealstreet user; a second API key on the same venue account is another
+  digest, so its fills stay unclaimed there. No id or key leaves the box. A key the venue-account hash cannot read
+  falls back to that login's own account and logs `cause=unreadable_key`, so
+  its fills fail open. `placedHere` is true when the native host's per-actor
+  ledger (`safe_cex_native::own_placements`: engine-generated dispatch receipts
+  and completion ids of this actor's placements, proven legs of a failed batch,
+  and amends only of orders it already holds; never a caller-chosen client id,
+  only the native id a proven placement's ack names) names exactly the order id, or the row's client order id or
+  parent, on the fill's symbol. A triggered child is linked at fill time from
+  the venue's frame (`Notice::OrderTriggered`), so it is claimed even when it
+  filled before any row was stored: OKX by `algoId` or `algoClOrdId`; Binance
+  USDⓈ-M and COIN-M by `ALGO_UPDATE.ai`; BloFin by `algoId`/`tpslId`, unverified live.
+  False means "not known here", never "someone else's": the ledger is
+  memory-only (4096 newest identities, each for 24 hours), so orders from
+  before a box roll, older resting orders, the venue UI, bots, liquidations and
+  ADL are all unclaimed, as are Binance portfolio-margin triggered
+  children and Bybit/BingX attached TP/SL, which carry no link. The gateway
+  withholds a fill only when ANOTHER user's resident claimed the same key;
+  unclaimed fills reach every login on the account exactly as before.
 - `orderRejected`: a chase or TWAP placement the venue refused outright
   (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
   port and never emit; unknown and not-sent outcomes never emit. At most one

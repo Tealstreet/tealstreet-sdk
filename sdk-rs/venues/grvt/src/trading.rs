@@ -1785,6 +1785,15 @@ impl Grvt {
                             Some(&created.id),
                             order.last_update,
                         );
+                        // GRVT keys the order by its client id; the placer
+                        // claims this native id (AGT-196). Native only.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        cx.placement_native_id(
+                            request.plan.command,
+                            &order.symbol,
+                            &order.id,
+                            &created.id,
+                        );
                     }
                     if cx
                         .store

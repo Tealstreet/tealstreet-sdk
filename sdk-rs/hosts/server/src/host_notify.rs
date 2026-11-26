@@ -21,6 +21,7 @@ pub const RESTART_FLUSH: Duration = Duration::from_secs(3);
 pub const WARNING_LEAD: Duration = Duration::from_secs(60 * 60);
 
 const ACCOUNT_DOMAIN: &[u8] = b"tealstreet/host-notify/account/v1";
+const FILL_DOMAIN: &[u8] = b"tealstreet/host-notify/fill/v1";
 const MAX_LABEL: usize = 64;
 
 /// Startup-only environment. An unset URL turns the whole lane off.
@@ -224,11 +225,14 @@ pub struct Scope {
     pub user: String,
     pub account_digest: String,
     pub venue: String,
+    /// The venue account itself, the same for every user connected to it
+    /// (`accounts::identity::venue_account`). Never sent; only `fill_key` uses it.
+    pub venue_account: String,
 }
 
 impl Scope {
     /// `registry_name` is the identity digest or the label; only its hash leaves the box.
-    pub fn new(user: &str, venue: &str, registry_name: &str) -> Self {
+    pub fn new(user: &str, venue: &str, registry_name: &str, venue_account: &str) -> Self {
         Self {
             user: user.to_owned(),
             account_digest: hex(&length_prefixed(
@@ -236,6 +240,7 @@ impl Scope {
                 &[user, venue, registry_name],
             )),
             venue: label(venue).unwrap_or_else(|| "unknown".to_owned()),
+            venue_account: venue_account.to_owned(),
         }
     }
 }
@@ -267,6 +272,13 @@ pub struct HostNotification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<u64>,
     pub fields: Fields,
+    /// AGT-196, `fill` only: the same key on every resident that saw this venue
+    /// order (`fill_key`), so the gateway can withhold a fill that ANOTHER
+    /// user's resident claimed with `placed_here`. Never withheld on the box.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placed_here: Option<bool>,
 }
 
 impl HostNotification {
@@ -291,6 +303,8 @@ impl HostNotification {
             collapse_key: format!("{}:{suffix}", draft.kind.as_str()),
             deadline: draft.deadline,
             fields: draft.fields,
+            fill_key: None,
+            placed_here: None,
         }
     }
 }
@@ -348,6 +362,16 @@ pub fn restart_shutdown() -> Draft {
 pub fn notification_id(user: &str, account_digest: &str, kind: Kind, natural_key: &str) -> String {
     let input = [user, account_digest, kind.as_str(), natural_key].join("\0");
     hex(&safe_cex_crypto::sha256(input.as_bytes()))
+}
+
+/// One venue order's key, the same on every resident of that venue account and
+/// no other: per-symbol order ids (Binance USDⓈ-M) and caller-chosen ids
+/// (portfolio margin) repeat across accounts. The ids never leave the box.
+pub fn fill_key(scope: &Scope, symbol: &str, order_id: &str) -> String {
+    hex(&length_prefixed(
+        FILL_DOMAIN,
+        &[&scope.venue_account, &scope.venue, symbol, order_id],
+    ))
 }
 
 /// An opaque 16-hex collapse/correlation key for a value that must never be sent.

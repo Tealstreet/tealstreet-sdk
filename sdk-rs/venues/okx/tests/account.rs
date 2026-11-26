@@ -1296,6 +1296,95 @@ fn triggered_order_row_survives_its_parent_algo_going_effective() {
     assert!(e.store().order("900").is_some());
 }
 
+// OKX's published `orders` push (docs-v5 "WS / Order channel", "Push data
+// example", fetched 2026-11-25), verbatim except where that page's field table
+// says a triggered stop-market child differs: `algoId`/`algoClOrdId` ("a value
+// when algo order is triggered"), `source` 7 ("the normal order triggered by the
+// TP/SL order"), `ordType` market, and a SWAP instrument and size. No recorded
+// live capture of such a child exists in this repo.
+const TRIGGERED_STOP_MARKET_FILLED: &str = r#"{"arg":{"channel":"orders","instType":"SWAP","instId":"BTC-USDT-SWAP","uid":"614488474791936"},"data":[{"accFillSz":"1","algoClOrdId":"0f6b1d2c3e4a5b6c7d8e9f0a1b2c3d4e","algoId":"452197707845865000","amendResult":"","amendSource":"","avgPx":"31527.1","cancelSource":"","category":"normal","ccy":"","clOrdId":"","code":"0","cTime":"1654084334977","execType":"T","fee":"-0.02522168","feeCcy":"USDT","fillFee":"-0.02522168","fillFeeCcy":"USDT","fillNotionalUsd":"31.50818374","fillPx":"31527.1","fillSz":"1","fillPnl":"0.01","fillTime":"1654084353263","fillPxVol":"","fillPxUsd":"","fillMarkVol":"","fillFwdPx":"","fillMarkPx":"","fillIdxPx":"","instId":"BTC-USDT-SWAP","instType":"SWAP","lever":"10","msg":"","notionalUsd":"31.50818374","ordId":"452197707845865472","ordType":"market","pnl":"0","posSide":"net","px":"","pxUsd":"","pxVol":"","pxType":"","quickMgnType":"","rebate":"0","rebateCcy":"USDT","reduceOnly":"true","reqId":"","side":"sell","attachAlgoClOrdId":"","slOrdPx":"","slTriggerPx":"","slTriggerPxType":"last","source":"7","state":"filled","stpId":"","stpMode":"","sz":"1","tag":"","tdMode":"cross","tgtCcy":"","tpOrdPx":"","tpTriggerPx":"","tpTriggerPxType":"last","attachAlgoOrds":[],"tradeId":"242589207","tradeQuoteCcy":"USDT","lastPx":"38892.2","uTime":"1654084353264","isTpLimit":"false","riskBypassResult":"","linkedAlgoOrd":{"algoId":""}}]}"#;
+
+/// (order id, its algo's identities), each on the fill's own symbol.
+fn triggered(actions: &[Action]) -> Vec<(String, Vec<String>)> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::OrderTriggered {
+                symbol,
+                order_id,
+                by,
+            }) => {
+                assert_eq!(symbol, "BTCUSDT", "the child's symbol");
+                Some((order_id.clone(), by.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+// AGT-196: a stop-market child's first private frame is already `filled`, so no
+// row for it is ever stored. Its fill still names the algo that placed it, by
+// `algoId` and `algoClOrdId`, so the placer's host can claim it.
+#[test]
+fn a_stop_market_child_filled_in_its_first_frame_names_its_algo_with_the_fill() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    e.take_frame(6.0);
+    ws(&mut e, private, TRIGGERED_STOP_MARKET_FILLED);
+    let actions = prepared(&mut e, 7.0);
+    assert!(
+        e.store().order("452197707845865472").is_none(),
+        "no row stored"
+    );
+    let fills = safe_cex_engine::wire::fills(e.take_frame(8.0).unwrap()).unwrap();
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].order_id, "452197707845865472");
+    assert_eq!(
+        triggered(&actions),
+        [(
+            "452197707845865472".to_owned(),
+            vec![
+                "452197707845865000".to_owned(),
+                "0f6b1d2c3e4a5b6c7d8e9f0a1b2c3d4e".to_owned()
+            ]
+        )]
+    );
+}
+
+// A trigger-limit child that rests first links on its later fill too, by
+// `algoClOrdId` alone when that is all it carries; a plain order links nothing.
+// Hand-built rows in OKX's documented `orders` field names, not a live capture.
+#[test]
+fn a_resting_triggered_child_links_on_its_fill_and_a_plain_order_never_does() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let child = r#"{"instId":"BTC-USDT-SWAP","ordId":"900","clOrdId":"","algoId":"","algoClOrdId":"tsalgo900","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}"#;
+    let plain = r#"{"instId":"BTC-USDT-SWAP","ordId":"901","clOrdId":"caller901","algoId":"","algoClOrdId":"","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"38000"}"#;
+    for row in [child, plain] {
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    assert!(triggered(&prepared(&mut e, 6.0)).is_empty(), "no fill yet");
+    for row in [child, plain] {
+        let filled = row.replace("\"live\"", "\"filled\"").replace(
+            "\"accFillSz\":\"0\"",
+            "\"accFillSz\":\"4\",\"fillSz\":\"4\",\"fillPx\":\"39000\",\"tradeId\":\"t\"",
+        );
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#),
+        );
+    }
+    assert_eq!(
+        triggered(&prepared(&mut e, 7.0)),
+        [("900".to_owned(), vec!["tsalgo900".to_owned()])]
+    );
+}
+
 #[test]
 fn a_failed_algo_is_reported_once_and_ends() {
     for state in ["order_failed", "partially_failed"] {

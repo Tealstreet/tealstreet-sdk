@@ -333,6 +333,44 @@ pub enum Notice {
         command: CommandId,
         receipts: Vec<OrderIdentityReceipt>,
     },
+    /// A venue order that an algo order's trigger created (an OKX stop's
+    /// child), with every identity the venue gave that algo: its id and client
+    /// id. Sent with the child's fills, so a host can tie them to whoever placed
+    /// the algo even when no row for the child was ever stored (AGT-196).
+    /// Both are on `symbol`: venue ids can repeat across symbols. Native hosts
+    /// only: a page needs no claim, so WASM bundles carry none of it.
+    #[cfg(not(target_arch = "wasm32"))]
+    OrderTriggered {
+        symbol: String,
+        order_id: String,
+        by: Vec<String>,
+    },
+    /// A client-keyed venue's order and the venue's own id for it, sent with
+    /// its fills. Binance spot and portfolio margin key orders by the caller's
+    /// client id, which a later order may reuse; a fill's claim keys on the
+    /// native id so two orders sharing one client id never share a claim
+    /// (AGT-196). Native hosts only, like `OrderTriggered`.
+    /// `fill_id` is the fill's own `Fill::id`, so a host can tell apart two
+    /// orders' fills under one client id inside one batch of frames.
+    #[cfg(not(target_arch = "wasm32"))]
+    OrderNativeId {
+        symbol: String,
+        order_id: String,
+        native_id: String,
+        fill_id: Option<String>,
+    },
+    /// The venue acknowledged `command`'s order placed under the caller's
+    /// `client_order_id` with its own `native_id`. A reusable client id never
+    /// claims an order: the placing host claims this native id instead
+    /// (AGT-196). Sent by venues that key orders by client id, whose
+    /// completions carry the client id. Native hosts only.
+    #[cfg(not(target_arch = "wasm32"))]
+    PlacementNativeId {
+        command: CommandId,
+        symbol: String,
+        client_order_id: String,
+        native_id: String,
+    },
     /// Startup cannot complete without intervention (bad configuration or an
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
@@ -3252,6 +3290,93 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
         self.core().command_progress(command, receipts)
+    }
+
+    /// `Notice::PlacementNativeId`; nothing is sent when an identity is empty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn placement_native_id(
+        &mut self,
+        command: CommandId,
+        symbol: &str,
+        client_order_id: &str,
+        native_id: &str,
+    ) {
+        if !symbol.is_empty() && !client_order_id.is_empty() && !native_id.is_empty() {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::PlacementNativeId {
+                    command,
+                    symbol: symbol.to_owned(),
+                    client_order_id: client_order_id.to_owned(),
+                    native_id: native_id.to_owned(),
+                }));
+        }
+    }
+
+    /// `Notice::OrderNativeId`: `order_id` (a client id) is the venue's order
+    /// `native_id`. Nothing is sent when they are equal or either is empty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn order_native_id(
+        &mut self,
+        symbol: &str,
+        order_id: &str,
+        native_id: &str,
+        fill_id: Option<&str>,
+    ) {
+        if !symbol.is_empty()
+            && !order_id.is_empty()
+            && !native_id.is_empty()
+            && order_id != native_id
+        {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::OrderNativeId {
+                    symbol: symbol.to_owned(),
+                    order_id: order_id.to_owned(),
+                    native_id: native_id.to_owned(),
+                    fill_id: fill_id.map(str::to_owned),
+                }));
+        }
+    }
+
+    /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is
+    /// sent when none remain. A no-op on WASM, which has no such notice.
+    #[cfg(target_arch = "wasm32")]
+    #[inline(always)]
+    pub fn order_triggered<'a>(
+        &mut self,
+        _symbol: &str,
+        _order_id: &str,
+        _by: impl IntoIterator<Item = &'a str>,
+    ) {
+    }
+
+    /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is
+    /// sent when none remain.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn order_triggered<'a>(
+        &mut self,
+        symbol: &str,
+        order_id: &str,
+        by: impl IntoIterator<Item = &'a str>,
+    ) {
+        let by: Vec<String> = by
+            .into_iter()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if !symbol.is_empty() && !order_id.is_empty() && !by.is_empty() {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::OrderTriggered {
+                    symbol: symbol.to_owned(),
+                    order_id: order_id.to_owned(),
+                    by,
+                }));
+        }
     }
 
     #[inline]

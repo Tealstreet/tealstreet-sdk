@@ -548,8 +548,21 @@ fn encode(actions: &[Action]) -> String {
     if actions.is_empty() {
         return String::new();
     }
+    let actions = actions.iter();
+    // Native builds of this crate (its tests) also see the host-only fill
+    // claim notices (AGT-196); a page never gets them.
+    #[cfg(not(target_arch = "wasm32"))]
+    let actions = actions.filter(|action| {
+        !matches!(
+            action,
+            Action::Notice(
+                Notice::OrderTriggered { .. }
+                    | Notice::OrderNativeId { .. }
+                    | Notice::PlacementNativeId { .. }
+            )
+        )
+    });
     let out: Vec<ActionOut<'_>> = actions
-        .iter()
         .map(|action| match action {
             #[cfg(feature = "address-nonce")]
             Action::RetireAddressSetup { task, token } => ActionOut::RetireAddressSetup {
@@ -644,8 +657,18 @@ fn encode(actions: &[Action]) -> String {
                     receipts,
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Action::Notice(
+                Notice::OrderTriggered { .. }
+                | Notice::OrderNativeId { .. }
+                | Notice::PlacementNativeId { .. },
+            ) => unreachable!("filtered above"),
         })
         .collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    if out.is_empty() {
+        return String::new();
+    }
     serde_json::to_string(&out).unwrap_or_default()
 }
 
@@ -1828,6 +1851,19 @@ mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
+    /// Review B (942d22190f): a native build of this crate sees the host-only
+    /// notice when a venue links a triggered child; it encodes to nothing.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_host_only_order_triggered_notice_encodes_to_nothing() {
+        let triggered = safe_cex_engine::Action::Notice(safe_cex_engine::Notice::OrderTriggered {
+            symbol: "BTCUSDT".into(),
+            order_id: "child".into(),
+            by: vec!["algo".into()],
+        });
+        assert_eq!(super::encode(&[triggered]), "");
+    }
+
     #[cfg(all(feature = "bybit", feature = "bingx"))]
     #[test]
     fn constructor_supplies_display_metadata_and_user_tuning_to_local_frames() {

@@ -3,15 +3,40 @@ use safe_cex_engine::error::VenueError;
 use safe_cex_engine::model::{Order, OrderStatus, OrderType};
 use serde_json::json;
 
+/// The orders the fill tests below placed through this account (AGT-196).
+const PLACED_HERE: [&str; 8] = [
+    "order-secret-1",
+    "order-2",
+    "o",
+    "ioc-removed",
+    "ioc-kept",
+    "kept-closed",
+    "seen-later",
+    "vanished",
+];
+
 fn tap(delegated: bool, held: bool) -> (Rc<Tap>, HostNotifier) {
+    let placements = Placements::default();
+    for id in PLACED_HERE {
+        placements.lock().unwrap().record("BTCUSDT", id);
+    }
+    tap_for("auth0|u1", delegated, held, placements)
+}
+
+fn tap_for(
+    user: &str,
+    delegated: bool,
+    held: bool,
+    placements: Placements,
+) -> (Rc<Tap>, HostNotifier) {
     let notifier = HostNotifier::unstarted();
     let notify = AlgoNotify::new(
         notifier.clone(),
-        Scope::new("auth0|u1", "bybit", "synthetic-main"),
+        Scope::new(user, "bybit", "synthetic-main", "venue-account"),
         Arc::new(move || delegated),
         Arc::new(AtomicBool::new(held)),
     );
-    (Rc::new(Tap::new(notify)), notifier)
+    (Rc::new(Tap::new(notify, placements)), notifier)
 }
 
 fn sent(notifier: &HostNotifier) -> Vec<Value> {
@@ -569,9 +594,9 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
     let id = |order: &str, key: &str| {
         crate::host_notify::notification_id(
             "auth0|u1",
-            &Scope::new("auth0|u1", "bybit", "synthetic-main").account_digest,
+            &Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account").account_digest,
             Kind::Fill,
-            &format!("{order}\0{key}"),
+            &format!("BTCUSDT\0{order}\0{key}"),
         )
     };
     assert_eq!(verbs[&id("kept-closed", "filled")], "filled");
@@ -579,5 +604,351 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
     assert_eq!(
         verbs[&id("vanished", "partiallyFilled\x001")],
         "partiallyFilled"
+    );
+}
+
+/// AGT-196: two Tealstreet users connected to ONE venue account each run their
+/// own resident, and both private streams carry every fill on that account.
+/// Both still report it (the box never withholds); each carries the same
+/// user-independent key, and only the placer claims it, so the gateway can
+/// withhold the other user's push.
+#[tokio::test(start_paused = true)]
+async fn a_shared_venue_accounts_fill_carries_one_key_and_only_the_placer_claims_it() {
+    let placer_orders = Placements::default();
+    placer_orders
+        .lock()
+        .unwrap()
+        .record("BTCUSDT", "shared-order");
+    let (placer, placer_sent) = tap_for("auth0|placer", true, false, placer_orders);
+    let (other, other_sent) = tap_for("auth0|other", true, false, Placements::default());
+    let venue_account = store(vec![order("shared-order", 1.0, 1.0)]);
+    for tap in [&placer, &other] {
+        tap.record_fills(&[fill("shared-order", 1.0)], &venue_account);
+        tokio::time::advance(FILL_DEBOUNCE).await;
+        tap.flush_fills(&venue_account, false);
+    }
+    let (placer_sent, other_sent) = (sent(&placer_sent), sent(&other_sent));
+    assert_eq!(
+        (placer_sent.len(), other_sent.len()),
+        (1, 1),
+        "neither is withheld here"
+    );
+    assert_eq!(placer_sent[0]["placedHere"], true);
+    assert_eq!(other_sent[0]["placedHere"], false);
+    let key = placer_sent[0]["fillKey"].as_str().unwrap();
+    assert_eq!(key.len(), 64);
+    assert_eq!(
+        other_sent[0]["fillKey"], key,
+        "one key per venue order, whoever saw it"
+    );
+    assert!(!key.contains("shared-order"));
+    assert_ne!(
+        placer_sent[0]["collapseKey"], other_sent[0]["collapseKey"],
+        "collapse stays per account"
+    );
+}
+
+/// A fill nobody placed through Tealstreet (venue UI, bot, liquidation, ADL) is
+/// still reported, unclaimed, so it reaches the user exactly as before.
+#[tokio::test(start_paused = true)]
+async fn an_unplaced_fill_such_as_a_liquidation_is_still_reported_unclaimed() {
+    let (tap, notifier) = tap_for("auth0|u1", true, false, Placements::default());
+    tap.record_fills(&[fill("liquidation-1", 1.0)], &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["placedHere"], false);
+    assert_eq!(queued[0]["kind"], "fill");
+}
+
+/// An order placed here is claimed by its client order id (the dispatch
+/// receipt), its parent, or its own id once the native host linked it to an
+/// algo placed here (an OKX triggered stop files under a new `ordId`).
+#[tokio::test(start_paused = true)]
+async fn placed_here_covers_client_ids_parents_and_linked_triggered_children() {
+    let placements = Placements::default();
+    for id in ["client-secret", "entry", "algo9"] {
+        placements.lock().unwrap().record("BTCUSDT", id);
+    }
+    placements
+        .lock()
+        .unwrap()
+        .link("BTCUSDT", "900", &["algo9".into()]);
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
+    let mut by_client = order("venue-assigned", 1.0, 1.0);
+    by_client.client_order_id = Some("client-secret".into());
+    let mut leg = order("venue-leg", 1.0, 1.0);
+    leg.client_order_id = None;
+    leg.parent_id = Some("entry".into());
+    let mut foreign = order("foreign", 1.0, 1.0);
+    foreign.client_order_id = Some("someone-else".into());
+    // The triggered child "900" has no row: it filled in its first frame.
+    let rows = store(vec![by_client, leg, foreign]);
+    let ids = ["venue-assigned", "venue-leg", "900", "foreign"];
+    tap.record_fills(&ids.map(|id| fill(id, 1.0)), &rows);
+    tap.flush_fills(&rows, true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 4, "every fill is reported");
+    let claimed: Vec<bool> = ids
+        .iter()
+        .map(|id| {
+            let key = crate::host_notify::fill_key(
+                &Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account"),
+                "BTCUSDT",
+                id,
+            );
+            queued
+                .iter()
+                .find(|n| n["fillKey"] == key.as_str())
+                .unwrap()["placedHere"]
+                .as_bool()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(claimed, [true, true, true, false]);
+}
+
+/// Review B finding 2: Binance USDⓈ-M order ids repeat across symbols. This
+/// resident's BTCUSDT order 7 does not claim another login's ETHUSDT order 7,
+/// nor lend that order its BTCUSDT row's client id.
+#[tokio::test(start_paused = true)]
+async fn a_claim_never_crosses_symbols() {
+    let placements = Placements::default();
+    placements.lock().unwrap().record("BTCUSDT", "7");
+    placements
+        .lock()
+        .unwrap()
+        .record("BTCUSDT", "client-secret");
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements);
+    let mine = order("7", 1.0, 1.0);
+    let mut theirs = order("7", 1.0, 1.0);
+    theirs.symbol = "ETHUSDT".into();
+    theirs.client_order_id = Some("theirs".into());
+    let mut theirs_by_client = order("8", 1.0, 1.0);
+    theirs_by_client.symbol = "ETHUSDT".into();
+    let rows = store(vec![mine, theirs, theirs_by_client]);
+    let on = |symbol: &str, id: &str| Fill {
+        symbol: symbol.into(),
+        ..fill(id, 1.0)
+    };
+    let fills = [on("BTCUSDT", "7"), on("ETHUSDT", "7"), on("ETHUSDT", "8")];
+    tap.record_fills(&fills, &rows);
+    tap.flush_fills(&rows, true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 3, "one report per (symbol, order)");
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let claimed: Vec<bool> = fills
+        .iter()
+        .map(|fill| {
+            let key = crate::host_notify::fill_key(&scope, &fill.symbol, &fill.order_id);
+            queued
+                .iter()
+                .find(|n| n["fillKey"] == key.as_str())
+                .unwrap()["placedHere"]
+                .as_bool()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(claimed, [true, false, false]);
+}
+
+/// Review B (1acdf351b7): Binance spot and portfolio margin key orders by a
+/// client id a later order may reuse. Two orders reusing `desk` on one symbol
+/// must not share a key, or a claim on the first withholds the second; the key
+/// is the venue's own order id from the fill's frame.
+#[tokio::test(start_paused = true)]
+async fn orders_reusing_one_client_id_get_different_fill_keys() {
+    let placements = Placements::default();
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let mut keys = Vec::new();
+    for native in ["111", "222"] {
+        placements
+            .lock()
+            .unwrap()
+            .note_native_id("BTCUSDT", "desk", native, Some("exec-desk"));
+        tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        let sent = sent(&notifier);
+        let key = sent.last().unwrap()["fillKey"].as_str().unwrap().to_owned();
+        assert_eq!(key, crate::host_notify::fill_key(&scope, "BTCUSDT", native));
+        keys.push(key);
+    }
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(
+        keys[0],
+        crate::host_notify::fill_key(&scope, "BTCUSDT", "desk")
+    );
+}
+
+/// Review B (10e8ae20c6) item 5: a closed caller id claims by its native id,
+/// so this login's late fills of its own `desk` claim and another order
+/// reusing `desk` (another native id) does not.
+#[tokio::test(start_paused = true)]
+async fn a_client_keyed_fill_claims_by_its_native_id() {
+    let placements = Placements::default();
+    placements.lock().unwrap().record("BTCUSDT", "n-1");
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
+    let mut claimed = Vec::new();
+    for native in ["n-1", "n-2"] {
+        placements
+            .lock()
+            .unwrap()
+            .note_native_id("BTCUSDT", "desk", native, Some("exec-desk"));
+        tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        claimed.push(
+            sent(&notifier).last().unwrap()["placedHere"]
+                .as_bool()
+                .unwrap(),
+        );
+    }
+    assert_eq!(claimed, [true, false]);
+}
+
+/// One `desk` fill with its own trade id.
+fn desk_fill(trade: &str) -> Fill {
+    Fill {
+        id: Some(trade.into()),
+        ..fill("desk", 1.0)
+    }
+}
+
+/// Review A and B (2750605102): A's `desk` (native n-a) fills and B reuses
+/// `desk` (native n-b) inside one 2 s debounce, both before any flush. Each
+/// fill's native id is resolved from its own trade id when recorded, so they
+/// stay two notifications with two keys, and each login claims only its own:
+/// neither is withheld from its placer.
+#[tokio::test(start_paused = true)]
+async fn two_orders_sharing_a_client_id_in_one_debounce_keep_their_own_keys_and_claims() {
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let mut claims = Vec::new();
+    for (user, own) in [("auth0|a", "n-a"), ("auth0|b", "n-b")] {
+        let placements = Placements::default();
+        placements.lock().unwrap().record("BTCUSDT", own);
+        {
+            let mut ledger = placements.lock().unwrap();
+            ledger.note_native_id("BTCUSDT", "desk", "n-a", Some("t-a"));
+            ledger.note_native_id("BTCUSDT", "desk", "n-b", Some("t-b"));
+        }
+        let (tap, notifier) = tap_for(user, true, false, placements);
+        tap.record_fills(&[desk_fill("t-a"), desk_fill("t-b")], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        let sent = sent(&notifier);
+        assert_eq!(sent.len(), 2, "{user}: two orders, two notifications");
+        let scope = Scope::new(user, "bybit", "synthetic-main", "venue-account");
+        let by_native: Vec<(String, bool)> = ["n-a", "n-b"]
+            .iter()
+            .map(|native| {
+                let key = crate::host_notify::fill_key(&scope, "BTCUSDT", native);
+                let n = sent
+                    .iter()
+                    .find(|n| n["fillKey"] == key.as_str())
+                    .unwrap_or_else(|| panic!("{user}: {native}'s own key"));
+                ((*native).to_owned(), n["placedHere"].as_bool().unwrap())
+            })
+            .collect();
+        claims.push(by_native);
+    }
+    assert_eq!(
+        claims,
+        [
+            vec![("n-a".to_owned(), true), ("n-b".to_owned(), false)],
+            vec![("n-a".to_owned(), false), ("n-b".to_owned(), true)],
+        ]
+    );
+    assert_eq!(
+        crate::host_notify::fill_key(&scope, "BTCUSDT", "n-a"),
+        crate::host_notify::fill_key(
+            &Scope::new("auth0|b", "bybit", "synthetic-main", "venue-account"),
+            "BTCUSDT",
+            "n-a"
+        ),
+        "one key per order across logins"
+    );
+}
+
+/// A client-keyed fill without its own trade id can only be matched to the
+/// latest order under its client id. It is claimed when any native id seen
+/// under that client id is this login's: a duplicate push, never a withheld
+/// one.
+#[tokio::test(start_paused = true)]
+async fn a_client_keyed_fill_without_a_trade_id_is_claimed_if_any_order_could_be_ours() {
+    let placements = Placements::default();
+    {
+        let mut ledger = placements.lock().unwrap();
+        ledger.record("BTCUSDT", "n-a");
+        ledger.note_native_id("BTCUSDT", "desk", "n-a", Some("t-a"));
+        ledger.note_native_id("BTCUSDT", "desk", "n-b", Some("t-b"));
+    }
+    let (tap, notifier) = tap_for("auth0|a", true, false, placements);
+    let anonymous = Fill {
+        id: None,
+        ..fill("desk", 1.0)
+    };
+    tap.record_fills(&[anonymous], &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    assert_eq!(sent(&notifier)[0]["placedHere"], true);
+}
+
+/// CodeRabbit (0562b1e5b2): Binance USDⓈ-M order ids repeat across symbols.
+/// BTCUSDT order 7 and ETHUSDT order 7 filling on one account are two
+/// notifications with distinct ids and collapse keys, so the gateway never
+/// drops one as a duplicate of the other.
+#[tokio::test(start_paused = true)]
+async fn equal_order_ids_on_two_symbols_are_two_notifications() {
+    let (tap, notifier) = tap_for("auth0|u1", true, false, Placements::default());
+    let fills = ["BTCUSDT", "ETHUSDT"].map(|symbol| Fill {
+        symbol: symbol.into(),
+        ..fill("7", 1.0)
+    });
+    tap.record_fills(&fills, &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    let sent = sent(&notifier);
+    assert_eq!(sent.len(), 2);
+    assert_ne!(sent[0]["id"], sent[1]["id"]);
+    assert_ne!(sent[0]["collapseKey"], sent[1]["collapseKey"]);
+}
+
+/// One fill's key on a tap for `user` connected to `venue_account`.
+async fn fill_key_on(user: &str, venue_account: &str, fill: Fill) -> Value {
+    let notifier = HostNotifier::unstarted();
+    let notify = AlgoNotify::new(
+        notifier.clone(),
+        Scope::new(user, "bybit", "synthetic-main", venue_account),
+        Arc::new(|| true),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let tap = Tap::new(notify, Placements::default());
+    tap.record_fills(std::slice::from_ref(&fill), &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    sent(&notifier)[0]["fillKey"].clone()
+}
+
+/// AGT-196 review: the key names the VENUE account, so every Tealstreet user
+/// connected to it computes the same one, and unrelated accounts never collide
+/// on per-symbol order ids (Binance USDⓈ-M) or caller-chosen ids (PM).
+#[tokio::test(start_paused = true)]
+async fn a_fill_key_is_shared_on_one_venue_account_and_distinct_across_accounts() {
+    let on = |user: &'static str, account: &'static str, symbol: &'static str| {
+        let mut fill = fill("7", 1.0);
+        fill.symbol = symbol.into();
+        fill_key_on(user, account, fill)
+    };
+    let shared = on("auth0|a", "venue-account-1", "BTCUSDT").await;
+    assert_eq!(
+        on("auth0|b", "venue-account-1", "BTCUSDT").await,
+        shared,
+        "two users, one venue account"
+    );
+    assert_ne!(
+        on("auth0|c", "venue-account-2", "BTCUSDT").await,
+        shared,
+        "another venue account, same order id and symbol"
+    );
+    assert_ne!(
+        on("auth0|a", "venue-account-1", "ETHUSDT").await,
+        shared,
+        "the same id on another symbol is another order"
     );
 }
