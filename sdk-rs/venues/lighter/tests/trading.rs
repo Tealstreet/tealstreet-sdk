@@ -2338,3 +2338,35 @@ fn an_exemption_taking_effect_during_the_approval_read_still_requires_approval()
         "{out:?}"
     );
 }
+
+#[test]
+fn a_nonce_retry_after_the_exemption_expires_is_signed_as_the_gate_decided() {
+    // Review B: the 21104 retry re-signs. It must reuse the job's decision, not
+    // add a fee that never passed the tier or approval checks.
+    let expires = NOW as u64 / 1000 + 1;
+    let token = test_exemption("mainnet", EXEMPT_ACCOUNT, expires);
+    let (mut e, _) = ready_with(exempt_options(false, token));
+    let first = begin(&mut e, vec![limit()]);
+    assert!(wire(&first).get("L2TxAttributes").is_none());
+    reply(
+        &mut e,
+        &first,
+        200,
+        r#"{"code":21104,"message":"invalid nonce"}"#,
+    );
+    let later = (expires + 5) as f64 * 1000.0;
+    let t = timer(&mut e);
+    e.handle(later, Event::TimerFired { timer: t });
+    let nonce = http_at(&mut e, later, "nextNonce");
+    reply_at(&mut e, later, &nonce, 200, r#"{"code":200,"nonce":20}"#);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, later);
+    let mut sent = out.iter().filter_map(|a| match a {
+        Action::Http(r) => Some(r),
+        _ => None,
+    });
+    let retry = sent.next().expect("the one retry");
+    assert!(retry.url.contains("sendTx"), "{out:?}");
+    assert!(sent.next().is_none(), "{out:?}");
+    assert_eq!(wire(retry)["Nonce"], 20);
+    assert!(wire(retry).get("L2TxAttributes").is_none());
+}
