@@ -1813,3 +1813,21 @@ above their ceiling.
 | bitget | 2949761 | 2949120 | 2960384 |
 | okx | 2222371 | 2222080 | 2233344 |
 | phemex | 2273340 | 2273280 | 2284544 |
+
+## 2026-11-26 — #3813 CodeRabbit fixes raise the backpack cap
+
+The three review fixes on #3813 (`eb4c7763`) add about 130 B per family:
+- admission now floors the slice to the step before comparing it with the minimum;
+- a known partial failure that kept orders resets the refusal streak;
+- a refused slice chaser passes its runtime reason to the pause notice.
+
+backpack, the family with the least headroom (59 B at `25f6b1df`), now measures
+70 B over its ceiling. Every other family passes under its current cap. Rule-17
+raise per `harness/CLAUDE.md`, generated with `update-wasm-caps.mjs` from PR run
+45736242856 (sealed source `c1d825d22d6eba5bb3df4ddce7fcd74c69a889bb`, the merge
+of PR head `eb4c7763b77b3856077e4ab9c27db8517f7d3384` into master
+`506c3c3802f1dc6644b39a91472165a4cd76f41d`), filtered to backpack.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| backpack | 2225222 | 2225152 | 2236416 |
