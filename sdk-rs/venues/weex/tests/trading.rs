@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Contract V3 documented trading examples and adversarial lifecycle contracts.
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -190,11 +191,14 @@ fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
                 );
                 assert_eq!(error.protection, None);
                 assert!(
-                    error.message.to_lowercase().contains("unknown"),
+                    error.message.to_lowercase().contains("confirm"),
                     "{operation} {status}: {error:?}"
                 );
                 assert!(
-                    error.message.contains("Check Open Orders"),
+                    error
+                        .message
+                        .replace("Check your open orders", "Check Open Orders")
+                        .contains("Check Open Orders"),
                     "{operation} {status}: {error:?}"
                 );
                 assert!(!error.message.contains("refused"), "{error:?}");
@@ -225,10 +229,16 @@ fn dispatched_ambiguity_native_rate_row_says_unknown() {
     let error = failure(&actions);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
-        error.message.to_lowercase().contains("unknown"),
+        error.message.to_lowercase().contains("confirm"),
         "{error:?}"
     );
-    assert!(error.message.contains("Check Open Orders"), "{error:?}");
+    assert!(
+        error
+            .message
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{error:?}"
+    );
     assert!(writes(&actions).is_empty());
 }
 fn order(id: &str, kind: OrderType) -> Order {
@@ -2087,12 +2097,14 @@ fn write_failures_preserve_native_text_with_unknown_guidance() {
         if matches!(status, 429 | 502) {
             assert_eq!(
                 error.message,
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
         } else {
             assert_eq!(
                 error.message,
-                format!("HTTP {status}: {body}. The outcome is unknown. Check Open Orders")
+                format!(
+                    "HTTP {status}: {body}. We couldn’t confirm this change. Check your open orders before trying again."
+                )
             );
         }
         assert_eq!(
@@ -2500,5 +2512,67 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         json!({"code":"40006","msg":"invalid signature"}),
     );
     let error = done(&actions).unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
+}
+
+// AGT-115: the placeTpSlOrder payload has no tp/sl fields, so a stop or take-profit entry
+// dropped its attached legs while the optimistic row kept them. It now refuses the whole
+// command before any write; a conditional entry keeps carrying its legs natively.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    let stop_refusal = stop_entry_legs_refusal("WEEX");
+    // AGT-120: a reduce-only one is refused by the engine first, with its own copy.
+    for reduce in [false, true] {
+        let refusal = if reduce {
+            safe_cex_engine::model::REDUCE_ONLY_LEGS_REFUSAL.to_owned()
+        } else {
+            stop_refusal.clone()
+        };
+        for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+            for (stop_loss, take_profit) in [
+                (Some(58000.0), None),
+                (None, Some(70000.0)),
+                (Some(0.0), Some(70000.0)),
+            ] {
+                let mut e = engine();
+                let mut stop = opts("");
+                stop.kind = kind;
+                stop.side = OrderSide::Sell;
+                stop.price = Some(68000.0);
+                stop.reduce_only = Some(reduce);
+                stop.stop_loss = stop_loss;
+                stop.take_profit = take_profit;
+                let actions = command(
+                    &mut e,
+                    Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![opts(""), stop],
+                    },
+                );
+                assert!(writes(&actions).is_empty(), "{kind:?}");
+                assert!(e.store().orders().is_empty());
+                assert_eq!(done(&actions).unwrap_err(), refusal);
+                assert_eq!(
+                    failure(&actions).outcome,
+                    Some(safe_cex_engine::Outcome::NotSent)
+                );
+            }
+        }
+    }
+    let mut e = engine();
+    let mut conditional = opts("");
+    conditional.kind = OrderType::Conditional;
+    conditional.trigger_price = Some(70000.0);
+    conditional.stop_loss = Some(60000.0);
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![conditional],
+        },
+    );
+    assert_eq!(body(&writes(&actions)[0])["presetStopLossPrice"], "60000");
 }

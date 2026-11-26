@@ -30,6 +30,8 @@ const LIGHTER_READ_AUTH_PATHS = new Set([
   '/api/v1/accountActiveOrders',
   '/api/v1/positionFunding',
   '/api/v1/accountLimits',
+  // AGT-45: placement proof and the guarded-edit cancel/put-back proofs read orders by client index.
+  '/api/v1/accountOrders',
 ]);
 const LIGHTER_TIER_AUTH_PATH = '/api/v1/changeAccountTier';
 // sign.rs AuthRecipe: deadline:account:key-index:hex(80-byte Schnorr signature).

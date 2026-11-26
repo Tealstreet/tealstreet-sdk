@@ -1966,7 +1966,8 @@ impl Account {
                 let delivery = prepared.delivery();
                 emitted = delivery.amount();
                 cx.fill(Fill {
-                    id: None,
+                    id: (native.last_quantity > 0.0 && !native.trade_id.is_empty())
+                        .then(|| native.trade_id.to_string()),
                     order_id: id.to_owned(),
                     symbol: symbol.clone(),
                     side: order_side(&native.side),

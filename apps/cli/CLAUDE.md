@@ -95,7 +95,7 @@ local `build.sh disrupt` of the tagged commit.
 
 `src/rust-engine.ts` initializes the Rust browser artifact from a Bun embedded
 asset; standalone binaries need no workspace or extracted WASM file. Build
-`corepack yarn -s rust:build-wasm` from the repository root before source runs
+`corepack yarn -s rust:build-wasm (on the tealstreet-sdk mirror; in tealstreet-next run `bash sdk-rs/harness/build.sh`)` from the repository root before source runs
 or CLI compilation. The `*.wasm.test.ts` consumer tests (selected with
 `SAFE_CEX_WASM_TESTS=1`) prove saved-account native state and an isolated
 compiled binary. They do not prove live routing or authenticated connectivity.
@@ -294,6 +294,13 @@ that. Any future account-creation surface must expose the same fields.
 Note the proxy/tunnel path then requires `login` — an account can be added
 non-interactively but not _used_ through the proxy until the OAuth flow has run.
 
+### `account list` never prints signing material
+
+On `requiresNoSecret` venues (Paradex, Polymarket) `apiKey` holds a private key, so
+the old first-4/last-4 line leaked 8 characters of it (AGT-321). Print account keys only
+through `src/account-key-display.ts`: those venues, and unknown ones, show the public
+`paradexAddress` when present, otherwise a fixed mask. `--json` prints no key at all.
+
 ## Auth Flow
 
 1. CLI opens browser → `{web}/cli-login?callback=http://localhost:9876/callback`
@@ -441,8 +448,9 @@ The storage inventory below is relative to the user directory described in
 | `console.warn/error()`             | Above prompt + mirrored on the top status bar²                        | Yes                                |
 | `console.debug()`                  | No                                                                    | Only when `DEBUG=1`/`true`³        |
 | `print()` / `originalConsoleLog()` | Yes (no rate limit, no suppression)                                   | No                                 |
+| `printOutput()` (subcommands)      | Above prompt (no rate limit, no dedup, no suppression)                | Yes                                |
 
-¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[ReconnectingWebSocket]`, `RWS>`, `[HOWWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`.
+¹ Lines matching **operational** patterns (`[trackLastReceived]`, `[BaseReconnectingWebSocket]`, `[ReconnectingWebSocket]`, `RWS>`, `[HOWWebSocket]`, `[HOW] Latency`, ping/keepalive noise, balance dumps) are suppressed from the terminal (file only) — they were corrupting the readline prompt. The pattern list + the shared severity taxonomy (`operational`/`info`/`warn`/`error`/`critical`) live in `src/log-classify.ts` (`OPERATIONAL_PATTERNS`, `classifyLog`); `logger.ts:shouldSuppressLog` delegates to `isOperational()`. Add new noisy prefixes there, not in `logger.ts`. **Rust engine notices reach the CLI as `console.log(message, severity)`** (`BaseExchange.log`), so a venue `Level::Warn` notice is an INFO line here and its engine code is not visible; routine `ws.disconnected` reconnects and the optional `Bybit fee rates:` read are matched by text for that reason. Keep auth-failure and exhausted-route variants off the list.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
@@ -544,7 +552,7 @@ name}` footer segment auto-runs the named script ~1×/sec
   arrive unresolved). The CLI doesn't run the rule engine, so read a flag with a strict
   `flags?.FOO === true` (NOT `Boolean(flags?.FOO)` — a residual object is truthy).
   Engine: `@tealstreet/feature-flags-core/src/rules.ts`.
-- Logger rate-limits to 5 msg/sec with 10s dedup window
+- Logger rate-limits to 5 msg/sec with 10s dedup window. Subcommand output in `src/index.ts` uses `printOutput()`, never `console.log`: the limit silently dropped every venue past the second from `account exchanges` and the second task from `tasks list` (AGT-172)
 - Exchange integration delegates to `@tealstreet/safe-cex`
 - Build inlines env vars via `--define` (TEALSTREET_CLI_VERSION, URLs)
 - **Preprocess pipeline.** `processCommand` in `repl.ts` runs every input

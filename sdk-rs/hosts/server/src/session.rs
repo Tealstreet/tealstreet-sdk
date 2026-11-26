@@ -6,6 +6,7 @@ use crate::delegated::probe::{ProbeRefusal, RefusalStage};
 use crate::envelope::{self, AccountMsg, Inbound, InitPayload};
 use crate::methods::{self, Plan};
 use crate::out::Out;
+use crate::publication::Preferences;
 use crate::state::{Log, Metrics};
 use safe_cex_algo_twap::{PersistedTwap, TwapStatus};
 use safe_cex_engine::capabilities::CancelAll;
@@ -16,13 +17,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod history_completeness;
 mod order_actions;
 mod order_frames;
 mod settings;
+use history_completeness::HistoryCompleteness;
+pub(crate) use order_frames::strip_roles;
+
+#[cfg(test)]
+mod history_completeness_tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
-    Placement(u64),
+    /// `caller_id` is whether the submit carried a caller venue ID (AGT-110).
+    Placement { seq: u64, caller_id: bool },
     Action {
         seq: u64,
         kind: &'static str,
@@ -48,8 +56,8 @@ struct Pending {
     reply: methods::Reply,
     /// A cancel-all fanned out over symbols: one shared outcome for the group.
     group: Option<Arc<Mutex<Group>>>,
-    /// The engine said this history read returned only part of the window.
-    incomplete: bool,
+    /// Cold detail is allocated only after an explicit incomplete-read notice.
+    incomplete: Option<Box<HistoryCompleteness>>,
     /// Order-affecting commands are logged with their result when they settle.
     audit: Option<Audit>,
 }
@@ -58,6 +66,7 @@ struct Audit {
     who: crate::audit::Who,
     origin: String,
     fields: serde_json::Map<String, Value>,
+    stages: crate::audit::Stages,
 }
 
 struct Group {
@@ -73,7 +82,8 @@ struct Client {
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     /// After a re-snapshot the old client only finishes its pending replies.
     draining: Arc<AtomicBool>,
-    publish_interval: tokio::sync::watch::Sender<u16>,
+    /// This connection's interval and ticker selection; never shared with another holder.
+    publication: tokio::sync::watch::Sender<Preferences>,
 }
 
 /// Subscribers one socket can stack on a book or candle key before extras stop counting.
@@ -104,7 +114,10 @@ pub struct Session {
     metrics: Arc<Metrics>,
     identity: Identity,
     pub socket: u64,
+    sign_responses: crate::signing_diagnostics::ReplyMisses,
     pub resume_id: String,
+    /// In-band companion to `resume_id` for DELEGATED claims (AGT-54).
+    resume_proof: String,
     out: Out,
     joined: HashMap<String, Joined>,
     /// Current fallback reply registration, independent of live account authority.
@@ -134,6 +147,8 @@ pub struct Session {
     next_verification: u64,
     verified: tokio::sync::mpsc::UnboundedSender<JoinCompletion>,
     verified_rx: Option<tokio::sync::mpsc::UnboundedReceiver<JoinCompletion>>,
+    /// Arrival of the socket frame being handled, for order audit stages.
+    frame_received: Option<std::time::Instant>,
 }
 
 struct PendingVerification {
@@ -200,6 +215,9 @@ pub const SNAPSHOT_HOLD_LIMIT: std::time::Duration = std::time::Duration::from_s
 const SNAPSHOT_HOLD_CHECK: std::time::Duration = std::time::Duration::from_millis(250);
 /// How long a hold's load check may wait on the engine; a miss is retried next hold tick.
 const HOLD_LOAD_CHECK: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Connection-local, like `set-publish-interval`: it selects this socket's ticker rows only.
+const SET_ACTIVE_TICKER_SYMBOLS: &str = "set-active-ticker-symbols";
 
 const PUBLIC_OPS: [&str; 5] = [
     "sendSnapshot",
@@ -268,7 +286,9 @@ impl Session {
             metrics,
             identity,
             socket,
+            sign_responses: crate::signing_diagnostics::ReplyMisses::new(socket),
             resume_id: crate::accounts::resume_id(),
+            resume_proof: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
             registration_outputs: HashMap::new(),
@@ -287,6 +307,7 @@ impl Session {
             next_verification: 0,
             verified,
             verified_rx: Some(verified_rx),
+            frame_received: None,
         }
     }
 
@@ -502,11 +523,7 @@ impl Session {
         }
         if let Some(probe) = completed.probe {
             let requested_mode = envelope::AccountSigningMode::requested(&probe.init);
-            let interval = probe
-                .init
-                .publish_interval_ms
-                .millis()
-                .expect("validated init");
+            let interval = probe.init.publication().expect("validated init");
             let candidate = completed.candidate.ok();
             out = out.account(&completed.account_name);
             let account = match probe.permit {
@@ -550,7 +567,7 @@ impl Session {
                         let previous = std::mem::replace(&mut joined.out, out.clone());
                         previous.retire_order_receipts();
                         previous.finish_registration(&out);
-                        self.resnapshot(&completed.account_name, Some(interval))
+                        self.resnapshot(&completed.account_name, Some(interval.clone()))
                             .await;
                     } else {
                         if let Some(previous) = self.joined.remove(&completed.account_name) {
@@ -575,6 +592,7 @@ impl Session {
                                 &completed.account_name,
                                 requested_mode,
                                 out.outbox(),
+                                out.instance_id(),
                             );
                         if self.joined[&completed.account_name]
                             .account
@@ -610,7 +628,13 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(if refusal.unavailable {
+                    out.send(if let Some(conflict) = refusal.settings {
+                        envelope::init_settings_conflict(
+                            &completed.account_name,
+                            conflict,
+                            refusal.stage,
+                        )
+                    } else if refusal.unavailable {
                         envelope::init_proof_unavailable(&completed.account_name)
                     } else {
                         match refusal.transition {
@@ -757,10 +781,13 @@ impl Session {
     }
 
     fn open_probed_cosigned(&mut self, init: InitPayload) {
+        let diagnostic = self
+            .handovers
+            .refusal_context(&init.account_name, &init.exchange_name);
         let permit = self.registry.probe_permit(self.user(), &init);
         let out = self.handover_out(&init.account_name);
         let (signing_out, lifetime) = out.isolated();
-        let link = safe_cex_remote_signer::SignerLink::new(self.socket, signing_out.outbox());
+        let link = crate::signing_diagnostics::link(self.socket, signing_out.outbox());
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
@@ -782,7 +809,7 @@ impl Session {
                     Some(ProbedInit {
                         init,
                         permit,
-                        diagnostic: None,
+                        diagnostic: Some(diagnostic),
                     }),
                 )
             },
@@ -974,12 +1001,17 @@ impl Session {
     }
 
     fn refuse_handover(&self, name: &str, refusal: ProbeRefusal) {
-        self.handover_out(name).send(envelope::init_unverified(
-            name,
-            refusal.transient,
-            envelope::InitRefusalReasonClass::Unknown,
-            refusal.into(),
-        ));
+        let frame = if let Some(conflict) = refusal.settings {
+            envelope::init_settings_conflict(name, conflict, refusal.stage)
+        } else {
+            envelope::init_unverified(
+                name,
+                refusal.transient,
+                envelope::InitRefusalReasonClass::Unknown,
+                refusal.into(),
+            )
+        };
+        self.handover_out(name).send(frame);
     }
 
     /// Exercise the trusted construction entry point from this authenticated
@@ -1081,36 +1113,131 @@ impl Session {
                         account.clone(),
                         out,
                         envelope::AccountSigningMode::Cosigned,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                 }
             }
         }
+        let delegated = match (&self.identity.resume_from, &self.identity.user) {
+            (Some(from), Some(user)) if self.admission_token_valid() => {
+                self.registry.delegated_resumable(from, user, self.socket)
+            }
+            _ => Vec::new(),
+        };
         if let Some(user) = &self.identity.user {
             self.taken_over = self.registry.open_session(&self.resume_id, user);
         }
-        self.send(envelope::session(&self.resume_id, resumed));
+        self.send(envelope::session_with_delegated(
+            &self.resume_id,
+            resumed,
+            &self.resume_proof,
+            &delegated,
+        ));
+    }
+
+    /// AGT-54: a `resume` init claims this socket's parked DELEGATED label and
+    /// its resident signer without a handover or probe. Any refusal is
+    /// transient and tells the client to fall back to the ordinary handover.
+    async fn resume_delegated(&mut self, init: InitPayload, out: Out, interval: Preferences) {
+        let name = init.account_name.clone();
+        self.handovers.forget(&name);
+        let claimed = match (&self.identity.resume_from, &self.identity.token) {
+            (Some(from), Some(token))
+                if self.admission_token_valid()
+                    && !self.router_fenced()
+                    && !self.joined.contains_key(&name)
+                    && init.sealed.is_none()
+                    && crate::delegated::enabled(&init.exchange_name) =>
+            {
+                // Retire before minting: the claimed holder keeps this exact output,
+                // so later notices (algo errors, stop replay) reach this socket.
+                self.out.retire_account(&name);
+                let out = out.account(&name);
+                self.registry
+                    .resume_delegated(
+                        from,
+                        self.user(),
+                        self.socket,
+                        token.clone(),
+                        &init,
+                        out.outbox(),
+                    )
+                    .map(|account| (account, out))
+            }
+            _ => None,
+        };
+        let Some((account, out)) = claimed else {
+            Log::info(&format!(
+                "delegated resume {name} socket {}: unavailable, handover required",
+                self.socket
+            ));
+            self.drop_early(&name, "delegated resume unavailable");
+            out.account(&name)
+                .send(envelope::init_resume_unavailable(&name));
+            return;
+        };
+        Log::info(&format!(
+            "delegated resume {name} socket {}: resident signer kept",
+            self.socket
+        ));
+        self.metrics.note_init();
+        let mode = envelope::AccountSigningMode::Delegated;
+        self.join(account, out.clone(), mode, interval).await;
+        let Some(joined) = self.joined.get(&name) else {
+            return;
+        };
+        let account = joined.account.clone();
+        account.confirm_signing_mode(self.socket, &name, mode, out.outbox(), out.instance_id());
+        self.registry.interruptions.delegated_status(
+            self.user(),
+            &name,
+            &out,
+            crate::interruption::DelegatedKeyStatus::KeyAvailable,
+        );
+        self.registry
+            .interruptions
+            .deliver(self.user(), &name, &out);
+        if let Some(kept) = self.registry.take_notice(
+            self.user(),
+            account.registry_name(),
+            &account.fingerprint,
+            self.identity.resume_from.as_deref(),
+        ) {
+            for frame in kept.frames(&name) {
+                out.send(frame);
+            }
+        }
     }
 
     pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
+        self.frame_received = Some(std::time::Instant::now());
+        let handled = self.handle_frame(text).await;
+        self.frame_received = None;
+        handled
+    }
+
+    async fn handle_frame(&mut self, text: &str) -> Result<(), Close> {
         if self.token_expired() {
             // Refusal does not shorten TOKEN_GRACE. Init replies keep the
             // request's registration without changing the current holder.
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
-                Ok(Inbound::Msg(msg)) if msg.op == "set-publish-interval" => {
+                Ok(Inbound::Msg(msg))
+                    if msg.op == "set-publish-interval" || msg.op == SET_ACTIVE_TICKER_SYMBOLS =>
+                {
                     let out = msg
                         .account_name
                         .as_deref()
                         .map(|name| self.account_out(name))
                         .unwrap_or_else(|| self.out.clone());
-                    out.send(envelope::publish_interval_refused(
-                        msg.account_name.as_deref(),
-                        "auth_expired",
-                        false,
-                    ));
+                    let refused = if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+                        envelope::active_ticker_symbols_refused
+                    } else {
+                        envelope::publish_interval_refused
+                    };
+                    out.send(refused(msg.account_name.as_deref(), "auth_expired", false));
                     return Ok(());
                 }
                 Ok(Inbound::OrderSubmit(submit))
@@ -1310,6 +1437,10 @@ impl Session {
                     self.set_publish_interval(msg);
                     return Ok(());
                 }
+                if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+                    self.set_active_ticker_symbols(msg);
+                    return Ok(());
+                }
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
@@ -1346,9 +1477,10 @@ impl Session {
                     if let Some(link) = &joined.account.link
                         && link.resolve(self.socket, response.clone())
                     {
-                        break;
+                        return Ok(());
                     }
                 }
+                self.sign_responses.unmatched(&response);
             }
             Inbound::Dispose { account_name } => {
                 if self.pending_verifications.contains_key(&account_name) {
@@ -1437,13 +1569,12 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
-        let Some(interval) = init.publish_interval_ms.millis() else {
-            out.send(envelope::publish_interval_refused(
-                Some(&init.account_name),
-                "invalid_publish_interval",
-                true,
-            ));
-            return Ok(());
+        let interval = match init.publication() {
+            Ok(preferences) => preferences,
+            Err(refusal) => {
+                out.send(refusal(Some(&init.account_name), true));
+                return Ok(());
+            }
         };
         self.registration_outputs
             .insert(init.account_name.clone(), out.clone());
@@ -1471,7 +1602,11 @@ impl Session {
             return Ok(());
         }
         if init.signing_mode.as_deref() == Some("delegated") {
-            self.admission_init(init);
+            if init.resume == Some(true) {
+                self.resume_delegated(init, out, interval).await;
+            } else {
+                self.admission_init(init);
+            }
             return Ok(());
         }
         self.handovers.forget(&init.account_name);
@@ -1551,13 +1686,15 @@ impl Session {
                 account.update_reply_outbox(self.socket, out.outbox(), &init.account_name);
             }
             previous.finish_registration(&out);
-            self.resnapshot(&init.account_name, Some(interval)).await;
+            self.resnapshot(&init.account_name, Some(interval.clone()))
+                .await;
             if !account.is_public() {
                 account.confirm_signing_mode(
                     self.socket,
                     &init.account_name,
                     envelope::AccountSigningMode::requested(&init),
                     out.outbox(),
+                    out.instance_id(),
                 );
             }
             return Ok(());
@@ -1656,7 +1793,7 @@ impl Session {
         account: Arc<Account>,
         out: Out,
         admitted_mode: envelope::AccountSigningMode,
-        interval: u16,
+        interval: Preferences,
     ) {
         let name = out.account_label(&account.name).to_owned();
         match self.client(&account, out.clone(), interval).await {
@@ -1691,10 +1828,13 @@ impl Session {
         &self,
         account: &Arc<Account>,
         out: Out,
-        interval: u16,
+        interval: Preferences,
     ) -> Result<Client, &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms())?;
         let id = self.registry.next_id();
+        account
+            .handle
+            .configure_store_frames(&account.name, &account.venue);
         let link = account.handle.join(id, true).await?;
         if self.token_expired() {
             account.handle.leave(id);
@@ -1706,12 +1846,13 @@ impl Session {
             client: id,
             loaded: self.loaded.clone(),
         });
-        let (publish_interval, publish_rx) = tokio::sync::watch::channel(interval);
+        let (publication, publish_rx) = tokio::sync::watch::channel(interval);
         let pump = tokio::spawn(pump(
             link,
             id,
             self.dropped.clone(),
             account.handle.clone(),
+            account.name.clone(),
             out.account_label(&account.name).to_owned(),
             out,
             pending.clone(),
@@ -1724,14 +1865,14 @@ impl Session {
             pump,
             pending,
             draining,
-            publish_interval,
+            publication,
         })
     }
 
     /// A new client on the same account takes a full snapshot (seq 1); the old
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
-    async fn resnapshot(&mut self, name: &str, requested_interval: Option<u16>) -> bool {
+    async fn resnapshot(&mut self, name: &str, requested_interval: Option<Preferences>) -> bool {
         if self.token_expired() {
             return false;
         }
@@ -1739,7 +1880,7 @@ impl Session {
             (
                 joined.account.clone(),
                 joined.out.clone(),
-                requested_interval.unwrap_or(*joined.client.publish_interval.borrow()),
+                requested_interval.unwrap_or_else(|| joined.client.publication.borrow().clone()),
             )
         }) else {
             return false;
@@ -1811,7 +1952,10 @@ impl Session {
         let gone: Vec<String> = self
             .joined
             .iter()
-            .filter(|(_, joined)| !registry.holds(&joined.account, socket))
+            .filter(|(_, joined)| {
+                let label = joined.out.account_label(&joined.account.name);
+                !registry.holds_label(&joined.account, socket, label)
+            })
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
@@ -1849,12 +1993,53 @@ impl Session {
             ));
             return;
         };
-        joined.client.publish_interval.send_replace(interval);
+        joined
+            .client
+            .publication
+            .send_modify(|preferences| preferences.interval = interval);
+    }
+
+    fn set_active_ticker_symbols(&self, msg: AccountMsg) {
+        let name = msg.account_name.as_deref();
+        let out = name
+            .map(|name| self.account_out(name))
+            .unwrap_or_else(|| self.out.clone());
+        let joined = name.and_then(|name| self.joined.get(name));
+        let Some(joined) = joined.filter(|joined| {
+            self.registry.holds(&joined.account, self.socket)
+                && !joined.client.draining.load(Ordering::Relaxed)
+                && !self.pending_verifications.contains_key(name.unwrap())
+        }) else {
+            out.send(envelope::active_ticker_symbols_refused(
+                name,
+                "not_admitted",
+                false,
+            ));
+            return;
+        };
+        let Some(tickers) =
+            envelope::RequestedTickers::parse(&msg.data["activeTickerSymbols"]).selection()
+        else {
+            out.send(envelope::active_ticker_symbols_refused(
+                name,
+                "invalid_active_ticker_symbols",
+                false,
+            ));
+            return;
+        };
+        joined
+            .client
+            .publication
+            .send_modify(|preferences| preferences.tickers = tickers);
     }
 
     async fn msg(&mut self, msg: AccountMsg) {
         if msg.op == "set-publish-interval" {
             self.set_publish_interval(msg);
+            return;
+        }
+        if msg.op == SET_ACTIVE_TICKER_SYMBOLS {
+            self.set_active_ticker_symbols(msg);
             return;
         }
         let Some(name) = msg.account_name.clone() else {
@@ -1950,8 +2135,8 @@ impl Session {
                 self.send(envelope::error(
                     Some(&name),
                     &format!(
-                        "{} was not run: this account is not connected yet. Try again once it has loaded",
-                        msg.op
+                        "{} wasn’t possible: this account isn’t connected yet. Try again once it has loaded.",
+                        algo_action_label(&msg.op)
                     ),
                 ));
             }
@@ -1981,15 +2166,21 @@ impl Session {
             )),
             (op, _, _)
                 if self.joined[&name].account.delegated().is_some()
-                    && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
-                        || op == "twap:state"
-                            && msg.data.as_array().is_some_and(|rows| {
-                                rows.iter().any(|row| {
-                                    serde_json::from_value::<PersistedTwap>(row.clone()).is_ok_and(
-                                        |entry| entry.state.status == TwapStatus::Running,
-                                    )
-                                })
-                            })) =>
+                    && (matches!(
+                        op,
+                        "exec"
+                            | "chaser:start"
+                            | "chaser:amend"
+                            | "twap:start"
+                            | "twap:amend"
+                            | "twap:resume"
+                    ) || op == "twap:state"
+                        && msg.data.as_array().is_some_and(|rows| {
+                            rows.iter().any(|row| {
+                                serde_json::from_value::<PersistedTwap>(row.clone())
+                                    .is_ok_and(|entry| entry.state.status == TwapStatus::Running)
+                            })
+                        })) =>
             {
                 let message = format!(
                     "DelegatedActionUnavailable: DELEGATED {op} is unavailable; only place and reduce-only close are enabled"
@@ -2065,7 +2256,7 @@ impl Session {
     async fn apply_settings(&mut self, name: &str, data: Value) {
         let out = self.account_out(name);
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
-        let interval = *self.joined[name].client.publish_interval.borrow();
+        let interval = self.joined[name].client.publication.borrow().clone();
         let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
             Ok(init) if init.account_name == name => {
                 let joined = &self.joined[name];
@@ -2357,6 +2548,31 @@ impl Session {
         } else {
             Vec::new()
         };
+        // A protective row's amend may complete as a position setting naming no
+        // order (Bybit trading-stop). Capture the target's shape before dispatch.
+        let protective_amend = match (order_frame, args.first()) {
+            (Some(OrderReceipt::Action { kind: "amend", .. }), Some(request)) => {
+                let id = request["order"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                account
+                    .handle
+                    .read(move |store| {
+                        store.order(&id).is_some_and(|order| {
+                            matches!(
+                                order.kind,
+                                safe_cex_engine::model::OrderType::StopLoss
+                                    | safe_cex_engine::model::OrderType::TakeProfit
+                                    | safe_cex_engine::model::OrderType::TrailingStopLoss
+                            )
+                        })
+                    })
+                    .await
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
         if let Some(OrderReceipt::Action {
             seq,
             kind,
@@ -2478,20 +2694,27 @@ impl Session {
                 if let Plan::Command { reply, command } | Plan::AfterLoad { reply, command } = plan
                 {
                     *reply = match receipt {
-                        OrderReceipt::Placement(seq) => methods::Reply::Intent {
+                        OrderReceipt::Placement { seq, .. } => methods::Reply::Intent {
                             client_order_id: command["orders"]
                                 .as_array()
                                 .filter(|orders| orders.len() == 1)
                                 .and_then(|orders| orders[0]["clientOrderId"].as_str())
                                 .map(str::to_owned),
                             seq,
+                            protective_legs: crate::order_contract::bracket_protective_legs(
+                                &account.venue,
+                                command,
+                            ),
                         },
                         OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
                             seq,
                             kind,
                             unit: matches!(reply, methods::Reply::Unit),
-                            idless_protection: kind == "place"
-                                && crate::full_writes::protection_only(command),
+                            idless_protection: match kind {
+                                "place" => crate::full_writes::protection_only(command),
+                                "amend" => protective_amend,
+                                _ => false,
+                            },
                         },
                     };
                 }
@@ -2723,7 +2946,7 @@ impl Session {
             method: method.to_owned(),
             reply,
             group: group.clone(),
-            incomplete: false,
+            incomplete: None,
             audit: None,
         };
         if !self.joined[name].account.running.io_allowed() {
@@ -2731,7 +2954,7 @@ impl Session {
                 name,
                 completion,
                 "ServerDraining",
-                "Router lease expired; no new work was sent",
+                "The server connection expired; no new orders were sent",
                 Some("notSent"),
                 order_frame,
             );
@@ -2766,6 +2989,7 @@ impl Session {
             ),
             _ => None,
         };
+        let frame_received = self.frame_received;
         let joined = self.joined.get_mut(name).unwrap();
         joined.account.placed.record_command(&command);
         let Some(id) = joined.next_command.checked_add(1) else {
@@ -2785,6 +3009,11 @@ impl Session {
             who: audit_who(&joined.account),
             origin: format!("socket:{}/client:{}", self.socket, joined.client.id),
             fields,
+            stages: crate::audit::Stages {
+                received: frame_received,
+                admitted: Some(std::time::Instant::now()),
+                ..Default::default()
+            },
         });
         completion.audit = audit;
         joined.client.pending.lock().unwrap().insert(id, completion);
@@ -2840,6 +3069,15 @@ impl Session {
                 }
                 return;
             }
+            // Stamped before handoff: the engine may complete before input returns.
+            if let Some(audit) = pending
+                .lock()
+                .unwrap()
+                .get_mut(&id)
+                .and_then(|entry| entry.audit.as_mut())
+            {
+                audit.stages.queued = Some(std::time::Instant::now());
+            }
             let failure = match handle.input(client, &command.to_string()) {
                 Ok(true) => None,
                 // Not queued, so not submitted: a definite failure, never retried.
@@ -2847,8 +3085,12 @@ impl Session {
                 Err(refused) => Some(refused.notice.to_string()),
             };
             if let Some(message) = failure
-                && let Some(pending) = pending.lock().unwrap().remove(&id)
+                && let Some(mut pending) = pending.lock().unwrap().remove(&id)
             {
+                // The queue refused it, so it was never queued.
+                if let Some(audit) = pending.audit.as_mut() {
+                    audit.stages.queued = None;
+                }
                 if audit_refusal
                     && !matches!(
                         pending.reply,
@@ -3000,6 +3242,8 @@ impl Session {
         }
         if let Some(user) = &self.identity.user {
             self.registry.park(self.resume_id.clone(), user, parked);
+            self.registry
+                .bind_resume_proof(&self.resume_id, &self.resume_proof);
             self.registry.session_closed(&self.resume_id);
         }
     }
@@ -3078,8 +3322,8 @@ fn after_load_pool<'a>(
     }
 }
 
-fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
-    if let Some(audit) = &pending.audit {
+fn settle(out: &Out, name: &str, mut pending: Pending, outcome: Result<Value, Value>) {
+    let audit = pending.audit.take().map(|mut audit| {
         if let Err(error) = &outcome
             && error["outcome"] == "notSent"
         {
@@ -3090,24 +3334,34 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                 pending.group.is_some(),
             );
         }
-        let mut fields = audit.fields.clone();
         if matches!(
             pending.reply,
             methods::Reply::Intent { .. } | methods::Reply::Action { .. }
         ) && let Ok(value) = &outcome
         {
-            fields.insert(
+            audit.fields.insert(
                 "result_shape".into(),
                 crate::audit::result_shape(value).into(),
             );
         }
-        crate::audit::log(
-            &audit.who,
-            &audit.origin,
-            &fields,
-            crate::audit::result(&outcome),
-        );
+        (audit, crate::audit::result(&outcome))
+    });
+    // Logged after the reply so `replied` is when the frame reached the socket writer.
+    let replied = reply(out, name, pending, outcome);
+    if let Some((mut audit, result)) = audit {
+        if replied {
+            audit.stages.replied = Some(std::time::Instant::now());
+        }
+        if let Some(offsets) = audit.stages.offsets() {
+            audit.fields.insert("stages_us".into(), offsets);
+        }
+        crate::audit::log(&audit.who, &audit.origin, &audit.fields, result);
     }
+}
+
+/// Sends the command's reply; `false` when a grouped leg leaves it to a later
+/// leg or the output did not take the frame.
+fn reply(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) -> bool {
     let outcome = match &pending.group {
         None => outcome,
         Some(group) => {
@@ -3119,7 +3373,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                     .push(error["message"].as_str().unwrap_or("failed").to_owned());
             }
             if group.remaining > 0 {
-                return;
+                return false;
             }
             if group.failures.is_empty() {
                 Ok(Value::Null)
@@ -3159,23 +3413,23 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
                 value
             }
         });
-        crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
-        return;
+        return crate::order_actions::settle(out, name, &pending.request_id, *seq, kind, outcome);
     }
     if let methods::Reply::Intent {
         client_order_id,
         seq,
+        protective_legs,
     } = &pending.reply
     {
-        order_frames::settle_intent(
+        return order_frames::settle_intent(
             out,
             name,
             &pending.request_id,
             client_order_id.as_deref(),
             *seq,
+            *protective_legs,
             outcome,
         );
-        return;
     }
     let data = match outcome {
         Ok(result) => {
@@ -3191,18 +3445,16 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             };
             let mut data =
                 json!({"requestId": pending.request_id, "success": true, "result": result});
-            if pending.incomplete {
-                data["completeness"] = json!({"incomplete": true});
+            if let Some(completeness) = pending.incomplete {
+                data["completeness"] = json!(completeness);
             }
             data
         }
         Err(detail) => json!({"requestId": pending.request_id, "success": false, "result": detail}),
     };
-    let _ = out.send(envelope::msg(name, "callMethod:done", data));
+    out.send(envelope::msg(name, "callMethod:done", data))
 }
 
-/// How often a client's `store.socketHealth` is re-derived, as the browser engine's sync.
-const SOCKET_HEALTH_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
 /// Last-message times alone change on every frame; they go out at most this often.
 const SOCKET_HEALTH_TIMES_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -3246,7 +3498,7 @@ pub fn socket_health(summary: SocketSummary) -> Value {
 
 /// Forwards one client's account output: frames as base64 SCXF with a per-client
 /// seq (the first frame is the snapshot), notices as the existing msg ops, and
-/// `store.socketHealth`, which frames do not carry, once the snapshot is out.
+/// native store sections carried by that same SCXF stream.
 /// Where a private account's pump reports that its held snapshot may go.
 struct Hold {
     client: u64,
@@ -3295,64 +3547,40 @@ async fn pump(
     client: u64,
     dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     handle: AccountHandle,
+    source_name: String,
     name: String,
     out: Out,
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
     mut hold: Option<Hold>,
-    mut publish_interval: tokio::sync::watch::Receiver<u16>,
+    mut publication: tokio::sync::watch::Receiver<Preferences>,
 ) {
     // Set while frames are withheld: when holding began.
     let mut held: Option<std::time::Instant> = None;
     let mut seq = 0u64;
     let mut publisher = crate::publication::Publisher::new(
-        *publish_interval.borrow(),
+        publication.borrow().interval,
         safe_cex_native::ServerConfig::default().max_frame_bytes,
     );
     let mut configuration_open = true;
-    let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
     let mut hold_tick = tokio::time::interval(SNAPSHOT_HOLD_CHECK);
-    let mut sent_health = (Value::Null, std::time::Instant::now());
-    let report_health = |sent: &mut (Value, std::time::Instant)| {
-        let sockets = handle.socket_health();
-        let health = socket_health(sockets.summary(now_ms()));
-        if !socket_health_due(&sent.0, &health, sent.1.elapsed()) {
-            return true;
-        }
-        // The host tracker's own view, on every state change: whether a private
-        // socket was ever seen opening and taking a frame.
-        if socket_health_due(&sent.0, &health, std::time::Duration::ZERO) {
-            Log::info(&format!(
-                "{name} socketHealth privateInitialized={} privateHealthy={} publicInitialized={} tracker public={:?} business={:?} private={:?}",
-                health["privateInitialized"],
-                health["privateHealthy"],
-                health["publicInitialized"],
-                sockets.public,
-                sockets.business,
-                sockets.private,
-            ));
-        }
-        *sent = (health.clone(), std::time::Instant::now());
-        out.send(envelope::msg(
-            &name,
-            "store",
-            json!({"socketHealth": health}),
-        ))
-    };
     loop {
         // Service cadence after each received item, even with a permanently ready inbox.
         // The preceding item's private sections/notices have already been sent.
         if !draining.load(Ordering::Relaxed) {
-            let interval = *publish_interval.borrow_and_update();
-            let ready = publisher.set_interval(interval).and_then(|mut frames| {
-                if publisher
-                    .deadline()
-                    .is_some_and(|at| at <= tokio::time::Instant::now())
-                {
-                    frames.extend(publisher.flush()?);
-                }
-                Ok(frames)
-            });
+            let preferences = publication.borrow_and_update().clone();
+            let ready = publisher
+                .set_interval(preferences.interval)
+                .and_then(|mut frames| {
+                    frames.extend(publisher.set_tickers(preferences.tickers)?);
+                    if publisher
+                        .deadline()
+                        .is_some_and(|at| at <= tokio::time::Instant::now())
+                    {
+                        frames.extend(publisher.flush()?);
+                    }
+                    Ok(frames)
+                });
             match ready {
                 Ok(frames) => {
                     if !publish_frames(&out, &name, &mut seq, frames) {
@@ -3378,7 +3606,7 @@ async fn pump(
                     break;
                 }
             },
-            changed = publish_interval.changed(), if configuration_open => {
+            changed = publication.changed(), if configuration_open => {
                 if changed.is_err() { configuration_open = false; }
                 continue;
             }
@@ -3389,12 +3617,7 @@ async fn pump(
                 release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
                 continue;
             }
-            _ = health_tick.tick() => {
-                if seq > 0 && !draining.load(Ordering::Relaxed) && !report_health(&mut sent_health) {
-                    break;
-                }
-                continue;
-            }
+
         };
         match item {
             Outgoing::Frame(bytes) => {
@@ -3415,6 +3638,12 @@ async fn pump(
                 if held.is_some() {
                     continue;
                 }
+                // Relabel native UI sections before cadence splits/coalesces public data.
+                let bytes = if source_name == name {
+                    bytes
+                } else {
+                    safe_cex_store_frames::with_account_label(&bytes, &name).into()
+                };
                 let initial = seq == 0;
                 match publisher.receive(bytes, initial) {
                     Ok(frames) => {
@@ -3427,9 +3656,6 @@ async fn pump(
                         let _ = dropped.send((name.clone(), client));
                         break;
                     }
-                }
-                if initial && seq > 0 && !report_health(&mut sent_health) {
-                    break;
                 }
             }
             Outgoing::Text(text) => {
@@ -3483,25 +3709,42 @@ fn notice_to_msg(
     // As the SDK bridge: a partial history read is answered with its rows and a
     // positive `completeness` marker, never as complete.
     if kind == "event" && notice["code"] == "history.incomplete" {
-        let owner = notice["fields"]["command"]
-            .as_u64()
-            .and_then(|id| u32::try_from(id).ok());
+        let owner = history_completeness::command_owner(&notice["fields"]["command"]);
         if let Some(id) = owner
             && let Some(waiting) = pending.lock().unwrap().get_mut(&id)
         {
-            waiting.incomplete = true;
+            waiting.incomplete = Some(Box::new(HistoryCompleteness::from_fields(
+                &notice["fields"],
+            )));
         }
     }
     let command = notice["command"]
         .as_u64()
         .and_then(|id| u32::try_from(id).ok());
+    // A native write identity is released immediately before that write's I/O.
+    if kind == "commandProgress"
+        && let Some(id) = command
+        && let Some(audit) = pending
+            .lock()
+            .unwrap()
+            .get_mut(&id)
+            .and_then(|waiting| waiting.audit.as_mut())
+    {
+        audit
+            .stages
+            .sent
+            .get_or_insert_with(std::time::Instant::now);
+    }
     // Only completions settle a request; other notices leave it waiting.
     let settles = matches!(kind, "done" | "error");
     let waiting = command
         .filter(|_| settles)
         .and_then(|id| pending.lock().unwrap().remove(&id));
     match (kind, waiting) {
-        ("done", Some(pending)) => {
+        ("done", Some(mut pending)) => {
+            if let Some(audit) = pending.audit.as_mut() {
+                audit.stages.responded = Some(std::time::Instant::now());
+            }
             let outcome = match (
                 notice.get("result").and_then(Value::as_str),
                 notice.get("error"),
@@ -3604,6 +3847,7 @@ pub fn unauthenticated_init_refusal(init: &InitPayload) -> Option<&'static str> 
         .then_some("Unauthenticated public Bybit init cannot include account or routing fields")
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3611,6 +3855,7 @@ mod tests {
 
     mod apexomni_batch_bridge;
     mod apply_settings;
+    mod audit_stages;
     mod backpack_local_proof;
     mod cosigned_coinbase;
     mod cosigned_venues;
@@ -3621,6 +3866,7 @@ mod tests {
     mod local_proof;
     mod provider_handover_refusals;
     mod publish_interval;
+    mod signing_diagnostics;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
@@ -4049,11 +4295,7 @@ mod tests {
                 session.init(first.clone()).await.unwrap();
                 assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_a));
                 while sent.try_recv().is_ok() {}
-                let old_update = envelope::msg(
-                    "acct",
-                    "store",
-                    json!({"balance":{"info":{"syntheticOwner":"A"}}}),
-                );
+                let old_update = envelope::msg("acct", "log", json!({"syntheticOwner":"A"}));
                 account_a.notify(old_update.clone());
                 assert_eq!(
                     sent.try_recv().unwrap(),
@@ -4082,11 +4324,7 @@ mod tests {
                     !old_callback(old_update.clone()),
                     "late A callback cannot adopt B's generation"
                 );
-                let new_update = envelope::msg(
-                    "acct",
-                    "store",
-                    json!({"balance":{"info":{"syntheticOwner":"B"}}}),
-                );
+                let new_update = envelope::msg("acct", "log", json!({"syntheticOwner":"B"}));
                 account_b.notify(new_update.clone());
                 let mut queued = Vec::new();
                 while let Ok(text) = sent.try_recv() {
@@ -4577,8 +4815,8 @@ mod tests {
                 let mut chase = Value::Null;
                 while let Ok(frame) = sent.try_recv() {
                     let frame: Value = serde_json::from_str(&frame).unwrap();
-                    if frame["d"]["op"] == "store"
-                        && let Some(row) = frame["d"]["data"]["activeChasers"].get(0)
+                    if let Some(rows) = crate::accounts::testing::native_frame_data(&frame)
+                        && let Some(row) = rows["activeChasers"].get(0)
                     {
                         chase = row["id"].clone();
                     }
@@ -4639,7 +4877,7 @@ mod tests {
                 let (mut late, mut frames) = user_session(registry, "u");
                 // Keep this stopped-actor fixture's original non-DELEGATED admission.
                 late.join(
-                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned, 0,
+                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned, Preferences::default(),
                 ).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
@@ -4687,7 +4925,7 @@ mod tests {
                         account,
                         late.out.clone(),
                         envelope::AccountSigningMode::Cosigned,
-                        0,
+                        Preferences::default(),
                     )
                     .await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
@@ -4716,6 +4954,41 @@ mod tests {
         assert_eq!(idle.drain_close(), Some(Close::Moved));
         assert_eq!(Close::Moved.code(), 4100);
         assert_eq!(Close::Moved.reason(), "draining: reconnect");
+    }
+
+    /// A second tab's init takes signing; the first tab only holds the account.
+    /// A chase's end reaches both, not only the signing tab.
+    #[tokio::test(start_paused = true)]
+    async fn a_chase_end_reaches_a_tab_that_does_not_sign() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, _first, mut first_sent) = chasing_session(&registry).await;
+                let (mut second, mut second_sent) = user_session(registry.clone(), "u");
+                assert!(second.init(acct_init()).await.is_ok());
+                let signer = crate::accounts::tests::signing(&account);
+                assert_eq!(signer, Some(second.socket), "the newest init signs");
+                let mut ended = registry.watch_algos_ended();
+                while first_sent.try_recv().is_ok() {}
+                while second_sent.try_recv().is_ok() {}
+                algo_op(&account, "chaser:terminateAll", "{}");
+                tokio::time::timeout(std::time::Duration::from_secs(60), ended.changed())
+                    .await
+                    .expect("the chase ends")
+                    .unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let ends = |sent: &mut crate::out::Receiver| {
+                    let mut count = 0;
+                    while let Ok(frame) = sent.try_recv() {
+                        let frame: Value = serde_json::from_str(&frame).unwrap();
+                        count += usize::from(frame["d"]["op"] == "chaser:complete");
+                    }
+                    count
+                };
+                assert_eq!(ends(&mut second_sent), 1, "the signing tab");
+                assert_eq!(ends(&mut first_sent), 1, "the tab that does not sign");
+            })
+            .await;
     }
 
     #[tokio::test(start_paused = true)]
@@ -5202,7 +5475,7 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| f.contains("chaser:start was not run") && f.contains("acct")),
+                .any(|f| f.contains("Starting the chase wasn’t possible") && f.contains("acct")),
             "{frames:?}"
         );
     }
@@ -5687,8 +5960,7 @@ mod tests {
                 let (mut chase, mut twap) = (Value::Null, Value::Null);
                 while let Ok(frame) = sent.try_recv() {
                     let frame: Value = serde_json::from_str(&frame).unwrap();
-                    let rows = &frame["d"]["data"];
-                    if frame["d"]["op"] == "store" {
+                    if let Some(rows) = crate::accounts::testing::native_frame_data(&frame) {
                         if let Some(row) = rows["activeChasers"].get(0) {
                             chase = row["id"].clone();
                         }
@@ -5886,11 +6158,12 @@ mod tests {
                     dropped,
                     handle,
                     "acct".into(),
+                    "acct".into(),
                     out,
                     Arc::default(),
                     Arc::default(),
                     Some(Hold { client: 1, loaded }),
-                    tokio::sync::watch::channel(0).1,
+                    tokio::sync::watch::channel(Preferences::default()).1,
                 ));
                 let mut accepted = 0;
                 for _ in 0..100 {
@@ -6138,11 +6411,12 @@ mod tests {
                 dropped,
                 handle.clone(),
                 "acct".into(),
+                "acct".into(),
                 out,
                 Arc::default(),
                 Arc::default(),
                 Some(Hold { client, loaded }),
-                tokio::sync::watch::channel(0).1,
+                tokio::sync::watch::channel(Preferences::default()).1,
             ));
             (sent, task)
         }
@@ -6389,11 +6663,12 @@ mod tests {
                         dropped,
                         handle.clone(),
                         "acct".into(),
+                        "acct".into(),
                         out,
                         Arc::default(),
                         Arc::default(),
                         Some(Hold { client: 1, loaded }),
-                        tokio::sync::watch::channel(0).1,
+                        tokio::sync::watch::channel(Preferences::default()).1,
                     ));
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                     while let Ok(text) = sent.try_recv() {
@@ -6527,7 +6802,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6564,7 +6839,7 @@ mod tests {
                 method: "fetchHistoricalFills".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6637,7 +6912,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6648,6 +6923,33 @@ mod tests {
         assert_eq!(reply["d"]["data"]["success"], false);
         assert_eq!(reply["d"]["data"]["result"]["outcome"], "unknown");
         assert_eq!(reply["d"]["data"]["result"]["message"], "rejected");
+    }
+
+    /// AGT-34: a Bybit partial-stop edit sent on unconfirmed evidence is a presented
+    /// CommandFailed (native `done` + `error`), so its "second stop may exist" text is in
+    /// the action result a DELEGATED client shows, not only in a side `commandError`.
+    #[test]
+    fn a_partial_stop_edit_warning_reaches_the_action_result() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            4,
+            Pending {
+                request_id: json!(11),
+                method: "amendOrder".into(),
+                reply: methods::Reply::Result,
+                group: None,
+                incomplete: None,
+                audit: None,
+            },
+        );
+        let message = "Your BTCUSDT edit was sent before the old stop’s cancellation was confirmed ({}). Check your open orders for a second stop.";
+        let notice =
+            json!({"type":"done","command":4,"error":message,"detail":{"kind":"rejected"}});
+        notice_to_msg(&out, "acct", &notice, &pending);
+        let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["d"]["data"]["success"], false);
+        assert_eq!(reply["d"]["data"]["result"]["message"], message);
     }
 
     #[test]
@@ -6663,7 +6965,7 @@ mod tests {
                     client_order_id: "cid-1".into(),
                 },
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6684,3 +6986,21 @@ mod delegated_writes_tests;
 #[cfg(test)]
 #[path = "session/tests/delegated_e2e.rs"]
 mod delegated_e2e;
+
+#[cfg(test)]
+#[path = "session/tests/delegated_resume.rs"]
+mod delegated_resume;
+
+/// Display names only, as the SDK's `algoActionLabel`; the op itself is unchanged.
+fn algo_action_label(op: &str) -> &'static str {
+    match op {
+        "chaser:start" => "Starting the chase",
+        "chaser:terminate" => "Stopping the chase",
+        "twap:start" => "Starting the TWAP",
+        "twap:resume" => "Resuming the TWAP",
+        "twap:pause" => "Pausing the TWAP",
+        "twap:stop" => "Stopping the TWAP",
+        "exec" => "Running this trading request",
+        _ => "This automated order request",
+    }
+}

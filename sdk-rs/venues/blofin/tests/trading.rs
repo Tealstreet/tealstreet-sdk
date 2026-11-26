@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 mod trusted;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -73,8 +74,12 @@ fn unknown_placement_rows_present_uncertainty_instead_of_rejection() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert!(!text.contains("rejected"), "{code}: {text}");
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some(message));
@@ -118,8 +123,12 @@ fn unknown_cancel_rows_present_uncertainty_instead_of_rejection() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert!(!text.contains("rejected"), "{code}: {text}");
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
@@ -148,8 +157,12 @@ fn unknown_top_level_placement_errors_present_uncertainty() {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{code}: {text}");
-        assert!(text.contains("Check Open Orders"), "{code}: {text}");
+        assert!(text.contains("confirm"), "{code}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{code}: {text}"
+        );
         assert_eq!(error.venue_code.as_deref(), Some(code));
         assert_eq!(error.venue_message.as_deref(), Some("internal failure"));
         assert!(
@@ -190,8 +203,12 @@ fn assert_codeless_write_requires_uncertainty(response: &str) {
         };
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text();
-        assert!(text.contains("unknown"), "{path}: {text}");
-        assert!(text.contains("Check Open Orders"), "{path}: {text}");
+        assert!(text.contains("confirm"), "{path}: {text}");
+        assert!(
+            text.replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
+            "{path}: {text}"
+        );
         assert!(!text.contains("rejected"), "{path}: {text}");
         assert!(
             h.pending
@@ -235,7 +252,10 @@ fn assert_combined_leg_cancel_unknown(code: &str) {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     let text = error.legacy_text();
     assert!(
-        text.contains("unknown") && text.contains("Check Open Orders"),
+        text.contains("confirm")
+            && text
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{text}"
     );
     assert!(
@@ -717,17 +737,19 @@ fn assert_dispatched_ambiguity_for<'a>(
             }
             assert_eq!(error.protection, None, "{operation} {failure:?}: {error:?}");
             assert!(
-                error.message.to_lowercase().contains("unknown"),
+                error.message.to_lowercase().contains("confirm"),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(
-                error.message.contains("Check Open Orders"),
+                error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(
                 !error.message.contains("refused")
-                    || (operation == "protective-put-back"
-                        && error.message.contains("put-back's outcome is unknown")),
+                    || (operation == "protective-put-back" && error.message.contains("confirm")),
                 "{operation} {failure:?}: {error:?}"
             );
             assert!(!error.message.contains("has no stop"), "{error:?}");
@@ -738,7 +760,10 @@ fn assert_dispatched_ambiguity_for<'a>(
                 }) = action
                 {
                     assert!(
-                        message.contains("unknown") && message.contains("Check Open Orders"),
+                        message.contains("confirm")
+                            && message
+                                .replace("Check your open orders", "Check Open Orders")
+                                .contains("Check Open Orders"),
                         "warning uses final outcome: {operation} {failure:?}: {message}"
                     );
                 }
@@ -1078,7 +1103,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("BTC") && error.message.contains("order is gone"),
+        error.message.contains("BTC")
+            && error
+                .message
+                .contains("order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );
@@ -2561,4 +2589,75 @@ fn a_partly_succeeded_cancel_envelope_stops_but_retains_applied_facts() {
         safe_cex_engine::write_plan::ElementResult::Applied { .. }
     )));
     assert!(h.e.store().order("1000171264712").is_none());
+}
+
+/// AGT-46: reduce-only stop-market and stop-limit triggers were refused as an
+/// opening shape. They place on order-algo with `reduceOnly: "true"`.
+#[test]
+fn reduce_only_conditional_stop_market_and_stop_limit_place_on_order_algo() {
+    use safe_cex_engine::model::OrderType;
+    for (limit, order_price) in [("", "-1"), (r#","price":54900"#, "54900")] {
+        let mut h = Harness::new();
+        h.open_private();
+        h.seed();
+        place(
+            &mut h,
+            &format!(
+                r#"[{{"symbol":"BTCUSDT","type":"conditional","side":"sell","amount":1,"triggerPrice":55000,"reduceOnly":true{limit}}}]"#
+            ),
+        );
+        assert!(h.failures.is_empty(), "{order_price}: {:?}", h.failures);
+        let request = h.take("order-algo");
+        let body: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["orderType"], "trigger");
+        assert_eq!(body["reduceOnly"], "true");
+        assert_eq!(body["side"], "sell");
+        assert_eq!(body["positionSide"], "net");
+        assert_eq!(body["triggerPrice"], "55000");
+        assert_eq!(body["triggerPriceType"], "last");
+        assert_eq!(body["orderPrice"], order_price);
+        assert_eq!(body["size"], "1");
+        h.respond(
+            request,
+            r#"{"code":"0","data":{"algoId":"501","code":"0"}}"#,
+        );
+        assert!(!done(&h), "{order_price}: {:?}", h.failures);
+        h.ws(&format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT","algoId":"501","orderType":"trigger","side":"sell","size":"1","triggerPrice":"55000","orderPrice":"{order_price}","triggerPriceType":"last","marginMode":"cross","positionSide":"net","reduceOnly":"true","state":"live"}}]}}"#));
+        let order =
+            h.e.store()
+                .order("501")
+                .expect("reduce-only trigger is listed");
+        assert_eq!(order.kind, OrderType::Conditional);
+        assert!(order.reduce_only);
+        assert_eq!(order.price, 55000.0);
+    }
+}
+
+#[test]
+fn opening_triggers_still_validate_their_shape() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000}]"#,
+    );
+    let request = h.take("order-algo");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+    assert!(body.get("reduceOnly").is_none());
+    assert_eq!(body["orderPrice"], "-1");
+    for refused in [
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000,"close":true}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000,"timeInForce":"ImmediateOrCancel"}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"sell","amount":1,"reduceOnly":true}]"#,
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        place(&mut h, refused);
+        assert!(done(&h), "{refused}");
+        assert!(
+            !h.pending.iter().any(|r| r.url.contains("order-algo")),
+            "{refused}"
+        );
+    }
 }

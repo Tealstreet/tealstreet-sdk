@@ -268,12 +268,12 @@ const loadTransports = () => {
     } };
 };
 const loadExchange = async (venue) => {
-  const [{ [venue.ts.className]: Exchange }, { DefaultStore }, { getTransport }, { directTransport }] = await Promise.all([
-    import(venue.ts.module), import('../../packages/safe-cex/src/store/store.base.ts'),
+  const [{ [venue.ts.className]: Exchange }, { FrameStore }, { getTransport }, { directTransport }] = await Promise.all([
+    import(venue.ts.module), import('../../packages/safe-cex/src/store/frameStore.ts'),
     import('../../packages/safe-cex/src/transport/registry.ts'), import('../../packages/safe-cex/src/transport/direct.ts'),
   ]);
   assert(getTransport({}) === directTransport, 'Ambient non-direct TS transport is unsupported');
-  return { Exchange, DefaultStore };
+  return { Exchange, FrameStore };
 };
 
 export async function recordTsPublic({ name = 'binance', books = ['BTCUSDT', 'ETHUSDT'], seconds = 60, testnet = false,
@@ -310,9 +310,9 @@ export async function recordTsPublic({ name = 'binance', books = ['BTCUSDT', 'ET
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: capture.wrapFetch(globalThis.fetch) });
     restoreNode = transports.installNodeSocket(capture.wrapWebSocket(transports.NodeWebSocket));
     capture.emit({ type: 'meta', epoch, private: false, source: 'live-ts-public', venue: name, testnet });
-    const { Exchange, DefaultStore } = await bounded(Promise.race([capture.failed,
+    const { Exchange, FrameStore } = await bounded(Promise.race([capture.failed,
       (dependencies.loadExchange ?? loadExchange)(venue)]), Math.max(0, startupDeadline - now()), 'TS recording loading/readiness timed out');
-    const store = new DefaultStore(); exchange = new Exchange(venue.ts.name, options, store);
+    const store = new FrameStore(); exchange = new Exchange(venue.ts.name, options, store);
     unsubscribe = store.subscribe((state) => { loaded = state.loaded?.markets === true && state.loaded?.tickers === true; });
     for (const client of axiosClients(exchange)) capture.wrapAxios(client);
     await bounded(Promise.race([capture.failed, (async () => {

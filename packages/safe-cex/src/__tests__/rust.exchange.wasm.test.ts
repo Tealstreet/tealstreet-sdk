@@ -1,28 +1,32 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { StoreData } from '../generated/StoreData';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
-vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 import { createHmac } from 'node:crypto';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
 import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybit/bybit.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
-import { prepareRecordedHttp } from './support/managedHttp';
+import { FrameStore } from '../store/frameStore';
 import { BROWSER_WS_HOSTS, setRoutingWsHosts } from '../transport/tealstreet/routing/routingTable';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
 import { virtualClock } from '../utils/virtualClock';
+import { nativeFixture } from './cutover/nativeFixture';
+import { prepareRecordedHttp } from './support/managedHttp';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -253,7 +257,12 @@ const bybitTransport = (category: 'linear' | 'inverse' | 'spot' = 'linear') => {
                     priceFilter: { tickSize: '0.10' },
                     lotSizeFilter:
                       category === 'spot'
-                        ? { basePrecision: '0.000001', minOrderQty: '0.00001', maxLimitOrderQty: '120', maxMarketOrderQty: '12' }
+                        ? {
+                            basePrecision: '0.000001',
+                            minOrderQty: '0.00001',
+                            maxLimitOrderQty: '120',
+                            maxMarketOrderQty: '12',
+                          }
                         : { qtyStep: category === 'inverse' ? '1' : '0.001', minOrderQty: '0.001', maxOrderQty: '120' },
                   },
                 ],
@@ -414,41 +423,75 @@ describe('RustEngineExchange', () => {
     setWasmEngineLoader(loadNodeEngine);
     const tape = recordedTransport();
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'invalid base64!' }, new DefaultStore());
+    exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'invalid base64!' }, new FrameStore());
     await expect(exchange.start()).rejects.toThrow(/base64/);
     expect(tape.requests).toEqual([]);
   });
 
   it('skips private metadata refresh for an implicitly public-only MEXC shell', async () => {
-    exchange = new RustEngineExchange('mexc', { key: '', secret: '' }, new DefaultStore());
+    exchange = new RustEngineExchange('mexc', { key: '', secret: '' }, new FrameStore());
     expect(exchange.isPublicDataOnly).toBe(true);
     await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
   });
 
   it('skips private WOO metadata for implicit public-only credentials', async () => {
-    exchange = new RustEngineExchange('woo', { key: '', secret: '' }, new DefaultStore());
+    exchange = new RustEngineExchange('woo', { key: '', secret: '' }, new FrameStore());
     await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
   });
 
   it('keeps WOO journal PnL on the order axis when fills have no PnL', async () => {
     setWasmEngineLoader(loadNodeEngine);
-    exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     await exchange.loadCapabilities();
     expect(exchange.hasStarted).toBe(false);
     const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([
-      { id: 'open', symbol: 'ETHUSDT', side: OrderSide.Buy, type: OrderType.Limit, status: OrderStatus.Closed,
-        price: 99, averagePrice: 100, amount: 1, filled: 1, reduceOnly: false,
-        createdTime: 1_000_000, updatedTime: 1_000_000, realizedPnl: 0, fees: 0.1, feeAsset: 'USDT' },
-      { id: 'close', symbol: 'ETHUSDT', side: OrderSide.Sell, type: OrderType.Limit, status: OrderStatus.Closed,
-        price: 111, averagePrice: 110, amount: 1, filled: 1, reduceOnly: true,
-        createdTime: 2_000_000, updatedTime: 2_000_000, realizedPnl: 10, fees: 0.1, feeAsset: 'USDT' },
+      {
+        id: 'open',
+        symbol: 'ETHUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        status: OrderStatus.Closed,
+        price: 99,
+        averagePrice: 100,
+        amount: 1,
+        filled: 1,
+        reduceOnly: false,
+        createdTime: 1_000_000,
+        updatedTime: 1_000_000,
+        realizedPnl: 0,
+        fees: 0.1,
+        feeAsset: 'USDT',
+      },
+      {
+        id: 'close',
+        symbol: 'ETHUSDT',
+        side: OrderSide.Sell,
+        type: OrderType.Limit,
+        status: OrderStatus.Closed,
+        price: 111,
+        averagePrice: 110,
+        amount: 1,
+        filled: 1,
+        reduceOnly: true,
+        createdTime: 2_000_000,
+        updatedTime: 2_000_000,
+        realizedPnl: 10,
+        fees: 0.1,
+        feeAsset: 'USDT',
+      },
     ]);
     const fills = vi.spyOn(exchange, 'fetchHistoricalFills').mockRejectedValue(new Error('fills lack PnL'));
     const records = await exchange.fetchHistoricalPositions({ account: 'woo-account', from: 500_000, to: 3_000_000 });
     expect(orders).toHaveBeenCalledWith({ from: 500_000, to: 3_000_000 });
     expect(fills).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ account: 'woo-account', symbol: 'ETHUSDT', state: 'closed', realizedPnl: 10, sourceAxis: 'orders' });
+    expect(records[0]).toMatchObject({
+      account: 'woo-account',
+      symbol: 'ETHUSDT',
+      state: 'closed',
+      realizedPnl: 10,
+      sourceAxis: 'orders',
+    });
   });
 
   it('routes real engine HTTP and private sockets through the account provider', async () => {
@@ -493,7 +536,7 @@ describe('RustEngineExchange', () => {
           }),
         },
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
     await exchange.start();
     expect(
@@ -524,102 +567,109 @@ describe('RustEngineExchange', () => {
     ['binancepm', 4321, 4321],
     ['binancepm', 0, 0],
     ['binancepm', undefined, 20000],
-  ] as const)('signs secondary reads, primary writes and lookup for %s with recvWindow %s', async (venue, recvWindow, expectedWindow) => {
-    const tape = recordedTransport({ balance: { status: 200, body: '[]' } });
-    const accountHost = venue === 'binancepm' ? 'papi.binance.com' : 'fapi.binance.com';
-    const orderPath = venue === 'binancepm' ? '/papi/v1/um/order' : '/fapi/v1/order';
-    const outgoing: Array<Parameters<Transport['request']>[0]> = [];
-    setWasmEngineLoader(loadNodeEngine);
-    setRustEngineTransport(() => ({
-      ...tape.transport,
-      request: async (request) => {
-        outgoing.push(request);
-        const url = new URL(request.url);
-        if (request.method === 'GET' && url.pathname.endsWith('/order')) {
-          return {
-            status: 200,
-            body: new TextEncoder().encode(
-              JSON.stringify({
-                orderId: 4243,
-                symbol: 'BTCUSDT',
-                clientOrderId: 'LostResponse1',
-                status: 'FILLED',
-                type: 'LIMIT',
-                origType: 'LIMIT',
-                side: 'BUY',
-                positionSide: 'BOTH',
-                reduceOnly: false,
-                price: '90000',
-                avgPrice: '90000',
-                origQty: '0.012',
-                executedQty: '0.012',
-                time: 1700000000000,
-                updateTime: 1700000000123,
-                timeInForce: 'GTC',
-              }),
-            ),
-          };
-        }
-        return tape.transport.request(request);
-      },
-    }));
-    exchange = new RustEngineExchange(
-      venue,
-      {
-        key: 'primary-key',
-        secret: 'primary-secret',
-        extra: { recvWindow },
-        secondary_key: 'read-key',
-        secondary_secret: 'read-secret',
-        secondaryProxyUrl: 'https://read-proxy.example/egress',
-        tealstreetProxy: false,
-        tealstreetTunnel: false,
-      },
-      new DefaultStore(),
-    );
-    await exchange.start();
-    const reads = outgoing.filter((r) => r.method === 'GET' && r.url.includes('signature='));
-    expect(reads.length).toBeGreaterThan(0);
-    for (const request of reads) {
-      expect(request.url.startsWith(`https://read-proxy.example/egress/https://${accountHost}/`)).toBe(true);
-      expect(request.headers['X-MBX-APIKEY']).toBe('read-key');
-      expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
-      const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
-      expect(signature).toBe(createHmac('sha256', 'read-secret').update(query).digest('hex'));
-    }
-    const publicRead = outgoing.find((r) => r.url.includes('/exchangeInfo'))!;
-    expect(publicRead.url).toBe('https://fapi.binance.com/fapi/v1/exchangeInfo');
-    expect(publicRead.headers['X-MBX-APIKEY']).toBeUndefined();
-    const listenKey = outgoing.find((r) => r.method === 'POST' && r.url.endsWith('/listenKey'))!;
-    expect(listenKey.headers['X-MBX-APIKEY']).toBe('primary-key');
-    expect(listenKey.url).not.toContain('read-proxy');
+  ] as const)(
+    'signs secondary reads, primary writes and lookup for %s with recvWindow %s',
+    async (venue, recvWindow, expectedWindow) => {
+      const tape = recordedTransport({ balance: { status: 200, body: '[]' } });
+      const accountHost = venue === 'binancepm' ? 'papi.binance.com' : 'fapi.binance.com';
+      const orderPath = venue === 'binancepm' ? '/papi/v1/um/order' : '/fapi/v1/order';
+      const outgoing: Array<Parameters<Transport['request']>[0]> = [];
+      setWasmEngineLoader(loadNodeEngine);
+      setRustEngineTransport(() => ({
+        ...tape.transport,
+        request: async (request) => {
+          outgoing.push(request);
+          const url = new URL(request.url);
+          if (request.method === 'GET' && url.pathname.endsWith('/order')) {
+            return {
+              status: 200,
+              body: new TextEncoder().encode(
+                JSON.stringify({
+                  orderId: 4243,
+                  symbol: 'BTCUSDT',
+                  clientOrderId: 'LostResponse1',
+                  status: 'FILLED',
+                  type: 'LIMIT',
+                  origType: 'LIMIT',
+                  side: 'BUY',
+                  positionSide: 'BOTH',
+                  reduceOnly: false,
+                  price: '90000',
+                  avgPrice: '90000',
+                  origQty: '0.012',
+                  executedQty: '0.012',
+                  time: 1700000000000,
+                  updateTime: 1700000000123,
+                  timeInForce: 'GTC',
+                }),
+              ),
+            };
+          }
+          return tape.transport.request(request);
+        },
+      }));
+      exchange = new RustEngineExchange(
+        venue,
+        {
+          key: 'primary-key',
+          secret: 'primary-secret',
+          extra: { recvWindow },
+          secondary_key: 'read-key',
+          secondary_secret: 'read-secret',
+          secondaryProxyUrl: 'https://read-proxy.example/egress',
+          tealstreetProxy: false,
+          tealstreetTunnel: false,
+        },
+        new FrameStore(),
+      );
+      await exchange.start();
+      const reads = outgoing.filter((r) => r.method === 'GET' && r.url.includes('signature='));
+      expect(reads.length).toBeGreaterThan(0);
+      for (const request of reads) {
+        expect(request.url.startsWith(`https://read-proxy.example/egress/https://${accountHost}/`)).toBe(true);
+        expect(request.headers['X-MBX-APIKEY']).toBe('read-key');
+        expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
+        const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
+        expect(signature).toBe(createHmac('sha256', 'read-secret').update(query).digest('hex'));
+      }
+      const publicRead = outgoing.find((r) => r.url.includes('/exchangeInfo'))!;
+      expect(publicRead.url).toBe('https://fapi.binance.com/fapi/v1/exchangeInfo');
+      expect(publicRead.headers['X-MBX-APIKEY']).toBeUndefined();
+      const listenKey = outgoing.find((r) => r.method === 'POST' && r.url.endsWith('/listenKey'))!;
+      expect(listenKey.headers['X-MBX-APIKEY']).toBe('primary-key');
+      expect(listenKey.url).not.toContain('read-proxy');
 
-    await expect(
-      exchange.placeOrder({
-        symbol: 'BTCUSDT',
-        type: OrderType.Limit,
-        side: OrderSide.Buy,
-        amount: 0.012,
-        price: 90000,
-      }),
-    ).resolves.toHaveLength(1);
-    await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'LostResponse1')).resolves.toMatchObject({
-      found: true,
-      order: { id: venue === 'binancepm' ? 'LostResponse1' : '4243', clientOrderId: 'LostResponse1', status: OrderStatus.Closed },
-    });
-    const primaryOrders = outgoing.filter((r) => new URL(r.url).pathname.endsWith('/order'));
-    expect(primaryOrders.map((r) => r.method)).toEqual(['POST', 'GET']);
-    for (const request of primaryOrders) {
-      expect(request.url.startsWith(`https://${accountHost}${orderPath}?`)).toBe(true);
-      expect(request.headers['X-MBX-APIKEY']).toBe('primary-key');
-      expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
-      const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
-      expect(signature).toBe(createHmac('sha256', 'primary-secret').update(query).digest('hex'));
-    }
-    expect(
-      outgoing.filter((r) => r.method === 'GET' && r.url.includes('origClientOrderId=LostResponse1')),
-    ).toHaveLength(1);
-  });
+      await expect(
+        exchange.placeOrder({
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 0.012,
+          price: 90000,
+        }),
+      ).resolves.toHaveLength(1);
+      await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'LostResponse1')).resolves.toMatchObject({
+        found: true,
+        order: {
+          id: venue === 'binancepm' ? 'LostResponse1' : '4243',
+          clientOrderId: 'LostResponse1',
+          status: OrderStatus.Closed,
+        },
+      });
+      const primaryOrders = outgoing.filter((r) => new URL(r.url).pathname.endsWith('/order'));
+      expect(primaryOrders.map((r) => r.method)).toEqual(['POST', 'GET']);
+      for (const request of primaryOrders) {
+        expect(request.url.startsWith(`https://${accountHost}${orderPath}?`)).toBe(true);
+        expect(request.headers['X-MBX-APIKEY']).toBe('primary-key');
+        expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
+        const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
+        expect(signature).toBe(createHmac('sha256', 'primary-secret').update(query).digest('hex'));
+      }
+      expect(
+        outgoing.filter((r) => r.method === 'GET' && r.url.includes('origClientOrderId=LostResponse1')),
+      ).toHaveLength(1);
+    },
+  );
 
   it.each([
     { secondary_key: 'read-key' },
@@ -633,11 +683,14 @@ describe('RustEngineExchange', () => {
       return recordedTransport().transport;
     });
     // The trusted setup boundary now rejects before BaseExchange can retain options.
-    expect(() => new RustEngineExchange(
-      'binance',
-      { key: 'primary-key', secret: 'primary-secret', ...secondary },
-      new DefaultStore(),
-    )).toThrow('secondary signing keys require a nonempty key and secret');
+    expect(
+      () =>
+        new RustEngineExchange(
+          'binance',
+          { key: 'primary-key', secret: 'primary-secret', ...secondary },
+          new FrameStore(),
+        ),
+    ).toThrow('The extra API credentials need both a key and secret');
     expect(transports).toBe(0);
   });
 
@@ -645,7 +698,7 @@ describe('RustEngineExchange', () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
 
     await exchange.start();
@@ -677,7 +730,7 @@ describe('RustEngineExchange', () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('binance', options, store);
 
     await exchange.start();
@@ -690,13 +743,25 @@ describe('RustEngineExchange', () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const sign = vi.fn(async (work: Parameters<NonNullable<ExchangeOptions['remoteSigner']>['sign']>[0]) => ({
-      id: work.id, wsAuthSignature: createHmac('sha256', 'delegated-provider-fixture').update(work.wsAuth!.toSign).digest('hex'),
+      id: work.id,
+      wsAuthSignature: createHmac('sha256', 'delegated-provider-fixture').update(work.wsAuth!.toSign).digest('hex'),
     }));
-    exchange = new RustEngineExchange('binance', { key: 'k', secret: '', remoteSigner: {
-      accountName: 'test', sign, isAvailable: () => true, onAvailabilityChange: () => () => undefined,
-    } }, store);
+    exchange = new RustEngineExchange(
+      'binance',
+      {
+        key: 'k',
+        secret: '',
+        remoteSigner: {
+          accountName: 'test',
+          sign,
+          isAvailable: () => true,
+          onAvailabilityChange: () => () => undefined,
+        },
+      },
+      store,
+    );
     await exchange.start();
     expect(store.balance).toMatchObject({ total: 1000, free: 900, used: 100 });
     expect(store.loaded.orders && store.loaded.positions).toBe(true);
@@ -726,22 +791,57 @@ describe('RustEngineExchange', () => {
       request: async ({ url }) => {
         const path = new URL(url).pathname;
         const data = path.endsWith('/contracts')
-          ? [{ symbol: 'BTCUSDT', baseCoin: 'BTC', quoteCoin: 'USDT', symbolStatus: 'normal', pricePlace: '1', priceEndStep: '1', sizeMultiplier: '0.001', minTradeNum: '0.001', maxOrderQty: '120', maxLever: '125' }]
-          : [{ symbol: 'BTCUSDT', bidPr: '99.9', askPr: '100.1', lastPr: '100', indexPrice: '99', changeUtc24h: '0.01', baseVolume: '1000', quoteVolume: '100000', fundingRate: '0.0001' }];
+          ? [
+              {
+                symbol: 'BTCUSDT',
+                baseCoin: 'BTC',
+                quoteCoin: 'USDT',
+                symbolStatus: 'normal',
+                pricePlace: '1',
+                priceEndStep: '1',
+                sizeMultiplier: '0.001',
+                minTradeNum: '0.001',
+                maxOrderQty: '120',
+                maxLever: '125',
+              },
+            ]
+          : [
+              {
+                symbol: 'BTCUSDT',
+                bidPr: '99.9',
+                askPr: '100.1',
+                lastPr: '100',
+                indexPrice: '99',
+                changeUtc24h: '0.01',
+                baseVolume: '1000',
+                quoteVolume: '100000',
+                fundingRate: '0.0001',
+              },
+            ];
         return { status: 200, body: new TextEncoder().encode(JSON.stringify({ code: '00000', data })) };
       },
     };
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => raw);
-    exchange = new RustEngineExchange('bitget', {
-      key: '', secret: '', publicDataOnly: true, tealstreetProxy: false, tealstreetTunnel: false,
-      transport: tealstreetTransport,
-    }, new DefaultStore());
+    exchange = new RustEngineExchange(
+      'bitget',
+      {
+        key: '',
+        secret: '',
+        publicDataOnly: true,
+        tealstreetProxy: false,
+        tealstreetTunnel: false,
+        transport: tealstreetTransport,
+      },
+      new FrameStore(),
+    );
     await exchange.start();
     await until(() => opened.length === 3);
     expect(opened.map(({ url }) => url)).toEqual(Array(3).fill('wss://ws.bitget.com/v2/ws/public'));
     expect(opened.every(({ channel, context }) => channel === 'public' && context?.recover === false)).toBe(true);
-    expect(new Set(opened.map(({ context }) => context?.feed))).toEqual(new Set(['primary', 'secondary-1', 'secondary-2']));
+    expect(new Set(opened.map(({ context }) => context?.feed))).toEqual(
+      new Set(['primary', 'secondary-1', 'secondary-2']),
+    );
   });
 
   it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
@@ -781,7 +881,7 @@ describe('RustEngineExchange', () => {
     };
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const callback = vi.fn(async ({ payload }: { payload: string }) => ({
       signature: createHmac('sha256', 'delegated-provider-fixture').update(payload).digest('hex'),
       headers: { 'X-Proof': 'same-attempt' },
@@ -807,7 +907,7 @@ describe('RustEngineExchange', () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, store);
 
     await exchange.start();
@@ -835,7 +935,7 @@ describe('RustEngineExchange', () => {
       const tape = recordedOkxTransport();
       setWasmEngineLoader(loadNodeEngine);
       setRustEngineTransport(() => tape.transport);
-      const store = new DefaultStore();
+      const store = new FrameStore();
       exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'p' }, store);
       await exchange.start();
       const eea = venue === 'okxeu' || venue === 'okxeudemo';
@@ -885,7 +985,7 @@ describe('RustEngineExchange', () => {
     const tape = recordedOkxTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('okx', { key: 'k', secret: 's', passphrase: 'p' }, store);
     await exchange.start();
     const order = store.orders.find((o) => o.id === '301')!;
@@ -906,80 +1006,98 @@ describe('RustEngineExchange', () => {
     expect(tape.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
   });
 
-  it.each(['cryptocom', 'weex', 'bitget', 'bitgetusdc'] as const)('honors %s caller IDs through the inherited shell helpers', async (venue) => {
-    // Reuse the existing wasm fixture to seed the shell's market preflight.
-    const tape = recordedTransport();
-    setWasmEngineLoader(loadNodeEngine);
-    setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
-    exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
-    await exchange.start();
-    const market = store.markets[0];
-    exchange.dispose();
-    const symbol = venue === 'weex' ? 'BTCUSDT' : 'BTCUSD-PERP';
-    store.update({ markets: [{ ...market, id: symbol, symbol }] });
-    exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'fixture-passphrase' }, store);
-    const opts = {
-      symbol,
-      type: OrderType.Limit,
-      side: OrderSide.Buy,
-      amount: 0.012,
-      price: 90000,
-      clientOrderId: 'Caller.crypto:01',
-    };
-    const sent: string[] = [];
-    exchange.placeOrder = async (order) => {
-      sent.push(order.clientOrderId!);
-      return ['crypto-4242'];
-    };
-    // The inherited lookup reads open orders from native state; this shell never starts.
-    exchange.fetchOrders = async () => store.orders;
-    await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
-      orderIds: ['crypto-4242'],
-      clientOrderId: opts.clientOrderId,
-    });
-    expect(sent).toEqual([opts.clientOrderId]);
-    expect(exchange.mintClientOrderId(opts)).toMatch(/^ts[A-Za-z0-9]{1,34}$/);
-    store.addOrder({
-      ...opts,
-      id: 'crypto-4242',
-      status: OrderStatus.Open,
-      filled: 0,
-      remaining: opts.amount,
-      reduceOnly: false,
-      lastUpdate: 1,
-    });
-    await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId)).resolves.toMatchObject({
-      found: true,
-      order: { id: 'crypto-4242', clientOrderId: opts.clientOrderId },
-    });
-    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'missing')).resolves.toEqual({
-      found: false,
-      definitive: false,
-    });
-    if (venue === 'bitget' || venue === 'bitgetusdc') {
-      await exchange.loadCapabilities();
-      expect(exchange.hasStarted).toBe(false);
-      for (const invalid of ['', 'invalid@id', 'a'.repeat(33)]) {
-        await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow(
-          'clientOrderId must match',
-        );
-        await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: invalid }])).rejects.toThrow(
-          'clientOrderId must match',
-        );
-      }
-      await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'bracket', stopLoss: 80000 }])).rejects.toThrow(
-        'order shape',
+  it.each(['cryptocom', 'weex', 'bitget', 'bitgetusdc'] as const)(
+    'honors %s caller IDs through the inherited shell helpers',
+    async (venue) => {
+      // Reuse the existing wasm fixture to seed the shell's market preflight.
+      const tape = recordedTransport();
+      setWasmEngineLoader(loadNodeEngine);
+      setRustEngineTransport(() => tape.transport);
+      const store = new FrameStore();
+      exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
+      await exchange.start();
+      const market = store.markets[0];
+      exchange.dispose();
+      const symbol = venue === 'weex' ? 'BTCUSDT' : 'BTCUSD-PERP';
+      store.apply(
+        nativeFixture(
+          { markets: [{ ...market, id: symbol, symbol }] },
+          store.markets.map((row) => row.symbol),
+        ),
       );
-      await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'split', amount: 1001 }])).rejects.toThrow(
-        'max size',
-      );
-      await expect(exchange.placeOrders([opts, opts])).rejects.toThrow('duplicated in one batch');
-      expect(exchange.mintClientOrderId({ ...opts, stopLoss: 80000 })).toBeUndefined();
-      expect(exchange.mintClientOrderId({ ...opts, amount: 1001 })).toBeUndefined();
+      exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'fixture-passphrase' }, store);
+      const opts = {
+        symbol,
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.012,
+        price: 90000,
+        clientOrderId: 'Caller.crypto:01',
+      };
+      const sent: string[] = [];
+      exchange.placeOrder = async (order) => {
+        sent.push(order.clientOrderId!);
+        return ['crypto-4242'];
+      };
+      // The inherited lookup reads open orders from native state; this shell never starts.
+      exchange.fetchOrders = async () => store.orders;
+      await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
+        orderIds: ['crypto-4242'],
+        clientOrderId: opts.clientOrderId,
+      });
       expect(sent).toEqual([opts.clientOrderId]);
-    }
-  });
+      expect(exchange.mintClientOrderId(opts)).toMatch(/^ts[A-Za-z0-9]{1,34}$/);
+      store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders,
+              {
+                ...opts,
+                id: 'crypto-4242',
+                status: OrderStatus.Open,
+                filled: 0,
+                remaining: opts.amount,
+                reduceOnly: false,
+                lastUpdate: 1,
+              },
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+      await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId)).resolves.toMatchObject({
+        found: true,
+        order: { id: 'crypto-4242', clientOrderId: opts.clientOrderId },
+      });
+      await expect(exchange.findOrderByClientOrderId(opts.symbol, 'missing')).resolves.toEqual({
+        found: false,
+        definitive: false,
+      });
+      if (venue === 'bitget' || venue === 'bitgetusdc') {
+        await exchange.loadCapabilities();
+        expect(exchange.hasStarted).toBe(false);
+        for (const invalid of ['', 'invalid@id', 'a'.repeat(33)]) {
+          await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow(
+            'clientOrderId must match',
+          );
+          await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: invalid }])).rejects.toThrow(
+            'clientOrderId must match',
+          );
+        }
+        await expect(
+          exchange.placeOrders([opts, { ...opts, clientOrderId: 'bracket', stopLoss: 80000 }]),
+        ).rejects.toThrow('order shape');
+        await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'split', amount: 1001 }])).rejects.toThrow(
+          'max size',
+        );
+        await expect(exchange.placeOrders([opts, opts])).rejects.toThrow('duplicated in one batch');
+        expect(exchange.mintClientOrderId({ ...opts, stopLoss: 80000 })).toBeUndefined();
+        expect(exchange.mintClientOrderId({ ...opts, amount: 1001 })).toBeUndefined();
+        expect(sent).toEqual([opts.clientOrderId]);
+      }
+    },
+  );
 
   it.each(['bytes', 'legacy'] as const)(
     'returns no outbound action payload for ticker updates and preserves socket errors (%s)',
@@ -1010,7 +1128,7 @@ describe('RustEngineExchange', () => {
         },
       }));
       setRustEngineTransport(() => tape.transport);
-      const store = new DefaultStore();
+      const store = new FrameStore();
       exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
       const errors: string[] = [];
       exchange.emitter.on('error', (message: string) => errors.push(message));
@@ -1034,7 +1152,7 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, store);
     await exchange.start();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
@@ -1084,7 +1202,7 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, store);
     await exchange.start();
     await until(() => tape.sockets.has('/v5/private'));
@@ -1104,7 +1222,10 @@ describe('RustEngineExchange', () => {
         { ...row, orderStatus: 'Filled', leavesQty: '0', cumExecQty: '0.012', cumExecValue: '1080', avgPrice: '90000' },
       ],
     });
-    send({ topic: 'execution', data: [{ ...row, execId: 'e-1', execType: 'Trade', execQty: '0.012', execPrice: '90000' }] });
+    send({
+      topic: 'execution',
+      data: [{ ...row, execId: 'e-1', execType: 'Trade', execQty: '0.012', execPrice: '90000' }],
+    });
     await until(() => seen.length > 0);
     expect(seen[0]).toEqual({ status: OrderStatus.Closed, filled: 0.012 });
   });
@@ -1113,7 +1234,7 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new DefaultStore());
+    exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new FrameStore());
     await exchange.start();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
     for (const clientOrderId of ['', 'invalid.id', 'a'.repeat(37)]) {
@@ -1145,18 +1266,24 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport('inverse');
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bybitinverse', { key: 'k', secret: 's' }, store);
     await exchange.start();
     expect(store.marketsBySymbol.BTCUSD).toMatchObject({ isInverse: true, precision: { amount: 1 } });
     const opts = { symbol: 'BTCUSD', type: OrderType.Limit, side: OrderSide.Buy, amount: 2, price: 90000 };
     expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'inverse-01' })).toEqual({
-      orderIds: ['4242'], clientOrderId: 'inverse-01',
+      orderIds: ['4242'],
+      clientOrderId: 'inverse-01',
     });
     const payload = JSON.parse(tape.writes[0].body!);
-    expect(payload).toMatchObject({ category: 'inverse', request: [{ symbol: 'BTCUSD', qty: '2', orderLinkId: 'inverse-01' }] });
+    expect(payload).toMatchObject({
+      category: 'inverse',
+      request: [{ symbol: 'BTCUSD', qty: '2', orderLinkId: 'inverse-01' }],
+    });
     expect(tape.socketUrls.some((url) => url.includes('/v5/public/inverse'))).toBe(true);
-    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow(
+      'clientOrderId must match',
+    );
     expect(tape.writes).toHaveLength(1);
   });
 
@@ -1164,24 +1291,59 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport('inverse');
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bybitinverse', { key: 'k', secret: 's' }, store);
     await exchange.start();
     await until(() => tape.sockets.has('/v5/private'));
     const privateSocket = tape.sockets.get('/v5/private')!;
-    privateSocket(JSON.stringify({ topic: 'position.inverse', data: [{
-      category: 'inverse', symbol: 'BTCUSD', positionIdx: 0, side: 'Buy', size: '1000',
-      avgPrice: '80000', leverage: '10', unrealisedPnl: '0.002',
-    }] }));
-    privateSocket(JSON.stringify({ topic: 'order.inverse', data: [{
-      category: 'inverse', symbol: 'BTCUSD', orderId: 'full-stop', side: 'Sell', orderStatus: 'Untriggered',
-      orderType: 'Market', stopOrderType: 'StopLoss', tpslMode: 'Full', triggerPrice: '80000',
-      qty: '11', leavesQty: '7', cumExecQty: '4', reduceOnly: true,
-    }] }));
+    privateSocket(
+      JSON.stringify({
+        topic: 'position.inverse',
+        data: [
+          {
+            category: 'inverse',
+            symbol: 'BTCUSD',
+            positionIdx: 0,
+            side: 'Buy',
+            size: '1000',
+            avgPrice: '80000',
+            leverage: '10',
+            unrealisedPnl: '0.002',
+          },
+        ],
+      }),
+    );
+    privateSocket(
+      JSON.stringify({
+        topic: 'order.inverse',
+        data: [
+          {
+            category: 'inverse',
+            symbol: 'BTCUSD',
+            orderId: 'full-stop',
+            side: 'Sell',
+            orderStatus: 'Untriggered',
+            orderType: 'Market',
+            stopOrderType: 'StopLoss',
+            tpslMode: 'Full',
+            triggerPrice: '80000',
+            qty: '11',
+            leavesQty: '7',
+            cumExecQty: '4',
+            reduceOnly: true,
+          },
+        ],
+      }),
+    );
     await until(() => store.positions.length === 1 && store.orders.some((o) => o.id === 'full-stop'));
-    expect(store.positions[0]).toMatchObject({ notional: 1000, extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
+    expect(store.positions[0]).toMatchObject({
+      notional: 1000,
+      extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 },
+    });
     expect(store.orders.find((o) => o.id === 'full-stop')).toMatchObject({
-      amount: 0, filled: 4, extra: { remainingNative: 7, remainingNotional: 7 },
+      amount: 0,
+      filled: 4,
+      extra: { remainingNative: 7, remainingNotional: 7 },
     });
   });
 
@@ -1189,25 +1351,39 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport('spot');
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, store);
     await exchange.start();
     expect(exchange.isSpot).toBe(true);
     expect(store.marketsBySymbol.BTCUSDT).toMatchObject({
-      isSpot: true, precision: { amount: 0.000001 }, limits: { leverage: { min: 1, max: 1 } },
+      isSpot: true,
+      precision: { amount: 0.000001 },
+      limits: { leverage: { min: 1, max: 1 } },
     });
     expect(store.positions).toEqual([]);
-    expect(tape.requests.filter(({ method, url }) => method === 'GET' && new URL(url).pathname === '/v5/account/info')).toHaveLength(1);
+    expect(
+      tape.requests.filter(({ method, url }) => method === 'GET' && new URL(url).pathname === '/v5/account/info'),
+    ).toHaveLength(1);
     expect(tape.requests.some(({ url }) => /position|fee-rate|PreLaunch/.test(url))).toBe(false);
-    expect(tape.requests.filter(({ url }) => url.includes('instruments-info')).every(({ url }) => !url.includes('limit='))).toBe(true);
+    expect(
+      tape.requests.filter(({ url }) => url.includes('instruments-info')).every(({ url }) => !url.includes('limit=')),
+    ).toBe(true);
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
     expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'spot-01' })).toEqual({
-      orderIds: ['4242'], clientOrderId: 'spot-01',
+      orderIds: ['4242'],
+      clientOrderId: 'spot-01',
     });
     expect(tape.writes).toHaveLength(1);
     expect(tape.writes[0].path).toBe('/v5/order/create');
-    expect(JSON.parse(tape.writes[0].body!)).toMatchObject({ category: 'spot', symbol: 'BTCUSDT', qty: '0.001', orderLinkId: 'spot-01' });
-    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    expect(JSON.parse(tape.writes[0].body!)).toMatchObject({
+      category: 'spot',
+      symbol: 'BTCUSDT',
+      qty: '0.001',
+      orderLinkId: 'spot-01',
+    });
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow(
+      'clientOrderId must match',
+    );
     expect(tape.writes).toHaveLength(1);
   });
 
@@ -1217,7 +1393,7 @@ describe('RustEngineExchange', () => {
       const tape = bybitTransport('spot');
       setWasmEngineLoader(loadNodeEngine);
       setRustEngineTransport(() => tape.transport);
-      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new FrameStore());
       await exchange.start();
       const requestsBefore = tape.requests.length;
       const valid = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
@@ -1233,7 +1409,7 @@ describe('RustEngineExchange', () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange('bybitdemo', { key: 'k', secret: 's', testnet }, new DefaultStore());
+    exchange = new RustEngineExchange('bybitdemo', { key: 'k', secret: 's', testnet }, new FrameStore());
     await exchange.start();
     const restHost = testnet ? 'api-testnet.bybit.com' : 'api-demo.bybit.com';
     expect(tape.requests.every(({ url }) => new URL(url).hostname === restHost)).toBe(true);
@@ -1246,7 +1422,9 @@ describe('RustEngineExchange', () => {
     );
     expect(exchange.isDemo).toBe(true);
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
-    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow(
+      'clientOrderId must match',
+    );
     expect(tape.writes).toEqual([]);
   });
 
@@ -1256,7 +1434,7 @@ describe('RustEngineExchange', () => {
       const tape = bybitTransport('spot');
       setWasmEngineLoader(loadNodeEngine);
       setRustEngineTransport(() => tape.transport);
-      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new FrameStore());
       await exchange.start();
       const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
       for (const value of [NaN, Infinity, -Infinity]) {
@@ -1274,7 +1452,7 @@ describe('RustEngineExchange', () => {
       const tape = bybitTransport('spot');
       setWasmEngineLoader(loadNodeEngine);
       setRustEngineTransport(() => tape.transport);
-      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new FrameStore());
       await exchange.start();
       const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 0.001 };
       const protectedOrder = { ...opts, bybitSlippageToleranceTicks: ticks };
@@ -1294,8 +1472,16 @@ describe('RustEngineExchange', () => {
     try {
       Object.assign(HYROTRADER_PROD_URL, { livenet: '', testnet: '' });
       Object.assign(HYROTRADER_SIMULATOR_URL, { livenet: '', testnet: '' });
-      exchange = new RustEngineExchange('hyrotrader', { key: 'k', secret: 's' }, new DefaultStore());
-      expect(exchange.mintClientOrderId({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 90000 })).toBeUndefined();
+      exchange = new RustEngineExchange('hyrotrader', { key: 'k', secret: 's' }, new FrameStore());
+      expect(
+        exchange.mintClientOrderId({
+          symbol: 'BTCUSDT',
+          type: OrderType.Limit,
+          side: OrderSide.Buy,
+          amount: 1,
+          price: 90000,
+        }),
+      ).toBeUndefined();
       await expect(exchange.start()).rejects.toThrow('URLs are not configured');
       expect(tape.requests).toEqual([]);
       expect(tape.socketUrls).toEqual([]);
@@ -1309,7 +1495,7 @@ describe('RustEngineExchange', () => {
     const tape = bingxTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange('bingx', { key: 'k', secret: 's' }, store);
     await exchange.start();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
@@ -1377,7 +1563,7 @@ describe('RustEngineExchange', () => {
     const tape = bingxTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange('bingx', { key: 'k', secret: 's' }, new DefaultStore());
+    exchange = new RustEngineExchange('bingx', { key: 'k', secret: 's' }, new FrameStore());
     await exchange.start();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
     for (const clientOrderId of ['', 'UPPER', 'a'.repeat(41)]) {
@@ -1412,9 +1598,9 @@ describe('RustEngineExchange', () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const workerStore = new DefaultStore();
+    const workerStore = new FrameStore();
     exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, workerStore);
-    const main = new BaseExchange('binance', { key: '', secret: '' }, new DefaultStore());
+    const main = new BaseExchange('binance', { key: '', secret: '' }, new FrameStore());
     const mainBooks: unknown[] = [];
     main.emitter.on('listenOrderBook', (book: unknown) => mainBooks.push(book));
     // The worker transfers each frame; main gets its own buffer.
@@ -1446,13 +1632,13 @@ describe('RustEngineExchange', () => {
   it('validates an account by its balance, or reports the venue error', async () => {
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => recordedTransport().transport);
-    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
     expect(await exchange.validateAccount()).toMatchObject({ error: '', balance: { total: 1000 } });
     exchange.dispose();
 
     const rejected = { status: 401, body: '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}' };
     setRustEngineTransport(() => recordedTransport({ account: rejected, leverageBracket: rejected }).transport);
-    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
     const result = await exchange.validateAccount();
     expect(result.error).toContain('Invalid API-key');
   });
@@ -1465,41 +1651,115 @@ describe('RustEngineExchange', () => {
       now: () => Date.now(),
       connect: (url, handlers) => {
         expect(url).toMatch(/^wss:\/\/kucoin.test\/socket\?token=token-/);
-        setTimeout(() => { handlers.onOpen(); handlers.onMessage(JSON.stringify({ type: 'welcome', id: 'fixture' })); }, 0);
-        return { close: () => {}, send: (text) => {
-          const message = JSON.parse(text) as { type: string; topic?: string; id?: string };
-          expect(message.type).not.toBe('login');
-          if (message.topic) topics.push(message.topic);
-          if (message.type === 'ping') setTimeout(() => handlers.onMessage(JSON.stringify({ type: 'pong', id: message.id })), 0);
-        } };
+        setTimeout(() => {
+          handlers.onOpen();
+          handlers.onMessage(JSON.stringify({ type: 'welcome', id: 'fixture' }));
+        }, 0);
+        return {
+          close: () => {},
+          send: (text) => {
+            const message = JSON.parse(text) as { type: string; topic?: string; id?: string };
+            expect(message.type).not.toBe('login');
+            if (message.topic) topics.push(message.topic);
+            if (message.type === 'ping')
+              setTimeout(() => handlers.onMessage(JSON.stringify({ type: 'pong', id: message.id })), 0);
+          },
+        };
       },
       request: async (request) => {
         requests.push(request);
         const name = new URL(request.url).pathname.split('/').pop()!;
         const data: Record<string, unknown> = {
-          active: [{ symbol: 'XBTUSDTM', baseCurrency: 'XBT', settleCurrency: 'USDT', status: 'Open', lotSize: 1, tickSize: 0.1, multiplier: 0.1, maxOrderQty: 1000, maxLeverage: 100 }],
+          active: [
+            {
+              symbol: 'XBTUSDTM',
+              baseCurrency: 'XBT',
+              settleCurrency: 'USDT',
+              status: 'Open',
+              lotSize: 1,
+              tickSize: 0.1,
+              multiplier: 0.1,
+              maxOrderQty: 1000,
+              maxLeverage: 100,
+            },
+          ],
           allTickers: [{ symbol: 'XBTUSDTM', price: '100', bestBidPrice: '99', bestAskPrice: '101' }],
-          positions: [{ symbol: 'XBTUSDTM', currentQty: 10, avgEntryPrice: '90', markPrice: '100', leverage: '10', marginMode: 'CROSS', positionMode: 0, unrealisedPnl: '0.1' }],
-          'account-overview': { accountEquity: '1000', availableBalance: '900', orderMargin: '100', unrealisedPNL: '0.1' },
+          positions: [
+            {
+              symbol: 'XBTUSDTM',
+              currentQty: 10,
+              avgEntryPrice: '90',
+              markPrice: '100',
+              leverage: '10',
+              marginMode: 'CROSS',
+              positionMode: 0,
+              unrealisedPnl: '0.1',
+            },
+          ],
+          'account-overview': {
+            accountEquity: '1000',
+            availableBalance: '900',
+            orderMargin: '100',
+            unrealisedPNL: '0.1',
+          },
           getPositionMode: { positionMode: 0 },
           getMarginMode: { marginMode: 'CROSS' },
           getCrossUserLeverage: { leverage: '10' },
-          orders: request.method === 'POST' ? { orderId: 'native-order' } : { currentPage: 1, totalPage: 1, totalNum: 1, items: [{ id: 'existing-native', symbol: 'XBTUSDTM', side: 'buy', type: 'limit', status: 'open', price: '95', size: 7, filledSize: 3, remainSize: 4, createdAt: 1700000000000 }] },
+          orders:
+            request.method === 'POST'
+              ? { orderId: 'native-order' }
+              : {
+                  currentPage: 1,
+                  totalPage: 1,
+                  totalNum: 1,
+                  items: [
+                    {
+                      id: 'existing-native',
+                      symbol: 'XBTUSDTM',
+                      side: 'buy',
+                      type: 'limit',
+                      status: 'open',
+                      price: '95',
+                      size: 7,
+                      filledSize: 3,
+                      remainSize: 4,
+                      createdAt: 1700000000000,
+                    },
+                  ],
+                },
           stopOrders: { currentPage: 1, totalPage: 1, totalNum: 0, items: [] },
           snapshot: { sequence: 100, bids: [[99, 3]], asks: [[101, 4]] },
         };
-        const payload = name.startsWith('bullet-') ? { token: `token-${++token}`, instanceServers: [{ endpoint: 'wss://kucoin.test/socket', pingInterval: 18000, pingTimeout: 10000 }] } : data[name];
+        const payload = name.startsWith('bullet-')
+          ? {
+              token: `token-${++token}`,
+              instanceServers: [{ endpoint: 'wss://kucoin.test/socket', pingInterval: 18000, pingTimeout: 10000 }],
+            }
+          : data[name];
         if (payload === undefined) throw new Error(`Untaped KuCoin request ${request.url}`);
-        return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify({ code: '200000', data: payload })) };
+        return {
+          status: 200,
+          headers: '',
+          body: new TextEncoder().encode(JSON.stringify({ code: '200000', data: payload })),
+        };
       },
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     };
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => transport);
-    const store = new DefaultStore();
-    exchange = new RustEngineExchange('kucoin', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase', extra: { kucoinBroker: { partner: 'partner', brokerKey: 'broker-fixture', brokerName: 'tealstreet' } } }, store);
-    const main = new BaseExchange('kucoin', { key: '', secret: '' }, new DefaultStore());
+    const store = new FrameStore();
+    exchange = new RustEngineExchange(
+      'kucoin',
+      {
+        key: 'fixture-key',
+        secret: 'fixture-secret',
+        passphrase: 'fixture-passphrase',
+        extra: { kucoinBroker: { partner: 'partner', brokerKey: 'broker-fixture', brokerName: 'tealstreet' } },
+      },
+      store,
+    );
+    const main = new BaseExchange('kucoin', { key: '', secret: '' }, new FrameStore());
     const books: OrderBook[] = [];
     main.emitter.on('listenOrderBook', ({ orderbook }: { orderbook: OrderBook }) => books.push(orderbook));
     exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
@@ -1509,22 +1769,65 @@ describe('RustEngineExchange', () => {
     expect(store.positions[0].contracts).toBe(1);
     expect(store.positions[0].extra?.contractsNative).toBe(10);
     expect(main.store.positions[0]).toMatchObject({ contracts: 1, extra: { contractsNative: 10 } });
-    expect(main.store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
+    expect(main.store.orders[0]).toMatchObject({
+      amount: 0.7,
+      filled: 0.3,
+      remaining: 0.4,
+      extra: { remainingNative: 4, filledInPlacementUnits: 3 },
+    });
     const { CrossTradeManager } = await import('../crossTrade/runtime/CrossTradeManager');
-    const masterStore = new DefaultStore();
-    masterStore.update({ markets: main.store.markets, tickers: main.store.tickers });
+    const masterStore = new FrameStore();
+    masterStore.apply(
+      nativeFixture(
+        { markets: main.store.markets, tickers: main.store.tickers },
+        masterStore.markets.map((row) => row.symbol),
+      ),
+    );
     const closes: number[] = [];
-    const copier = new CrossTradeManager({ getExchange: () => undefined, placeOrder: async (_copier, _market, _price, _account, _side, amount) => { closes.push(amount); } });
-    await (copier as any)._auditCopierPositions({ masterWeight: 1 }, { account: 'copier', weight: 1, symbolMappings: {} }, { name: 'binance', store: masterStore }, main);
+    const copier = new CrossTradeManager({
+      getExchange: () => undefined,
+      placeOrder: async (_copier, _market, _price, _account, _side, amount) => {
+        closes.push(amount);
+      },
+    });
+    await (copier as any)._auditCopierPositions(
+      { masterWeight: 1 },
+      { account: 'copier', weight: 1, symbolMappings: {} },
+      { name: 'binance', store: masterStore },
+      main,
+    );
     expect(closes).toEqual([10]);
-    expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
-    const ids = await exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 95, amount: 2, clientOrderId: 'caller-id' });
+    expect(store.orders[0]).toMatchObject({
+      amount: 0.7,
+      filled: 0.3,
+      remaining: 0.4,
+      extra: { remainingNative: 4, filledInPlacementUnits: 3 },
+    });
+    const ids = await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      price: 95,
+      amount: 2,
+      clientOrderId: 'caller-id',
+    });
     expect(ids).toEqual(['native-order']);
     const write = requests.find((request) => request.method === 'POST' && request.url.endsWith('/orders'))!;
-    expect(JSON.parse(write.body!)).toMatchObject({ clientOid: 'caller-id', size: '2', marginMode: 'CROSS', leverage: 10 });
+    expect(JSON.parse(write.body!)).toMatchObject({
+      clientOid: 'caller-id',
+      size: '2',
+      marginMode: 'CROSS',
+      leverage: 10,
+    });
     expect(write.headers['KC-API-KEY-VERSION']).toBe('2');
-    expect(write.headers['KC-API-PASSPHRASE']).toBe(createHmac('sha256', 'fixture-secret').update('fixture-passphrase').digest('base64'));
-    expect(write.headers['KC-API-PARTNER-SIGN']).toBe(createHmac('sha256', 'broker-fixture').update(write.headers['KC-API-TIMESTAMP'] + 'partner' + 'fixture-key').digest('base64'));
+    expect(write.headers['KC-API-PASSPHRASE']).toBe(
+      createHmac('sha256', 'fixture-secret').update('fixture-passphrase').digest('base64'),
+    );
+    expect(write.headers['KC-API-PARTNER-SIGN']).toBe(
+      createHmac('sha256', 'broker-fixture')
+        .update(write.headers['KC-API-TIMESTAMP'] + 'partner' + 'fixture-key')
+        .digest('base64'),
+    );
     await until(() => topics.includes('/contractMarket/tradeOrders'));
     exchange.listenOrderBook('BTCUSDT', () => {});
     await until(() => books.length > 0);
@@ -1601,7 +1904,7 @@ describe('RustEngineExchange', () => {
       }
     }
     setRustEngineTransport(() => new PrototypeTransport(transport));
-    const store = new DefaultStore();
+    const store = new FrameStore();
     exchange = new RustEngineExchange(
       'backpack',
       { key: 'public-test-key', secret: Buffer.alloc(32, 7).toString('base64') },

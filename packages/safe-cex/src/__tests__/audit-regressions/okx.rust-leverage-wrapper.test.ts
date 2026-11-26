@@ -5,15 +5,17 @@ import type { ExchangeName } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 const running: RustEngineExchange[] = [];
 
 const fixture = (name: ExchangeName) => {
   const commands: Array<Record<string, unknown>> = [];
+  const nativeLeverage: FrameStore['fetchedLeverage'] = {};
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name),
@@ -22,6 +24,7 @@ const fixture = (name: ExchangeName) => {
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols') return '[]';
       commands.push(command);
+      if (command.op === 'fetchLeverage') nativeLeverage[command.symbol] = { buyLeverage: 25, sellLeverage: 25 };
       const result = command.op === 'fetchLeverage' ? { buyLeverage: 25, sellLeverage: 25 } : [];
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
     },
@@ -33,7 +36,8 @@ const fixture = (name: ExchangeName) => {
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
@@ -45,9 +49,14 @@ const fixture = (name: ExchangeName) => {
       return engine;
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
-  const store = new DefaultStore();
-  installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  installNativeStartupFrames(engine, store, () => ({ fetchedLeverage: nativeLeverage }));
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(name, { key: 'k', secret: 's', passphrase: 'p' }, store);
   running.push(exchange);
   return { exchange, store, commands };
@@ -64,7 +73,7 @@ describe('OKX Rust leverage for flat symbols', () => {
     const { exchange, store, commands } = fixture(name);
     await exchange.start();
     expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toEqual({ buyLeverage: 25, sellLeverage: 25 });
-    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 25, sellLeverage: 25 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 25, sellLeverage: 25, positionMode: 'oneway' });
     expect(commands.at(-1)).toMatchObject({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   });
 });

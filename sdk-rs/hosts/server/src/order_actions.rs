@@ -386,14 +386,25 @@ pub(crate) fn decode_request(text: &str) -> Result<Request, serde_json::Error> {
 /// Schema rejection is terminal but never fabricates replay/no-handoff brands.
 /// Only the bound, authenticated pre-dispatch path may emit this outcome.
 pub fn unsupported(out: &Out, name: &str, id: &Value, seq: u64) {
+    unsupported_message(
+        out,
+        name,
+        id,
+        seq,
+        "This action isn’t supported by this version",
+    );
+}
+
+pub fn unsupported_message(out: &Out, name: &str, id: &Value, seq: u64, message: &'static str) {
     out.action_outcome(
         name,
         json!({"version":1,"intentId":id,"seq":seq,
         "outcome":"unsupported","result":null,
-        "error":{"message":"Unsupported v1 action schema","outcome":"unsupported"}}),
+        "error":{"message":message,"outcome":"unsupported"}}),
     );
 }
 
+/// Sends the typed outcome; `false` when the output did not take it.
 pub fn settle(
     out: &Out,
     name: &str,
@@ -401,17 +412,17 @@ pub fn settle(
     seq: u64,
     kind: &str,
     answer: Result<Value, Value>,
-) {
+) -> bool {
     let mut data = json!({"version":1,"intentId":id,"seq":seq,"outcome":"unknown","result":null,
-        "error":{"message":"Action result is not yet known","outcome":"unknown"}});
+        "error":{"message":"We couldn’t confirm this action. Check your open orders and positions before trying again.","outcome":"unknown"}});
     match answer {
         Ok(result) => {
             let applied = match kind {
-                "place"
+                "place" | "amend"
                     if result["protectionApplied"] == true
                         && result["orderIds"].as_array().is_some_and(Vec::is_empty) =>
                 {
-                    Some(json!({"kind":"place","orderIds":[],"protectionApplied":true}))
+                    Some(json!({"kind":kind,"orderIds":[],"protectionApplied":true}))
                 }
                 "amend" | "place" | "close" => {
                     let ids = result.as_array().or_else(|| result["orderIds"].as_array());
@@ -457,11 +468,24 @@ pub fn settle(
                 .is_some_and(|v| !v.is_empty())
                 || error["partialOrderCount"].as_u64().is_some_and(|v| v > 0)
                 || error["elements"].as_array().is_some_and(|v| !v.is_empty());
-            let not_sent = error["outcome"] == "notSent" && !partial;
+            // The engine's `rejected` means every released leg was definitively
+            // refused (AGT-68): no-effect proof, as for placement intents. Any
+            // partial, protection change or non-notSent element keeps it unknown.
+            let rejected = error["outcome"] == "rejected"
+                && !error["partial"].is_object()
+                && !error["protection"].is_string()
+                && error["partialOrderIds"]
+                    .as_array()
+                    .is_none_or(|v| v.is_empty())
+                && error["partialOrderCount"].as_u64().is_none_or(|v| v == 0)
+                && error["elements"]
+                    .as_array()
+                    .is_none_or(|v| v.iter().all(|e| e["status"] == "notSent"));
+            let not_sent = (error["outcome"] == "notSent" && !partial) || rejected;
             data["outcome"] = if not_sent { "refused" } else { "unknown" }.into();
             let message: String = error["message"]
                 .as_str()
-                .unwrap_or("Action result is not yet known")
+                .unwrap_or("We couldn’t confirm this action. Check your open orders and positions before trying again.")
                 .chars()
                 .take(512)
                 .collect();
@@ -469,7 +493,7 @@ pub fn settle(
                 json!({"message":message,"outcome":if not_sent {"notSent"} else {"unknown"}});
         }
     }
-    out.action_outcome(name, data);
+    out.action_outcome(name, data)
 }
 
 /// Capture both expiry bounds at arrival. Neither actor queues nor private-load
@@ -525,9 +549,13 @@ impl ActionGuard {
     pub(crate) fn check(&self) -> Result<(), &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms, crate::accounts::now_ms())?;
         if self.deadline.expired() {
-            Err("Action expired; no further action command was sent")
+            Err(
+                "This action expired before it could finish. Check your open orders and positions before trying again.",
+            )
         } else if !self.registration.action_active() {
-            Err("Action registration retired; no further action command was sent")
+            Err(
+                "The account connection changed before this action could finish. Check your open orders and positions before trying again.",
+            )
         } else {
             Ok(())
         }
@@ -536,7 +564,7 @@ impl ActionGuard {
 
 pub(crate) fn expired_outcome() -> Value {
     // Expiry is a dispatch fence, not whole-intent evidence of non-forwarding.
-    json!({"message":"Action expired; check orders and positions","outcome":"unknown"})
+    json!({"message":"This action expired. Check your open orders and positions before trying again.","outcome":"unknown"})
 }
 
 /// An actor-queued nuke owns its original registration and expiry, including
@@ -590,13 +618,14 @@ impl Drop for NukeReceipt {
                 seq,
                 self.kind,
                 Err(
-                    json!({"message":"Action interrupted; check orders and positions","outcome":"unknown"}),
+                    json!({"message":"This action was interrupted. Check your open orders and positions before trying again.","outcome":"unknown"}),
                 ),
             );
         }
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,6 +742,11 @@ mod tests {
             ("amend", Ok(json!(["changed"])), "applied"),
             ("amend", Ok(json!([])), "unknown"),
             (
+                "amend",
+                Ok(json!({"orderIds":[],"protectionApplied":true})),
+                "applied",
+            ),
+            (
                 "cancel",
                 Err(json!({"message":"connection lost"})),
                 "unknown",
@@ -767,6 +801,62 @@ mod tests {
             settle(&out, "main", &json!("intent"), 1, kind, answer);
             let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
             assert_eq!(frame["d"]["outcome"], expected, "{kind}: {frame}");
+        }
+    }
+
+    /// AGT-68: OKX 51088 was logged unknown and left a sticky "still
+    /// unconfirmed" toast. A whole-action venue rejection is no-effect proof,
+    /// exactly as `order_frames::settle_intent` already treats placements.
+    #[tokio::test]
+    async fn a_whole_action_venue_rejection_is_refused_not_unknown() {
+        let reason = "You can only place 1 TP/SL order to close an entire position (code 51088)";
+        for (kind, answer, expected) in [
+            (
+                "place",
+                Err(
+                    json!({"name":"ExchangeError","message":reason,"outcome":"rejected","venueCode":"51088"}),
+                ),
+                "refused",
+            ),
+            (
+                "place",
+                Err(json!({"message":reason,"outcome":"rejected",
+                    "elements":[{"index":0,"status":"notSent"}]})),
+                "refused",
+            ),
+            (
+                "place",
+                Err(
+                    json!({"message":reason,"outcome":"rejected","partialOrderIds":["native-first"]}),
+                ),
+                "unknown",
+            ),
+            (
+                "place",
+                Err(json!({"message":reason,"outcome":"rejected","partial":{"orderIds":[]}})),
+                "unknown",
+            ),
+            (
+                "cancelOrders",
+                Err(json!({"message":reason,"outcome":"rejected",
+                    "elements":[{"index":0,"status":"applied","effect":"cancel"}]})),
+                "unknown",
+            ),
+            (
+                "amend",
+                Err(json!({"message":reason,"outcome":"rejected","protection":"unprotected"})),
+                "unknown",
+            ),
+        ] {
+            let (out, mut sent, _) = Out::channel(4);
+            settle(&out, "main", &json!("intent"), 1, kind, answer);
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_eq!(frame["d"]["outcome"], expected, "{kind}: {frame}");
+            if expected == "refused" {
+                assert_eq!(frame["d"]["error"]["outcome"], "notSent", "{frame}");
+                assert_eq!(frame["d"]["error"]["message"], reason);
+                assert!(frame["d"]["result"].is_null());
+            }
         }
     }
 

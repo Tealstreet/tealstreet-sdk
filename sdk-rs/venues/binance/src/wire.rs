@@ -391,6 +391,11 @@ pub struct PlacedOrder {
     pub order_id: Option<Id>,
     #[serde(default)]
     pub algo_id: Option<Id>,
+    /// Native only: spot and portfolio margin claim the order by its native
+    /// id, on this symbol (AGT-196 `Notice::PlacementNativeId`).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(default)]
+    pub symbol: Option<String>,
 }
 
 /// One element of a `batchOrders` response: an order or an error.
@@ -480,6 +485,12 @@ pub struct AlgoUpdate<'a> {
     pub aid: Id,
     #[serde(borrow, default)]
     pub caid: Option<Str<'a>>,
+    /// The order the trigger placed in the matching engine; empty before it
+    /// fires. Raw, so an unexpected shape never drops the whole update.
+    /// Native only: it feeds `Notice::OrderTriggered`.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(borrow, default)]
+    pub ai: Option<&'a serde_json::value::RawValue>,
     #[serde(borrow, default)]
     pub aq: Option<Str<'a>>,
     #[serde(borrow, default)]

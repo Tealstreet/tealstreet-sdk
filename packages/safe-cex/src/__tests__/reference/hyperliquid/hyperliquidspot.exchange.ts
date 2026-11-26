@@ -1,8 +1,9 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { OrderWire } from '../../../exchanges/hyperliquid/hyperliquid.types';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
+import { mapSeries } from 'p-iteration';
 
 import { numberToString, parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_exchange';
 import {
@@ -14,6 +15,10 @@ import {
   SIGNIFICANT_DIGITS,
 } from '@tealstreet/ccxt-compat/src/functions/number';
 import { safeString } from '@tealstreet/ccxt-compat/src/functions/type';
+import { BaseExchange } from '../../../exchanges/base';
+import { hyperliquidClientOrderIdRule, mintHyperliquidCloid } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
+import { ENDPOINTS } from '../../../exchanges/hyperliquid/hyperliquid.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -41,16 +46,21 @@ import { validateWalletAndPrivateKey } from '../../../utils/ethereum/validateWal
 import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './hyperliquid.api';
-import { hyperliquidClientOrderIdRule, mintHyperliquidCloid } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
 import {
   orderRequestToOrderWire,
   orderWiresToNormalTPSLAction,
   orderWiresToOrderAction,
   signL1Action,
 } from './hyperliquid.signing';
-import { ENDPOINTS } from '../../../exchanges/hyperliquid/hyperliquid.types';
 import { calculatePricePrecision } from './hyperliquid.utils';
 import {
   AssetCtx,
@@ -95,7 +105,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
     }
   > = new Map();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 3 });
@@ -162,12 +172,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
         total: 0,
         upnl: 0,
       },
-      loaded: {
-        ...this.store.loaded,
-        orders: true,
-        balance: true,
-        positions: true,
-      },
+      loaded: { orders: true, balance: true, positions: true },
     };
 
     if (!useExternalPublicData) {
@@ -177,7 +182,11 @@ export class HyperliquidSpotExchange extends BaseExchange {
       storeUpdate.loaded.tickers = true;
     }
 
-    this.store.update(storeUpdate);
+    applyReferenceFixture(
+      this.store,
+      storeUpdate,
+      this.store.markets.map((row) => row.symbol),
+    );
 
     if (publicDataOnly) {
       this.log(`Ready to watch public data on Hyperliquid Spot`);
@@ -231,8 +240,8 @@ export class HyperliquidSpotExchange extends BaseExchange {
     for (let i = 0; i < meta.universe.length; i++) {
       const sourceMarket = meta.universe[i];
       // The documented contexts array is positional and may omit `coin`.
-      const sourceTicker = assets.find((asset: any) => asset.coin === sourceMarket.name) ??
-        (positionalContexts ? assets[i] : undefined);
+      const sourceTicker =
+        assets.find((asset: any) => asset.coin === sourceMarket.name) ?? (positionalContexts ? assets[i] : undefined);
       const token = meta.tokens.find((token) => token.index === meta.universe[i].tokens[0]);
       const quoteToken = meta.tokens.find((token) => token.index === sourceMarket.tokens[1]);
 
@@ -328,14 +337,20 @@ export class HyperliquidSpotExchange extends BaseExchange {
 
   private getSpotCoinMarkPrice = (coin: string, tokenIndex?: number): number => {
     const resolve = (name: string, index: number | undefined, visited: Set<string>, depth: number): number => {
-      const canonical = index === undefined ? this.store.marketsById[name]?.base :
-        this.store.markets.find((market) => market.info?.tokens?.[0] === index)?.base;
+      const canonical =
+        index === undefined
+          ? this.store.marketsById[name]?.base
+          : this.store.markets.find((market) => market.info?.tokens?.[0] === index)?.base;
       const key = (canonical ?? name).trim().toUpperCase();
       if (['USDC', 'USDT', 'USD', 'USDH'].includes(key)) return 1;
       if (!key || visited.has(key) || depth >= 3) return 0;
       const seen = new Set(visited).add(key);
-      const matches = this.store.markets.filter((candidate) => candidate.base?.toUpperCase() === key ||
-        candidate.id?.toUpperCase() === key || (index !== undefined && candidate.info?.tokens?.[0] === index));
+      const matches = this.store.markets.filter(
+        (candidate) =>
+          candidate.base?.toUpperCase() === key ||
+          candidate.id?.toUpperCase() === key ||
+          (index !== undefined && candidate.info?.tokens?.[0] === index),
+      );
       // Prefer a direct USD source over an earlier pair quoted in another token.
       matches.sort((a, b) => Number(b.quote === 'USDC') - Number(a.quote === 'USDC'));
       for (const market of matches) {
@@ -351,7 +366,9 @@ export class HyperliquidSpotExchange extends BaseExchange {
     return resolve(`${coin || ''}`, tokenIndex, new Set(), 0);
   };
 
-  private buildSpotBalance = (balances: Array<{ coin: string; hold: string; total: string; token?: number }>): Balance => {
+  private buildSpotBalance = (
+    balances: Array<{ coin: string; hold: string; total: string; token?: number }>,
+  ): Balance => {
     const currencies: { [asset: string]: { free: number; used: number; total: number; upnl: number } } = {};
     const coins: { [coin: string]: CoinBalance } = {};
 
@@ -407,9 +424,13 @@ export class HyperliquidSpotExchange extends BaseExchange {
       return;
     }
 
-    this.store.update({
-      balance: this.buildSpotBalance(balances),
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: this.buildSpotBalance(balances),
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   private fetchSpotClearinghouseState = async (): Promise<SpotClearinghouseState | null> => {
@@ -560,7 +581,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ]
@@ -573,7 +594,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
             {
@@ -584,7 +605,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ];
@@ -700,12 +721,55 @@ export class HyperliquidSpotExchange extends BaseExchange {
   //   "vaultAddress": null
   // }
 
+  /**
+   * The SL/TP legs a limit or market entry carries under `normalTpsl`, at the entry's size and
+   * limit price; spot wires are never reduce-only. AGT-117: market entries dropped them.
+   */
+  private bracketLegWires = (opts: PlaceOrderOpts, market: Market, limitPx: number) => {
+    const legs: OrderWire[] = [];
+    for (const [tpsl, triggerPx] of [
+      ['sl', opts.stopLoss],
+      ['tp', opts.takeProfit],
+    ] as const) {
+      if (!triggerPx) continue;
+      legs.push(
+        orderRequestToOrderWire(
+          {
+            coin: market.symbol,
+            is_buy: opts.side !== OrderSide.Buy,
+            sz: opts.amount,
+            limit_px: +this.priceToPrecision(market.symbol, limitPx),
+            order_type: { trigger: { isMarket: true, tpsl, triggerPx } },
+            reduce_only: false,
+            cloid: mintHyperliquidCloid(),
+          },
+          market.info.hyperliquidId,
+        ),
+      );
+    }
+    return legs;
+  };
+
+  // AGT-115: the base batch places one by one, so refuse a stop entry with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     // The caller's ID goes on the main wire verbatim; otherwise we mint one. Each TP/SL leg gets its own.
     const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
+    // AGT-115: legs are grouped only with a limit or market entry; a trigger entry would drop them.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
 
     // Use O(1) hashmap lookup instead of O(n) find
     const market = this.store.marketsBySymbol[opts.symbol];
@@ -752,16 +816,14 @@ export class HyperliquidSpotExchange extends BaseExchange {
         return;
       }
 
+      const limitPx = (ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95);
       const orderWire = orderRequestToOrderWire(
         {
           coin: market.symbol,
           is_buy: opts.side === OrderSide.Buy,
           sz: opts.amount,
           //limit_px: adjust((ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95), pPrice),
-          limit_px: +this.priceToPrecision(
-            ticker.symbol,
-            (ticker?.last || 0) * (opts.side === OrderSide.Buy ? 1.05 : 0.95),
-          ),
+          limit_px: +this.priceToPrecision(ticker.symbol, limitPx),
           order_type: {
             limit: {
               tif: 'Gtc' as any,
@@ -772,7 +834,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
         assetIndex,
       );
-      const action = orderWiresToOrderAction([orderWire]);
+      // AGT-117: the entry is a marketable limit, so its legs group with it as a limit's do.
+      const orderWires = [orderWire, ...this.bracketLegWires(opts, market, limitPx)];
+      const action =
+        orderWires.length > 1 ? orderWiresToNormalTPSLAction(orderWires) : orderWiresToOrderAction(orderWires);
 
       const nonce = +Date.now();
       const signature = await signL1Action(createWalletFromPrivateKey(this.options.secret), action, null, nonce);
@@ -947,53 +1012,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
       //                     }
       //                 }
 
-      if (opts.stopLoss) {
-        orderWires.push(
-          orderRequestToOrderWire(
-            {
-              coin: market.symbol,
-              is_buy: opts.side !== OrderSide.Buy,
-              sz: opts.amount,
-              //limit_px: opts.price || 0,
-              limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-              order_type: {
-                trigger: {
-                  isMarket: true,
-                  tpsl: 'sl',
-                  triggerPx: opts.stopLoss,
-                },
-              },
-              reduce_only: false,
-              cloid: mintHyperliquidCloid(),
-            },
-            assetIndex,
-          ),
-        );
-      }
-
-      if (opts.takeProfit) {
-        orderWires.push(
-          orderRequestToOrderWire(
-            {
-              coin: market.symbol,
-              is_buy: opts.side !== OrderSide.Buy,
-              sz: opts.amount,
-              //limit_px: opts.price || 0,
-              limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-              order_type: {
-                trigger: {
-                  isMarket: true,
-                  tpsl: 'tp',
-                  triggerPx: opts.takeProfit,
-                },
-              },
-              reduce_only: false,
-              cloid: mintHyperliquidCloid(),
-            },
-            assetIndex,
-          ),
-        );
-      }
+      orderWires.push(...this.bracketLegWires(opts, market, opts.price || 0));
 
       const action =
         opts.takeProfit || opts.stopLoss
@@ -1206,7 +1225,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
 
     this._deadOrders.add(order.id);
 
-    return await this.placeOrder(newOrder);
+    return await replacing(this, () => this.placeOrder(newOrder));
   };
 
   priceToPrecision = (symbol: string, price: any): string => {

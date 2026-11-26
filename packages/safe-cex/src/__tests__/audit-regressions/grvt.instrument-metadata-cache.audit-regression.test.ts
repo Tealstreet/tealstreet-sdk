@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { ENDPOINTS } from '../../exchanges/grvt/grvt.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 
 const instrument = (overrides: Record<string, unknown> = {}) => ({
   i: 'BTC_USDT_Perp',
@@ -21,11 +22,7 @@ const instrument = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const makeExchange = () =>
-  new GrvtExchange(
-    'grvt' as any,
-    { tuning: { consoleLogging: false } } as any,
-    new DefaultStore(),
-  );
+  new GrvtExchange('grvt' as any, { tuning: { consoleLogging: false } } as any, new FrameStore());
 
 describe('GRVT instrument metadata cache audit regression', () => {
   // Official all_instruments defaults omitted/empty k to PERPETUAL. These
@@ -36,9 +33,19 @@ describe('GRVT instrument metadata cache audit regression', () => {
     ['PUT', 'BTC_USDT_Put_20Oct23_2800'],
   ])('does not request %s even though its generic mapper accepts injected rows', async (kind, id) => {
     const exchange = makeExchange();
-    const post = vi.fn().mockResolvedValue({ data: { r: [instrument({
-      i: id, k: kind, e: '1697788800000000000', sp: '2800000000000', sp1: 'DAILY',
-    })] } });
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        r: [
+          instrument({
+            i: id,
+            k: kind,
+            e: '1697788800000000000',
+            sp: '2800000000000',
+            sp1: 'DAILY',
+          }),
+        ],
+      },
+    });
     exchange.xhr = { post } as any;
 
     const markets = await exchange.fetchMarkets();
@@ -67,7 +74,11 @@ describe('GRVT instrument metadata cache audit regression', () => {
       .mockResolvedValueOnce({ data: { r: [instrument()] } })
       .mockResolvedValueOnce({ data: { r: [instrument({ ih: '0x030599', bd: -3, qd: 8 })] } });
     exchange.xhr = { post } as any;
-    exchange.store.update({ markets: await exchange.fetchMarkets() });
+    applyReferenceFixture(
+      exchange.store,
+      { markets: await exchange.fetchMarkets() },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     await expect(exchange.refreshMarkets()).resolves.toEqual({ added: [], removed: [] });
 
@@ -79,7 +90,11 @@ describe('GRVT instrument metadata cache audit regression', () => {
     const exchange = makeExchange();
     const post = vi.fn().mockResolvedValue({ data: { r: [instrument()] } });
     exchange.xhr = { post } as any;
-    exchange.store.update({ markets: await exchange.fetchMarkets() });
+    applyReferenceFixture(
+      exchange.store,
+      { markets: await exchange.fetchMarkets() },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     post.mockClear();
     exchange.wallet = {} as any;
 
@@ -102,20 +117,24 @@ describe('GRVT instrument metadata cache audit regression', () => {
   ])('fails closed for %s signing metadata', async (_name, info) => {
     const exchange = makeExchange();
     exchange.wallet = {} as any;
-    exchange.store.update({
-      markets: [
-        {
-          id: 'BTC_USDT_Perp',
-          symbol: 'BTC_USDT_PERP',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-          info,
-        },
-      ] as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: 'BTC_USDT_Perp',
+            symbol: 'BTC_USDT_PERP',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            info,
+          },
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn();
     exchange.xhr = { post } as any;
 

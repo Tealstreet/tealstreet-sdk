@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -20,7 +21,7 @@ it('admits Backpack RemoteSigner while undeclared venues still refuse before cal
     let refusal: unknown;
     try { assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner }); } catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent',
-      message: expect.stringContaining("isn't available on the Hosted Server") });
+      message: expect.stringContaining("isn’t available for server trading") });
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
@@ -115,7 +116,7 @@ it('refuses foreign, partial and wrong-algorithm graphs before asking the device
     const r = rig();
     const request = work('fixture');
     mutate(request);
-    await expect(r.provider(request, context())).rejects.toThrow('Remote signing request refused');
+    await expect(r.provider(request, context())).rejects.toThrow('This request couldn’t be signed');
     expect(r.sign).not.toHaveBeenCalled();
   }
 });
@@ -129,13 +130,13 @@ it('refuses malformed signatures and wrong-account answers atomically, with reda
     JSON.stringify({ credential: 'fixture-key', signature: signature('fixture'), extra: true }),
   ]) {
     r.sign.mockImplementationOnce(async ({ id }) => ({ id, wsAuthSignature: answer }));
-    await expect(r.provider(work('fixture'), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(r.provider(work('fixture'), context())).rejects.toThrow(/^This request couldn’t be signed$/);
   }
   r.sign.mockRejectedValueOnce(new Error('fixture-secret fixture-seed ref:seed'));
-  await expect(r.provider(work('fixture'), context())).rejects.toThrow(/^Remote signing request refused$/);
+  await expect(r.provider(work('fixture'), context())).rejects.toThrow(/^This request couldn’t be signed$/);
   r.remoteSigner.isAvailable = () => false;
   // Availability is read on each guarded device operation.
-  await expect(r.provider(work('fixture'), context())).rejects.toThrow('Remote signer unavailable');
+  await expect(r.provider(work('fixture'), context())).rejects.toThrow('Signing isn’t available for this account');
 });
 
 it('cancels late device replies without returning partial signatures', async () => {
@@ -151,6 +152,6 @@ it('cancels late device replies without returning partial signatures', async () 
   });
   const pending = r.provider(work('fixture'), { signal: abort.signal });
   abort.abort();
-  await expect(pending).rejects.toThrow('Remote signing canceled');
+  await expect(pending).rejects.toThrow('Signing was cancelled');
   release();
 });

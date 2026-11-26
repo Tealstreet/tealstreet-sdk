@@ -1,11 +1,19 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ParadexExchange } from '../reference/paradex/paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
 
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+import { FrameStore } from '../../store/frameStore';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 it('uses socket control pings without sending invalid Paradex application heartbeat requests', () => {
   vi.useFakeTimers();
-  const exchange = new ParadexExchange('paradex', { publicDataOnly: true, tuning: { consoleLogging: false } } as any, new DefaultStore());
+  const exchange = new ParadexExchange(
+    'paradex',
+    { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
+    new FrameStore(),
+  );
   for (const socket of [exchange.publicWebsocket, exchange.privateWebsocket]) {
     Object.defineProperty(socket, 'isConnected', { get: () => true });
     const send = vi.spyOn(socket as any, 'send').mockImplementation(() => {});
@@ -18,7 +26,11 @@ it('uses socket control pings without sending invalid Paradex application heartb
   exchange.dispose();
 });
 it('authenticates only the matching object result with the documented node identity or legacy empty object', () => {
-  const exchange = new ParadexExchange('paradex', { publicDataOnly: true, tuning: { consoleLogging: false } } as any, new DefaultStore());
+  const exchange = new ParadexExchange(
+    'paradex',
+    { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
+    new FrameStore(),
+  );
   const socket = exchange.privateWebsocket as any;
   Object.defineProperty(socket, 'isConnected', { get: () => true });
   socket.authRequestId = 7;

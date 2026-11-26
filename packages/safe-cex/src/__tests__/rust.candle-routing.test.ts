@@ -5,8 +5,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../exchangeMetadata';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { disposePageCandleSources, RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import { FrameStore } from '../store/frameStore';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
@@ -70,7 +70,7 @@ const fixture = (privateAccount = true) => {
       testnet: true,
       bybitSiteId: 'BRA_BTL',
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   const bridge = vi.fn();
@@ -80,6 +80,7 @@ const fixture = (privateAccount = true) => {
 
 afterEach(() => {
   exchanges.splice(0).forEach((exchange) => exchange.dispose());
+  disposePageCandleSources();
   setWasmEngineLoader(loadNodeEngine);
   vi.useRealTimers();
 });
@@ -110,7 +111,10 @@ it.each([true, false])(
     expect(JSON.stringify(constructions[0])).not.toContain('primary.signing');
     expect(JSON.stringify(constructions[0])).not.toContain('primary.credential');
     expect(bridge).not.toHaveBeenCalled();
+    // The realm's shared source outlives its last mirror briefly, for a replacement (AGT-299).
     exchange.dispose();
+    expect(freed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(freed).toHaveBeenCalledOnce();
   },
 );

@@ -701,6 +701,35 @@ fn complete_fill_row_reconciles_order_and_keeps_future_amends_available() {
             .any(|r| r.method != safe_cex_engine::Method::Get)
     );
 }
+// AGT-83: the native execID is the fill identity; the order id is kept for attribution.
+#[test]
+fn exec_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, &order("New", 1));
+    e.take_frame(NOW);
+    for (sequence, exec, cumulative, leaves) in
+        [(2, "exec-1", "0.1", "0.2"), (3, "exec-2", "0.2", "0.1")]
+    {
+        let row = order("PartiallyFilled", sequence)
+            .replace(
+                "\"cumQty\":\"0\"",
+                &format!(r#""cumQty":"{cumulative}","execID":"{exec}","execQty":"0.1","execPriceRp":"69000","tradeType":"Trade""#),
+            )
+            .replace("\"leavesQty\":\"0.3\"", &format!("\"leavesQty\":\"{leaves}\""));
+        push_orders(&mut e, s, "incremental", sequence, &row);
+    }
+    let identities: Vec<_> = safe_cex_engine::wire::fills(e.take_frame(NOW).unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        ["exec-1", "exec-2"].map(|id| (Some(id.to_owned()), "one".to_owned(), 0.1))
+    );
+}
 #[test]
 fn incomplete_fill_blocks_amend_until_same_order_cumulative_update() {
     let (mut e, a, s) = started();

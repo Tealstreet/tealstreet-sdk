@@ -1,24 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WeexExchange } from '../reference/weex/weex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { WeexExchange } from '../reference/weex/weex.exchange';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new WeexExchange(
     'weex' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any,
@@ -29,10 +35,7 @@ const createExchange = () => {
 
 describe('audit regression: WEEX order error surfacing', () => {
   it.each([
-    [
-      { symbol: 'MISSING', type: OrderType.Market, side: OrderSide.Buy, amount: 1 },
-      'Market MISSING not found',
-    ],
+    [{ symbol: 'MISSING', type: OrderType.Market, side: OrderSide.Buy, amount: 1 }, 'Market MISSING not found'],
     [
       { symbol: 'BTCUSDT', type: OrderType.StopLoss, side: OrderSide.Sell, amount: 1 },
       'Trigger price is required for WEEX TP/SL orders',

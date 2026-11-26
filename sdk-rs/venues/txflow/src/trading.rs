@@ -1062,7 +1062,7 @@ enum Status {
 fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError> {
     if response.status != 200 {
         return Err(unknown(format!(
-            "TxFlow HTTP {} execution outcome is uncertain",
+            "TxFlow didn’t confirm this change (HTTP {}). Check your open orders before trying again.",
             response.status
         )));
     }
@@ -1077,7 +1077,9 @@ fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError>
     }
     if reply.status != "ok" || reply.code != Some(0) || reply.confirm.as_deref() != Some("executed")
     {
-        return Err(unknown("TxFlow execution outcome is uncertain"));
+        return Err(unknown(
+            "TxFlow didn’t confirm this change. Check your open orders before trying again.",
+        ));
     }
     let data = reply
         .data
@@ -1109,6 +1111,7 @@ fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

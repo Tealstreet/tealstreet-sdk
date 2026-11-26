@@ -8,8 +8,9 @@ import { expect, it, vi } from 'vitest';
 import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -106,13 +107,13 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
   };
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => transport);
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(
     'bitrue',
     { key: 'replay-key', secret: 'replay-secret', extra: { recvWindow: 12345 } },
     store,
   );
-  const main = new BaseExchange('bitrue', { key: '', secret: '' }, new DefaultStore());
+  const main = new BaseExchange('bitrue', { key: '', secret: '' }, new FrameStore());
   exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
   exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
   exchange.on('error', (error: unknown) => errors.push(error));
@@ -153,7 +154,12 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(bracketRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/leverageBracket?contractName=${symbol}`);
     // Prove this goes through the engine cache, not BaseExchange's JS store.
     const cachedOrders = store.orders;
-    store.update({ orders: [] });
+    store.apply(
+      nativeFixture(
+        { orders: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const lookupRequestsBefore = requests.filter((request) =>
       new URL(request.url).pathname.endsWith('/openOrders'),
     ).length;
@@ -164,7 +170,12 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(requests.filter((request) => new URL(request.url).pathname.endsWith('/openOrders'))).toHaveLength(
       lookupRequestsBefore,
     );
-    store.update({ orders: cachedOrders });
+    store.apply(
+      nativeFixture(
+        { orders: cachedOrders },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(await bounded(exchange.findOrderByClientOrderId(symbol, 'missing-caller'), 'open lookup')).toEqual({
       found: false,
       definitive: false,

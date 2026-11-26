@@ -575,6 +575,9 @@ export class Tape {
       throw error;
     }
     if (this.responses.unserved !== unservedBefore) this.pollingFence?.reject(new Error('Polling replay sent an unmatched HTTP request'));
+    // A taped read may quote an order index this replay created, as frames do.
+    if (this.venue.responseText && typeof response.body === 'string' && response.status !== 599)
+      response = { ...response, body: this.venue.responseText(response.body) };
     const matchedWrite = this.responses.isWrite(method, url) && response.status !== 599;
     const ackStage = matchedWrite ? this.responses.served.afterCommand : undefined;
     if (matchedWrite) {

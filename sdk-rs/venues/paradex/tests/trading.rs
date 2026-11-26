@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Trading contracts against documented request/response wire shapes.
 mod support;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
@@ -59,11 +60,21 @@ fn assert_dispatched_unknown(h: &Harness) {
     );
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{text}"
     );
     assert!(
-        !text.contains("refused") && !text.replace("may have no stop", "").contains("no stop"),
+        !text.contains("refused")
+            && !text
+                .replace(
+                    "stop was cancelled, but its replacement wasn’t confirmed",
+                    ""
+                )
+                .contains("no stop"),
         "{text}"
     );
     assert_eq!(error.protection, None);
@@ -597,7 +608,19 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
         })
         .expect("command failed");
     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
     }
     error
 }
@@ -896,8 +919,9 @@ fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
 /// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
+    // Native detail sits between what happened and the single action (#3726).
     assert!(
-        error.contains("outcome is unknown. Check Open Orders"),
+        error.contains("wasn’t confirmed") && error.matches("Check your open orders").count() == 1,
         "{error}"
     );
     let words = error.to_ascii_lowercase();
@@ -916,7 +940,8 @@ fn assert_unknown_put_back(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
     let words = error.to_ascii_lowercase();
     assert!(
-        !words.contains("no stop") || words.contains("may have no stop"),
+        !words.contains("no stop")
+            || words.contains("stop was cancelled, but its replacement wasn’t confirmed"),
         "{error}"
     );
 }
@@ -1222,7 +1247,7 @@ fn a_crossed_reference_at_planning_or_an_already_gone_stop_never_restores() {
     assert!(
         h.result(14)
             .unwrap_err()
-            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+            .contains("Your BTC-USD-PERP protection update wasn’t confirmed")
     );
 }
 
@@ -1952,7 +1977,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         let request = h.take("/orders");
         h.respond(request, status, body);
         if matches!(status, 408 | 429 | 500..) {
-            assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+            assert!(safe_cex_engine::error::carries_guidance(
+                h.result(8).unwrap_err(),
+                ENGINE_UNKNOWN_TEXT
+            ));
             assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
         } else {
             assert_eq!(h.result(8), Err(text), "{status} {body}");
@@ -1966,7 +1994,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
-    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        h.result(8).unwrap_err(),
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
@@ -1984,7 +2015,10 @@ fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() 
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
-    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        h.result(8).unwrap_err(),
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
@@ -2092,7 +2126,11 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
     assert_eq!(error.kind, kind);
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{error:?}"
     );
     assert_eq!(
@@ -2142,7 +2180,13 @@ fn the_first_unknown_diagnostic_is_retained_and_the_next_leg_is_withheld() {
         };
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.venue_message.as_deref(), Some(diagnostic));
-        assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+        assert!(
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
+        );
         assert!(!h.pending.iter().any(|r| r.method != Method::Get));
     }
 }
@@ -2182,7 +2226,11 @@ fn aggregation_normalizes_transport_unknown_warning() {
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text().to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert_eq!(text.contains("definitive refusal"), !lost_first, "{text}");
@@ -2223,7 +2271,11 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             let text = error.legacy_text().to_ascii_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{error:?}"
             );
             assert_eq!(
@@ -2340,7 +2392,7 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
         !h.pending.iter().any(|r| r.method == Method::Post),
         "the retry was written while the first placement is uncertain"
     );
-    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert!(h.result(9).unwrap_err().contains("confirm"));
     assert_eq!(
         h.failures.last().and_then(|e| e.outcome),
         Some(safe_cex_engine::Outcome::NotSent)
@@ -2349,7 +2401,7 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
     // 2. The read in flight before the write completes; the fence holds.
     h.respond(stale, 200, r#"{"results":[]}"#);
     place(&mut h, 10, vec![opts(OrderType::Limit)]);
-    assert!(h.result(10).unwrap_err().contains("uncertain"));
+    assert!(h.result(10).unwrap_err().contains("confirm"));
     assert!(!h.pending.iter().any(|r| r.method == Method::Post));
 
     // 3. The hook's owed read, dispatched after the write, releases it.
@@ -2417,7 +2469,7 @@ fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
         // Each re-ask joins the slow read: no restart, no second read.
         assert!(h.pending.is_empty(), "{:?}", h.pending);
         place(&mut h, 9, vec![opts(OrderType::Limit)]);
-        assert!(h.result(9).unwrap_err().contains("uncertain"));
+        assert!(h.result(9).unwrap_err().contains("confirm"));
     }
     assert_eq!(reasks, vec![1_000., 3_000., 7_000.]);
     h.respond(slow, 200, r#"{"results":[]}"#);
@@ -2451,7 +2503,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         !h.pending.iter().any(|r| r.method == Method::Delete),
         "cancel-all was sent while the placement is uncertain"
     );
-    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert!(h.result(9).unwrap_err().contains("confirm"));
     assert_eq!(
         h.failures.last().and_then(|e| e.outcome),
         Some(safe_cex_engine::Outcome::NotSent)
@@ -2463,7 +2515,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
     });
     let cancel = take_method(&mut h, Method::Delete, "/orders/resting");
     h.respond(cancel, 200, "{}");
-    assert!(!h.result(10).is_err_and(|e| e.contains("uncertain")));
+    assert!(!h.result(10).is_err_and(|e| e.contains("confirm")));
     // The cancel changed the order store after that read began, so its
     // snapshot cannot commit and cannot release the fence.
     h.respond(fresh, 200, r#"{"results":[]}"#);
@@ -2471,7 +2523,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         command: 11,
         symbol: "BTC-USD-PERP".into(),
     });
-    assert!(h.result(11).unwrap_err().contains("uncertain"));
+    assert!(h.result(11).unwrap_err().contains("confirm"));
     // The engine's re-ask starts a new read, whose clean snapshot releases it.
     let (timer, at) = h
         .actions
@@ -2610,8 +2662,16 @@ fn a_stop_replacement_with_unknown_outcome_says_the_stop_may_be_gone() {
         "an unknown replacement is never doubled"
     );
     let error = h.result(13).unwrap_err();
-    assert!(error.contains("may have no stop"), "{error}");
-    assert!(error.contains("Check Open Orders"), "{error}");
+    assert!(
+        error.contains("stop was cancelled, but its replacement wasn’t confirmed"),
+        "{error}"
+    );
+    assert!(
+        error
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -2663,7 +2723,7 @@ fn expire_cancel_proof(h: &mut Harness) {
             .last()
             .unwrap()
             .message
-            .contains("Check Open Orders and your position before replacing protection")
+            .contains("Check your open orders and position before adding protection")
     );
 }
 #[test]
@@ -3006,7 +3066,7 @@ fn cancel_proof_polls_are_bounded_and_share_one_nonrenewing_deadline() {
     assert!(
         h.result(13)
             .unwrap_err()
-            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+            .contains("Your BTC-USD-PERP protection update wasn’t confirmed")
     );
     assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history")));
 }
@@ -3124,7 +3184,7 @@ fn a_failed_cancel_proof_read_never_restores_or_retries_a_write() {
         assert!(
             h.failures[0]
                 .message
-                .contains("Check Open Orders and your position before replacing protection")
+                .contains("Check your open orders and position before adding protection")
         );
         assert!(
             !h.pending
@@ -3646,7 +3706,19 @@ fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
         unknown_exception_journal_and_telemetry(&h);
     }
 }
@@ -3670,14 +3742,38 @@ fn unknown_exception_child_halts_later_children_and_independent_entries() {
         let error = failed(&h, 91);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+                || (error.message.contains("confirm")
+                    && error
+                        .message
+                        .to_lowercase()
+                        .matches("check your open orders")
+                        .count()
+                        == 1
+                    && !error.message.contains(".;")
+                    && !error.message.contains(".:")),
+            "{error:?}"
+        );
         unknown_exception_journal_and_telemetry(&h);
     }
 }
 
 fn unknown_exception_journal_and_telemetry(h: &Harness) {
     let error = failed(h, 91);
-    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    assert!(
+        safe_cex_engine::error::carries_guidance(&error.message, ENGINE_UNKNOWN_TEXT)
+            || (error.message.contains("confirm")
+                && error
+                    .message
+                    .to_lowercase()
+                    .matches("check your open orders")
+                    .count()
+                    == 1
+                && !error.message.contains(".;")
+                && !error.message.contains(".:")),
+        "{error:?}"
+    );
     let event = h
         .actions
         .iter()
@@ -3690,7 +3786,10 @@ fn unknown_exception_journal_and_telemetry(h: &Harness) {
             _ => None,
         })
         .expect("Unknown journal telemetry");
-    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(safe_cex_engine::error::carries_guidance(
+        &event.message,
+        ENGINE_UNKNOWN_TEXT
+    ));
     assert!(
         event
             .fields

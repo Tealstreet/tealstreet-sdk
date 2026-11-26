@@ -18,7 +18,7 @@ assert.deepEqual(nx.errors, []);
 const options = { ...parsed.options, ...nx.options };
 
 function diagnostics(program) {
-  return ts.getPreEmitDiagnostics(program).map(d => ({
+  return ts.getPreEmitDiagnostics(program).map((d) => ({
     file: d.file?.fileName,
     code: d.code,
     line: d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : undefined,
@@ -26,8 +26,8 @@ function diagnostics(program) {
   }));
 }
 
-test('actual FrameApplier and Position reader compile with NX strict language options', () => {
-  const entry = path.join(sdk, 'src/store/frameApplier.ts');
+test('actual FrameStore and Position reader compile with NX strict language options', () => {
+  const entry = path.join(sdk, 'src/store/frameStore.ts');
   const program = ts.createProgram([entry], options);
   assert(program.getSourceFile(path.join(sdk, 'src/store/positionFrames.ts')), 'compile the real Position reader');
   assert.deepEqual(diagnostics(program), []);
@@ -48,15 +48,17 @@ const oldReader = {
 `;
   const host = ts.createCompilerHost(options);
   const original = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, version, ...args) => name === file
-    ? ts.createSourceFile(name, source, version, true)
-    : original(name, version, ...args);
+  host.getSourceFile = (name, version, ...args) =>
+    name === file ? ts.createSourceFile(name, source, version, true) : original(name, version, ...args);
   const errors = diagnostics(ts.createProgram([file], options, host));
-  assert.deepEqual(errors.map(({ file: filename, code, line }) => ({ file: filename, code, line })), [
-    { file, code: 2531, line: 6 },
-    { file, code: 2345, line: 6 },
-    { file, code: 2345, line: 7 },
-    { file, code: 2345, line: 8 },
-    { file, code: 2345, line: 9 },
-  ]);
+  assert.deepEqual(
+    errors.map(({ file: filename, code, line }) => ({ file: filename, code, line })),
+    [
+      { file, code: 2531, line: 6 },
+      { file, code: 2345, line: 6 },
+      { file, code: 2345, line: 7 },
+      { file, code: 2345, line: 8 },
+      { file, code: 2345, line: 9 },
+    ],
+  );
 });

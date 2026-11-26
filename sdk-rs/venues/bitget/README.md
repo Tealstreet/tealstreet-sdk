@@ -66,6 +66,15 @@ repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
 remainder. Per-lot rounding can change the submitted total. Batch chunks retain
 their 50-row limit and the existing partial-failure reporting.
 
+DELEGATED intent UUIDs use the server's lossless 32-character hexadecimal
+`clientOid` encoding (85b32c27469), while the router retains the original intent
+UUID. This fits the [UTA REST client-ID contract](https://www.bitget.com/docs/catalog/trading/order-management)
+and the shared native adapter's 32-character limit. A raw UUID has 36 characters
+and is refused before a write. Caller IDs also require one physical order: split
+amounts, brackets and algorithmic orders retain their existing refusal.
+`tests/trading.rs::delegated_uuid_encoding_preserves_one_plain_limit_order`
+pins the 0.001 BTCUSDT at 55000 case on Classic and UTA without venue I/O.
+
 UTA fills use the dedicated execution channel. UTA account topics cover multiple
 products, so orders are filtered by category and positions by margin coin and
 known market. Combined standalone TP/SL strategies use separate leg identities
@@ -82,7 +91,7 @@ never retried. This is the recorded stop-after-UNKNOWN parity exception
 (Sean/daxx, 2026-11-08): legacy TS can continue after an unproven acknowledgement.
 Venue-authored terminal write failures retain acknowledged IDs and name the
 unconfirmed request with
-`The outcome is unknown. Check Open Orders`; the companion
+`We couldn’t confirm this change. Check your open orders before trying again.`; the companion
 `order.outcome_unknown` event reports the command, acknowledged count and
 unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
@@ -105,6 +114,12 @@ UNPROVEN without a DEMO capture. Explicit selections refuse before send, and
 preset children retain only their returned `fill_price` / `mark_price` reference.
 UTA entries and Classic/UTA position TP/SL honor Last and Mark; Index refuses.
 See [trigger choices and UI integration](../../../../docs/plans/callers/bitget-tpsl-trigger-types.md).
+
+A whole-position TP/SL (`pos_loss`/`pos_profit`, or UTA `tpslMode: full`) is
+stored with amount 0 even when its row reports the current position size: it
+closes whatever is open when it triggers and holds no size. The close
+reservation (`reduceOrdersLockPositionSize`) therefore never counts it against a
+manual partial close (AGT-70); sized `loss_plan`/`profit_plan` rows keep their size.
 
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
@@ -177,3 +192,10 @@ failures carry neither field. Frame-fed consumers without their own native split
 receipt also omit them; frame/model quantities never stand in for a receipt.
 The same read-only binding applies to refusals and first-booking size mismatches
 and adds no event or request.
+
+## Stop-entry brackets (AGT-115)
+
+Stop, take-profit and trailing payloads (Classic `algo_payload`, UTA `strategy_payload`)
+never carry the order's own legs; they are position TP/SL or trailing closes. Such an entry
+with an attached stop-loss/take-profit used to place without it (live, 2026-11-21); the
+whole command now refuses in `preflight` before any I/O with the engine's shared `stop_entry_legs_refusal` copy.

@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Real perps candles must preserve JSON headers through managed preparation.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
@@ -445,6 +449,7 @@ fn hip3_raw_coin_spelling_is_preserved_in_public_managed_json() {
 fn streamed_prefix_is_never_published_and_progress_cannot_extend_deadline() {
     for failure in 0..3 {
         let mut e = boot(false);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         let actions = ask(&mut e, NOW, 611);
         let (token, _) = preparation(&actions);
         let timer = actions
@@ -503,7 +508,16 @@ fn streamed_prefix_is_never_published_and_progress_cannot_extend_deadline() {
         assert_eq!(error.outcome, None);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_)) || matches!(a, Action::Notice(Notice::Event(event)) if event.code == "history.incomplete")));
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
-        assert!(e.take_frame(NOW + 20_000.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            e.take_frame(NOW + 20_000.),
+            NOW + 20_000.,
+            if failure == 0 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 1, 0]
+            },
+        );
     }
 }
 
@@ -564,7 +578,10 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     let error = done[0].as_ref().unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, None);
-    assert_eq!(error.message, "Engine request capacity reached");
+    assert_eq!(
+        error.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Http(_) | Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }

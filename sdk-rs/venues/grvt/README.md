@@ -15,7 +15,7 @@ The six above-max cases and native refusal propagation are pinned in
 New-create failures include an indexed journal of native creates (parent and
 bracket children), retaining acknowledged client IDs and marking the unissued
 suffix `notSent`. An ambiguous reply returns
-`The outcome is unknown. Check Open Orders`, retains the diagnostic and client
+`We couldn’t confirm this change. Check your open orders before trying again.`, retains the diagnostic and client
 reconciliation identity in `venueMessage`, and emits `order.outcome_unknown`.
 Dispatch is unchanged: a definite refusal stops the serial batch, as in
 `grvt.exchange.ts:1608-1612` and `exchanges/base.ts:1111-1114`. The TS formatter

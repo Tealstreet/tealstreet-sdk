@@ -489,7 +489,7 @@ function correctCommands(ts, records, markets) {
           ts.commands,
           index,
           { error: `Coinbase cannot safely edit ${c.id}: CFM contract size units are not proven for native edit` },
-          { error: 'Coinbase native edit requires reconciled zero-fill spot LIMIT provenance' },
+          { error: 'This Coinbase edit requires a confirmed, unfilled spot limit order' },
           'unproven CFM native edit',
         );
       if (meta?.profile === 'intx') {

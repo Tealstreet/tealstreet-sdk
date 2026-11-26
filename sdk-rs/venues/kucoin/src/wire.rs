@@ -324,7 +324,8 @@ pub(crate) fn dispatched_write_failure(
         error.outcome = Some(Outcome::Unknown);
     }
     if error.outcome == Some(Outcome::Unknown) {
-        error.message = "KuCoin write outcome is unknown. Check Open Orders".into();
+        error.message =
+            "KuCoin didn’t confirm this change. Check your open orders before trying again.".into();
     }
     error
 }

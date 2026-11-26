@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! PM Algo Service REST and stream contracts; no live transport.
 mod support;
 use safe_cex_engine::model::{OrderType, PlaceOrderOpts};
@@ -29,6 +30,7 @@ fn starting_with(deferred: bool) -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk",200,r#"[{"entryPrice":"100","leverage":"20","markPrice":"100","positionAmt":"0.01","notional":"1","symbol":"BTCUSDT","unRealizedProfit":"0","liquidationPrice":"50","positionSide":"BOTH"}]"#);
+    h.respond("/papi/v1/um/symbolConfig",200,r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#);
     h.respond("/papi/v1/balance",200,r#"[{"asset":"USDT","totalWalletBalance":"1000","crossMarginFree":"900","umUnrealizedPNL":"0"}]"#);
     h
 }
@@ -327,6 +329,9 @@ fn pm_trailing_callback_rate_is_validated_before_cancel_and_can_be_put_back_exac
             if h.has_request("/papi/v1/um/positionRisk") {
                 h.respond("/papi/v1/um/positionRisk", 200, r#"[{"entryPrice":"100","leverage":"20","markPrice":"100","positionAmt":"0.01","notional":"1","symbol":"BTCUSDT","unRealizedProfit":"0","liquidationPrice":"50","positionSide":"BOTH"}]"#);
             }
+            if h.has_request("/papi/v1/um/symbolConfig") {
+                h.respond("/papi/v1/um/symbolConfig", 200, r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":"false","leverage":20,"maxNotionalValue":"6000000"}]"#);
+            }
             h.requests.clear();
             h.event(Event::Command(Command::AmendOrder {
                 command: 10,
@@ -423,7 +428,7 @@ fn unknown_algo_cancel_is_not_terminal_proof_even_for_a_cancel_only_command() {
         assert_unknown_no_create(&h, "unknown cancel");
         assert_eq!(
             h.result(7).unwrap().as_ref().unwrap_err(),
-            "Binance algo cancellation could not be confirmed; check Open Orders before re-placing. The outcome is unknown. Check Open Orders"
+            "Binance algo cancellation could not be confirmed; check Open Orders before re-placing. We couldn’t confirm this change. Check your open orders before trying again."
         );
         assert_eq!(h.engine.store().order("stop"), Some(&row));
         assert!(!h.has_request("/papi/v1/um/algo/algoOrder"));

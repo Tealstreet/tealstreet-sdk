@@ -16,7 +16,9 @@ FIFO inside each class. Reconciliation shares the reserve, while queued explicit
 fence/amend reads retain first rank. Already physical work is not preempted.
 Native refill is continuous at one weight per 60 ms, rather than a minute reset.
 Candles and caller history are bulk; catalogue, fees and builder reads remain
-normal. Account State/Orders, reconnect snapshots and Role/Mode/Spot prerequisites
+normal. A candle read reserves 20 plus one per 60 candles its requested span can
+return (ceil(span/step)+1, at most 6,000 rows = 120), not a flat 104 (AGT-113).
+Account State/Orders, reconnect snapshots and Role/Mode/Spot prerequisites
 use the closed reconciliation class. They keep the three-slot native bound;
 explicit amend reads retain their independent slot behavior. Existing three-slot account limits, including foreground Orders,
 remain in place. Native amend role/status weights are 60/2, matching the host.
@@ -24,7 +26,10 @@ remain in place. Native amend role/status weights are 60/2, matching the host.
 Shared waiters retain 100 ms renewal and a 2 s lease. At most 128 are tracked,
 with normal admission capped at 96 and bulk at 64 so they cannot fill every
 critical queue slot. Weight-blocked preparations retain their FIFO position when
-they reach dispatch. Cancelling one waiter removes only its own lease. The
+they reach dispatch. A shared `candleSnapshot` waiter that has queued 5 s ranks
+ahead of normal reads, never ahead of reconciliation or critical, so queued
+discovery cannot starve a chart read (AGT-299); the native queue is unchanged.
+Cancelling one waiter removes only its own lease. The
 shared 429 pause (Retry-After up to five minutes), generation check, established
 IDB failure behavior and dispatch-only charging/refund rules remain mandatory.
 No `/info` read bypasses a shared pause by changing its class.

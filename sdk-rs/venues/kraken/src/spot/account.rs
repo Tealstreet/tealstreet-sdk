@@ -1111,10 +1111,12 @@ impl KrakenSpot {
                 } else {
                     format!("{}:{filled}:{}", e.order_id, e.timestamp)
                 };
+                let execution =
+                    (!e.exec_id.is_empty() && e.last_qty.is_some()).then(|| e.exec_id.to_string());
                 fills.push((
                     key,
                     Fill {
-                        id: None,
+                        id: execution,
                         order_id: o.id.clone(),
                         symbol,
                         side,

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![cfg(feature = "test-support")]
 mod support;
 use safe_cex_engine::book::Book;
@@ -266,7 +267,7 @@ fn absent_callback_preserves_existing_error_and_actions() {
     let error = failure(&actions);
     assert_eq!(
         error.message,
-        "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+        "The exchange reply didn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
     assert_eq!(error.outcome, Some(Outcome::Unknown));

@@ -255,24 +255,12 @@ export class ExternalPublicDataProvider {
     }
   };
 
-  private handleTickers = (tickers: Ticker[]) => {
-    // Update store with tickers - same as direct WebSocket would do
-    this.parent.store.update({
-      tickers,
-      loaded: { ...this.parent.store.loaded, tickers: true },
-    });
+  private handleTickers = (_tickers: Ticker[]) => {
+    throw new Error('Public ticker state requires native SCXF frames');
   };
 
-  private handleTicker = (ticker: Ticker) => {
-    // Update single ticker
-    const tickers = [...this.parent.store.tickers];
-    const index = tickers.findIndex((t) => t.symbol === ticker.symbol);
-    if (index >= 0) {
-      tickers[index] = ticker;
-    } else {
-      tickers.push(ticker);
-    }
-    this.parent.store.update({ tickers });
+  private handleTicker = (_ticker: Ticker) => {
+    throw new Error('Public ticker state requires native SCXF frames');
   };
 
   private handleOrderbook = (symbol: string, orderbook: OrderBook) => {
@@ -290,11 +278,8 @@ export class ExternalPublicDataProvider {
     }
   };
 
-  private handleMarkets = (markets: Market[]) => {
-    this.parent.store.update({
-      markets: this.parent.adaptExternalMarkets(markets),
-      loaded: { ...this.parent.store.loaded, markets: true },
-    });
+  private handleMarkets = (_markets: Market[]) => {
+    throw new Error('Public market state requires native SCXF frames');
   };
 
   private onClose = () => {

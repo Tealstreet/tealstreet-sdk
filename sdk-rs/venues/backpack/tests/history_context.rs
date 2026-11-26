@@ -201,7 +201,23 @@ fn native_all_four_routes_complete_before_original_expiry() {
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
         );
-        assert_eq!(e.account_snapshot_frame(2036.), before);
+        let after = e.account_snapshot_frame(2036.);
+        // Rule 5 / #3640: a successful history HTTP receipt increments section 35;
+        // all financial/account sections must remain byte-identical.
+        let stable = |frame: &[u8]| {
+            safe_cex_engine::wire::sections(frame)
+                .filter(|(kind, _)| *kind != 35)
+                .map(|(kind, bytes)| (kind, bytes.to_vec()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(stable(after), stable(&before));
+        let successes = |frame: &[u8]| {
+            let (_, stats) = safe_cex_engine::wire::sections(frame)
+                .find(|(kind, _)| *kind == 35)
+                .unwrap();
+            u32::from_le_bytes(stats[..4].try_into().unwrap())
+        };
+        assert_eq!(successes(after), successes(&before) + 1);
     }
 }
 fn full_filtered_page() -> &'static str {

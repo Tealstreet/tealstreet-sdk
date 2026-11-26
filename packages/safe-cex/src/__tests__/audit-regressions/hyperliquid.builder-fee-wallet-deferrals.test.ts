@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { approveBuilderFeeWithBrowserWallet } from '../../exchanges/hyperliquid/hyperliquid.builderFee';
@@ -55,7 +56,7 @@ describe.each(['network', 'accounts'])('real ethers defers at %s', (stage) => {
     resume();
     const outcome = await result;
     if (switchOwner) {
-      expect(outcome).toEqual({ success: false, message: 'Builder fee approval cancelled-for-owner-change' });
+      expect(outcome).toEqual({ success: false, message: 'Builder fee approval stopped because the account connection changed' });
       expect(requests.filter((row) => row.owner === 'B')).toEqual([]);
       expect(fetch).not.toHaveBeenCalled();
     } else {

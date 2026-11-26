@@ -1,3 +1,4 @@
+import { applyReferenceFixture } from '../../packages/safe-cex/src/__tests__/cutover/referenceFixture.ts';
 // Fixture adapter for the independent Spot oracle; never imported by SDK factories.
 import axios from 'axios';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -29,9 +30,9 @@ export class BingxSpotReplayExchange {
   }
   async start() {
     const markets = await this.oracle.fetchMarkets();
-    this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+    applyReferenceFixture(this.store, { markets, loaded: { markets: true } });
     const tickers = await this.oracle.fetchTickers();
-    this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+    applyReferenceFixture(this.store, { tickers, loaded: { tickers: true } });
     this.public = this.socket(SPOT_WS, markets.map(m => `${m.id}@ticker`));
     if (!this.options.publicDataOnly) {
       const session = JSON.parse(await this.request('POST', '/openApi/user/auth/userDataStream'));
@@ -39,12 +40,12 @@ export class BingxSpotReplayExchange {
       this.private = this.socket(`${SPOT_WS}?listenKey=${session.listenKey}`, ['spot.executionReport', 'ACCOUNT_UPDATE']);
       await this.account();
     } else {
-      this.store.update({ loaded: { ...this.store.loaded, balance: true, orders: true, positions: true } });
+      applyReferenceFixture(this.store, {balance: {total: 0, free: 0, used: 0, upnl: 0}, orders: [], positions: [], loaded: { balance: true, orders: true, positions: true } });
     }
   }
   async account() {
     const [balance, orders] = await Promise.all([this.oracle.fetchBalance(), this.oracle.fetchOrders()]);
-    this.store.update({ balance, orders, positions: [], loaded: { ...this.store.loaded, balance: true, orders: true, positions: true } });
+    applyReferenceFixture(this.store, { balance, orders, positions: [], loaded: { balance: true, orders: true, positions: true } });
   }
   track(promise) {
     this.pending.add(promise);
@@ -70,8 +71,7 @@ export class BingxSpotReplayExchange {
     const { code = 0, dataType, data } = bigIntAsStringJsonParse(value);
     if (code !== 0 || !data) return;
     if (dataType.endsWith('@ticker')) {
-      this.store.updateTicker({ id: data.s }, { last: Number(data.c), percentage: Number(data.P),
-        bid: Number(data.B), ask: Number(data.A), volume: Number(data.v), quoteVolume: Number(data.q) });
+      applyReferenceFixture(this.store, {tickers: this.store.tickers.map(row => row.id === data.s ? {...row, last: Number(data.c), percentage: Number(data.P), bid: Number(data.B), ask: Number(data.A), volume: Number(data.v), quoteVolume: Number(data.q)} : row)});
     } else if (dataType.endsWith('@depth50')) {
       const symbol = dataType.split('@')[0].replaceAll('-', '');
       const levels = rows => rows.map(([price, amount]) => [Number(price), Number(amount)]);
@@ -81,17 +81,17 @@ export class BingxSpotReplayExchange {
       const order = this.oracle.mapOrder({ symbol: data.s, orderId: data.i, clientOrderID: data.C,
         side: data.S, type: data.o, status: data.X, origQty: data.q, executedQty: data.z, price: data.p,
         updateTime: data.T });
-      if (order.status === 'open') this.store.addOrUpdateOrder(order);
-      else this.store.removeOrder(order);
+      if (order.status === 'open') applyReferenceFixture(this.store, {orders: [...this.store.orders.filter(row => row.id !== order.id), order]});
+      else applyReferenceFixture(this.store, {orders: this.store.orders.filter(row => row.id !== order.id)});
       const fillKey = `${data.i}:${data.t}`;
       if (Number(data.l) > 0 && Number(data.L) > 0 && !this.seenFills.has(fillKey)) {
         this.seenFills.add(fillKey);
         this.emitter.emit('fill', { id: String(data.t), orderId: String(data.i), symbol: order.symbol,
           executionId: String(data.t), side: order.side, price: Number(data.L), amount: Number(data.l), fee: Number(data.n) });
       }
-      this.track(this.oracle.fetchBalance().then(balance => this.store.update({ balance })));
+      this.track(this.oracle.fetchBalance().then(balance => applyReferenceFixture(this.store, { balance })));
     } else if (dataType === 'ACCOUNT_UPDATE') {
-      this.track(this.oracle.fetchBalance().then(balance => this.store.update({ balance })));
+      this.track(this.oracle.fetchBalance().then(balance => applyReferenceFixture(this.store, { balance })));
     }
   }
   listenOrderBook(symbol, callback) {
@@ -106,7 +106,7 @@ export class BingxSpotReplayExchange {
     for (const order of orders) ids.push(...await this.oracle.placeOrder(order));
     return ids;
   }
-  async cancelOrders(orders) { for (const order of orders) { await this.oracle.cancelOrder(order.id, order.symbol); this.store.removeOrder(order); } }
+  async cancelOrders(orders) { for (const order of orders) { await this.oracle.cancelOrder(order.id, order.symbol); applyReferenceFixture(this.store, {orders: this.store.orders.filter(row => row.id !== order.id)}); } }
   fetchHistoricalFills(options) { return this.oracle.fetchHistoricalFills(options); }
   fetchOHLCV(options) { return this.oracle.fetchOHLCV(options); }
   fetchOrderBook(symbol) { return this.oracle.fetchOrderBook(symbol); }

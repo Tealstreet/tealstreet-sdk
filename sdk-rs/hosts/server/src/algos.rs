@@ -43,6 +43,10 @@ pub enum AlgoInput {
     Dispose {
         reason: String,
         stopped: Option<StopNotice>,
+        /// Set when the box itself stops the account (drain, SIGTERM, a forced
+        /// user drain): each running chase and TWAP gets an `algoStopped`, and
+        /// this is sent once they are queued.
+        server_stopped: Option<oneshot::Sender<()>>,
     },
 }
 
@@ -321,11 +325,13 @@ fn notice_text(data: &str) -> std::borrow::Cow<'_, str> {
 /// Bound on settling chaser cancels before the engine is disposed anyway.
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
-pub const OPS: [&str; 10] = [
+pub const OPS: [&str; 12] = [
     "chaser:start",
+    "chaser:amend",
     "chaser:terminate",
     "chaser:terminateAll",
     "twap:start",
+    "twap:amend",
     "twap:resume",
     "twap:cleanup",
     "twap:pause",
@@ -353,6 +359,8 @@ struct Port {
     /// Errors raised so far, to tell whether a shutdown raised any.
     errors: Cell<u64>,
     running: Arc<Running>,
+    /// AGT-37 host notifications; `None` when the lane is off.
+    tap: Option<Rc<crate::algo_notify::Tap>>,
 }
 
 /// A nuke belongs to the registration that requested it, even while another
@@ -407,7 +415,7 @@ impl AccountPort for Port {
         if !self.running.io_allowed() {
             return Box::pin(async {
                 Err(
-                    VenueError::new("Router lease expired; no new work was sent")
+                    VenueError::new("The server connection expired; no new orders were sent")
                         .kind(ErrorKind::VenueUnavailable)
                         .outcome(Outcome::NotSent),
                 )
@@ -453,6 +461,9 @@ impl AccountPort for Port {
         })
     }
     fn emit(&self, op: &str, data: String) {
+        if let Some(tap) = &self.tap {
+            tap.observe(op, &data);
+        }
         drop_superseded(&mut self.unheard.borrow_mut(), op, &data);
         if op == "error" {
             self.errors.set(self.errors.get() + 1);
@@ -464,14 +475,11 @@ impl AccountPort for Port {
         }
         let retrying = retrying_of(op, &data);
         if owed_on_rejoin(op) {
+            // Every tab, as errors are: a non-signing tab that never hears a chase
+            // end reports it as lost ("Hosted server stopped reporting it").
             let replay = algo_msg(&self.name, op, replayed(op, &data));
-            let frame = algo_msg(&self.name, op, data);
-            let mut holding = (self.broadcast)(None);
-            if let Some(signer) = &self.signer {
-                holding.live = vec![signer.socket()];
-            }
-            (self.emit)(frame);
-            self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
+            let holding = (self.broadcast)(Some(algo_msg(&self.name, op, data)));
+            self.keep_unheard(None, replay, holding, retrying, is_algo_end(op));
             return;
         }
         // Every tab on the account, not only the one that signs.
@@ -524,7 +532,7 @@ fn stop_notices(
                     })
                 });
             let check = if resting {
-                " Its order may still be open: check it."
+                " Its order may still be open. Check your open orders."
             } else {
                 ""
             };
@@ -541,7 +549,7 @@ fn stop_notices(
             .as_str()
             .unwrap_or("this account");
         let check = if may_rest {
-            " Its orders may still be open: check them."
+            " Its orders may still be open. Check your open orders."
         } else {
             ""
         };
@@ -708,6 +716,11 @@ impl Port {
     }
 }
 
+/// A rejoin batch starts from a snapshot: its fills are not reported as new.
+fn live_fills(tap: &Option<Rc<crate::algo_notify::Tap>>, batch: &Batch) -> Option<Vec<Fill>> {
+    (tap.is_some() && !batch.rejoined && !batch.fills.is_empty()).then(|| batch.fills.clone())
+}
+
 /// Algo clients are trusted and in-process: a deep queue keeps a burst from
 /// dropping them (and the fills its frames carry) as slow peers.
 pub const ALGO_QUEUE: usize = 4096;
@@ -856,7 +869,7 @@ pub fn balance_info(payload: Option<&Value>, tier: Option<&Value>) -> Option<Val
 /// the account, since nobody would receive the result.
 async fn sync_balance_info(
     port: Rc<Port>,
-    name: String,
+    _name: String,
     held: std::sync::Arc<std::sync::atomic::AtomicBool>,
     payload: bool,
     tier: bool,
@@ -889,8 +902,7 @@ async fn sync_balance_info(
             continue;
         };
         if sent.as_ref() != Some(&info) || tick.is_multiple_of(BALANCE_INFO_RESEND_TICKS) {
-            let rows = serde_json::json!({ "balance": { "info": info } });
-            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
+            port.handle.store_balance_info(&info);
             sent = Some(info);
         }
     }
@@ -922,6 +934,7 @@ pub async fn run(
         running,
         twap_owner,
         None,
+        None,
         inbox,
     )
     .await;
@@ -940,6 +953,7 @@ pub(crate) async fn run_with_identity(
     running: Arc<Running>,
     twap_owner: Arc<crate::twap_owner::Binding>,
     identity: Option<String>,
+    notify: Option<crate::algo_notify::AlgoNotify>,
     mut inbox: mpsc::UnboundedReceiver<AlgoInput>,
 ) {
     // An algo host that cannot run never takes the account with it: the account's
@@ -952,6 +966,9 @@ pub(crate) async fn run_with_identity(
         return;
     };
     let name = who.account.clone();
+    handle.configure_store_frames(&name, &who.venue);
+    let tap =
+        notify.map(|notify| Rc::new(crate::algo_notify::Tap::new(notify, handle.placements())));
     let port = Rc::new(Port {
         handle: handle.clone(),
         client: Cell::new(client),
@@ -971,16 +988,50 @@ pub(crate) async fn run_with_identity(
         unheard: RefCell::default(),
         errors: Cell::new(0),
         running: running.clone(),
+        tap: tap.clone(),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
-    let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
+    // Chase and TWAP placements are server-initiated; exec and nuke keep `cx`.
+    let tapped = |algo| match &tap {
+        Some(tap) => AlgoCx::new(
+            Rc::new(crate::algo_notify::RejectTap {
+                port: port.clone(),
+                tap: tap.clone(),
+                algo,
+            }),
+            scope.clone(),
+        ),
+        None => cx.clone(),
+    };
+    let chasers = safe_cex_chaser::ChaserFactory::new(tapped(crate::host_notify::Algo::Chase));
     let book = chasers.book();
+    if let Some(tap) = &tap {
+        let book = Rc::downgrade(&book);
+        tap.set_chases(Box::new(move || {
+            book.upgrade()
+                .map_or_else(Vec::new, |book| book.active_chasers())
+        }));
+        // On its own task, like the recount: `feed.next()` must not race a timer.
+        let (tap, port) = (tap.clone(), port.clone());
+        cx.spawn(async move {
+            loop {
+                match tap.next_fill_due() {
+                    Some(due) => tokio::select! {
+                        () = tokio::time::sleep_until(due) => {}
+                        () = tap.wake.notified() => {}
+                    },
+                    None => tap.wake.notified().await,
+                }
+                tap.flush_fills(&port.store(), false);
+            }
+        });
+    }
     let binding = twap_owner.clone();
     let factory = if identity.is_some() {
         safe_cex_algo_twap::factory::TwapFactory::new_with_owner(
             &name,
-            cx.clone(),
+            tapped(crate::host_notify::Algo::Twap),
             Rc::new(book.clone()),
             twap_owner.snapshot(),
         )
@@ -988,7 +1039,7 @@ pub(crate) async fn run_with_identity(
         safe_cex_algo_twap::factory::TwapFactory::with_owner(
             &name,
             twap_owner.snapshot(),
-            cx.clone(),
+            tapped(crate::host_notify::Algo::Twap),
             Rc::new(book.clone()),
         )
     };
@@ -1015,7 +1066,6 @@ pub(crate) async fn run_with_identity(
         Box::new(twap.clone()),
         Box::new(exec.clone()),
     ]);
-    let mut published = String::new();
     // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
     // chases count until their cleanup ends: it may still need a signature.
     {
@@ -1034,17 +1084,9 @@ pub(crate) async fn run_with_identity(
             }
         });
     }
-    // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
-    let publish = |published: &mut String| {
-        let rows = serde_json::json!({
-            "activeChasers": book.active_chasers(),
-            "activeTWAPs": twap.active_twaps(&name),
-        });
-        let text = rows.to_string();
-        if *published != text {
-            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
-            *published = text;
-        }
+    // The account actor emits native algo sections on the same ordered frame stream.
+    let publish = || {
+        handle.store_algos(&book.active_chasers(), &twap.active_twaps(&name));
     };
     let capabilities = handle.capabilities();
     if capabilities.balance_info || capabilities.account_tier {
@@ -1070,7 +1112,7 @@ pub(crate) async fn run_with_identity(
                     port.client.set(feed.client());
                     // Their completions went to the dropped client: the outcome is unknown.
                     for (_, waiter) in port.pending.borrow_mut().drain() {
-                        let mut error = VenueError::new("algo feed rejoined; command outcome unknown");
+                        let mut error = VenueError::new("The account connection was interrupted. Check your open orders before trying again.");
                         error.outcome = Some(Outcome::Unknown);
                         let _ = waiter.send(Err(error));
                     }
@@ -1079,13 +1121,18 @@ pub(crate) async fn run_with_identity(
                 if (batch.frames > 0 || batch.rejoined)
                     && let Some(snapshot) = handle.read(projection::project).await
                 {
+                    let live_fills = live_fills(&tap, &batch);
                     let change = port.apply(snapshot, batch.fills, batch.rejoined);
+                    if let (Some(tap), Some(fills)) = (&tap, live_fills) {
+                        tap.record_fills(&fills, &port.store());
+                    }
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
-                    publish(&mut published);
+                    publish();
                 }
             }
             input = inbox.recv() => match input {
                 Some(AlgoInput::RouterFence { stopped }) => {
+                    if let Some(tap) = &tap { tap.end(); tap.flush_fills(&port.store(), true); }
                     for row in twap.active_twaps(&name) {
                         if let Some(id) = row["id"].as_str() {
                             let _ = registry.dispatch("twap:pause", &serde_json::to_string(id).unwrap(), &cx);
@@ -1094,11 +1141,10 @@ pub(crate) async fn run_with_identity(
                     let paused = twap.active_twaps(&name);
                     // No cancellation cleanup: already-dispatched orders may still rest or fill.
                     scope.dispose();
-                    let kept: Kept = "Router ownership expired: chases stopped and TWAPs paused. Resting orders were kept; an in-flight order may still fill. Check Open Orders, then explicitly resume TWAPs or start a new chase after reconnecting.".into();
+                    let kept: Kept = "The server connection expired: chases stopped and TWAPs paused without cancelling existing orders. Check your open orders before restarting them.".into();
                     for frame in kept.frames(&name) { (port.broadcast)(Some(frame)); }
-                    (port.broadcast)(Some(crate::envelope::msg(&name, "store", serde_json::json!({
-                        "activeChasers": [], "activeTWAPs": paused,
-                    }))));
+                    handle.store_algos(&Vec::<safe_cex_chaser::ActiveChaser>::new(), &paused);
+                    handle.flush_store_frames().await;
                     stopped(kept);
                     running.refresh(&[], &paused, 0);
                     handle.dispose();
@@ -1108,7 +1154,7 @@ pub(crate) async fn run_with_identity(
                 Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner, action }) => {
                     let audit_refusal = |reason: &str| crate::audit::pre_dispatch_refused(Some(&who.venue), "algo", reason);
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        let message = "The automated-order request stopped because its account connection changed";
                         if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1136,7 +1182,7 @@ pub(crate) async fn run_with_identity(
                         continue;
                     }
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        let message = "The automated-order request stopped because its account connection changed";
                         if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1180,12 +1226,17 @@ pub(crate) async fn run_with_identity(
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
+                    let client_stop = tap.as_ref().filter(|_| matches!(op.as_str(), "twap:stop" | "twap:cleanup"))
+                        .and_then(|tap| Some((tap, serde_json::from_str::<String>(&data).ok()?)));
+                    if let Some((tap, id)) = &client_stop {
+                        tap.client_stop(id);
+                    }
                     let dispatched = if crate::user_drain::starts_job(&op) {
                         if let Some(user) = running.user.get() {
                             match user.admit() {
                                 // Admission can wait: re-check the owner after it, right before dispatch.
                                 Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
-                                    let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                                    let message = "The automated-order request stopped because its account connection changed";
                                     if action.is_some() { audit_refusal(message); }
                                     port.emit("error", serde_json::json!(message).to_string());
                                     if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1195,6 +1246,10 @@ pub(crate) async fn run_with_identity(
                                 Err(error) => {
                                     if action.is_some() { audit_refusal("draining"); }
                                     port.emit("error", error.to_string());
+                                    // A refused amendment changed nothing; starts keep the existing receipt.
+                                    if matches!(op.as_str(), "chaser:amend" | "twap:amend") && let Some(receipt) = action {
+                                        receipt.finish(Err(crate::user_drain::refusal()));
+                                    }
                                     continue;
                                 }
                             }
@@ -1205,22 +1260,33 @@ pub(crate) async fn run_with_identity(
                         && twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "running") {
                         guard.acknowledge_resume(id, epoch);
                     }
+                    if let Some((tap, id)) = &client_stop && !matches!(dispatched, Some(Ok(()))) {
+                        tap.client_stop_refused(id);
+                    }
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {
-                            serde_json::json!({"message": error.chars().take(160).collect::<String>()})
+                            crate::audit::algo_error(error)
                         }
                         None => serde_json::json!({"message": "unhandled op"}),
                     };
+                    let amend_refusal = if matches!(op.as_str(), "chaser:amend" | "twap:amend") {
+                        match &dispatched { Some(Err(error)) => Some(error.clone()), _ => None }
+                    } else { None };
                     crate::audit::log(&who, &origin, &crate::audit::algo_op(&op, &data), result);
                     if let Some(Err(error)) = dispatched {
                         port.emit("error", Value::String(error).to_string());
                     }
-                    publish(&mut published);
+                    publish();
                     if let Some(receipt) = action {
+                        if let Some(message) = amend_refusal {
+                            // Shared amend validates synchronously before changing future settings.
+                            receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"})));
+                            continue;
+                        }
                         // Dispatch admission is not proof that an asynchronous job or
                         // its venue writes completed. Ordinary algo events reconcile it.
-                        receipt.finish(Err(serde_json::json!({"message":"Algo operation dispatched; reconcile its account events","outcome":"unknown"})));
+                        receipt.finish(Err(serde_json::json!({"message":"Your automated-order request was sent. Check its status before trying again.","outcome":"unknown"})));
                     }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
@@ -1232,7 +1298,7 @@ pub(crate) async fn run_with_identity(
                     }
                     let io_allowed = running.io_allowed();
                     if !io_allowed || action.as_ref().is_some_and(|receipt| !receipt.active()) {
-                        audit_refusal(if io_allowed {"Action registration retired before dispatch"} else {"io_fenced"});
+                        audit_refusal(if io_allowed {"This action couldn’t start because the account connection changed"} else {"io_fenced"});
                         if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
                         else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
                             "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
@@ -1271,7 +1337,7 @@ pub(crate) async fn run_with_identity(
                         }
                         _ if action.as_ref().is_some_and(|receipt| {
                             if !receipt.active() {
-                                audit_refusal("Action registration retired before dispatch");
+                                audit_refusal("This action couldn’t start because the account connection changed");
                                 true
                             } else if !running.io_allowed() {
                                 audit_refusal("io_fenced");
@@ -1281,7 +1347,7 @@ pub(crate) async fn run_with_identity(
                             }
                         }) => {
                             // Keep the existing wire error; only the journal distinguishes IO.
-                            Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"}))
+                            Err(serde_json::json!({"message":"This action couldn’t start because the account connection changed","outcome":"notSent"}))
                         }
                         (_, Some(Err(error))) => {
                             audit_refusal("draining");
@@ -1291,6 +1357,12 @@ pub(crate) async fn run_with_identity(
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
+                            // A nuke is a client stop for every TWAP it ends.
+                            if let Some(tap) = &tap {
+                                for row in twap.active_twaps(&name) {
+                                    if let Some(id) = row["id"].as_str() { tap.client_stop(id); }
+                                }
+                            }
                             exec.nuke(mode, &nuke_cx)
                         }
                         _ => {
@@ -1350,26 +1422,36 @@ pub(crate) async fn run_with_identity(
                 // Chases and TWAPs run on through a socket drop, until the
                 // resume window expires (Dispose) or the browser is back.
                 Some(AlgoInput::Joined) => {
-                    published.clear();
-                    publish(&mut published);
+                    publish();
                     // What it stopped for while the browser was gone, once.
                     for frame in port.take_for_join() {
                         crate::state::Log::info(&format!("algo notice replayed {name}: {frame}"));
                         (port.emit)(frame);
                     }
                 }
-                Some(AlgoInput::Dispose { reason, stopped }) => break Some((reason, stopped)),
-                None => break Some(("account disposed".to_owned(), None)),
+                Some(AlgoInput::Dispose { reason, stopped, server_stopped }) => {
+                    break Some((reason, stopped, server_stopped));
+                }
+                None => break Some(("account disposed".to_owned(), None, None)),
             },
         }
     };
+    if let Some(tap) = &tap {
+        tap.end();
+    }
     // Disposal contract: stop TWAPs, let chaser cancels settle, then the scope, then the engine.
-    let (disposing, reason, stopped) = match ended {
-        Some((reason, stopped)) => (true, reason, stopped),
-        None => (false, "algo feed ended".to_owned(), None),
+    let (disposing, reason, stopped, server_stopped) = match ended {
+        Some((reason, stopped, server_stopped)) => (true, reason, stopped, server_stopped),
+        None => (false, "algo feed ended".to_owned(), None, None),
     };
     let reason = reason.as_str();
     let (chasers, twaps) = (book.active_chasers(), twap.active_twaps(&name));
+    if let Some(queued) = server_stopped {
+        if let Some(tap) = &tap {
+            tap.server_stopped(&chasers, &twaps);
+        }
+        let _ = queued.send(());
+    }
     let stop_notices = |may_rest| stop_notices(&chasers, &twaps, &port.store(), reason, may_rest);
     let (stopped_notices, unsettled_notices) = (stop_notices(false), stop_notices(true));
     // Kept for the next init only when no browser is there to be sent them.
@@ -1425,7 +1507,7 @@ pub(crate) async fn run_with_identity(
                         port.client.set(feed.client());
                         for (_, waiter) in port.pending.borrow_mut().drain() {
                             let mut error =
-                                VenueError::new("algo feed rejoined; command outcome unknown");
+                                VenueError::new("The account connection was interrupted. Check your open orders before trying again.");
                             error.outcome = Some(Outcome::Unknown);
                             let _ = waiter.send(Err(error));
                         }
@@ -1433,7 +1515,11 @@ pub(crate) async fn run_with_identity(
                     if (batch.frames > 0 || batch.rejoined)
                         && let Some(snapshot) = handle.read(projection::project).await
                     {
+                        let live_fills = live_fills(&tap, &batch);
                         let change = port.apply(snapshot, batch.fills, batch.rejoined);
+                        if let (Some(tap), Some(fills)) = (&tap, live_fills) {
+                            tap.record_fills(&fills, &port.store());
+                        }
                         port.subscribers
                             .borrow_mut()
                             .retain(|tx| tx.send(change.clone()).is_ok());
@@ -1445,6 +1531,10 @@ pub(crate) async fn run_with_identity(
     let deadline_passed = tokio::time::timeout(SHUTDOWN_DEADLINE, pumped)
         .await
         .is_err();
+    // The debounce task dies with the scope: send what it was holding now.
+    if let Some(tap) = &tap {
+        tap.flush_fills(&port.store(), true);
+    }
     if deadline_passed {
         crate::state::Log::error(
             &format!(
@@ -1544,7 +1634,7 @@ fn completion(notice: &Value) -> Result<String, VenueError> {
 /// once, since the fill toast it would have shown went with the page.
 fn replayed(op: &str, data: &str) -> String {
     match serde_json::from_str::<Value>(data) {
-        Ok(Value::Object(mut end)) if op == "chaser:complete" => {
+        Ok(Value::Object(mut end)) if is_algo_end(op) => {
             end.insert("replayed".into(), Value::Bool(true));
             Value::Object(end).to_string()
         }
@@ -1552,9 +1642,14 @@ fn replayed(op: &str, data: &str) -> String {
     }
 }
 
-/// A chase's end and its outcome warnings are owed to a page that was away, as errors are.
+/// An algo's end and its outcome warnings are owed to a page that was away, as errors are.
 fn owed_on_rejoin(op: &str) -> bool {
-    matches!(op, "warning" | "chaser:complete")
+    op == "warning" || is_algo_end(op)
+}
+
+/// A chase's or TWAP's own end: without it a page reads the vanished row as lost.
+fn is_algo_end(op: &str) -> bool {
+    matches!(op, "chaser:complete" | "twap:complete")
 }
 
 fn error_kind(kind: &str) -> Option<ErrorKind> {
@@ -1575,6 +1670,7 @@ fn error_kind(kind: &str) -> Option<ErrorKind> {
     })
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1594,7 +1690,8 @@ mod tests {
                 end: false,
             }
         };
-        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it in Open Orders or use Nuke";
+        // The chaser's own retry warning (book.rs), so the prefix parser is pinned to real copy.
+        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. It can still fill until it is cancelled. Cancellation is being retried. Cancel it from your open orders.";
         let mut unheard = VecDeque::from([
             kept("warning", retry),
             kept("warning", &retry.replace("71b464ec", "other")),
@@ -1613,7 +1710,7 @@ mod tests {
                 .all(|kept| kept.retrying.as_deref() != Some("71b464ec"))
         );
         let failed = serde_json::to_string(
-            "Chaser could not cancel BTCUSDT order a1, other: refused; it may still be open. Cancel it in Open Orders or use Nuke",
+            "Chase couldn’t confirm cancellation of BTCUSDT order a1, other: refused. Cancel it from your open orders.",
         )
         .unwrap();
         drop_superseded(&mut unheard, "error", &failed);
@@ -1626,6 +1723,12 @@ mod tests {
         let replay: Value = serde_json::from_str(&replayed("chaser:complete", end)).unwrap();
         assert_eq!(replay["replayed"], true);
         assert_eq!(replay["filled"], 0.001);
+        let twap: Value = serde_json::from_str(&replayed(
+            "twap:complete",
+            r#"{"id":"t1","end":"completed"}"#,
+        ))
+        .unwrap();
+        assert_eq!(twap["replayed"], true);
         assert_eq!(
             replayed("warning", "\"Chaser stopped: x\""),
             "\"Chaser stopped: x\""
@@ -1635,6 +1738,7 @@ mod tests {
     #[test]
     fn a_chase_end_and_its_warnings_are_replayed_to_a_page_that_was_away() {
         assert!(owed_on_rejoin("chaser:complete"));
+        assert!(owed_on_rejoin("twap:complete"));
         assert!(owed_on_rejoin("warning"));
         assert!(!owed_on_rejoin("log"));
         assert!(!owed_on_rejoin("twap:stateUpdate"));

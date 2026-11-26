@@ -13,6 +13,11 @@ account reconciliation read still runs: neither the ACK nor the completion
 invents a Canceled Store state for an order that could have filled. Consumers
 continue to use the order stream or clean census for the final order state.
 
+This holds in a code `1`/`2` envelope too (AGT-69): a partial batch settles
+per row and the job continues to its later batches, including `cancel-algos`.
+A refused row fails the job only after every batch has run, naming each order
+still open.
+
 Real sibling errors remain visible. HTTP failures, malformed acknowledgements,
 other codes, placements, amendments and cancel-then-replace amendments retain
 their existing failure semantics. No retry, caller migration or inventory

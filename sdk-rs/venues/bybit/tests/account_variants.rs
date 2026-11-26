@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Variant contracts from documented Bybit V5 payloads and Hyro's readiness contract.
 mod support;
 use safe_cex_engine::{Command, Event};
@@ -657,6 +658,56 @@ fn malformed_execution_does_not_consume_identity_and_missing_ids_stay_distinct()
     );
 }
 
+// AGT-83: equal partial executions of one order must stay distinguishable from a replay.
+#[test]
+fn execution_id_is_the_fill_identity_and_the_order_id_is_kept() {
+    for variant in [
+        Variant::Linear,
+        Variant::Demo,
+        Variant::Inverse,
+        Variant::Spot,
+    ] {
+        let mut h = startup(variant);
+        authenticate(&mut h);
+        emitted_fills(&mut h);
+        let (category, symbol) = if variant.is_inverse() {
+            ("inverse", "BTCUSD")
+        } else if variant.is_spot() {
+            ("spot", "BTCUSDT")
+        } else {
+            ("linear", "BTCUSDT")
+        };
+        let row = |exec: &str| {
+            format!(
+                r#"{{"category":"{category}","symbol":"{symbol}","orderId":"order-1",{exec}"side":"Buy","execQty":"2","execPrice":"50000","execType":"Trade"}}"#
+            )
+        };
+        let packet = format!(
+            r#"{{"topic":"execution","data":[{},{},{}]}}"#,
+            row(r#""execId":"exec-a","#),
+            row(r#""execId":"exec-b","#),
+            row(r#""execId":"","#)
+        );
+        h.message("/v5/private", &packet);
+        let frame = h.engine.take_frame(h.now).unwrap();
+        let fills = safe_cex_engine::wire::fills(frame).unwrap();
+        let identities: Vec<_> = fills
+            .iter()
+            .map(|fill| (fill.id.as_deref(), fill.order_id.as_str(), fill.amount))
+            .collect();
+        // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+        assert_eq!(
+            identities,
+            vec![
+                (Some("exec-a"), "order-1", 2.0),
+                (Some("exec-b"), "order-1", 2.0),
+                (Some("order-1"), "order-1", 2.0),
+            ],
+            "{variant:?}"
+        );
+    }
+}
+
 #[test]
 fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
     let mut h = startup(Variant::Inverse);
@@ -983,7 +1034,7 @@ fn capacity_refusals(h: &mut Harness) -> usize {
             (3_000..3_300).contains(command)
                 && result
                     .as_ref()
-                    .is_err_and(|error| error.contains("capacity"))
+                    .is_err_and(|error| error.contains("request queue is full"))
         })
         .count()
 }

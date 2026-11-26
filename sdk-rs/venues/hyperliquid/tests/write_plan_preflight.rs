@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -26,6 +27,17 @@ fn order(amount: f64) -> PlaceOrderOpts {
         "amount": amount, "price": 100
     }))
     .expect("fixture order")
+}
+
+/// A standalone stop is never batched, so it keeps its neighbours in writes of their own.
+/// Plain rows on one DEX share one order action since feat/hyperliquid-batched-placements;
+/// the serial-continuation pins below put a stop between plain rows to keep one row per write.
+fn separator() -> PlaceOrderOpts {
+    serde_json::from_value(json!({
+        "symbol": "BTC-PERP", "type": "stop_market", "side": "sell",
+        "amount": 3, "price": 80
+    }))
+    .expect("fixture stop")
 }
 
 fn configured() -> Engine<Hyperliquid> {
@@ -62,11 +74,22 @@ fn legacy_serial_dispatch_does_not_add_native_rule_gates() {
             last
         },
     ] {
+        let legs = [last.stop_loss, last.take_profit]
+            .into_iter()
+            .flatten()
+            .filter(|price| *price > 0.)
+            .count();
         let payloads = submit_valid(vec![order(3.), last]);
+        // Plain rows now share one action (feat/hyperliquid-batched-placements); every row
+        // is still formatted and sent without min/max/notional gates.
+        let rows: usize = payloads
+            .iter()
+            .map(|payload| payload["action"]["orders"].as_array().expect("rows").len())
+            .sum();
         assert_eq!(
-            payloads.len(),
-            2,
-            "TS formats and sends each serial row without min/max/notional gates"
+            rows,
+            2 + legs,
+            "every row is sent without native rule gates"
         );
     }
 }
@@ -188,15 +211,16 @@ fn positional_zero_trigger_control() {
 
 #[test]
 fn final_wire_bounds_allow_rounding_to_exact_minimum_and_maximum() {
+    // One batched action since feat/hyperliquid-batched-placements; rows keep caller order.
     let payloads = submit_valid(vec![order(1.6), order(4.9)]);
-    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads.len(), 1);
     assert_eq!(payloads[0]["action"]["orders"][0]["s"], "2");
-    assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
+    assert_eq!(payloads[0]["action"]["orders"][1]["s"], "5");
 }
 
 fn runtime_failure(status: u16, second_reply: &str, expected: &str) {
     runtime_failure_orders(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         status,
         second_reply,
         expected,
@@ -227,11 +251,15 @@ fn runtime_failure_suffix(
     fenced_suffix: bool,
     recorded_exception: bool,
 ) {
-    let second_rows = 1 + [orders[1].stop_loss, orders[1].take_profit]
-        .into_iter()
-        .flatten()
-        .filter(|price| *price > 0.)
-        .count();
+    let rows = |order: &PlaceOrderOpts| {
+        1 + [order.stop_loss, order.take_profit]
+            .into_iter()
+            .flatten()
+            .filter(|price| *price > 0.)
+            .count()
+    };
+    let second_rows = rows(&orders[1]);
+    let tail_rows = rows(&orders[2]);
     let mut engine = configured();
     engine.handle(
         2000.,
@@ -310,7 +338,7 @@ fn runtime_failure_suffix(
     let elements = error["elements"]
         .as_array()
         .expect("complete per-element outcomes");
-    assert_eq!(elements.len(), second_rows + 2);
+    assert_eq!(elements.len(), second_rows + 1 + tail_rows);
     assert_eq!(elements[0]["index"], 0);
     assert_eq!(elements[0]["status"], "placed");
     assert_eq!(elements[0]["orderIds"], json!(["91"]));
@@ -321,7 +349,7 @@ fn runtime_failure_suffix(
                 element["error"]["message"]
                     .as_str()
                     .expect("element message")
-                    .contains(support::ENGINE_UNKNOWN_TEXT),
+                    .contains(if status >= 500 { "The exchange reply didn’t confirm this change. Check your open orders before trying again." } else { support::ENGINE_UNKNOWN_TEXT }),
                 "{element}"
             );
         }
@@ -334,15 +362,14 @@ fn runtime_failure_suffix(
             }
         );
     }
-    assert_eq!(elements[second_rows + 1]["status"], "notSent");
-    if fenced_suffix {
-        assert_eq!(elements[second_rows + 1]["error"]["outcome"], "notSent");
-        assert_eq!(
-            elements[second_rows + 1]["error"]["message"],
-            "Request is not in a sendable state"
-        );
-    } else {
-        assert!(elements[second_rows + 1].get("error").is_none(), "{error}");
+    for tail in &elements[second_rows + 1..] {
+        assert_eq!(tail["status"], "notSent");
+        if fenced_suffix {
+            assert_eq!(tail["error"]["outcome"], "notSent");
+            assert_eq!(tail["error"]["message"], "This request isn’t ready to send");
+        } else {
+            assert!(tail.get("error").is_none(), "{error}");
+        }
     }
 }
 
@@ -381,7 +408,7 @@ fn runtime_server_failure_retains_complete_journal() {
     // Engine-sealed HTTP503 retains halt/journal/canonical-message pins.
     // Telemetry for this path awaits the engine hook approved by the lead.
     runtime_failure_suffix(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         503,
         "service unavailable",
         "unknown",
@@ -402,7 +429,7 @@ fn later_market_write_uses_current_price_without_frozen_plan_veto() {
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![order(3.), second],
+            orders: vec![separator(), second],
         }),
     );
     let mut actions = prepared_now(&mut engine);
@@ -450,7 +477,7 @@ fn accepted_idless_prefix(first: PlaceOrderOpts, statuses: Value, expected: &[&s
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 77,
-            orders: vec![first, order(3.), order(3.)],
+            orders: vec![first, order(3.), separator()],
         }),
     );
     let mut actions = prepared_now(&mut engine);
@@ -593,6 +620,18 @@ fn mixed_native_group_retains_placed_applied_refused_and_unsent_rows() {
     assert_eq!(elements[2]["error"]["outcome"], "rejected");
     assert_eq!(elements[3]["status"], "notSent");
     assert!(elements[3].get("error").is_none());
+    // AGT-214: the grouped bracket names each leg, so the app can say "Entry and
+    // stop-loss placed. Take-profit not sent"; the plain order after it names none.
+    let roles: Vec<_> = elements.iter().map(|row| row.get("role")).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(&json!("entry")),
+            Some(&json!("stopLoss")),
+            Some(&json!("takeProfit")),
+            None
+        ]
+    );
 }
 
 #[test]
@@ -658,8 +697,9 @@ fn caller_id_size_gate_matches_ts_rounded_maximum() {
     // TS exchanges/base.ts:1211-1223 rounds before the positive-cap unsplit check.
     let mut accepted = order(5.1);
     accepted.client_order_id = Some("0x00000000000000000000000000000001".into());
+    // The second row of the one batched action (feat/hyperliquid-batched-placements).
     let payloads = submit_valid(vec![order(3.), accepted]);
-    assert_eq!(payloads[1]["action"]["orders"][0]["s"], "5");
+    assert_eq!(payloads[0]["action"]["orders"][1]["s"], "5");
 
     let mut engine = configured();
     engine
@@ -693,7 +733,24 @@ fn market_row_refusal_pins_stop_before_next_live_price_preparation() {
     market.kind = safe_cex_engine::model::OrderType::Market;
     market.price = None;
     runtime_failure_orders(
-        vec![order(3.), market.clone(), market],
+        vec![separator(), market, separator()],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
+        "notSent",
+    );
+}
+
+// AGT-117: a market entry's legs are rows of its own grouped write, so a refused market
+// bracket journals three refused rows, and an unsent one three unsent rows.
+#[test]
+fn market_bracket_rows_are_journaled_when_refused_or_unsent() {
+    let mut bracket = order(3.);
+    bracket.kind = safe_cex_engine::model::OrderType::Market;
+    bracket.price = None;
+    bracket.stop_loss = Some(80.);
+    bracket.take_profit = Some(120.);
+    runtime_failure_orders(
+        vec![order(3.), bracket.clone(), bracket],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order."}]}}}"#,
         "notSent",
@@ -732,7 +789,7 @@ fn context_free_deferred_plain_limit_reply_keeps_unknown_fence() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquid.order-response.ts:137-145; hyperliquid.exchange.ts:4439-4442.
     // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquid | serial-placement-batch/audit trading.rs:367
     runtime_failure_suffix(
-        vec![order(3.), order(3.), order(3.)],
+        vec![separator(), order(3.), separator()],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
@@ -750,7 +807,7 @@ fn context_free_deferred_market_reply_keeps_fence_before_next_market() {
     market.kind = safe_cex_engine::model::OrderType::Market;
     market.price = None;
     runtime_failure_suffix(
-        vec![order(3.), market.clone(), market],
+        vec![separator(), market, separator()],
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill"]}}}"#,
         "unknown",
@@ -775,4 +832,44 @@ fn deferred_group_without_proven_parent_keeps_unknown_fence() {
         false,
         true,
     );
+}
+
+// AGT-115: `wires` groups legs only with a limit or market entry, so a stop or take-profit entry
+// was placed without them. It now refuses the whole batch before any write.
+#[test]
+fn a_stop_entry_with_attached_legs_refuses_entire_batch() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("Hyperliquid");
+    for kind in ["stop_market", "take_profit_market"] {
+        for legs in [
+            json!({"stopLoss": 80}),
+            json!({"takeProfit": 120}),
+            json!({"stopLoss": 0, "takeProfit": 120}),
+        ] {
+            let mut stop = json!({"symbol": "BTC-PERP", "type": kind, "side": "buy", "amount": 3, "price": 110});
+            for (k, v) in legs.as_object().unwrap() {
+                stop[k] = v.clone();
+            }
+            let mut engine = configured();
+            engine.handle(
+                2000.,
+                Event::Command(Command::PlaceOrders {
+                    command: 77,
+                    orders: vec![order(3.), serde_json::from_value(stop).unwrap()],
+                }),
+            );
+            let actions = prepared_now(&mut engine);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_))),
+                "{kind} {legs}"
+            );
+            assert!(
+                actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { command: 77, error })
+                    if error.outcome == Some(Outcome::NotSent) && error.legacy_text() == refusal)),
+                "{kind} {legs}: {actions:?}"
+            );
+        }
+    }
 }

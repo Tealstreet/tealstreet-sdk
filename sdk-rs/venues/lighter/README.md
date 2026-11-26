@@ -10,7 +10,7 @@ behavior. Ordinary non-market lots and native limit batches retain their existin
 minimum checks before submission.
 
 An Unknown placement halts remaining writes for that action. Its failure includes
-"The outcome is unknown. Check Open Orders", accepted order indexes and the
+"We couldn’t confirm this change. Check your open orders before trying again.", accepted order indexes and the
 indexes whose placement is uncertain. The engine's mutation journal retains the
 accepted prefix. For venue-reported uncertainty, `order.outcome_unknown` telemetry
 snapshots placed, unknown and unsent indexes from that journal and the dispatcher
@@ -59,3 +59,55 @@ account, and only with a Tealstreet-signed token (`src/builder_exemption.rs`):
 Note: `lighterIntegratorAccountIndex` (public, mutable) overrides the integrator
 on every network, matching the legacy TS resolver. Whether production should
 honour it on mainnet is a separate product decision.
+
+## Placement proof (AGT-45)
+
+A `sendTx` acknowledgement only says the sequencer queued the transaction; the
+order can still be canceled at execution (margin, slippage, liquidity) or the
+transaction can fail. Every ordinary placement therefore records an engine
+pending placement and parks its Plan for at most 10 seconds while background
+reads prove it: authenticated `accountOrders` by client index (up to 20 per
+read), and `tx?by=hash` for a placement whose row has not appeared. An `open` or
+`filled` row, a fill, an untriggered stop's `pending`, or a resting order's later
+`canceled`/`-expired`/`-oco`/`-child`/`-liquidation` resolves it; a reason-qualified pre-rest
+cancellation (`canceled-margin-not-allowed`, `-post-only`, `-reduce-only`,
+`-position-not-allowed`, `-too-much-slippage`, `-not-enough-liquidity`,
+`-self-trade`, `-invalid-balance`), an unfilled market/IOC order that ended
+(`canceled`, `canceled-expired`, ...), or a failed transaction (`status` 0) refuses it
+`Rejected` with the venue reason and withdraws the optimistic row. Only exact
+statuses resolve: `in-progress`, an unlisted spelling and a non-trigger `pending`
+keep polling. A mix of refused and live lots, or no proof by the bound, is
+Unknown; nothing is resent.
+Reads back off 250 ms to 2 s. A proven placement keeps the legacy 100 ms pace
+before the command's next write, which continues from the settled call. Grouped
+TP/SL keep their stream proof and a guarded put-back keeps its `RestoreProof`.
+
+## Plain limit amends
+
+An unguarded limit edit is one native `ModifyOrder` (tx 17) of the resting order,
+with trigger price 0 (the venue's nil trigger) and the left-of-total amount. A
+refusal leaves the original untouched. Edits that cannot be one modify (split
+lots) refuse before any write; there is no cancel-then-replace fallback.
+
+The tx 17 acknowledgement is not the result (AGT-77): a size-up the venue
+refuses for margin is queued, then fails at execution and leaves the order
+unchanged. The ACK records an engine pending receipt (the engine allows one for
+an Amend intent as well as a Place) and parks the Plan under the same 10-second
+bound while `tx?by=hash` proves it. An executed transaction (status 2-5) completes
+the amend; a failed one (status 0) refuses it `Rejected`, "Lighter order not
+changed: <venue text>"; anything else is Unknown by the bound. Guarded
+protective modifies keep their own proofs.
+
+**A failed or unproven transaction resyncs the nonce.** A failed tx did not
+take its nonce, so continuing the local sequence made the next write fail
+`21104 invalid nonce`. A status-0 transaction (placement or modify) and a proof
+that expires invalidate the counter, so the next write reads `nextNonce` first.
+An order-status refusal (`canceled-margin-not-allowed`) executed its transaction
+and keeps the sequence.
+
+## Stop-entry brackets (AGT-115)
+
+Legs attach only to a limit/market entry that is not reduce-only: grouped OTO/OTOCO for a
+limit, separate trigger steps after a market. Any other entry with a non-zero leg, and a
+reduce-only limit/market with one, used to be placed without them; `prepare_orders` now
+refuses the whole command before any signing with the engine's shared `stop_entry_legs_refusal` copy, or its own reduce-only copy.

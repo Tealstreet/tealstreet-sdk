@@ -1,10 +1,13 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../reference/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, Position, PositionMode, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 
 const createPosition = (symbol: string): Position => ({
   id: `${symbol}:long:oneway`,
@@ -33,18 +36,30 @@ describe('Bybit initial position snapshot reconciliation', () => {
 
     const variants = [
       {
-        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore()),
+        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore()),
         symbol: 'BTCUSDT',
       },
       {
-        exchange: new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new DefaultStore()),
+        exchange: new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new FrameStore()),
         symbol: 'BTCUSD',
       },
     ];
 
     for (const { exchange, symbol } of variants) {
       const websocketPosition = createPosition(symbol);
-      exchange.store.addOrUpdatePositionsFull([websocketPosition]);
+      (() => {
+        const incoming: StoreData['positions'] = [websocketPosition];
+        return applyReferenceFixture(
+          exchange.store,
+          {
+            positions: incoming.map((row) => ({
+              ...exchange.store.positions.find((old) => old.id === row.id),
+              ...row,
+            })),
+          },
+          exchange.store.markets.map((row) => row.symbol),
+        );
+      })();
       exchange.lastWebsocketPositionsUpdate = 10_000;
       vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
       vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);

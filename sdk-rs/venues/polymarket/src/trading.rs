@@ -534,6 +534,7 @@ impl Polymarket {
             .map(|index| Element {
                 index,
                 client_order_id: None,
+                role: None,
             })
             .collect();
         self.trading.jobs.insert(
@@ -745,6 +746,7 @@ impl Polymarket {
                                 .map(|index| Element {
                                     index,
                                     client_order_id: None,
+                                    role: None,
                                 })
                                 .collect(),
                         ));

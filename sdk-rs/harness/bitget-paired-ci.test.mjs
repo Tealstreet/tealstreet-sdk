@@ -1,3 +1,4 @@
+import { PHYSICAL_JOB_RELISTS } from './physical-job.mjs';
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { BITGET_CUMULATIVE_ANCHOR } from './bitget-paired-steady.mjs';
@@ -310,7 +311,7 @@ test('run 40518541502: the paired producer is re-listed until GitHub lists it wi
   const unassigned = await relisted(p => [{ ...p, runner_id: 0, status: 'in_progress' }]);
   await assert.rejects(unassigned.result,
     /missing\/duplicate paired physical producer; candidates \[\{"id":30,"name":"Rust \/ Bitget counterbalanced steady CPU","run_attempt":1,"runner_id":0,"status":"in_progress"\}\]/);
-  assert.equal(unassigned.sleeps.length, 6);
+  assert.equal(unassigned.sleeps.length, PHYSICAL_JOB_RELISTS);
   const duplicate = await relisted(p => [p, p]);
   await assert.rejects(duplicate.result, /missing\/duplicate paired physical producer/);
   assert.equal(duplicate.sleeps.length, 0);

@@ -2747,7 +2747,7 @@ impl BitgetFutures {
                         };
                         if self.remember_execution(format!("{}:{execution}", row.symbol)) {
                             cx.fill(Fill {
-                                id: None,
+                                id: Some(execution.into_owned()),
                                 order_id: order.into_owned(),
                                 symbol: row.symbol.into_owned(),
                                 side,
@@ -2877,7 +2877,7 @@ impl BitgetFutures {
             return;
         }
         cx.fill(Fill {
-            id: None,
+            id: (raw.base_volume.0.is_some() && !execution.is_empty()).then_some(execution),
             order_id: order.id.clone(),
             symbol: order.symbol.clone(),
             side: order.side,
@@ -3421,7 +3421,11 @@ impl BitgetFutures {
                 (raw.side.as_ref(), protected),
                 ("sell", "long") | ("buy", "short")
             );
-        let amount = if raw.tpsl_mode == "full" {
+        // A whole-position TP/SL closes whatever is open when it triggers: it holds no size, even
+        // when its row reports the current position size (AGT-70).
+        let amount = if raw.tpsl_mode == "full"
+            || matches!(plan_type(&raw.plan_type), Some("pos_loss" | "pos_profit"))
+        {
             0.0
         } else {
             first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0)

@@ -1,5 +1,9 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original actual-venue controls for caller-root closed-position adoption.
 #![allow(dead_code)]
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 
 use safe_cex_engine::request_context::{HttpAction, Preparation};
@@ -241,7 +245,10 @@ fn unknown_symbol_empty_result_cannot_bypass_full_genuine_capacity() {
         "local[] must obtain genuine Read authority"
     );
     assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
-    assert_eq!(errors[0].message, "Engine request capacity reached");
+    assert_eq!(
+        errors[0].message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(errors[0].outcome.is_none());
     assert!(done(&output).is_none());
     no_dispatch(&output);
@@ -277,13 +284,19 @@ fn response_at_the_caller_deadline_cannot_publish_raw_rows() {
 #[test]
 fn caller_expiry_discards_accepted_output_waiting_for_native_dequeue() {
     let mut engine = ready();
+    let before_stats = engine.snapshot_frame(NOW).to_vec();
     fetch(&mut engine, NOW, None, Some(250));
     let first = request(&prepared(&mut engine, NOW));
     reply(&mut engine, &first, NOW + 200.0, &page(&rows(0)));
     let timer = pacing(&prepared(&mut engine, NOW + 200.0), NOW + 300.0);
     engine.handle(NOW + 300.0, Event::TimerFired { timer });
     root_expired(&prepared(&mut engine, NOW + 300.0));
-    assert!(engine.take_frame(NOW + 300.0).is_none());
+    assert_request_stats_frame(
+        &before_stats,
+        engine.take_frame(NOW + 300.0),
+        NOW + 300.0,
+        [1, 0, 0, 0, 0],
+    );
 }
 
 #[test]

@@ -26,7 +26,9 @@ pub trait Host {
     fn call(&mut self, token: u64, method: &str, args: Value) -> Result<(), Value>;
     fn emit(&mut self, op: &str, data: Value);
     fn algo(&mut self, _request: AlgoRequest) -> Result<AlgoReply, Value> {
-        Err(json!({"message":"Hosted algo runtime unavailable","outcome":"notSent"}))
+        Err(
+            json!({"message":"Automated orders aren’t available on this server","outcome":"notSent"}),
+        )
     }
     fn random(&mut self) -> Result<f64, String> {
         Err("Random distribution unavailable".into())
@@ -243,8 +245,9 @@ impl Exec {
             if let Some(summary) = value["summary"].as_str() {
                 pending.success = summary.into();
             } else {
-                result =
-                    Err(json!({"message":"Invalid native command result","outcome":"unknown"}));
+                result = Err(
+                    json!({"message":"The server reply didn’t confirm this action. Check your open orders before trying again.","outcome":"unknown"}),
+                );
             }
         }
         if let Ok(value) = &result
@@ -255,7 +258,9 @@ impl Exec {
                     ids.extend(returned.iter().map(|v| v.as_str().unwrap().to_string()));
                 }
             } else {
-                result = Err(json!({"message":"Invalid placement result","outcome":"unknown"}));
+                result = Err(
+                    json!({"message":"The exchange reply didn’t confirm this order. Check your open orders before trying again.","outcome":"unknown"}),
+                );
             }
         }
         if let Some((group, index)) = pending.group {

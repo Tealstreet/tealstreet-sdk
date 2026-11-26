@@ -4,7 +4,7 @@ import {
   EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS,
   ExternalPublicDataProvider,
 } from '../../exchanges/external-public-data';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 const createParent = () =>
   ({
@@ -48,9 +48,7 @@ describe('ExternalPublicDataProvider liveness', () => {
       exchangeId: 'contract-test',
     });
 
-    vi.advanceTimersByTime(
-      EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS - EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS,
-    );
+    vi.advanceTimersByTime(EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS - EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS);
 
     expect(close).toHaveBeenCalledTimes(1);
     provider.dispose();
@@ -108,8 +106,8 @@ describe('ExternalPublicDataProvider liveness', () => {
     provider.dispose();
   });
 
-  test('reports gateway disconnects through the exchange public socket-health bridge', () => {
-    const store = new DefaultStore();
+  test('reports gateway liveness while native frames retain Store health authority', () => {
+    const store = new FrameStore();
     const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
     const provider = new ExternalPublicDataProvider(exchange, {
       url: 'wss://gateway.example.test',
@@ -125,11 +123,15 @@ describe('ExternalPublicDataProvider liveness', () => {
 
     (provider as any).onOpen();
     exchange.syncSocketHealthToStore();
-    expect(store.socketHealth).toMatchObject({ publicInitialized: true, publicHealthy: true });
+    expect(provider.isInitialized).toBe(true);
+    expect(provider.isHealthy).toBe(true);
+    const nativeHealth = store.socketHealth;
 
     ws.readyState = WebSocket.CLOSED;
     exchange.syncSocketHealthToStore();
-    expect(store.socketHealth).toMatchObject({ publicInitialized: true, publicHealthy: false });
+    expect(provider.isInitialized).toBe(true);
+    expect(provider.isHealthy).toBe(false);
+    expect(store.socketHealth).toBe(nativeHealth);
 
     exchange.dispose();
   });

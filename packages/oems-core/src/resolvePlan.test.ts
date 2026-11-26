@@ -1,3 +1,5 @@
+import { requireArray, requireRecord } from './typeChecks.testHelpers';
+
 import type { OemsContext } from './context.types';
 import type { OemsIntent, OemsPlan } from './intent.types';
 
@@ -160,7 +162,13 @@ describe('reduce all my positions by 30%', () => {
   it('closes with a reduce-only market order sized in the venue own units', () => {
     for (const command of result.commands) {
       expect(command.method).toBe('placeOrder');
-      expect(Object.keys(command.args[0] as object).sort()).toEqual(['amount', 'reduceOnly', 'side', 'symbol', 'type']);
+      expect(Object.keys(requireRecord(command.args[0])).sort()).toEqual([
+        'amount',
+        'reduceOnly',
+        'side',
+        'symbol',
+        'type',
+      ]);
     }
   });
 
@@ -201,7 +209,7 @@ describe('reduce_positions guards', () => {
       positions,
       markets,
     });
-    expect((result.commands[0].args[0] as { amount: number }).amount).toBe(150);
+    expect(requireRecord(result.commands[0].args[0]).amount).toBe(150);
   });
 
   it('skips the venue-minimum check where the limit unit is adapter-dependent', () => {
@@ -221,7 +229,7 @@ describe('reduce_positions guards', () => {
       markets,
     });
     expect(result.rejections).toEqual([]);
-    expect((result.commands[0].args[0] as { amount: number }).amount).toBe(2);
+    expect(requireRecord(result.commands[0].args[0]).amount).toBe(2);
   });
 
   it('refuses a flat position row instead of sending a zero-size close', () => {
@@ -264,7 +272,7 @@ describe('close_positions', () => {
       markets,
     });
     expect(result.commands[0].method).toBe('placeOrder');
-    expect((result.commands[0].args[0] as { amount: number }).amount).toBe(5);
+    expect(requireRecord(result.commands[0].args[0]).amount).toBe(5);
   });
 
   it('refuses a close on a symbol with no market row rather than guessing the unit', () => {
@@ -278,7 +286,7 @@ describe('close_positions', () => {
     const result = resolve(plan({ kind: 'close_positions', scope: { symbols: ['ETHUSD'] } }));
     expect(result.rejections).toEqual([]);
     expect(result.commands.map((command) => command.method)).toEqual(['placeOrder', 'placeOrder']);
-    expect((result.commands[0].args[0] as { amount: number }).amount).toBe(100);
+    expect(requireRecord(result.commands[0].args[0]).amount).toBe(100);
   });
 });
 
@@ -312,8 +320,8 @@ describe('cancel_orders', () => {
     }));
     const result = resolve(plan({ kind: 'cancel_orders', scope: {} }), { orders });
     expect(result.commands).toHaveLength(2);
-    expect((result.commands[0].args[0] as { ids: unknown[] }).ids.length).toBe(25);
-    expect((result.commands[1].args[0] as { ids: unknown[] }).ids.length).toBe(5);
+    expect(requireArray(requireRecord(result.commands[0].args[0]).ids).length).toBe(25);
+    expect(requireArray(requireRecord(result.commands[1].args[0]).ids).length).toBe(5);
   });
 });
 
@@ -536,7 +544,7 @@ describe('amend_order', () => {
   it('sends exactly one of price or amount, keyed by id', () => {
     const result = resolve(plan({ kind: 'amend_order', account: 'binance-main', orderId: 'o1', price: 57_999.96 }));
     expect(result.commands[0].args).toEqual(['o1', { update: { price: 58_000 } }, 'binance-main']);
-    expect(Object.keys((result.commands[0].args[1] as { update: object }).update)).toEqual(['price']);
+    expect(Object.keys(requireRecord(requireRecord(result.commands[0].args[1]).update))).toEqual(['price']);
   });
 
   it('sends the engine a total, so the size asked for is what stays open after a part fill', () => {
@@ -662,7 +670,7 @@ describe('user overrides', () => {
     const result = resolveWith(reduce30, [
       { step: 0, symbol: 'BTCUSDT', account: 'binance-main', side: 'sell', amount: 0.0000001 },
     ]);
-    expect(result.commands.some((command) => (command.args[0] as { symbol: string }).symbol === 'BTCUSDT')).toBe(false);
+    expect(result.commands.some((command) => requireRecord(command.args[0]).symbol === 'BTCUSDT')).toBe(false);
     expect(result.rejections.map((rejection) => rejection.reason).join(' ')).toMatch(/minimum|not a size/);
   });
 
@@ -884,7 +892,7 @@ describe('user overrides', () => {
     const result = resolveWith(reduce30, [
       { step: 0, symbol: 'DOGEUSDT', account: 'binance-main', side: 'sell', amount: 5 },
     ]);
-    expect(result.commands.map((command) => (command.args[0] as { amount: number }).amount)).toEqual([0.3, 30, 12]);
+    expect(result.commands.map((command) => requireRecord(command.args[0]).amount)).toEqual([0.3, 30, 12]);
   });
 });
 

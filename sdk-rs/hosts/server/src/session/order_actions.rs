@@ -29,7 +29,7 @@ impl Session {
         let refused = if request.version != 1 {
             Some("not sent: unsupported action version")
         } else if !self.order_admitted(&name, request.instance_id.as_deref()) {
-            Some("not sent: account not admitted for actions")
+            Some("Order changes aren’t available on this account connection")
         } else if let Err(error) =
             crate::order_contract::check_key(&request.intent_id, crate::accounts::now_ms())
         {
@@ -52,7 +52,8 @@ impl Session {
             }
         };
         if let Some(message) = refused {
-            let reason = if message == "not sent: account not admitted for actions" {
+            let reason = if message == "Order changes aren’t available on this account connection"
+            {
                 self.order_admission_refusal(&name, request.instance_id.as_deref())
                     .unwrap_or(message)
             } else {
@@ -76,14 +77,26 @@ impl Session {
             return;
         };
         let action = decoded.action;
-        let (method, args) = match action.call() {
+        let (method, mut args) = match action.call() {
             Ok(call) => call,
             Err(message) => {
                 self.audit_order_refusal(&name, action.kind(), message);
-                order_actions::unsupported(&out, &name, &id, request.seq);
+                if matches!(&action, order_actions::Action::Algo { op, .. } if matches!(op.as_str(), "chaser:amend" | "twap:amend"))
+                {
+                    order_actions::unsupported_message(&out, &name, &id, request.seq, message);
+                } else {
+                    order_actions::unsupported(&out, &name, &id, request.seq);
+                }
                 return;
             }
         };
+        // After the fingerprint and schema checks: both bind the caller's own ID.
+        if matches!(
+            action,
+            order_actions::Action::Place { .. } | order_actions::Action::Close { .. }
+        ) {
+            crate::order_contract::venue_caller_ids(&self.joined[&name].account.venue, &mut args);
+        }
         let Some(deadline) =
             order_actions::ActionDeadline::new(&request.intent_id, request.age_ms, arrived)
         else {
@@ -221,7 +234,7 @@ impl Session {
             cancel.seq,
             "",
             Err(
-                json!({"message":"Queue cancellation must be resolved by the router","outcome":"unknown"}),
+                json!({"message":"The queued order couldn’t be cancelled here. Cancel it from your pending orders.","outcome":"unknown"}),
             ),
         );
     }
@@ -242,6 +255,10 @@ impl Session {
             return;
         };
         let account = self.joined[name].account.clone();
+        let label = self.joined[name]
+            .out
+            .account_label(&account.name)
+            .to_owned();
         let receipt = crate::order_actions::NukeReceipt::new(
             self.account_out(name),
             name.to_owned(),
@@ -274,23 +291,25 @@ impl Session {
                 crate::audit::pre_dispatch_refused(
                     Some(&account.venue),
                     kind,
-                    "Action expired; no further action command was sent",
+                    "This action expired before it could finish. Check your open orders and positions before trying again.",
                 );
                 receipt.finish(Err(order_actions::expired_outcome()));
                 return;
             }
             let refusal = if !receipt.active() {
-                Some("Action registration retired; no further action command was sent")
+                Some(
+                    "The account connection changed before this action could finish. Check your open orders and positions before trying again.",
+                )
             } else if !account.running.io_allowed() {
                 Some("io_fenced")
-            } else if !registry.holds(&account, socket) {
+            } else if !registry.holds_label(&account, socket, &label) {
                 Some("holder_changed")
             } else {
                 None
             };
             if let Some(reason) = refusal {
                 crate::audit::pre_dispatch_refused(Some(&account.venue), kind, reason);
-                receipt.finish(Err(json!({"message":"Action registration retired before dispatch","outcome":"notSent"})));
+                receipt.finish(Err(json!({"message":"This action couldn’t start because the account connection changed","outcome":"notSent"})));
                 return;
             }
             if let Err(error) = loaded {

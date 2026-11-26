@@ -85,3 +85,80 @@ it('drops a reason that is not a short identifier, keeping the incompleteness', 
     expect(withHistoryCompleteness([], { incomplete: true, reason })).not.toHaveProperty('incompleteReason');
   }
 });
+
+it('keeps a later-page failure through mapping and JSON without raw native values', () => {
+  const failure = {
+    operation: 'bybitOrders',
+    kind: 'rateLimited',
+    venueCode: '10006',
+    message: 'PRIVATE_CANARY',
+  };
+  const input = Object.defineProperties([{ id: 1 }], {
+    incomplete: { value: true },
+    incompleteReason: { value: 'laterPageFailed' },
+    historyFailure: { value: failure },
+  });
+  const mapped = copyHistoryCompleteness(
+    input,
+    input.map((row) => ({ ...row })),
+  );
+  const wire = JSON.parse(JSON.stringify({ rows: mapped, completeness: historyCompletenessOf(mapped) }));
+  expect(wire).toEqual({
+    rows: [{ id: 1 }],
+    completeness: {
+      incomplete: true,
+      reason: 'laterPageFailed',
+      failure: { operation: 'bybitOrders', kind: 'rateLimited', venueCode: '10006' },
+    },
+  });
+  const restored = withHistoryCompleteness(wire.rows, wire.completeness);
+  expect(historyCompletenessOf(restored)).toEqual(wire.completeness);
+  expect(Object.getOwnPropertyDescriptor(restored, 'historyFailure')?.enumerable).toBe(false);
+  expect(JSON.stringify(wire)).not.toContain('PRIVATE_CANARY');
+});
+
+it('does not carry a different input failure when replacing a completeness assertion', () => {
+  const rows = withHistoryCompleteness([], {
+    incomplete: true,
+    reason: 'laterPageFailed',
+    failure: { operation: 'bybitClosedPnl', kind: 'network' },
+  });
+  const updated = withHistoryCompleteness(rows, { incomplete: true, reason: 'pageBudget' });
+  expect(updated).not.toHaveProperty('historyFailure');
+  const frozen = Object.freeze(
+    withHistoryCompleteness([], {
+      incomplete: true,
+      reason: 'laterPageFailed',
+      failure: { operation: 'bybitOrders', kind: 'timeout' },
+    }),
+  );
+  expect(withHistoryCompleteness(frozen, { incomplete: true, reason: 'cursorStalled' })).not.toHaveProperty(
+    'historyFailure',
+  );
+});
+
+it('drops malformed failure metadata and never attaches failure facts without the owning reason', () => {
+  for (const failure of [
+    null,
+    [],
+    { operation: 'PRIVATE_CANARY', kind: 'network' },
+    { operation: 'bybitOrders', kind: 'PRIVATE_CANARY' },
+    { operation: 'bybitOrders', kind: 'network', venueCode: 'PRIVATE_CANARY' },
+    {
+      get operation() {
+        throw Error('PRIVATE_CANARY');
+      },
+    },
+  ]) {
+    expect(withHistoryCompleteness([], { incomplete: true, reason: 'laterPageFailed', failure })).not.toHaveProperty(
+      'historyFailure',
+    );
+  }
+  expect(
+    withHistoryCompleteness([], {
+      incomplete: true,
+      reason: 'pageBudget',
+      failure: { operation: 'bybitOrders', kind: 'network' },
+    }),
+  ).not.toHaveProperty('historyFailure');
+});

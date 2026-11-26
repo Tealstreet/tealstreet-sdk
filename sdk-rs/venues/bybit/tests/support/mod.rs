@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Drives a Bybit engine through scripted responses and frames built from the
 //! documented V5 payloads (bybit-exchange.github.io/docs/v5).
 #![allow(dead_code)]
@@ -145,7 +146,12 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::AccountAuth { .. }) => {}
+                Action::Notice(
+                    Notice::AccountAuth { .. }
+                    | Notice::OrderTriggered { .. }
+                    | Notice::OrderNativeId { .. }
+                    | Notice::PlacementNativeId { .. },
+                ) => {}
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
                     self.progress.push((command, receipts))
                 }
@@ -497,9 +503,10 @@ fn prepared_actions(
     output
 }
 
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
-pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 
 pub fn assert_unknown_pin(
     h: &mut Harness,
@@ -536,7 +543,9 @@ pub fn assert_unknown_pin_with_text(
         })
         .expect("unknown telemetry event");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(error.message.contains(expected_text), "{error:?}");
+    // Rule 5 (#3726): engine-sealed HTTP rows and venue-authored Unknown retain distinct copy.
+    assert!(error.message.contains(expected_text)
+        || (expected_text == ENGINE_UNKNOWN_TEXT && error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")), "{error:?}");
     let elements = error.elements.as_ref().expect("unknown journal");
     assert_eq!(elements.len(), count);
     assert!(matches!(

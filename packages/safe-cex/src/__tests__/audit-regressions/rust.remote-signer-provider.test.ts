@@ -76,12 +76,12 @@ describe('standalone account-owned remote primitive provider', () => {
     const r = remote();
     const fallback = vi.fn();
     const signer = createRemoteSignerProvider({ exchangeName: 'bybit', identities, remoteSigner: r.value, payloadSigner: fallback });
-    await expect(signer(request(secondary), context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(request(secondary), context())).rejects.toThrow('This request couldn’t be signed');
     const mixed = request();
     const op = mixed.operations[1];
     if (op.kind !== 'sign') throw new Error('fixture');
     op.payload = [{ kind: 'credential', key: secondary.credential }];
-    await expect(signer(mixed, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(mixed, context())).rejects.toThrow('This request couldn’t be signed');
     expect(r.value.sign).not.toHaveBeenCalled();
     expect(fallback).not.toHaveBeenCalled();
   });
@@ -116,7 +116,7 @@ describe('standalone account-owned remote primitive provider', () => {
     });
     const fallback = vi.fn();
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, remoteSigner: r.value, payloadSigner: fallback });
-    await expect(signer(request(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(signer(request(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(fallback).not.toHaveBeenCalled();
     expect(r.unsubscribe).toHaveBeenCalledTimes(1);
   });
@@ -127,7 +127,7 @@ describe('standalone account-owned remote primitive provider', () => {
       return kind === 'null' ? null as never : { signature: 'x'.repeat(64) };
     };
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, payloadSigner: callback });
-    await expect(signer(request(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(signer(request(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
   });
 
   it('omits absent accountName and settles even when availability cleanup throws', async () => {
@@ -157,7 +157,7 @@ describe('standalone account-owned remote primitive provider', () => {
     await signer(input, context());
     expect(callback).toHaveBeenCalledWith({ exchangeName: 'binance', key: 'public+é', payload: 'A'.repeat(256), scheme: 'hmac-sha256', encoding: 'hex' });
     payload.push({ kind: 'bytes', bytes: [65] });
-    await expect(signer(input, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(input, context())).rejects.toThrow('This request couldn’t be signed');
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
@@ -165,11 +165,11 @@ describe('standalone account-owned remote primitive provider', () => {
     const r = remote();
     vi.mocked(r.value.isAvailable).mockReturnValue(false);
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, remoteSigner: r.value });
-    await expect(signer(request(), context())).rejects.toThrow('Remote signer unavailable');
+    await expect(signer(request(), context())).rejects.toThrow('Signing isn’t available for this account');
     expect(r.value.sign).not.toHaveBeenCalled();
     vi.mocked(r.value.isAvailable).mockReturnValue(true);
     vi.mocked(r.value.onAvailabilityChange).mockImplementation((callback) => { callback(false); return r.unsubscribe; });
-    await expect(signer(request(), context())).rejects.toThrow('Remote signer unavailable');
+    await expect(signer(request(), context())).rejects.toThrow('Signing isn’t available for this account');
     expect(r.value.sign).not.toHaveBeenCalled();
     expect(r.unsubscribe).toHaveBeenCalledTimes(1);
   });
@@ -182,7 +182,7 @@ describe('standalone account-owned remote primitive provider', () => {
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, remoteSigner: r.value, payloadSigner: fallback });
     const result = signer(request(), { signal: controller.signal });
-    const expected = expect(result).rejects.toThrow(event === 'abort' ? 'Remote signing canceled' : 'Remote signer unavailable');
+    const expected = expect(result).rejects.toThrow(event === 'abort' ? 'Signing was cancelled' : 'Signing isn’t available for this account');
     if (event === 'abort') controller.abort();
     else r.notify(false);
     await expected;
@@ -199,11 +199,11 @@ describe('standalone account-owned remote primitive provider', () => {
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, payloadSigner: callback });
     const controller = new AbortController();
     controller.abort();
-    await expect(signer(request(), { signal: controller.signal })).rejects.toThrow('Remote signing canceled');
+    await expect(signer(request(), { signal: controller.signal })).rejects.toThrow('Signing was cancelled');
     expect(callback).not.toHaveBeenCalled();
     const next = new AbortController();
     callback.mockImplementation(async () => { next.abort(); return { signature: hex }; });
-    await expect(signer(request(), { signal: next.signal })).rejects.toThrow('Remote signing canceled');
+    await expect(signer(request(), { signal: next.signal })).rejects.toThrow('Signing was cancelled');
   });
 
   it('refuses bad refs, unsupported algorithms/result parts, malformed bytes and oversize batches before callbacks', async () => {
@@ -221,7 +221,7 @@ describe('standalone account-owned remote primitive provider', () => {
       Array(33).fill({ kind: 'present', key: primary.credential }),
     ];
     for (const operations of invalid) {
-      await expect(signer({ ...request(), operations }, context())).rejects.toThrow('Remote signing request refused');
+      await expect(signer({ ...request(), operations }, context())).rejects.toThrow('This request couldn’t be signed');
     }
     expect(callback).not.toHaveBeenCalled();
   });
@@ -231,13 +231,13 @@ describe('standalone account-owned remote primitive provider', () => {
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, payloadSigner: callback });
     const operations = request().operations;
     operations.length = 3;
-    await expect(signer({ ...request(), operations }, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer({ ...request(), operations }, context())).rejects.toThrow('This request couldn’t be signed');
     const next = request();
     const malformed = request().operations[1];
     if (malformed.kind !== 'sign') throw new Error('fixture');
     malformed.payload.length += 1;
     next.operations.push(malformed);
-    await expect(signer(next, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(next, context())).rejects.toThrow('This request couldn’t be signed');
     expect(callback).not.toHaveBeenCalled();
   });
 
@@ -250,7 +250,7 @@ describe('standalone account-owned remote primitive provider', () => {
       { stampMs: Infinity }, { expiryMs: NaN }, { stampMs: 5, expiryMs: 5 }, { stampMs: 6, expiryMs: 5 },
       { stampMs: null }, { arbitrary: 1 }, null,
     ]) {
-      await expect(signer({ ...request(), receipt } as SignRequest, context())).rejects.toThrow('Remote signing request refused');
+      await expect(signer({ ...request(), receipt } as SignRequest, context())).rejects.toThrow('This request couldn’t be signed');
     }
     expect(callback).not.toHaveBeenCalled();
     for (const receipt of [{}, { stampMs: 0 }, { expiryMs: Number.MAX_SAFE_INTEGER }, { stampMs: 0, expiryMs: 1 }]) {
@@ -264,7 +264,7 @@ describe('standalone account-owned remote primitive provider', () => {
       for (const field of ['credential', 'signing']) {
         expect(() => createRemoteSignerProvider({ exchangeName: 'binance',
           identities: { primary: { ...primary, [field]: key } }, payloadSigner: callback }))
-          .toThrow('Remote signing request refused');
+          .toThrow('This request couldn’t be signed');
       }
     }
     for (const signing of ['é'.repeat(128), '   ', 'ref\0suffix']) {
@@ -281,7 +281,7 @@ describe('standalone account-owned remote primitive provider', () => {
     const operations: SignRequest['operations'] = Array.from({ length: 2 }, () => ({
       kind: 'sign', key: primary.signing, algorithm: 'hmacSha256', payload: [{ kind: 'bytes', bytes: Array(600_000).fill(65) }],
     }));
-    await expect(signer({ ...request(), operations }, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer({ ...request(), operations }, context())).rejects.toThrow('This request couldn’t be signed');
     expect(callback).not.toHaveBeenCalled();
   });
 
@@ -292,7 +292,7 @@ describe('standalone account-owned remote primitive provider', () => {
     { ['X'.repeat(257)]: 'x' },
   ])('rejects malformed or oversized callback headers atomically', async (headers) => {
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, payloadSigner: () => ({ signature: hex, headers }) });
-    await expect(signer(request(), context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(request(), context())).rejects.toThrow('This request couldn’t be signed');
   });
 
   it('refuses headers on ambiguous multiple-HMAC batches but allows headerless multiple results', async () => {
@@ -300,7 +300,7 @@ describe('standalone account-owned remote primitive provider', () => {
     const signer = createRemoteSignerProvider({ exchangeName: 'binance', identities, payloadSigner: callback });
     const input = request();
     input.operations.push(request().operations[1]);
-    await expect(signer(input, context())).rejects.toThrow('Remote signing request refused');
+    await expect(signer(input, context())).rejects.toThrow('This request couldn’t be signed');
     expect(callback).toHaveBeenCalledTimes(1);
     callback.mockResolvedValue({ signature: hex } as never);
     const result: SignResult = await signer(input, context());
@@ -322,14 +322,14 @@ describe('standalone account-owned remote primitive provider', () => {
   });
 
   it('rejects missing callbacks and ambiguous/invalid identity setup with closed errors', () => {
-    expect(() => createRemoteSignerProvider({ exchangeName: 'binance', identities })).toThrow('Remote signing request refused');
+    expect(() => createRemoteSignerProvider({ exchangeName: 'binance', identities })).toThrow('This request couldn’t be signed');
     for (const invalid of [
       { ...primary, signing: primary.credential },
       { ...secondary, credential: primary.credential },
       { ...secondary, publicCredential: '\ud800' },
     ]) {
       expect(() => createRemoteSignerProvider({ exchangeName: 'binance', identities: { primary, secondary: invalid }, payloadSigner: vi.fn() }))
-        .toThrow('Remote signing request refused');
+        .toThrow('This request couldn’t be signed');
     }
   });
 });
@@ -423,7 +423,7 @@ describe('Bitunix fused double-SHA256 remote admission', () => {
     const r = browser();
     const signer = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value });
     const input = fused('');
-    await expect(signer({ ...input, operations: mutate(input.operations) }, context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(signer({ ...input, operations: mutate(input.operations) }, context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(r.value.sign).not.toHaveBeenCalled();
   });
 
@@ -434,24 +434,24 @@ describe('Bitunix fused double-SHA256 remote admission', () => {
   ])('refuses a %s browser answer without publishing any value', async (_, answer) => {
     const r = browser(answer as (toSign: string) => unknown);
     const signer = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value });
-    await expect(signer(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(signer(fused(''), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(r.value.sign).toHaveBeenCalledOnce();
   });
 
   it('refuses the fused shape for PayloadSigner, for other venues and for HMAC on Bitunix', async () => {
     const callback = vi.fn(async () => ({ signature: hex }));
     const payload = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, payloadSigner: callback });
-    await expect(payload(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(payload(fused(''), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(callback).not.toHaveBeenCalled();
     for (const exchangeName of ['bybit', 'binance', 'okx', 'bitget'] as const) {
       const r = browser();
       const signer = createRemoteSignerProvider({ exchangeName, identities: slots, remoteSigner: r.value });
-      await expect(signer(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+      await expect(signer(fused(''), context())).rejects.toThrow(/^This request couldn’t be signed$/);
       expect(r.value.sign).not.toHaveBeenCalled();
     }
     const r = browser();
     const bitunix = createRemoteSignerProvider({ exchangeName: 'bitunix', identities, remoteSigner: r.value });
-    await expect(bitunix(request(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(bitunix(request(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(r.value.sign).not.toHaveBeenCalled();
   });
 
@@ -506,14 +506,14 @@ describe('BloFin base64-of-hex remote admission', () => {
       (toSign: string) => Buffer.from(hexText(toSign).slice(2)).toString('base64'),
     ]) {
       const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, remoteSigner: browser(answer).value });
-      await expect(signer(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+      await expect(signer(work(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     }
   });
 
   it('never asks a PayloadSigner for a BloFin signature', async () => {
     const callback = vi.fn();
     const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, payloadSigner: callback });
-    await expect(signer(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    await expect(signer(work(), context())).rejects.toThrow(/^This request couldn’t be signed$/);
     expect(callback).not.toHaveBeenCalled();
   });
 });

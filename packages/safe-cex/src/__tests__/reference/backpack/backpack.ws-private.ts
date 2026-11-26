@@ -1,9 +1,22 @@
-import { MarginType, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, Position, PositionSide } from '../../../types';
-import { createPositionId } from '../../../utils/createPositionId';
+import type { StoreData } from '../../../generated/StoreData';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { generateWsAuthSignature } from './backpack.signing';
+import {
+  MarginType,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderTimeInForce,
+  OrderType,
+  Position,
+  PositionSide,
+} from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BackpackExchange } from './backpack.exchange';
+import { generateWsAuthSignature } from './backpack.signing';
 import { BackpackWsOrderUpdate, BackpackWsPositionUpdate, WSS_URLS } from './backpack.types';
 
 export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
@@ -65,18 +78,14 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
   private authenticate = async () => {
     try {
       const streams = ['account.orderUpdate', 'account.positionUpdate'];
-      const authSig = await generateWsAuthSignature(
-        this.parent.options.key,
-        this.parent.options.secret,
-        5000
-      );
+      const authSig = await generateWsAuthSignature(this.parent.options.key, this.parent.options.secret, 5000);
 
       this.send(
         JSON.stringify({
           method: 'SUBSCRIBE',
           params: streams,
           signature: authSig,
-        })
+        }),
       );
 
       streams.forEach((stream) => this.subscriptions.add(stream));
@@ -97,18 +106,14 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
 
     if (!this.subscriptions.has(stream)) {
       try {
-        const authSig = await generateWsAuthSignature(
-          this.parent.options.key,
-          this.parent.options.secret,
-          5000
-        );
+        const authSig = await generateWsAuthSignature(this.parent.options.key, this.parent.options.secret, 5000);
 
         this.send(
           JSON.stringify({
             method: 'SUBSCRIBE',
             params: [stream],
             signature: authSig,
-          })
+          }),
         );
 
         this.subscriptions.add(stream);
@@ -123,18 +128,14 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
 
     if (!this.subscriptions.has(stream)) {
       try {
-        const authSig = await generateWsAuthSignature(
-          this.parent.options.key,
-          this.parent.options.secret,
-          5000
-        );
+        const authSig = await generateWsAuthSignature(this.parent.options.key, this.parent.options.secret, 5000);
 
         this.send(
           JSON.stringify({
             method: 'SUBSCRIBE',
             params: [stream],
             signature: authSig,
-          })
+          }),
         );
 
         this.subscriptions.add(stream);
@@ -206,7 +207,7 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       }
 
       // For trigger orders, use triggerPrice as display price; otherwise use p or L (last executed price)
-      const price = triggerPrice ?? (data.p ? parseFloat(data.p) : (data.L ? parseFloat(data.L) : 0));
+      const price = triggerPrice ?? (data.p ? parseFloat(data.p) : data.L ? parseFloat(data.L) : 0);
 
       // For trigger orders, use trigger quantity if available, otherwise fall back to regular quantity
       const rawAmount = isTriggerOrder && data.Q ? data.Q : data.q;
@@ -228,7 +229,22 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
         timeInForce: this.mapTimeInForce(data.f || 'GTC'),
       };
 
-      this.store.addOrUpdateOrder(order);
+      (() => {
+        const incoming: StoreData['orders'] = [order];
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       // Emit fill event for orderFill events
       if (data.e === 'orderFill' && data.l) {
@@ -276,7 +292,11 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
           (position) => position.id !== positionId && position.id !== oppositePositionId,
         );
         if (updatedPositions.length !== this.store.positions.length) {
-          this.store.update({ positions: updatedPositions });
+          applyReferenceFixture(
+            this.store,
+            { positions: updatedPositions },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
         return;
       }
@@ -284,7 +304,11 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       // Backpack reports one signed net quantity per symbol. Evict the stale
       // internal side before applying a flip that crosses through zero.
       if (this.store.positions.some((position) => position.id === oppositePositionId)) {
-        this.store.update({ positions: this.store.positions.filter((position) => position.id !== oppositePositionId) });
+        applyReferenceFixture(
+          this.store,
+          { positions: this.store.positions.filter((position) => position.id !== oppositePositionId) },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
 
       // Entry price is in 'b' (breakeven) or 'B' field
@@ -302,14 +326,29 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
         leverage,
         unrealizedPnl: parseFloat(data.P),
         contracts: size,
-        liquidationPrice: parseFloat(data.l) || 0,
+        liquidationPrice: nativeLiquidationPrice(parseFloat(data.l) || 0),
         lastUpdate: Math.floor(data.E / 1000), // Convert microseconds to milliseconds
         // Backpack is always cross-margin hedged mode
         positionMode,
         marginType: MarginType.Cross,
       };
 
-      this.store.addOrUpdatePosition(position);
+      (() => {
+        const incoming: StoreData['positions'] = [position];
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (error) {
       this.parent.emitAndLogError(`Error handling position update: ${error}`);
     }
@@ -331,11 +370,7 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
    * Determines if a trigger order is a StopLoss or TakeProfit based on the side
    * and trigger price relative to current market price.
    */
-  private determineTriggerOrderType = (
-    symbol: string,
-    side: OrderSide,
-    triggerPrice?: number
-  ): OrderType => {
+  private determineTriggerOrderType = (symbol: string, side: OrderSide, triggerPrice?: number): OrderType => {
     // Get current market price from ticker
     const ticker = this.store.tickers.find((t) => t.symbol === symbol);
     const currentPrice = ticker?.last ?? ticker?.mark;
@@ -391,7 +426,7 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
         JSON.stringify({
           method: 'UNSUBSCRIBE',
           params: streams,
-        })
+        }),
       );
 
       streams.forEach((stream) => this.subscriptions.delete(stream));
@@ -437,7 +472,11 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed) {
-        this.store.update({ positions });
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
     } catch {
       // Silent failure, will retry on next event
@@ -458,13 +497,14 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: { orders: true },
           },
-        });
+          this.parent.store.markets.map((row) => row.symbol),
+        );
       } catch {
         // Silent failure, will retry on next event
       }
@@ -510,7 +550,11 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       this.hasPendingBalanceEvents = false;
       const balance = await this.parent.fetchBalance();
       if (!this.isDisposed) {
-        this.store.update({ balance });
+        applyReferenceFixture(
+          this.store,
+          { balance },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
     } catch {
       // Silent failure, will retry on next event

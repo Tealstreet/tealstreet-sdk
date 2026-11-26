@@ -1,3 +1,4 @@
+// Rule 5: pin the refusal wording; NotSent and zero venue writes remain required.
 //! Exercises the wire handover, native probe, account admission and manual write together.
 use super::*;
 use crate::delegated::probe::RefusalStage;
@@ -10,11 +11,11 @@ use hpke::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-const USER: &str = "synthetic-tenant:alice";
-const ACCOUNT: &str = "synthetic-e2e";
-const INSTANCE: &str = "e2e-registration";
+pub(super) const USER: &str = "synthetic-tenant:alice";
+pub(super) const ACCOUNT: &str = "synthetic-e2e";
+pub(super) const INSTANCE: &str = "e2e-registration";
 
-fn vectors() -> Vec<Value> {
+pub(super) fn vectors() -> Vec<Value> {
     let data: Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/delegated-handover-vectors.json"
     ))
@@ -23,7 +24,7 @@ fn vectors() -> Vec<Value> {
 }
 
 /// Use the S5 fixture bytes before sealing the same plaintext to a fresh server offer.
-fn plaintext(vector: &Value) -> Vec<u8> {
+pub(super) fn plaintext(vector: &Value) -> Vec<u8> {
     let input = &vector["input"];
     let sealed: Sealed = serde_json::from_value(vector["sealed"].clone()).unwrap();
     let private = <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(
@@ -83,7 +84,7 @@ fn connection(registry: Arc<Registry>) -> (Session, crate::out::Receiver) {
     )
 }
 
-async fn wire(session: &mut Session, message: Value) {
+pub(super) async fn wire(session: &mut Session, message: Value) {
     session.handle(&message.to_string()).await.unwrap();
 }
 
@@ -105,11 +106,11 @@ async fn next_text(sent: &mut crate::out::Receiver, op: &str) -> String {
     .expect("bounded test reply")
 }
 
-async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
+pub(super) async fn next(sent: &mut crate::out::Receiver, op: &str) -> Value {
     serde_json::from_str(&next_text(sent, op).await).unwrap()
 }
 
-async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
+pub(super) async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Value {
     let mut loaded = session.take_loaded();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -127,7 +128,7 @@ async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver) -> Val
     .expect("loaded snapshot reaches the connection")
 }
 
-async fn sealed_init(
+pub(super) async fn sealed_init(
     session: &mut Session,
     sent: &mut crate::out::Receiver,
     vector: &Value,
@@ -166,7 +167,9 @@ async fn sealed_init_for_offer(
     json!({"t":"init","d":{"accountName":ACCOUNT,"exchangeName":venue,"key":key,"instanceId":INSTANCE,"signingMode":"delegated","sealed":sealed}})
 }
 
-async fn completed(results: &mut mpsc::UnboundedReceiver<JoinCompletion>) -> JoinCompletion {
+pub(super) async fn completed(
+    results: &mut mpsc::UnboundedReceiver<JoinCompletion>,
+) -> JoinCompletion {
     tokio::time::timeout(Duration::from_secs(5), results.recv())
         .await
         .expect("native probe settles")
@@ -194,7 +197,7 @@ async fn assert_empty(session: &Session, registry: &Registry) {
     .expect("temporary probe is released");
 }
 
-fn mock(vector: &Value) -> MockVenue {
+pub(super) fn mock(vector: &Value) -> MockVenue {
     MockVenue::new(
         vector["input"]["key"].as_str().unwrap().into(),
         vector["input"]["secret"].as_str().unwrap().into(),
@@ -434,6 +437,12 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
 
 #[cfg(target_os = "linux")]
 async fn hyperliquid_protected_placement(typed: bool, explicit_id: bool) {
+    hyperliquid_placement(typed, explicit_id, None).await;
+}
+
+/// `caller_id` sends a typed v1 `place` action carrying that caller ID instead.
+#[cfg(target_os = "linux")]
+async fn hyperliquid_placement(typed: bool, explicit_id: bool, caller_id: Option<&str>) {
     let material = format!("0x{:064x}", 7);
     let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
     let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
@@ -488,7 +497,34 @@ async fn hyperliquid_protected_placement(typed: bool, explicit_id: bool) {
     .expect("real native startup completes before placement");
     assert!(venue.observed.lock().unwrap().reads > 0);
     assert!(venue.observed.lock().unwrap().writes.is_empty());
-    if typed {
+    if let Some(caller) = caller_id {
+        let epoch = format!("{:012x}", crate::accounts::now_ms());
+        let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
+        let action = json!({"kind":"place","orders":[{"symbol":"BTC-PERP","type":"limit",
+            "side":"buy","amount":0.001,"price":55000,"clientOrderId":caller}]});
+        let fingerprint =
+            crate::order_contract::action_wire_fingerprint(ACCOUNT, &intent, &action, 1).unwrap();
+        wire(
+            &mut session,
+            json!({"t":"order.action","d":{"version":1,"accountName":ACCOUNT,
+            "instanceId":INSTANCE,"intentId":intent,"seq":1,"ageMs":0,"fingerprint":fingerprint,
+            "action":action}}),
+        )
+        .await;
+        let ack = hyperliquid_order_frame(&mut sent, "order.actionAck").await;
+        assert_eq!(ack["d"]["received"], true);
+        let outcome = hyperliquid_order_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(outcome["d"]["outcome"], "applied", "{outcome}");
+        assert_eq!(
+            outcome["d"]["result"],
+            json!({"kind":"place","orderIds":["77"]})
+        );
+        // AGT-42: the signed native order carries the cloid the caller recomputes.
+        assert_eq!(
+            venue.observed.lock().unwrap().writes[0]["action"]["orders"][0]["c"],
+            crate::order_contract::hyperliquid_cloid(caller)
+        );
+    } else if typed {
         let epoch = format!("{:012x}", crate::accounts::now_ms());
         let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
         let mut params =
@@ -596,6 +632,13 @@ async fn delegated_hyperliquid_typed_submit_maps_uuid_before_protected_send() {
 #[tokio::test]
 async fn delegated_hyperliquid_typed_submit_maps_explicit_intent_id() {
     hyperliquid_protected_placement(true, true).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_place_action_derives_the_caller_cloid() {
+    hyperliquid_placement(true, false, Some("ts-caller-1")).await;
+    hyperliquid_placement(true, false, Some("0x0123456789abcdef0123456789abcdef")).await;
 }
 
 #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
@@ -805,7 +848,7 @@ async fn bybit_mobile_receipt(case: &str) {
         } else if case == "missing-type" {
             "invalid command"
         } else {
-            "not admitted"
+            "Order changes aren’t available on this account connection"
         }));
         assert!(venue.observed.lock().unwrap().writes.is_empty());
     } else {

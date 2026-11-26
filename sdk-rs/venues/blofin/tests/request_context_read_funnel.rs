@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Original controls: BloFin's private reads go out as managed legs, never legacy HTTP.
 #![allow(dead_code)]
 mod support;
@@ -206,7 +207,7 @@ fn capacity_refusals(h: &mut Harness, now: f64) -> usize {
             .drain_actions()
             .filter(|a| {
                 matches!(a, Action::Notice(safe_cex_engine::Notice::CommandFailed { command: c, error })
-                    if *c == command && error.legacy_text().contains("capacity"))
+                    if *c == command && error.legacy_text().contains("request queue is full"))
             })
             .count();
     }

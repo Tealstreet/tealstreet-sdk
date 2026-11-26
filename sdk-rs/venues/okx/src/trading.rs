@@ -15,7 +15,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::write_plan::{
-    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, WritePlan,
+    AppliedEffect, Element, ElementOutcome, ElementOutcomes, ElementResult, LegRole, WritePlan,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -24,7 +24,8 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
-const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_OUTCOME_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 /// Every write is one call with its own 20 s bound; only a 50113 signature
 /// refusal, which executed nothing, is re-signed and sent once more.
@@ -164,6 +165,20 @@ struct Step {
     write_index: Option<usize>,
     /// Reporting only: the row whose native acknowledgement is unproven.
     unknown_row: Option<usize>,
+    /// An amend-algos call that cancels one leg of a two-leg algo; it settles
+    /// as a cancellation of the named algo (AGT-98).
+    leg_delete: bool,
+    /// Reporting only: each receipt's part in a split bracket (AGT-214).
+    roles: Vec<Option<LegRole>>,
+}
+impl Step {
+    fn cancels(&self) -> bool {
+        self.leg_delete
+            || matches!(
+                self.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            )
+    }
 }
 #[derive(Default)]
 pub struct TradingState {
@@ -192,8 +207,59 @@ struct Job {
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
     continue_cancel_errors: bool,
+    /// Every settled cancel row across this job's batches (AGT-69).
+    cancel_report: CancelReport,
     /// A step took effect, so a later rejection cannot mean nothing happened.
     effective: bool,
+}
+/// A cancellation's per-row results across its batches, so a partial batch
+/// never hides the later algo batch and the terminal names what is still open.
+#[derive(Default)]
+struct CancelReport {
+    outcomes: Vec<ElementOutcome>,
+    left: Vec<String>,
+    first_code: Option<String>,
+    /// The terminal's "still open" summary, appended to the projected message.
+    note: Option<String>,
+}
+impl CancelReport {
+    fn record(&mut self, mut outcomes: ElementOutcomes, acks: &[Ack<'_>], requested: &[Requested]) {
+        let offset = self.outcomes.len();
+        for outcome in &mut outcomes.0 {
+            outcome.element.index += offset;
+        }
+        self.outcomes.extend(outcomes.0);
+        for (ack, target) in acks.iter().zip(requested) {
+            if matches!(ack.s_code, "" | "0" | "51400") {
+                continue;
+            }
+            self.first_code.get_or_insert_with(|| ack.s_code.to_owned());
+            self.left.push(format!(
+                "{}: {} (code {})",
+                target.id(),
+                ack.s_msg,
+                ack.s_code
+            ));
+        }
+    }
+    /// The terminal refusal when any target was definitively refused.
+    fn refusal(&mut self, status: u16) -> Option<VenueError> {
+        if self.left.is_empty() {
+            return None;
+        }
+        let message = format!(
+            "OKX left {} of {} orders open: {}",
+            self.left.len(),
+            self.outcomes.len(),
+            self.left.join_with("; ")
+        );
+        self.note = Some(message.clone());
+        let mut error = rejection(message, self.first_code.as_deref(), status);
+        error.elements = Some(Box::new(ElementOutcomes(std::mem::take(
+            &mut self.outcomes,
+        ))));
+        Some(error)
+    }
 }
 #[derive(Clone, Copy, PartialEq)]
 enum LookupStage {
@@ -316,10 +382,11 @@ impl Job {
                 return;
             }
             step.write_index = Some(elements.len());
-            for receipt in &step.receipts {
+            for (row, receipt) in step.receipts.iter().enumerate() {
                 elements.push(Element {
                     index: elements.len(),
                     client_order_id: Some(receipt.identity.clone()),
+                    role: step.roles.get(row).copied().flatten(),
                 });
             }
         }
@@ -332,6 +399,9 @@ impl Job {
 struct OrderPayload {
     #[serde(skip)]
     symbol: String,
+    /// Reporting only, never sent: set on a bracketed order's own entry and legs (AGT-214).
+    #[serde(skip)]
+    role: Option<LegRole>,
     inst_id: String,
     td_mode: &'static str,
     tag: &'static str,
@@ -375,6 +445,101 @@ struct OrderPayload {
     callback_ratio: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     callback_spread: Option<String>,
+}
+
+const FULL_POSITION_HELD: &str =
+    "OKX allows one full-position TP/SL. Edit the existing order or remove it first.";
+
+enum AlgoWrite {
+    Place(Box<OrderPayload>),
+    Join(LegAmend),
+}
+
+/// Adds or deletes one leg of an existing OKX TP/SL algo through amend-algos.
+/// Adding a leg to a one-leg `conditional` makes it an `oco`; deleting one leg
+/// of an `oco` (trigger and order price "0") leaves a `conditional` (AGT-98).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegAmend {
+    inst_id: String,
+    algo_id: String,
+    cxl_on_fail: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_sl_trigger_px: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_sl_ord_px: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_sl_trigger_px_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_tp_trigger_px: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_tp_ord_px: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_tp_trigger_px_type: Option<&'static str>,
+}
+
+impl LegAmend {
+    fn new(inst_id: &str, algo_id: &str) -> Self {
+        Self {
+            inst_id: inst_id.into(),
+            algo_id: algo_id.into(),
+            cxl_on_fail: false,
+            new_sl_trigger_px: None,
+            new_sl_ord_px: None,
+            new_sl_trigger_px_type: None,
+            new_tp_trigger_px: None,
+            new_tp_ord_px: None,
+            new_tp_trigger_px_type: None,
+        }
+    }
+
+    /// The missing leg of a placed full payload, executed at market like the payload.
+    fn add(inst_id: &str, algo_id: &str, payload: &OrderPayload) -> Self {
+        let mut amend = Self::new(inst_id, algo_id);
+        if payload.sl_trigger_px.is_some() {
+            amend.new_sl_trigger_px = payload.sl_trigger_px.clone();
+            amend.new_sl_ord_px = payload.sl_ord_px;
+            amend.new_sl_trigger_px_type = payload.sl_trigger_px_type;
+        } else {
+            amend.new_tp_trigger_px = payload.tp_trigger_px.clone();
+            amend.new_tp_ord_px = payload.tp_ord_px;
+            amend.new_tp_trigger_px_type = payload.tp_trigger_px_type;
+        }
+        amend
+    }
+
+    fn delete(inst_id: &str, algo_id: &str, stop: bool) -> Self {
+        let mut amend = Self::new(inst_id, algo_id);
+        if stop {
+            amend.new_sl_trigger_px = Some("0".into());
+            amend.new_sl_ord_px = Some("0");
+        } else {
+            amend.new_tp_trigger_px = Some("0".into());
+            amend.new_tp_ord_px = Some("0");
+        }
+        amend
+    }
+}
+
+/// `Some(true)` for a lone full-position SL, `Some(false)` for a lone full TP.
+fn single_full_leg(payload: &OrderPayload) -> Option<bool> {
+    if payload.ord_type != "conditional" || payload.close_fraction != Some("1") {
+        return None;
+    }
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        _ => None,
+    }
+}
+
+fn complements(placed: &OrderPayload, payload: &OrderPayload) -> bool {
+    matches!(
+        (single_full_leg(placed), single_full_leg(payload)),
+        (Some(a), Some(b)) if a != b
+    ) && placed.inst_id == payload.inst_id
+        && placed.side == payload.side
+        && placed.pos_side == payload.pos_side
 }
 
 #[derive(Serialize)]
@@ -645,6 +810,14 @@ impl Okx {
         {
             return Err("Implied volatility is supported only for options".into());
         }
+        // AGT-115: legs are derived only after a limit/market entry; an algo entry
+        // would be placed without them, so refuse the whole command before any write.
+        if orders
+            .iter()
+            .any(PlaceOrderOpts::stop_entry_with_attached_legs)
+        {
+            return Err(stop_entry_legs_refusal("OKX"));
+        }
         let mut seen = HashSet::new();
         for o in &orders {
             let m = cx
@@ -676,7 +849,7 @@ impl Okx {
         let mut derived = Vec::new();
         for o in orders {
             if is_algo(o.kind) {
-                algos.push(o);
+                algos.push((o, false));
                 continue;
             }
             let m = cx.store.market(&o.symbol).expect("preflight market");
@@ -705,7 +878,8 @@ impl Okx {
             let mut count = 0;
             while remaining > 0.0 {
                 let size = remaining.min(max);
-                let payload = self.order_payload(cx, &o, size)?;
+                let mut payload = self.order_payload(cx, &o, size)?;
+                payload.role = bracket.then_some(LegRole::Entry);
                 count += 1;
                 regular.push(payload);
                 remaining = num::adjust(remaining - size, m.precision.amount);
@@ -730,13 +904,13 @@ impl Okx {
                         leg.stop_loss = None;
                         leg.take_profit = None;
                         leg.reduce_only = Some(true);
-                        derived.push(leg);
+                        derived.push((leg, true));
                     }
                 }
             }
         }
         algos.extend(derived);
-        algos.sort_by_key(|o| match o.kind {
+        algos.sort_by_key(|(o, _)| match o.kind {
             OrderType::StopLoss => 0,
             OrderType::TrailingStopLoss => 1,
             OrderType::TakeProfit => 2,
@@ -745,8 +919,13 @@ impl Okx {
         // Build every payload before issuing a write, including protective legs.
         let algos = algos
             .into_iter()
-            .map(|o| self.order_payload(cx, &o, o.amount))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(o, leg)| {
+                let mut payload = self.order_payload(cx, &o, o.amount)?;
+                payload.role = leg.then(|| algo_role(&payload));
+                Ok(payload)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
             steps.push(placement_step(
@@ -756,15 +935,108 @@ impl Okx {
                 true,
             )?);
         }
-        for payload in algos {
-            steps.push(placement_step(
-                "/api/v5/trade/order-algo",
-                &payload,
-                1,
-                true,
-            )?);
+        for write in algos {
+            steps.push(match write {
+                AlgoWrite::Place(payload) => {
+                    placement_step("/api/v5/trade/order-algo", &*payload, 1, true)?
+                }
+                AlgoWrite::Join(amend) => step("/api/v5/trade/amend-algos", &amend, 1, true)?,
+            });
         }
         Ok(job(steps, Finish::Ids))
+    }
+
+    /// OKX keeps ONE entire-position TP/SL algo per position and refuses a
+    /// second with 51088. A full SL and TP placed together become one `oco`
+    /// algo (as ccxt places them). A lone full leg for a position whose full
+    /// algo holds only the other leg joins it through amend-algos, which OKX
+    /// turns into an `oco` carrying both legs (verified on a live account,
+    /// AGT-98). Any other full leg beside a held full algo is refused before
+    /// any write: same kind, both legs already held, or both legs at once.
+    fn full_position_algos(
+        &self,
+        cx: &Cx<'_, Pending>,
+        payloads: Vec<OrderPayload>,
+    ) -> Result<Vec<AlgoWrite>, String> {
+        let mut placed: Vec<OrderPayload> = Vec::new();
+        for payload in payloads {
+            if let Some(partner) = placed.iter_mut().find(|p| complements(p, &payload)) {
+                partner.ord_type = "oco";
+                partner.role = partner.role.or(payload.role).map(|_| LegRole::Other);
+                if payload.sl_trigger_px.is_some() {
+                    partner.sl_trigger_px = payload.sl_trigger_px;
+                    partner.sl_ord_px = payload.sl_ord_px;
+                    partner.sl_trigger_px_type = payload.sl_trigger_px_type;
+                } else {
+                    partner.tp_trigger_px = payload.tp_trigger_px;
+                    partner.tp_ord_px = payload.tp_ord_px;
+                    partner.tp_trigger_px_type = payload.tp_trigger_px_type;
+                }
+                continue;
+            }
+            placed.push(payload);
+        }
+        let mut joined = HashSet::new();
+        let mut writes = Vec::with_capacity(placed.len());
+        for payload in placed {
+            if payload.close_fraction != Some("1") || !self.holds_full_position_algo(cx, &payload) {
+                writes.push(AlgoWrite::Place(Box::new(payload)));
+                continue;
+            }
+            match self.joinable_full_algo(cx, &payload) {
+                Some(algo_id) if joined.insert(algo_id.clone()) => writes.push(AlgoWrite::Join(
+                    LegAmend::add(&payload.inst_id, &algo_id, &payload),
+                )),
+                _ => return Err(FULL_POSITION_HELD.into()),
+            }
+        }
+        Ok(writes)
+    }
+
+    /// The position already has an open entire-position TP or SL. Full rows
+    /// carry the zero-size sentinel; trigger rows always have a size.
+    fn holds_full_position_algo(&self, cx: &Cx<'_, Pending>, payload: &OrderPayload) -> bool {
+        cx.store
+            .orders()
+            .iter()
+            .any(|o| self.is_full_position_leg(o, payload))
+    }
+
+    fn is_full_position_leg(&self, o: &Order, payload: &OrderPayload) -> bool {
+        o.symbol == payload.symbol
+            && o.side == payload.side
+            && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && o.amount == 0.0
+            && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+            && !self
+                .trading
+                .algo_orders
+                .get(&o.id)
+                .is_some_and(|observed| observed.trigger)
+    }
+
+    /// The native algo a lone full leg can join: the position's only full
+    /// algo, holding just the opposite leg.
+    fn joinable_full_algo(&self, cx: &Cx<'_, Pending>, payload: &OrderPayload) -> Option<String> {
+        let held_kind = match single_full_leg(payload)? {
+            true => OrderType::TakeProfit,
+            false => OrderType::StopLoss,
+        };
+        let mut held = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| self.is_full_position_leg(o, payload));
+        let only = held.next()?;
+        if held.next().is_some() || only.kind != held_kind {
+            return None;
+        }
+        let suffix = if held_kind == OrderType::StopLoss {
+            "_sl"
+        } else {
+            "_tp"
+        };
+        only.id.strip_suffix(suffix).map(str::to_owned)
     }
 
     fn order_payload(
@@ -902,6 +1174,7 @@ impl Okx {
     fn plan_cancel(&self, cx: &Cx<'_, Pending>, ids: Vec<String>) -> Result<Job, String> {
         let mut regular = Vec::new();
         let mut algos = Vec::new();
+        let mut legs = Vec::new();
         let mut seen = HashSet::new();
         let mut optimistic = Vec::new();
         for id in &ids {
@@ -911,6 +1184,13 @@ impl Okx {
                     .market(&o.symbol)
                     .ok_or_else(|| "unknown market".to_owned())?;
                 optimistic.push((id.clone(), o.status));
+                if let Some(stop) = lone_leg(cx, &ids, o, &self.trading.algo_orders) {
+                    // Cancel-algos would take the sibling leg with it.
+                    if seen.insert((m.id.as_str(), native_id(id))) {
+                        legs.push(LegAmend::delete(&m.id, native_id(id), stop));
+                    }
+                    continue;
+                }
                 (m.id.as_str(), native_id(id), is_algo(o.kind))
             } else if let Some(order) = self.trading.acknowledged.get(id) {
                 (order.inst_id.as_str(), id.as_str(), order.algo)
@@ -952,6 +1232,11 @@ impl Okx {
                 batch.len(),
                 false,
             )?);
+        }
+        for leg in legs {
+            let mut delete = step("/api/v5/trade/amend-algos", &leg, 1, false)?;
+            delete.leg_delete = true;
+            steps.push(delete);
         }
         let mut result = job(steps, Finish::Empty);
         result.optimistic = optimistic;
@@ -1483,7 +1768,7 @@ impl Okx {
                 );
             }
             let envelope: wire::Envelope<'_> = serde_json::from_str(response.body)
-                .map_err(|_| "Malformed OKX native order source")?;
+                .map_err(|_| "OKX’s original order details couldn’t be read")?;
             if envelope.code != "0" {
                 return Err(format!(
                     "OKX {}: {}; the order is unchanged",
@@ -1499,7 +1784,7 @@ impl Okx {
                 }
                 let quotes: Vec<Quote<'_>> =
                     serde_json::from_str(envelope.data.ok_or("Missing OKX ticker")?.get())
-                        .map_err(|_| "Malformed OKX ticker")?;
+                        .map_err(|_| "OKX’s current price couldn’t be read")?;
                 let [quote] = quotes.as_slice() else {
                     return Err("OKX ticker must name exactly one instrument".into());
                 };
@@ -1536,7 +1821,7 @@ impl Okx {
                     .ok_or("Missing OKX native order source")?
                     .get(),
             )
-            .map_err(|_| "Malformed OKX native order source")?;
+            .map_err(|_| "OKX’s original order details couldn’t be read")?;
             let [row] = rows.as_slice() else {
                 return Err("OKX native order source must name exactly one order".into());
             };
@@ -1690,13 +1975,29 @@ impl Okx {
                         .iter()
                         .all(|ack| matches!(&ack.s_msg, std::borrow::Cow::Borrowed(_)))
             });
-        let Some(acks) = acks else {
+        let Some(mut acks) = acks else {
             if matches!(envelope.code, "0" | "2") {
-                return self.unproven(cx, request, "Malformed OKX write response");
+                return self.unproven(cx, request, "OKX’s reply couldn’t be read");
             }
             let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
+        // A leg deletion on an algo that is already gone answers 51527 with no
+        // algoId (live okx-t, AGT-98); like 51400 for cancel-algos, the leg is gone.
+        let deleted_leg = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.steps.front())
+            .filter(|step| step.leg_delete)
+            .and_then(|step| serde_json::from_str::<Requested>(&step.body).ok());
+        if let (Some(named), [ack]) = (&deleted_leg, acks.as_mut_slice())
+            && ack.s_code == "51527"
+            && ack.algo_id.is_empty()
+        {
+            ack.s_code = "51400";
+            ack.algo_id = &named.algo_id;
+        }
         // A refused envelope with no failing rows is one whole native failure.
         if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
@@ -1798,7 +2099,7 @@ impl Okx {
             let message = if missing_id {
                 "OKX placement response missing order ID"
             } else {
-                "OKX 50004: write execution status is unknown"
+                "OKX didn’t confirm this change (50004). Check your open orders before trying again."
             };
             // Preserve proven siblings in this same unproven batch. Recording
             // only an empty Unknown fact loses them in the engine projection.
@@ -1853,18 +2154,21 @@ impl Okx {
         if step.expected > 0 && acks.len() != step.expected {
             return self.unproven(cx, request, "OKX write response row count mismatch");
         }
-        let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
-        if matches!(
-            step.path,
-            "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
-        ) && (requested.len() != step.expected
-            || acks.iter().enumerate().any(|(index, ack)| {
-                requested.get(index).is_none_or(|named| {
-                    named.id().is_empty()
-                        || ack.ord_id != named.ord_id
-                        || ack.algo_id != named.algo_id
-                })
-            }))
+        let requested: Vec<Requested> = if step.leg_delete {
+            serde_json::from_str(&step.body).map(|row| vec![row])
+        } else {
+            serde_json::from_str(&step.body)
+        }
+        .unwrap_or_default();
+        if step.cancels()
+            && (requested.len() != step.expected
+                || acks.iter().enumerate().any(|(index, ack)| {
+                    requested.get(index).is_none_or(|named| {
+                        named.id().is_empty()
+                            || ack.ord_id != named.ord_id
+                            || ack.algo_id != named.algo_id
+                    })
+                }))
         {
             return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
         }
@@ -1940,10 +2244,7 @@ impl Okx {
                     }
                 })
                 .collect();
-            if matches!(
-                step.path,
-                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
-            ) {
+            if step.cancels() {
                 cx.http_write_applied_batch(
                     &request.context,
                     &CODES,
@@ -1985,10 +2286,7 @@ impl Okx {
                 errors.join_with("; ")
             };
             let mut error = VenueError::new(message).outcome(Outcome::Unknown);
-            if matches!(
-                step.path,
-                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
-            ) {
+            if step.cancels() {
                 error.message = format!("{}. {UNKNOWN_OUTCOME_TEXT}", error.message);
                 // Native facts still supply kind/code/partial; retain the venue's guidance.
                 error.presents = true;
@@ -1998,8 +2296,13 @@ impl Okx {
         }
         let read_after =
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
+        // A cancellation whose rows are all identity-validated and proven settles
+        // per row, whatever the envelope code: OKX answers a partial batch `2`,
+        // and stopping there left every later algo cancel unsent (AGT-69).
+        let cancel_rows =
+            continue_cancel_errors && matches!(envelope.code, "0" | "1" | "2") && step.cancels();
         // Legacy TS's response interceptor throws on every nonzero envelope.
-        if envelope.code != "0" {
+        if envelope.code != "0" && !cancel_rows {
             let mut error = if errors.is_empty() {
                 // A satisfied cancel row stays quiet unless the empty envelope
                 // would otherwise erase its only available native diagnostic.
@@ -2027,10 +2330,7 @@ impl Okx {
                     response.status,
                 ))
             };
-            if matches!(
-                step.path,
-                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
-            ) {
+            if step.cancels() {
                 error.elements = Some(Box::new(cancel_outcomes(&response, &acks, &requested)));
             }
             self.end(cx, request.command, Some(&request), error, false);
@@ -2062,8 +2362,24 @@ impl Okx {
         {
             trailing.phase = TrailingPhase::Replace;
         }
-        job.effective = true;
-        if job.steps.is_empty() {
+        if cancel_rows {
+            job.cancel_report.record(
+                cancel_outcomes(&response, &acks, &requested),
+                &acks,
+                &requested,
+            );
+            job.effective |= acks.iter().any(|a| matches!(a.s_code, "" | "0"));
+        } else {
+            job.effective = true;
+        }
+        let cancel_refusal = if job.steps.is_empty() {
+            job.cancel_report.refusal(response.status)
+        } else {
+            None
+        };
+        if let Some(refusal) = cancel_refusal {
+            self.end(cx, request.command, Some(&request), refusal, false);
+        } else if job.steps.is_empty() {
             let restored = job
                 .trailing
                 .as_mut()
@@ -2220,8 +2536,10 @@ impl Okx {
                         return;
                     }
                     Err(reason) => {
-                        error.message =
-                            format!("{}; restore admission failed: {reason}", error.message)
+                        error.message = format!(
+                            "{}; restoring the original order couldn’t be prepared: {reason}",
+                            error.message
+                        )
                     }
                 }
             }
@@ -2267,6 +2585,8 @@ impl Okx {
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
+            // A cancel job's amend-algos call is a leg deletion, not a stop edit.
+            && !job.continue_cancel_errors
         {
             error.message = format!("{}; your stop is unchanged by this edit", error.message);
             error.presents = true;
@@ -2286,7 +2606,7 @@ impl Okx {
                 "{}; {}",
                 error.message,
                 if uncertain {
-                    "OKX trailing protection is unconfirmed; check Open Orders before placing another stop"
+                    "The OKX trailing stop wasn’t confirmed. Check your open orders before adding another stop."
                 } else {
                     "The old OKX trailing stop was canceled and could not be replaced; the position is unprotected"
                 }
@@ -2304,6 +2624,12 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
+        if let Some(left) = job.cancel_report.note.take() {
+            note = Some(match note {
+                Some(note) => format!("{note}; {left}"),
+                None => left,
+            });
+        }
         if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
             cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
             let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
@@ -2481,6 +2807,7 @@ fn cancel_outcomes(
                     element: Element {
                         index,
                         client_order_id: None,
+                        role: None,
                     },
                     result,
                 }
@@ -2613,6 +2940,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 fn empty_payload() -> OrderPayload {
     OrderPayload {
         symbol: String::new(),
+        role: None,
         inst_id: String::new(),
         td_mode: "cross",
         tag: BROKER,
@@ -2639,6 +2967,15 @@ fn empty_payload() -> OrderPayload {
         callback_spread: None,
     }
 }
+/// An algo's part in a split bracket: a lone stop-loss or take-profit trigger, or
+/// another kind (trailing, conditional, or a full-position `oco` holding both legs).
+fn algo_role(payload: &OrderPayload) -> LegRole {
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => LegRole::StopLoss,
+        (None, Some(_)) => LegRole::TakeProfit,
+        _ => LegRole::Other,
+    }
+}
 fn step<T: Serialize + ?Sized>(
     path: &'static str,
     body: &T,
@@ -2654,6 +2991,8 @@ fn step<T: Serialize + ?Sized>(
         collect_ids,
         write_index: None,
         unknown_row: None,
+        leg_delete: false,
+        roles: Vec::new(),
     })
 }
 
@@ -2761,11 +3100,39 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         finish,
         optimistic: Vec::new(),
         continue_cancel_errors: false,
+        cancel_report: CancelReport::default(),
         effective: false,
         replacing_stop: None,
         trailing: None,
         lookup: None,
     }
+}
+/// `Some(true)` when cancelling `order`, the SL leg of a two-leg OKX algo whose
+/// TP leg stays open and is not also being cancelled (`Some(false)` for a TP).
+/// Native `trigger` algos carry one leg whose kind follows the reference price,
+/// so they never take a leg deletion.
+fn lone_leg(
+    cx: &Cx<'_, Pending>,
+    cancelling: &[String],
+    order: &Order,
+    observed: &HashMap<String, ObservedAlgo>,
+) -> Option<bool> {
+    if observed.get(&order.id).is_some_and(|algo| algo.trigger) {
+        return None;
+    }
+    let (stop, sibling) = match order.kind {
+        OrderType::StopLoss => (true, "_tp"),
+        OrderType::TakeProfit => (false, "_sl"),
+        _ => return None,
+    };
+    let algo = order.id.strip_suffix(if stop { "_sl" } else { "_tp" })?;
+    let sibling = format!("{algo}{sibling}");
+    let held = cx.store.order(&sibling).is_some_and(|o| {
+        o.symbol == order.symbol
+            && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+            && !observed.get(&sibling).is_some_and(|algo| algo.trigger)
+    });
+    (held && !cancelling.contains(&sibling)).then_some(stop)
 }
 fn is_algo(kind: OrderType) -> bool {
     !matches!(kind, OrderType::Limit | OrderType::Market)
@@ -2855,12 +3222,18 @@ fn placement_step<T: Serialize + ?Sized + PlacementIdentities>(
 ) -> Result<Step, String> {
     let mut write = step(path, body, expected, collect_ids)?;
     write.receipts = body.identities();
+    write.roles = body.identity_roles();
     Ok(write)
 }
 trait PlacementIdentities {
     fn identities(&self) -> Vec<OrderIdentityReceipt>;
+    /// Each receipt's bracket role, row for row with `identities`.
+    fn identity_roles(&self) -> Vec<Option<LegRole>>;
 }
 impl PlacementIdentities for OrderPayload {
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        vec![self.role; self.identities().len()]
+    }
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.cl_ord_id
             .iter()
@@ -2877,6 +3250,9 @@ impl<const N: usize> PlacementIdentities for [OrderPayload; N] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
         self.as_slice().identities()
     }
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        self.as_slice().identity_roles()
+    }
 }
 impl PlacementIdentities for [OrderPayload] {
     fn identities(&self) -> Vec<OrderIdentityReceipt> {
@@ -2884,8 +3260,14 @@ impl PlacementIdentities for [OrderPayload] {
             .flat_map(PlacementIdentities::identities)
             .collect()
     }
+    fn identity_roles(&self) -> Vec<Option<LegRole>> {
+        self.iter()
+            .flat_map(PlacementIdentities::identity_roles)
+            .collect()
+    }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod code_table_tests {
     use super::*;

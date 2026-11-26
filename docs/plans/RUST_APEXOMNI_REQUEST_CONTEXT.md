@@ -110,7 +110,8 @@ conversion and malformed/all-invalid versus valid-empty handling.
 Preserve the existing maximum three transport read retries (four physical
 attempts without the signature-refusal resend, five with it), using shared
 `ReadFailure` evidence under the original immutable
-deadline. Preserve the native one-time signature-refusal read retry only after
+deadline. (AGT-75 later removed the signature-refusal read retry; see
+`RUST_APEXOMNI_READ_CONTEXT.md`.) Preserve the native one-time signature-refusal read retry only after
 shared read-failure admission; it cannot extend the deadline or mint a new
 owner. Retry counters and response parsing are native facts; retry eligibility,
 issuance, release and expiry remain engine policy. Preparation refusal must not

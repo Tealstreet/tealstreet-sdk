@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Read-owner handoff, native financial behavior, expiry and failure recovery.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{
@@ -581,7 +585,7 @@ fn an_unknown_placement_stays_fenced_through_expiry_until_fresh_reconciliation()
         assert!(out.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: id, error })
             if *id == command && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain"))));
+                && error.message.contains("confirm"))));
     };
     refused(&mut e, NOW + 2000., 701);
     let mut seen = actions;
@@ -672,7 +676,7 @@ fn native_identity_secondary_exact_uid_and_no_account_publication() {
     );
     let out: Vec<_> = e.drain_actions().collect();
     assert_eq!(out.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command:42, result }) if result == r#"{"userId":"9007199254740993"}"#)).count(), 1);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     response(
         &mut e,
         NOW + 2.,

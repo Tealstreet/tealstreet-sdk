@@ -6,7 +6,7 @@ import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 // restored by #3502; #3317 dropped a live venue without a product decision.
 it.each(['polymarket'] as const)(
@@ -52,7 +52,7 @@ it.each(['polymarket'] as const)(
     });
     setWasmEngineLoader(load);
     try {
-      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrowError(unsupported);
+      expect(() => new RustEngineExchange(name, options, new FrameStore())).toThrowError(unsupported);
       await expect(createExchange(name, options)).rejects.toEqual(unsupported);
       expect(sign).not.toHaveBeenCalled();
       expect(options.remoteSigner.isAvailable).not.toHaveBeenCalled();
@@ -66,30 +66,26 @@ it.each(['polymarket'] as const)(
 
 for (const entry of ['constructor', 'factory']) {
   // restored by #3502; #3317 dropped a live venue without a product decision.
-  it.each(['polymarket'] as const)(
-    `%s ${entry} refuses before reading accessor-backed options`,
-    async (name) => {
-      const inspected = vi.fn(() => {
-        throw new Error('OUT constructor options must remain uninspected');
-      });
-      const options: ExchangeOptions = { key: '', secret: '' };
-      Object.defineProperties(options, {
-        publicDataOnly: { enumerable: true, get: inspected },
-        remoteSigner: { enumerable: true, get: inspected },
-        payloadSigner: { enumerable: true, get: inspected },
-      });
-      const unsupported = expect.objectContaining({
-        message: `${name} is unsupported in this build`,
-        kind: 'unsupported',
-        outcome: 'notSent',
-      });
-      const construct = async () => entry === 'constructor'
-        ? new RustEngineExchange(name, options, new DefaultStore())
-        : createExchange(name, options);
-      await expect(construct()).rejects.toEqual(unsupported);
-      expect(inspected).not.toHaveBeenCalled();
-    },
-  );
+  it.each(['polymarket'] as const)(`%s ${entry} refuses before reading accessor-backed options`, async (name) => {
+    const inspected = vi.fn(() => {
+      throw new Error('OUT constructor options must remain uninspected');
+    });
+    const options: ExchangeOptions = { key: '', secret: '' };
+    Object.defineProperties(options, {
+      publicDataOnly: { enumerable: true, get: inspected },
+      remoteSigner: { enumerable: true, get: inspected },
+      payloadSigner: { enumerable: true, get: inspected },
+    });
+    const unsupported = expect.objectContaining({
+      message: `${name} is unsupported in this build`,
+      kind: 'unsupported',
+      outcome: 'notSent',
+    });
+    const construct = async () =>
+      entry === 'constructor' ? new RustEngineExchange(name, options, new FrameStore()) : createExchange(name, options);
+    await expect(construct()).rejects.toEqual(unsupported);
+    expect(inspected).not.toHaveBeenCalled();
+  });
 }
 
 it('admitted public accounts still ignore unused signer contents', () => {

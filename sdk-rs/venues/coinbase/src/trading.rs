@@ -12,7 +12,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const ROOT: &str = "/api/v3/brokerage/orders";
 const MAX_JOBS: usize = 100;
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub struct Request {
     command: CommandId,
@@ -469,7 +470,7 @@ impl Coinbase {
         let proof = self
             .account
             .editable(id)
-            .ok_or("Coinbase native edit requires reconciled zero-fill spot LIMIT provenance")?
+            .ok_or("This Coinbase edit requires a confirmed, unfilled spot limit order")?
             .clone();
         self.validate_edit(cx, id, &proof)?;
         let order = cx.store.order(id).unwrap();
@@ -505,7 +506,7 @@ impl Coinbase {
         let current = self
             .account
             .editable(id)
-            .ok_or("Coinbase native edit provenance changed")?;
+            .ok_or("The Coinbase order details changed before this edit could be sent")?;
         let order = cx
             .store
             .order(id)
@@ -538,7 +539,7 @@ impl Coinbase {
             || decimal(&proof.size) != decimal(&positive(order.amount)?)
         {
             return Err(
-                "Coinbase native edit requires exact current zero-fill spot LIMIT provenance"
+                "This Coinbase edit requires current details for an unfilled spot limit order"
                     .into(),
             );
         }
@@ -576,6 +577,7 @@ impl Coinbase {
                     elements.push(Element {
                         index,
                         client_order_id: Some(payload.client_order_id.clone()),
+                        role: None,
                     });
                     job.steps.push_back(step);
                 }
@@ -1538,7 +1540,7 @@ impl Coinbase {
         self.private_after_write(cx);
         self.placement_unresolved(cx, &request.step);
         let error = unknown(format!(
-            "Coinbase write outcome requires reconciliation: {error}"
+            "Coinbase didn’t confirm this change: {error}. Check your open orders before trying again."
         ));
         self.trading_finish_error(cx, request.command, error.kind(ErrorKind::Network));
     }
@@ -1600,7 +1602,7 @@ impl Coinbase {
                     _ => ErrorKind::RateLimited,
                 };
                 let mut error = unknown(format!(
-                    "Coinbase write outcome requires reconciliation: {error}"
+                    "Coinbase didn’t confirm this change: {error}. Check your open orders before trying again."
                 ))
                 .kind(kind);
                 if let Some(code) = rate_code {
@@ -1694,7 +1696,7 @@ impl Coinbase {
         match step {
             Step::Place { payload, order, .. } => {
                 let result: CreateResponse = serde_json::from_str(body)
-                    .map_err(|_| unknown("Malformed Coinbase placement response"))?;
+                    .map_err(|_| unknown("Coinbase’s new-order reply couldn’t be read"))?;
                 if !result.success {
                     if let Some(code) = rate_code {
                         return Err(rate_limited(code));
@@ -1780,7 +1782,7 @@ impl Coinbase {
             }
             Step::Cancel { ids } => {
                 let result: Canceled = serde_json::from_str(body)
-                    .map_err(|_| unknown("Malformed Coinbase cancel response"))?;
+                    .map_err(|_| unknown("Coinbase’s cancellation reply couldn’t be read"))?;
                 let expected: HashSet<_> = ids.iter().map(String::as_str).collect();
                 let mut seen = HashSet::new();
                 if result.results.len() != ids.len()
@@ -1820,7 +1822,7 @@ impl Coinbase {
             }
             Step::Confirm { id, product } => {
                 let detail: Detail = serde_json::from_str(body)
-                    .map_err(|_| not_sent("Malformed Coinbase cancellation confirmation"))?;
+                    .map_err(|_| not_sent("Coinbase didn’t confirm the requested cancellation"))?;
                 if detail.order.order_id != *id
                     || detail.order.product_id != *product
                     || detail.order.status != "CANCELLED"
@@ -1881,7 +1883,7 @@ fn rejected(message: impl Into<String>) -> VenueError {
 }
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(format!(
-        "{}. The outcome is unknown. Check Open Orders",
+        "{}. We couldn’t confirm this change. Check your open orders before trying again.",
         message.into()
     ))
     .outcome(Outcome::Unknown)

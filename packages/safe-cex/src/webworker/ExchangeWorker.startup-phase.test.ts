@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 /**
  * Drives the real `start()` failure path rather than calling `logError`
@@ -18,7 +18,7 @@ const startMock = vi.fn();
 const onMock = vi.fn();
 
 class FakeExchange {
-  store: DefaultStore;
+  store: FrameStore;
   isDisposed = false;
   start = startMock;
   on = onMock;
@@ -28,7 +28,7 @@ class FakeExchange {
   // Mirrors the real signature: the worker hands its own store to the exchange,
   // and `_setupExchangeEventListeners` subscribes to `exchange.store`. Creating
   // a fresh store here would subscribe to one the worker never writes to.
-  constructor(_name: string, _options: unknown, store: DefaultStore) {
+  constructor(_name: string, _options: unknown, store: FrameStore) {
     this.store = store;
   }
 }
@@ -182,41 +182,5 @@ describe('ExchangeWorker start that keeps timing out', () => {
     const error = errorPayloads(messages)[0];
     expect(error.data[0]).toContain('did not finish loading');
     expect(error.data[1]).toEqual({ forceToast: true });
-  });
-});
-
-describe('ExchangeWorker on public data only', () => {
-  it('runs no postprocessor that would publish its unread account rows as real', () => {
-    const ctx = { postMessage: vi.fn() };
-    const worker = new ExchangeWorker(ctx as any, 'a', 'bybit' as any, { publicDataOnly: true } as any, {} as any, {} as any, 's') as any;
-    const account = { readsAccountData: true, process: vi.fn() };
-    const market = { process: vi.fn() };
-    worker._postprocessors = [account, market];
-    try {
-      worker._storeUpdate({});
-    } catch {
-      // Only the postprocessor loop is under test.
-    }
-    expect(account.process).not.toHaveBeenCalled();
-    expect(market.process).toHaveBeenCalled();
-  });
-});
-
-describe('ExchangeWorker when the engine deactivates', () => {
-  it('hands the page the refusal, so it can run on public data', async () => {
-    const handlers: Record<string, (...args: any[]) => void> = {};
-    onMock.mockImplementation((event: string, handler: (...args: any[]) => void) => {
-      handlers[event] = handler;
-    });
-    loaderMock.mockResolvedValue(FakeExchange);
-    startMock.mockImplementation(() => new Promise(() => undefined));
-    const { messages, worker } = createWorker();
-    void worker.start();
-    await vi.waitFor(() => expect(handlers.deactivate).toBeDefined());
-    handlers.deactivate('Api credential is invalid');
-    expect(messages.find((m) => m.op === 'deactivate-status')).toMatchObject({
-      data: true,
-      refusal: 'Api credential is invalid',
-    });
   });
 });

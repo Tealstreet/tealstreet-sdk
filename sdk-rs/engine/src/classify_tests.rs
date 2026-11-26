@@ -1263,6 +1263,7 @@ fn known_partial_evidence_is_reported_without_reclassifying_physical_failure() {
             .map(|index| Element {
                 index,
                 client_order_id: None,
+                role: None,
             })
             .collect(),
     );

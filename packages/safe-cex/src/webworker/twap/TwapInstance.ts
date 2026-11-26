@@ -20,7 +20,7 @@ export class TwapInstance {
   private timerId: NodeJS.Timeout | undefined;
   private readonly updateStateCallback: (state: TwapState) => void;
   readonly exchange: Exchange;
-  private ctx: Worker;
+  private ctx: Pick<Worker, 'postMessage'>;
   private trackedChaserOrderIds: string[] = [];
   private trackedLimitOrderIds: string[] = [];
   /** Per-slice timeout timers used by `twap chase` policy enforcement.
@@ -29,7 +29,7 @@ export class TwapInstance {
 
   constructor(
     exchange: Exchange,
-    ctx: Worker,
+    ctx: Pick<Worker, 'postMessage'>,
     options: TwapOptions,
     updateStateCallback: (state: TwapState) => void,
     state?: TwapState,

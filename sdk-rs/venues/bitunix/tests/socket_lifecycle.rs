@@ -42,8 +42,18 @@ fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
                     context: Some(context),
                     ..
                 } => {
+                    let private = context.feed == "private";
                     sockets.push((context.feed, socket));
                     e.handle(0.0, Event::WsOpened { socket });
+                    if private {
+                        e.handle(
+                            0.0,
+                            Event::WsMessage {
+                                socket,
+                                text: r#"{"op":"login","data":{"result":true}}"#,
+                            },
+                        );
+                    }
                 }
                 Action::Http(r) if r.url.ends_with("/tickers") => {
                     e.handle(0.0, Event::HttpResponse { request: r.id, response: Response { status: 200, headers: "", body: r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"# } });
@@ -111,11 +121,40 @@ fn timers(actions: &[Action]) -> Vec<(TimerId, f64)> {
 
 #[test]
 fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
-    let (mut e, sockets) = ready();
-    let mut now = 1.0;
-    for (feed, mut socket) in sockets {
+    // A live stream: the feeds not under test keep answering inside their idle window.
+    let keep_alive = |e: &mut TestEngine, sockets: &[(String, SocketId)], skip: usize, now: f64| {
+        for (i, (_, socket)) in sockets.iter().enumerate() {
+            if i != skip {
+                e.handle(
+                    now,
+                    Event::WsMessage {
+                        socket: *socket,
+                        text: r#"{"op":"pong"}"#,
+                    },
+                );
+            }
+        }
+        for action in safe_cex_engine::test_support::prepared_now(e) {
+            assert!(
+                !matches!(&action, Action::WsClose { socket }
+                if sockets.iter().enumerate().any(|(i, (_, sibling))| i != skip && sibling == socket)),
+                "keep_alive retired a sibling: {action:?}"
+            );
+            assert!(
+                !matches!(&action, Action::WsConnect { .. }),
+                "keep_alive unexpectedly replaced a sibling: {action:?}"
+            );
+        }
+    };
+    for index in 0..6 {
+        // Each feed starts with every sibling live. The stable-reset check
+        // retires its subject, so do not carry that retired ID to another case.
+        let (mut e, mut sockets) = ready();
+        let mut now = 1.0;
+        let (feed, mut socket) = sockets[index].clone();
         for attempt in 0..8 {
             let nominal = (1000.0 * 2f64.powi(attempt)).min(30_000.0);
+            keep_alive(&mut e, &sockets, index, now);
             let (timer, delay) = retry(&mut e, socket, now);
             assert!(
                 (nominal * 0.75..=nominal).contains(&delay),
@@ -138,6 +177,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                     .is_none()
             );
             now += delay;
+            keep_alive(&mut e, &sockets, index, now);
             socket = reconnect(&mut e, timer, now, &feed, false);
             e.handle(now, Event::TimerFired { timer });
             assert!(
@@ -153,6 +193,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 .for_each(drop);
             now += 1.0;
         }
+        sockets[index].1 = socket;
         if feed == "private" {
             e.handle(
                 now,
@@ -164,6 +205,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
         }
         // Real traffic after a stable epoch resets only this feed.
         now += 31_000.0;
+        keep_alive(&mut e, &sockets, index, now);
         e.handle(
             now,
             Event::WsMessage {
@@ -179,7 +221,6 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             (750.0..=1000.0).contains(&delay),
             "stable {feed} reset: {delay}"
         );
-        now += 1.0;
     }
 }
 

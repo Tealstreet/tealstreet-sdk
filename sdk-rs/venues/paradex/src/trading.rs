@@ -20,7 +20,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 #[derive(Serialize)]
 struct Placement {
@@ -1141,7 +1142,7 @@ impl Trading {
         };
         let symbol = &proof.guard.symbol;
         let mut error = unproven(format!(
-            "The outcome of your {symbol} protection update is unknown. Check Open Orders and your position before replacing protection: {cause}"
+            "Your {symbol} protection update wasn’t confirmed: {cause}. Check your open orders and position before adding protection."
         ));
         error.presents = true;
         self.clear_cancel_proof(cx, job);
@@ -1476,7 +1477,7 @@ impl Trading {
                     error.message = if error.message.is_empty() {
                         gone
                     } else {
-                        format!("{gone}: {}", error.message)
+                        safe_cex_engine::error::with_detail(&gone, &error.message)
                     };
                     error.protection =
                         (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
@@ -1507,9 +1508,12 @@ impl Trading {
                             "unknown":unknown_labels,
                             "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
                         });
-                        error.message = format!(
-                            "{}; placed order IDs: {}; unknown placements: {}",
-                            error.message, journal["placed"], journal["unknown"]
+                        error.message = safe_cex_engine::error::with_detail(
+                            &error.message,
+                            &format!(
+                                "placed order IDs: {}; unknown placements: {}",
+                                journal["placed"], journal["unknown"]
+                            ),
                         );
                         cx.event(
                             Level::Error,
@@ -2433,6 +2437,7 @@ fn ambiguous_write(mut error: VenueError) -> VenueError {
     error.outcome(Outcome::Unknown)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

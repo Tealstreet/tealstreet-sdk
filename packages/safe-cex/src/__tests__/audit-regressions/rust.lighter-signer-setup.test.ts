@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -10,7 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 import { LocalSignerSetup } from '../../exchanges/rust/localSignerSetup';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const secret = `01${'00'.repeat(39)}`;
 
@@ -46,7 +46,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s trusted setup cutov
           applicationId: '718895',
           publicDataOnly: false,
         } as ExchangeOptions,
-        new DefaultStore(),
+        new FrameStore(),
       );
       expect(exchange.options.key).toBeUndefined();
       expect(exchange.options.secret).toBeUndefined();
@@ -61,7 +61,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s trusted setup cutov
         apiKeyIndex: '1',
         applicationId: '718895',
       } as ExchangeOptions,
-      new DefaultStore(),
+      new FrameStore(),
     );
     expect((exchange as unknown as { lighterL1Address?: string }).lighterL1Address).toBeUndefined();
   });

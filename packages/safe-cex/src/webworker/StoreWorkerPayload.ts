@@ -1,8 +1,6 @@
 import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { SerializedCommandError } from '../commandOutcome';
 import type { OHLCVFrameRejection, OrderBookFrameRejection } from '../exchanges/base';
-import type { PackedTickerDelta } from '../store/store.interface';
-import type { StoreData, Writable } from '../types';
 
 /** Ops the worker receives from the main thread */
 export type StoreWorkerIncomingOp =
@@ -14,9 +12,6 @@ export type StoreWorkerIncomingOp =
   | 'sayHi'
   | 'forwardFrames'
   // Store
-  | 'store'
-  | 'merge-loaded'
-  | 'merge-message-handler-stats'
   | 'sendSnapshot'
   | 'settings'
   | 'sync-time'
@@ -27,9 +22,11 @@ export type StoreWorkerIncomingOp =
   | 'unsubscribeOrderBook'
   // Trading
   | 'chaser:start'
+  | 'chaser:amend'
   | 'chaser:terminate'
   | 'chaser:terminateAll'
   | 'twap:start'
+  | 'twap:amend'
   | 'twap:resume'
   | 'twap:cleanup'
   | 'twap:pause'
@@ -57,10 +54,7 @@ export type StoreWorkerIncomingOp =
 
 /** Ops the worker sends to the main thread */
 export type StoreWorkerOutgoingOp =
-  // Store
-  | 'store'
-  | 'store:delta'
-  // One Rust engine flush frame (an ArrayBuffer), see store/frameApplier
+  // One Rust engine flush frame (an ArrayBuffer), see store/frameStore
   | 'frame'
   // Orderbook
   | 'listenOrderBook'
@@ -75,6 +69,9 @@ export type StoreWorkerOutgoingOp =
   | 'callMethod:done'
   | 'twap:stateUpdate'
   | 'chaser:complete'
+  | 'chaser:amended'
+  // A Hosted TWAP's own end: `{id, end, ordersExecuted, ordersCount}`.
+  | 'twap:complete'
   // Native order attribution, independent of RPC settlement and store frames.
   | 'command-progress'
   // Lifecycle
@@ -111,10 +108,6 @@ export type StoreWorkerOutgoingOp =
 
 /** All valid worker op codes */
 export type StoreWorkerOp = StoreWorkerIncomingOp | StoreWorkerOutgoingOp;
-
-export type StoreWorkerStorePayload = Partial<Writable<StoreData>> & {
-  tickerDeltas?: PackedTickerDelta[];
-};
 
 export interface StoreWorkerPayload {
   op: StoreWorkerOp;

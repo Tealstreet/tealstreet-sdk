@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Managed custody of Aster's trade plans (RUST_ASTERDEX_REQUEST_CONTEXT.md,
 //! remaining funnel slice 3). Each independent case is its own test.
 mod support;
@@ -421,7 +422,7 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
 }
 
 #[test]
-fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_on_loss() {
+fn v3_clock_recovery_resigns_each_method_then_preserves_unknown_on_loss() {
     for (command_of, method, path) in [
         (place as fn() -> Command, Method::Post, "/order"),
         (cancel as fn() -> Command, Method::Delete, "/order"),
@@ -437,12 +438,10 @@ fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_o
         let second = write(&resent, method, path).clone();
         assert_ne!(query(&first.url, "nonce"), query(&second.url, "nonce"));
         assert_ne!(signature(&first.url), signature(&second.url));
-        if method == Method::Post && path == "/order" {
-            assert!(stamp(&first.url).is_none());
-            assert!(stamp(&second.url).is_none());
-        } else {
-            assert_ne!(stamp(&first.url), stamp(&second.url));
-        }
+        assert!(stamp(&first.url).is_none());
+        assert!(stamp(&second.url).is_none());
+        assert!(query(&first.url, "recvWindow").is_none());
+        assert!(query(&second.url, "recvWindow").is_none());
         let failed = lost(&mut engine, &second);
         assert_eq!(
             terminal(&failed).unwrap().unwrap_err().outcome,
@@ -593,7 +592,15 @@ fn a_cancel_batch_continues_after_a_failure_through_one_plan() {
 
 #[test]
 fn a_v3_stp_mode_read_is_a_managed_command_read() {
-    let mut e = support::engine(Options::v3_wallet());
+    // Nonces are shared process-wide per signer. Keep this independent read
+    // from racing the clock-recovery test's releases on its fixture wallet.
+    let secret = "03".repeat(32);
+    let signer = safe_cex_crypto::ethereum::private_key_address(&secret).unwrap();
+    let mut e = support::engine(Options {
+        key: Some(signer),
+        secret: Some(secret),
+        ..Options::v3_wallet()
+    });
     e.store_mut().set_markets(vec![market()]);
     let sent = command(&mut e, Command::FetchStpMode { command: COMMAND });
     managed(&sent, 1);
@@ -706,7 +713,7 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     );
     let error = terminal(&refused).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
-    assert!(error.legacy_text().contains("uncertain"), "{error:?}");
+    assert!(error.legacy_text().contains("confirm"), "{error:?}");
     // The read started before the seal completes: still fenced.
     let after_stale = answer(&mut e, &stale, 200, "[]");
     let still = retry(&mut e);
@@ -804,7 +811,7 @@ fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
     assert_eq!(
         error.legacy_text(),
-        "Placement outcome is uncertain; reconcile before cancel-all"
+        "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
     );
     // Cancel by ID cannot place, so it is admitted.
     let by_id = command(&mut e, cancel());

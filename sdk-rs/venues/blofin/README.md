@@ -25,8 +25,14 @@ Reads and documented definitive refusal codes on other statuses are unchanged.
 Trading validation and compensating writes follow the legacy TS adapter.
 Normal split lots and grouped rows do not gain a whole-plan native min/max gate;
 legacy partial-placement cases remain known issues. Existing zero-size and
-opening-trigger shape/provenance checks remain in the venue driver. Unknown
+trigger shape/provenance checks remain in the venue driver. Unknown
 stored protection references normalize to the TS default `last`.
+PARITY-EXCEPTION (AGT-46): TS refused reduce-only triggers; the port sends them
+on order-algo with the documented string `reduceOnly: "true"` and lists reduce-only
+trigger rows as reduce-only Conditionals. Close-only and non-GTC triggers stay refused.
+Whole-position trigger rows (`size: -1`, AGT-46 follow-up #3740) retain native
+provenance but publish `amount: 0`, `remaining: 0`, `close: true`; their trigger-time
+quantity is not inferred from a potentially stale position snapshot.
 Split allocation also follows TS: round equal lots and append the rounded native
 remainder. For amount 11/12 with maximum 5 and step 1, the payload sizes are
 `[3,3,3,1]`/`[3,3,3,2]`, including TS's quantity shortfall. Rounding can also
@@ -56,7 +62,7 @@ allowed. Definite refusals retain the TS dispatch rules above.
 Active recording tests in `tests/after_failure.rs` pin each affected path,
 including native lots, grouped batches, protective children, cancellation,
 replacement and sibling compensation. Failures retain placed IDs and indexed
-Unknown/notSent outcomes, show "The outcome is unknown. Check Open Orders",
+Unknown/notSent outcomes, show "We couldn’t confirm this change. Check your open orders before trying again.",
 and emit an Unknown telemetry event. The engine fence remains unchanged.
 Engine-sealed HTTP Unknowns retain the same telemetry through the venue's
 retirement/reconciliation callback, without routing the reply through its decoder.

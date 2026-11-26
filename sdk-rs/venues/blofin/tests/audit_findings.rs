@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! BloFin answers the 2026-11-02 audit found misreported: each pinned to its ruling.
 mod support;
 use safe_cex_engine::model::OrderType;
@@ -76,7 +77,7 @@ fn an_internal_error_on_a_stop_edit_says_its_outcome_is_unknown() {
         r#"{"code":"103013","msg":"Internal error; unable to process your request. Please try again.","data":null}"#,
     );
     let e = failure(&h).expect("failure");
-    assert!(e.message.contains("is unknown"), "{}", e.message);
+    assert!(e.message.contains("confirm"), "{}", e.message);
     assert_eq!(e.outcome, Some(safe_cex_engine::Outcome::Unknown));
     no_cancel_or_placement(&h);
 }
@@ -91,7 +92,7 @@ fn a_row_internal_error_on_a_stop_edit_says_its_outcome_is_unknown() {
         r#"{"code":"0","msg":"success","data":{"tpslId":null,"clientOrderId":null,"code":"103013","msg":"Internal error; unable to process your request. Please try again."}}"#,
     );
     let e = failure(&h).expect("failure");
-    assert!(e.message.contains("is unknown"), "{}", e.message);
+    assert!(e.message.contains("confirm"), "{}", e.message);
     no_cancel_or_placement(&h);
 }
 
@@ -143,7 +144,12 @@ fn an_internal_error_on_an_order_replacement_says_it_may_be_gone() {
     let r = h.take("batch-orders");
     h.respond(r, r#"{"code":"103013","msg":"Internal error; unable to process your request. Please try again.","data":null}"#);
     let e = failure(&h).unwrap();
-    assert!(e.message.contains("may be gone"), "{}", e.message);
+    assert!(
+        e.message
+            .contains("was cancelled, but its replacement wasn’t confirmed"),
+        "{}",
+        e.message
+    );
 }
 
 #[test]

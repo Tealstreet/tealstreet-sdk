@@ -221,6 +221,8 @@ pub(crate) fn all_leverage(store: &Store, leverage: f64) -> Result<Vec<Plan>, Re
 /// These are typed op variants, never arbitrary callMethod or raw engine JSON.
 pub(crate) fn algo(op: &str, data: &Value) -> Result<(), &'static str> {
     let valid = match op {
+        "chaser:amend" => return safe_cex_chaser::ChaserAmendment::parse(data).map(|_| ()),
+        "twap:amend" => return safe_cex_algo_twap::TwapAmendment::parse(data).map(|_| ()),
         "exec" => data.as_object().is_some_and(|v| {
             v.keys().all(|k| matches!(k.as_str(), "command" | "symbol"))
                 && v.get("command")

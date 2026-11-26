@@ -1,12 +1,14 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::legacy_parity::{batch, configured, ordinary, write_sequence};
 use super::*;
 use safe_cex_engine::write_plan::ElementResult;
 use safe_cex_engine::{Outcome, VenueError};
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const HTTP_UNKNOWN_TEXT: &str =
-    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
-const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+    "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
+const UNKNOWN_AFTER_REFUSAL: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 
 #[derive(Clone, Copy, Debug)]
 enum Path {

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! An Unknown placement fences its symbol until a fresh, clean open-orders
 //! snapshot proves what landed (engine #2279 placement fence; Binance has no
 //! placement scope, so the mark comes from the Unknown write fact, Phase B).
@@ -86,10 +87,18 @@ fn futures_loaded(variant: Variant, mut h: Harness) -> Harness {
         200,
         "[]",
     );
+    h.respond(
+        if pm {
+            "/papi/v1/um/symbolConfig"
+        } else {
+            "/fapi/v1/symbolConfig"
+        },
+        200,
+        "[]",
+    );
     if pm {
         h.respond("/papi/v1/balance", 200, "[]");
     } else {
-        h.respond("/fapi/v1/symbolConfig", 200, "[]");
         h.respond("/fapi/v3/account", 200, r#"{"assets":[]}"#);
     }
     for path in order_reads(variant) {
@@ -208,7 +217,7 @@ fn outcome(h: &Harness, command: u32) -> Option<Outcome> {
 
 fn refused_uncertain(h: &Harness, command: u32) -> bool {
     h.failures.iter().any(|(c, e)| {
-        *c == command && e.outcome == Some(Outcome::NotSent) && e.message.contains("uncertain")
+        *c == command && e.outcome == Some(Outcome::NotSent) && e.message.contains("confirm")
     })
 }
 
@@ -389,7 +398,7 @@ fn cancel_all_stays_refused_while_fenced() {
             refused_uncertain(&h, 81)
                 || h.failures
                     .iter()
-                    .any(|(c, e)| *c == 81 && e.message.contains("uncertain")),
+                    .any(|(c, e)| *c == 81 && e.message.contains("confirm")),
             "{variant:?}"
         );
     }

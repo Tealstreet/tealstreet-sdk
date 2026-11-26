@@ -1855,7 +1855,7 @@ impl Grvt {
                         sell_leverage: f64,
                     }
                     let result: Result<String, String> = if failed {
-                        Err("Malformed GRVT leverage response".into())
+                        Err("GRVT’s leverage reply couldn’t be read".into())
                     } else if revision != self.account.settings_revision {
                         Err("GRVT leverage settings changed during read; retry query".into())
                     } else {
@@ -2291,8 +2291,12 @@ impl Grvt {
                                 .find(|(_, native)| native.as_str() == &*fill.native_id)
                                 .map_or_else(|| fill.native_id.to_string(), |(id, _)| id.clone())
                         };
+                        // GRVT keys orders by a reusable client id: the claim
+                        // keys on the native id (AGT-196). Native only.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let (symbol, client) = (market.symbol.clone(), id.clone());
                         cx.fill(Fill {
-                            id: None,
+                            id: Some(fill.trade_id.to_string()),
                             order_id: id,
                             symbol: market.symbol.clone(),
                             side: if fill.buyer {
@@ -2303,6 +2307,8 @@ impl Grvt {
                             price: fill.price.0,
                             amount: fill.size.0,
                         });
+                        #[cfg(not(target_arch = "wasm32"))]
+                        cx.order_native_id(&symbol, &client, &fill.native_id, Some(&fill.trade_id));
                     }
                 }
             }

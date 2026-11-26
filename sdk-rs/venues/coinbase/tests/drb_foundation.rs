@@ -286,6 +286,7 @@ fn only_documented_correlated_errors_prove_refusal() {
         (13009, ErrorKind::AuthExpired),
         (-32602, ErrorKind::InvalidInput),
         (10020, ErrorKind::InvalidInput),
+        (11054, ErrorKind::Rejected),
     ] {
         let mut t = Transport::default();
         let id = send(&mut t);
@@ -1062,5 +1063,145 @@ fn unknown_methods_are_rejected_on_both_transports_before_admission() {
         });
         assert_eq!(actions.len(), 1, "unexpected effects for {method}");
         assert!(matches!(&actions[0], Action::WsSend { .. }));
+    }
+}
+
+#[test]
+fn auth_accepts_live_gateway_extras_and_names_rejected_fields() {
+    // Shape observed from drb.coinbase.com public/auth for an INTX CDP key.
+    let live = json!({
+        "access_token": "synthetic-live-shape",
+        "expires_in": 899,
+        "scope": "rat#trade rat#view",
+        "token_type": "bearer",
+        "portfolio_uuid": "00000000-0000-0000-0000-000000000000",
+        "gateway_id": 0
+    });
+    let mut http = Session::new(Channel::Http);
+    http.accept(live, 1000.).unwrap();
+    assert!(http.refresh_at().is_some());
+
+    let base =
+        || json!({"access_token":"tok","expires_in":900,"scope":"trade","token_type":"bearer"});
+    let cases: [(&str, Value); 6] = [
+        ("expires_in is not a whole number", {
+            let mut v = base();
+            v["expires_in"] = json!(899.5);
+            v
+        }),
+        ("scope is not a string", {
+            let mut v = base();
+            v["scope"] = Value::Null;
+            v
+        }),
+        ("token_type is not bearer", {
+            let mut v = base();
+            v["token_type"] = json!("Bearer");
+            v
+        }),
+        ("access_token missing", {
+            let mut v = base();
+            v.as_object_mut().unwrap().remove("access_token");
+            v
+        }),
+        ("access_token contains whitespace", {
+            let mut v = base();
+            v["access_token"] = json!("secret value");
+            v
+        }),
+        ("result is not an object", json!("secret-value")),
+    ];
+    for (start, (reason, result)) in cases.into_iter().enumerate() {
+        let error = Session::new(Channel::Http)
+            .accept(result, 1000. + start as f64)
+            .unwrap_err();
+        assert!(error.contains(reason), "{error}");
+        assert!(error.contains("(fields: "), "{error}");
+        assert!(!error.contains("secret"), "{error}");
+    }
+}
+
+#[test]
+fn auth_rejection_lists_field_names_only() {
+    let error = Session::new(Channel::Http)
+        .accept(
+            json!({"expires_in":900,"scope":"secret-scope","token_type":"bearer"}),
+            1000.,
+        )
+        .unwrap_err();
+    assert!(
+        error.ends_with("access_token missing (fields: expires_in,scope,token_type)"),
+        "{error}"
+    );
+    assert!(!error.contains("secret"));
+    let error = Session::new(Channel::Http)
+        .accept(json!({}), 1000.)
+        .unwrap_err();
+    assert!(error.ends_with("(fields: none)"), "{error}");
+}
+
+#[test]
+fn websocket_auth_accepts_connection_scoped_session_without_token() {
+    // Live drb WebSocket public/auth reply: a session id, no bearer token.
+    let session_reply = || {
+        json!({
+            "expires_in": 899,
+            "scope": "rat#trade rat#view",
+            "token_type": "bearer",
+            "portfolio_uuid": "00000000-0000-0000-0000-000000000000",
+            "gateway_id": 0,
+            "sid": "synthetic-session"
+        })
+    };
+    let mut ws = Session::new(Channel::WebSocket(SocketId(9)));
+    ws.accept(session_reply(), 1000.).unwrap();
+    assert!(ws.refresh_at().is_some());
+    assert!(!ws.needs_refresh(1001.));
+    assert!(ws.authorization(1001.).is_none());
+
+    // HTTP still requires a bearer token.
+    let error = Session::new(Channel::Http)
+        .accept(session_reply(), 1000.)
+        .unwrap_err();
+    assert!(error.contains("access_token missing"), "{error}");
+
+    // Without a session id, a token-less WS reply is still refused.
+    let mut no_sid = session_reply();
+    no_sid.as_object_mut().unwrap().remove("sid");
+    let error = Session::new(Channel::WebSocket(SocketId(9)))
+        .accept(no_sid, 1000.)
+        .unwrap_err();
+    assert!(error.contains("access_token missing"), "{error}");
+
+    // Other fields keep their checks on the session path.
+    let mut bad = session_reply();
+    bad["token_type"] = json!("mac");
+    assert!(
+        Session::new(Channel::WebSocket(SocketId(9)))
+            .accept(bad, 1000.)
+            .is_err()
+    );
+}
+
+#[test]
+fn non_object_auth_diagnostics_are_fixed_and_never_accept_a_session() {
+    for value in [
+        json!(null),
+        json!(true),
+        json!(123),
+        json!("PRIVATE_AUTH_VALUE"),
+        json!([{"access_token":"PRIVATE_AUTH_VALUE"}]),
+    ] {
+        for channel in [Channel::Http, Channel::WebSocket(SocketId(9))] {
+            let mut session = Session::new(channel);
+            let error = session.accept(value.clone(), 1000.).unwrap_err();
+            assert_eq!(
+                error,
+                "drb invalid public/auth result: result is not an object (fields: non-object)"
+            );
+            assert!(session.authorization(1001.).is_none());
+            assert!(session.refresh_at().is_none());
+            assert!(!format!("{session:?}").contains("PRIVATE_AUTH_VALUE"));
+        }
     }
 }

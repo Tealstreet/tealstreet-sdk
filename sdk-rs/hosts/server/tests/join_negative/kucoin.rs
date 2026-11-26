@@ -59,6 +59,28 @@ impl<const TESTNET: bool> Venue for Kucoin<TESTNET> {
             ..Default::default()
         }
     }
+    fn replayable(frame: &Value) -> bool {
+        // Discovery and read-feed token setup are prerequisites, not private
+        // admission evidence. A successful prior probe need not have requested
+        // every one of them, and replaying a token can stall before REST proof.
+        let descriptor: Value =
+            serde_json::from_str(frame["d"]["wsAuth"]["toSign"].as_str().unwrap()).unwrap();
+        let operation = descriptor["payload"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches(|c: char| c.is_ascii_digit());
+        let path = operation
+            .split_once('?')
+            .map_or(operation, |(path, _)| path);
+        matches!(
+            path,
+            "GET/api/v1/account-overview"
+                | "GET/api/v2/position/getPositionMode"
+                | "GET/api/v1/positions"
+                | "GET/api/v1/orders"
+                | "GET/api/v1/stopOrders"
+        )
+    }
     fn credentials(other: bool) -> Value {
         if other {
             json!({"key":OTHER_KEY,"secret":OTHER_SECRET,"passphrase":PASS})
@@ -204,6 +226,120 @@ mod controls {
         }
         h
     }
+    // These targets are emitted by the real native COSIGNED probe. Discovery
+    // and read-feed setup can arrive after a prior admission has completed.
+    fn sign_frame(id: u64, stamp: u64, operation: &str) -> Value {
+        json!({"t":"sign-req", "d":{"id":id,"wsAuth":{
+            "outputFormat":"kucoin-batch",
+            "toSign":json!({"slot":"primary","brokerPrefix":null,
+                "payload":format!("{stamp}{operation}")}).to_string()
+        }}})
+    }
+
+    #[test]
+    fn replay_targets_every_private_startup_read_but_not_prerequisites() {
+        for operation in [
+            "GET/api/v1/account-overview?currency=USDT",
+            "GET/api/v2/position/getPositionMode",
+            "GET/api/v1/positions",
+            "GET/api/v1/orders?status=active&currentPage=1&pageSize=100",
+            "GET/api/v1/stopOrders?status=active&currentPage=1&pageSize=100",
+        ] {
+            assert!(
+                Kucoin::<false>::replayable(&sign_frame(1, now_ms(), operation)),
+                "private proof must replay: {operation}"
+            );
+        }
+        for operation in [
+            "GET/api/v1/contracts/active",
+            "GET/api/v1/allTickers",
+            "POST/api/v1/bullet-public",
+            "POST/api/v1/bullet-private",
+        ] {
+            assert!(
+                !Kucoin::<false>::replayable(&sign_frame(1, now_ms(), operation)),
+                "prerequisite must sign freshly: {operation}"
+            );
+        }
+    }
+
+    #[test]
+    fn unseen_late_prerequisite_is_fresh_then_real_private_proof_replays() {
+        use super::super::join_negative::{Answer, Device};
+        let proof = "GET/api/v1/account-overview?currency=USDT";
+        for operation in [
+            "GET/api/v1/contracts/active",
+            "GET/api/v1/allTickers",
+            "POST/api/v1/bullet-public",
+            "POST/api/v1/bullet-private",
+        ] {
+            let stamp = now_ms();
+            let mut device = Device::default();
+            // A successful prior proof supplied this mandatory private operation,
+            // but did not request the later discovery/token operation at all.
+            device.answer::<Kucoin<false>>(&sign_frame(1, stamp - 10, proof), Answer::Correct);
+            let late = sign_frame(2, stamp, operation);
+            let reply = device.answer::<Kucoin<false>>(&late, Answer::Replay);
+            assert_eq!(reply, Kucoin::<false>::signature(&late, false).2);
+            assert_eq!(device.replayed, 0, "setup cannot count as replay evidence");
+            let replay =
+                device.answer::<Kucoin<false>>(&sign_frame(3, stamp, proof), Answer::Replay);
+            assert_eq!(device.replayed, 1, "the real private proof must replay");
+            let batch: Value =
+                serde_json::from_str(replay["wsAuthSignature"].as_str().unwrap()).unwrap();
+            let target = "/api/v1/account-overview?currency=USDT";
+            let mut h = headers(KEY, SECRET, target);
+            h.insert("KC-API-TIMESTAMP", stamp.to_string().parse().unwrap());
+            h.insert(
+                "KC-API-SIGN",
+                batch["macs"][0].as_str().unwrap().parse().unwrap(),
+            );
+            h.insert(
+                "KC-API-PASSPHRASE",
+                batch["macs"][1].as_str().unwrap().parse().unwrap(),
+            );
+            assert!(
+                !valid(&Method::GET, target, &h),
+                "replayed proof must fail native MAC verification"
+            );
+            let fresh = Kucoin::<false>::signature(&sign_frame(3, stamp, proof), false).2;
+            let fresh_batch: Value =
+                serde_json::from_str(fresh["wsAuthSignature"].as_str().unwrap()).unwrap();
+            h.insert(
+                "KC-API-SIGN",
+                fresh_batch["macs"][0].as_str().unwrap().parse().unwrap(),
+            );
+            h.insert(
+                "KC-API-PASSPHRASE",
+                fresh_batch["macs"][1].as_str().unwrap().parse().unwrap(),
+            );
+            assert!(
+                valid(&Method::GET, target, &h),
+                "fresh proof at the same timestamp remains valid"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a successful prior attempt signed this operation")]
+    fn an_uncaptured_private_proof_still_panics() {
+        use super::super::join_negative::{Answer, Device};
+        Device::default().answer::<Kucoin<false>>(
+            &sign_frame(1, now_ms(), "GET/api/v1/positions"),
+            Answer::Replay,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "replay must cross a real signing-byte boundary")]
+    fn unchanged_private_signing_bytes_still_cannot_count_as_replay() {
+        use super::super::join_negative::{Answer, Device};
+        let frame = sign_frame(1, now_ms(), "GET/api/v1/positions");
+        let mut device = Device::default();
+        device.answer::<Kucoin<false>>(&frame, Answer::Correct);
+        device.answer::<Kucoin<false>>(&frame, Answer::Replay);
+    }
+
     #[test]
     fn both_pairs_are_genuinely_valid() {
         for (k, s) in [(KEY, SECRET), (OTHER_KEY, OTHER_SECRET)] {

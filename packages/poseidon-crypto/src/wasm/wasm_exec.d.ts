@@ -6,3 +6,12 @@
  * the literal loader imports in index.ts.
  */
 export {};
+
+interface GoRuntime {
+  importObject: WebAssembly.Imports;
+  run(instance: WebAssembly.Instance): Promise<void>;
+}
+
+declare global {
+  var Go: new () => GoRuntime;
+}

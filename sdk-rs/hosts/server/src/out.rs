@@ -168,6 +168,11 @@ impl Out {
         }
     }
 
+    /// The client registration (init `instanceId`) this output answers, if any.
+    pub(crate) fn instance_id(&self) -> Option<&str> {
+        self.instance_id.as_deref()
+    }
+
     pub(crate) fn with_account_label(&self, label: &str) -> Self {
         Self {
             account_label: Some(Arc::from(label)),
@@ -220,19 +225,48 @@ impl Out {
         };
         receipts.sequence = next;
         data["outcomeSeq"] = next.into();
-        let text = crate::envelope::order_frame(kind, name, data.clone());
-        // The registration ID is inserted by send; reserve its full bounded
-        // UTF-8/JSON expansion before exposing a result to the router.
-        let size = self.instance_id.as_deref().map_or(text.len(), |id| {
-            crate::envelope::with_instance_id(text.clone(), id).len()
-        });
+        let size_of = |text: &String| {
+            // The registration ID is inserted by send; reserve its full bounded
+            // UTF-8/JSON expansion before exposing a result to the router.
+            self.instance_id.as_deref().map_or(text.len(), |id| {
+                crate::envelope::with_instance_id(text.clone(), id).len()
+            })
+        };
+        let mut text = crate::envelope::order_frame(kind, name, data.clone());
+        let mut size = size_of(&text);
+        // A placement's leg list is display data (AGT-185): shed its roles (AGT-214),
+        // then the list, never the outcome.
+        if kind == "order.outcome"
+            && size > crate::order_contract::OUTCOME_MAX
+            && let Some(legs) = data["error"]["elements"].as_array().cloned()
+        {
+            data["error"]["elements"] = crate::session::strip_roles(legs).into();
+            text = crate::envelope::order_frame(kind, name, data.clone());
+            size = size_of(&text);
+        }
+        if kind == "order.outcome"
+            && size > crate::order_contract::OUTCOME_MAX
+            && let Some(error) = data["error"].as_object_mut()
+            && error.remove("elements").is_some()
+        {
+            text = crate::envelope::order_frame(kind, name, data.clone());
+            size = size_of(&text);
+        }
         if kind == "order.actionOutcome" && size > crate::order_contract::OUTCOME_MAX {
             data["outcome"] = "unknown".into();
             data["result"] = serde_json::Value::Null;
             data["error"] = serde_json::json!({"message":"Action result exceeds receipt limit","outcome":"unknown"});
-            return self.send(crate::envelope::order_frame(kind, name, data));
+            let sent = self.send(crate::envelope::order_frame(kind, name, data));
+            if sent {
+                crate::audit::note_typed_outcome(&"unknown".into());
+            }
+            return sent;
         }
-        self.send(text)
+        let sent = self.send(text);
+        if sent {
+            crate::audit::note_typed_outcome(&data["outcome"]);
+        }
+        sent
     }
 
     pub(crate) fn retire_order_receipts(&self) {
@@ -422,7 +456,12 @@ mod tests {
             let current = out.account("acct").with_instance_id(Some("registration-B"));
             assert!(release.send(current.clone()).is_ok());
             callback.await.unwrap();
-            assert!(current.send(crate::envelope::msg("acct", "store", serde_json::json!({}))));
+            assert!(current.send(crate::envelope::frame(
+                "acct",
+                1,
+                true,
+                b"SCXF\x01\0\0\0\0\0\0\0\0\0\0\0"
+            )));
             let mut requests = 0;
             while let Ok(text) = sent.try_recv() {
                 let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -513,7 +552,12 @@ mod tests {
         let first = out.with_instance_id(Some("A"));
         pending.finish_registration(&first);
         pending.finish_registration(&out.with_instance_id(Some("B")));
-        assert!(pending.send(crate::envelope::msg("acct", "store", serde_json::json!({}))));
+        assert!(pending.send(crate::envelope::frame(
+            "acct",
+            1,
+            true,
+            b"SCXF\x01\0\0\0\0\0\0\0\0\0\0\0"
+        )));
         let frame: serde_json::Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         assert_eq!(frame["d"]["instanceId"], "A");
 

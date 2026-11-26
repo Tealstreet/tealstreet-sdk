@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -184,7 +185,7 @@ it('admits Crypto.com RemoteSigner and canonical PayloadSigner while retaining u
   expect(deriveRemoteSigningPolicy('krakenspot')).toBeUndefined();
   expect(() => assertBetaAccount('krakenspot', { key: 'replay-key', remoteSigner })).toThrow(
     expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
-      message: expect.stringContaining("isn't available on the Hosted Server") }),
+      message: expect.stringContaining("isn’t available for server trading") }),
   );
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
@@ -215,7 +216,7 @@ it.each([{ secondary_key: 'read-key' }, { secondary_secret: 'read-material' }, {
       expect.objectContaining({
         kind: 'unsupported',
         outcome: 'notSent',
-        message: expect.stringContaining('Crypto.com secondary'),
+        message: expect.stringContaining('Crypto.com doesn’t support extra read-only keys for server trading'),
       }),
     );
     expect(remoteSigner.sign).not.toHaveBeenCalled();

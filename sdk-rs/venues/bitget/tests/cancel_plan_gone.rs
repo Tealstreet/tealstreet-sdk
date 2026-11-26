@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! A Classic cancel-plan-order answered with empty success and failure lists
 //! (Bitget's answer for a position TP/SL it already removed with the position)
 //! reads the plan back once: a clean, complete page without it proves it gone.
@@ -8,7 +9,7 @@ use support::*;
 
 const EMPTY_ACK: &str = r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#;
 const LISTED: &str = r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target","symbol":"BTCUSDT","size":"0","triggerPrice":"120","side":"buy","holdSide":"short","planType":"pos_loss","planStatus":"live"}],"endId":"target"}}"#;
-const UNACKNOWLEDGED: &str = "Bitget batch cancel did not acknowledge every order; these may still be open: BTCUSDT buy stoploss target (acknowledged [], planType pos_loss); outcome unknown, check Open Orders";
+const UNACKNOWLEDGED: &str = "Bitget didn’t confirm cancellation of these orders, which may still be open: BTCUSDT buy stoploss target (confirmed [], planType pos_loss). Check your open orders before trying again.";
 
 fn ready() -> Harness {
     let mut h = Harness::classic();

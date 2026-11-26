@@ -92,7 +92,7 @@ pub struct Device {
     pub replayed: usize,
 }
 impl Device {
-    fn answer<V: Venue>(&mut self, frame: &Value, answer: Answer) -> Value {
+    pub(super) fn answer<V: Venue>(&mut self, frame: &Value, answer: Answer) -> Value {
         let (slot, preimage, fresh) = V::signature(frame, matches!(answer, Answer::OtherKey));
         let mut reply = if matches!(answer, Answer::Replay) && V::replayable(frame) {
             let (old, reply) = self
@@ -301,6 +301,14 @@ impl Client {
         .expect("real Session handover offer")
     }
     pub async fn finish<V: Venue>(&mut self, device: &mut Device, answer: Answer) {
+        self.finish_with::<V>(device, |_| answer).await;
+    }
+    /// `finish` with the device's answer chosen per signing request.
+    pub async fn finish_with<V: Venue>(
+        &mut self,
+        device: &mut Device,
+        mut answer: impl FnMut(&Value) -> Answer,
+    ) {
         tokio::time::timeout(WAIT, async {
             loop {
                 tokio::select! {
@@ -309,7 +317,7 @@ impl Client {
                         let frame: Value = serde_json::from_str(&text.unwrap()).unwrap();
                         self.frames.push(frame.clone());
                         if frame["t"] == "sign-req" {
-                            let reply = device.answer::<V>(&frame, answer);
+                            let reply = device.answer::<V>(&frame, answer(&frame));
                             self.send(json!({"t":"sign-res", "d":reply})).await;
                         } else if frame["d"]["data"][1]["initRefused"] == true { break; }
                     }

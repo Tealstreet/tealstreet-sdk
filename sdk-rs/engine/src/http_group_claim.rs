@@ -183,7 +183,7 @@ impl<V: Venue> Engine<V> {
                     now,
                     preparation,
                     reason,
-                    VenueError::new("HTTP group admission failed"),
+                    VenueError::new("This group of requests couldn’t be prepared"),
                 );
                 return Err(reason);
             }

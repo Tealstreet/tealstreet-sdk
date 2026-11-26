@@ -237,7 +237,9 @@ impl KucoinSpot {
         mut error: VenueError,
     ) {
         if error.outcome == Some(Outcome::Unknown) {
-            error.message = "The outcome is unknown. Check Open Orders".into();
+            error.message =
+                "We couldn’t confirm this change. Check your open orders before trying again."
+                    .into();
             error.presents = true;
         }
         if (job.effective || !job.ids.is_empty())
@@ -507,6 +509,7 @@ impl KucoinSpot {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

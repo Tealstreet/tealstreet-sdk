@@ -11,9 +11,13 @@ import {
 
 type Options = Omit<TwapOptions, 'activeMarket'> & { activeMarket: { symbol: string } };
 type State = Omit<TwapState, 'activeMarket'> & { activeMarket: { symbol: string } };
+export type ChaserAmendment = { id: string; update: { limitPrice?: number; offset?: number; maxAttempts?: number } };
+export type TwapAmendment = { id: string; update: { intervalMs?: number; remainingSlices?: number } };
 export type DelegatedAlgoAction =
   | { kind: 'algo'; op: 'exec'; data: { command: string; symbol?: string } }
   | { kind: 'algo'; op: 'chaser:start'; data: ChaserOrderOptions }
+  | { kind: 'algo'; op: 'chaser:amend'; data: ChaserAmendment }
+  | { kind: 'algo'; op: 'twap:amend'; data: TwapAmendment }
   | { kind: 'algo'; op: 'chaser:terminate' | 'twap:resume' | 'twap:pause' | 'twap:stop' | 'twap:cleanup'; data: string }
   | { kind: 'algo'; op: 'chaser:terminateAll'; data: Record<string, never> }
   | { kind: 'algo'; op: 'twap:start'; data: Options }
@@ -58,6 +62,17 @@ const stateFields = [
 const market = (v: unknown) => record(v) && keys(v, ['symbol']) && target(v.symbol);
 const side = (v: unknown) => v === 'buy' || v === 'sell';
 const uint = (v: unknown) => number(v) && Number.isInteger(v) && v <= 0xffff_ffff;
+const chaserAmendFields = ['limitPrice', 'offset', 'maxAttempts'];
+const twapAmendFields = ['intervalMs', 'remainingSlices'];
+
+export function unsupportedAlgoAmendField(value: unknown): string | undefined {
+  if (!record(value) || value.kind !== 'algo' || (value.op !== 'chaser:amend' && value.op !== 'twap:amend')) return;
+  const data = value.data;
+  if (!record(data) || !record(data.update)) return;
+  const fields = value.op === 'chaser:amend' ? chaserAmendFields : twapAmendFields;
+  if (!keys(data, ['id', 'update']) || !keys(data.update, fields))
+    return 'unsupported amend field: algo identity and quantity are immutable';
+}
 function options(v: unknown): boolean {
   if (
     !record(v) ||
@@ -110,6 +125,29 @@ export function isDelegatedAlgoAction(v: Record<string, unknown>): v is Record<s
   if (!keys(v, ['kind', 'op', 'data'])) return false;
   const d = v.data;
   switch (v.op) {
+    case 'chaser:amend':
+    case 'twap:amend': {
+      if (!record(d) || !keys(d, ['id', 'update']) || !target(d.id) || !record(d.update)) return false;
+      const update = d.update;
+      const fields = v.op === 'chaser:amend' ? chaserAmendFields : twapAmendFields;
+      if (!keys(update, fields) || Object.keys(update).length === 0 || !Object.values(update).every(number))
+        return false;
+      if (v.op === 'chaser:amend') {
+        return (
+          (!('limitPrice' in update) || (number(update.limitPrice) && update.limitPrice > 0)) &&
+          (!('maxAttempts' in update) || (number(update.maxAttempts) && update.maxAttempts < 0xffff_ffff))
+        );
+      }
+      return (
+        (!('intervalMs' in update) ||
+          (number(update.intervalMs) && update.intervalMs > 0 && update.intervalMs <= Number.MAX_SAFE_INTEGER)) &&
+        (!('remainingSlices' in update) ||
+          (number(update.remainingSlices) &&
+            Number.isInteger(update.remainingSlices) &&
+            update.remainingSlices >= 1 &&
+            update.remainingSlices <= 1000))
+      );
+    }
     case 'exec':
       return (
         record(d) &&

@@ -48,7 +48,12 @@ enum Settled {
 /// Opens the warning that a stop's cancel is being retried.
 const RETRYING: &str = "Chaser stopped, but ";
 /// Open the message that ends a stop's cancel, retried or not.
-const SETTLED: [&str; 2] = ["Chaser stopped: ", "Chaser could not cancel "];
+// Retained notices can use the previous wording until every client reconnects.
+const SETTLED: [&str; 3] = [
+    "Chaser stopped: ",
+    "Chaser could not cancel ",
+    "Chase couldn’t confirm cancellation of ",
+];
 
 /// The order a stop's retrying warning names, for a host that keeps warnings.
 pub fn retrying_order(message: &str) -> Option<&str> {
@@ -86,7 +91,7 @@ fn named_orders(message: &str) -> Vec<&str> {
 }
 
 /// Close All walks positions only, so it never reaches a stranded chase order.
-const CANCEL_WAY_OUT: &str = "Cancel it in Open Orders or use Nuke";
+const CANCEL_WAY_OUT: &str = "Cancel it from your open orders.";
 /// Each chase runs its own supervisor, price checks and REST reconciles.
 pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
@@ -197,7 +202,9 @@ fn stop_twap_unknown_cancel(chase: &Chase, error: &VenueError) -> bool {
     // Retain uncertainty for TWAP's journal and relinquish every remaining cancel.
     chase.note_order_may_be_open();
     chase.release_orders();
-    chase.mark_complete("The outcome is unknown. Check Open Orders");
+    chase.mark_complete(
+        "We couldn’t confirm this change. Check your open orders before trying again.",
+    );
     true
 }
 
@@ -285,6 +292,42 @@ impl ChaserBook {
             .iter()
             .map(|chase| chase.active())
             .collect()
+    }
+
+    pub fn amend(&self, amendment: crate::ChaserAmendment) -> Result<(), String> {
+        amendment.validate()?;
+        let chase = self
+            .find(&amendment.id)
+            // A TWAP slice's chase belongs to its TWAP; it is edited through `twap:amend`.
+            .filter(|chase| {
+                chase.options.twap_id.is_none()
+                    && !chase.is_stopped()
+                    && !chase.scope.is_disposed()
+                    && !chase.order_may_be_open()
+            })
+            .ok_or(
+                "Chaser job is not amendable: finished, stopping, unknown, missing or a TWAP slice",
+            )?;
+        let mut current = chase.amendment.borrow().clone();
+        if let Some(value) = amendment.update.limit_price {
+            current.limit_price = Some(value);
+        }
+        if let Some(value) = amendment.update.offset {
+            current.offset = Some(value);
+        }
+        if let Some(value) = amendment.update.max_attempts {
+            current.max_attempts = Some(value);
+        }
+        if amendment.update.limit_price.is_some() || amendment.update.offset.is_some() {
+            self.best_price_with(&chase, &current)?;
+        }
+        chase.amendment.replace(current.clone());
+        // No wake/cancel/place: only the next ordinary attempt reads these settings.
+        self.cx.port.emit(
+            "chaser:amended",
+            serde_json::json!({"id":amendment.id,"update":current}).to_string(),
+        );
+        Ok(())
     }
 
     /// User STOP: stop and cancel the resting order.
@@ -428,7 +471,7 @@ impl ChaserBook {
         let told = !gone && !open.is_empty();
         if told {
             self.error(&format!(
-                "Chaser could not cancel {symbol} order {}: {}; it may still be open. {CANCEL_WAY_OUT}",
+                "Chase couldn’t confirm cancellation of {symbol} order {}: {}. {CANCEL_WAY_OUT}",
                 open.join(", "),
                 error.message
             ));
@@ -505,6 +548,14 @@ impl ChaserBook {
     }
 
     fn best_price(&self, chase: &Chase) -> Result<f64, String> {
+        self.best_price_with(chase, &chase.amendment.borrow())
+    }
+
+    fn best_price_with(
+        &self,
+        chase: &Chase,
+        amendment: &crate::ChaserUpdate,
+    ) -> Result<f64, String> {
         let store = self.store();
         let symbol = &chase.options.symbol;
         let (Some(market), Some(ticker)) = (store.markets.get(symbol), store.tickers.get(symbol))
@@ -538,7 +589,43 @@ impl ChaserBook {
         if !(raw.is_finite() && step.is_finite() && step > 0.0) {
             return Err("No usable quote".into());
         }
-        Ok(adjust(raw.max(step), step))
+        if amendment.limit_price.is_none() && amendment.offset.is_none() {
+            return Ok(adjust(raw.max(step), step));
+        }
+        let offset = amendment.offset.unwrap_or(0.0);
+        let constrained = match chase.options.side {
+            OrderSide::Buy => (raw - offset).min(amendment.limit_price.unwrap_or(f64::INFINITY)),
+            OrderSide::Sell => (raw + offset).max(amendment.limit_price.unwrap_or(0.0)),
+        };
+        // Round outward from the market, but keep a quote already on the tick:
+        // a float floor/ceil of constrained / step drops one on decimal ticks.
+        let nearest = adjust(constrained, step);
+        let tolerance = step * 1e-6;
+        let mut price = match chase.options.side {
+            OrderSide::Buy if nearest > constrained + tolerance => adjust(nearest - step, step),
+            OrderSide::Sell if nearest < constrained - tolerance => adjust(nearest + step, step),
+            _ => nearest,
+        };
+        if let Some(limit) = amendment.limit_price {
+            if chase.options.side == OrderSide::Buy && price > limit {
+                price = adjust(price - step, step);
+            }
+            if chase.options.side == OrderSide::Sell && price < limit {
+                price = adjust(price + step, step);
+            }
+        }
+        if !price.is_finite()
+            || price < step
+            || amendment
+                .limit_price
+                .is_some_and(|limit| match chase.options.side {
+                    OrderSide::Buy => price > limit,
+                    OrderSide::Sell => price < limit,
+                })
+        {
+            return Err("Chaser price constraint leaves no usable quote".into());
+        }
+        Ok(price)
     }
 
     fn check_and_mark_if_complete(&self, chase: &Chase) {
@@ -866,7 +953,9 @@ impl ChaserBook {
             .iter()
             .find(|order| order.status == OrderStatus::Open)
             .map(|order| order.price);
-        let best = self.best_price(chase)?;
+        // Keep the existing re-quote trigger; new constraints apply only when
+        // that next ordinary attempt constructs its replacement order.
+        let best = self.best_price_with(chase, &crate::ChaserUpdate::default())?;
         if chase.options.reduce_only() && self.position_gone(chase) {
             chase.mark_complete("Completed");
             return Ok(());
@@ -915,6 +1004,11 @@ impl ChaserBook {
         if order_price == Some(best) {
             return Ok(());
         }
+        // An amended constraint can pin the replacement at the resting price;
+        // cancelling it would only spend an attempt on the same quote.
+        if order_price.is_some() && self.best_price(chase).ok() == order_price {
+            return Ok(());
+        }
         chase.increment_attempts();
         if chase.is_stopped() {
             return Ok(());
@@ -948,7 +1042,7 @@ impl ChaserBook {
                     .any(|phrase| message.contains(phrase));
                 let finished_meanwhile = to_cancel.iter().all(|id| self.known_closed(id));
                 if !(fill_tracked && filled_or_gone) && !finished_meanwhile {
-                    self.error("Chaser failed to cancel orders, stopping");
+                    self.error("The chase stopped because its orders couldn’t be cancelled. Check your open orders.");
                     chase.mark_complete("Failed to cancel orders");
                     return Ok(());
                 }
@@ -1200,7 +1294,7 @@ impl ChaserBook {
             }
             if chase.remaining() == 0.0 {
                 chase.mark_complete("No remaining size. User likely cancelled order");
-                self.error("Chaser has no remaining size. User likely cancelled order");
+                self.error("The chase stopped because no order size remains");
                 return Vec::new();
             }
             if tries >= max_tries {
@@ -1515,7 +1609,7 @@ impl ChaserBook {
                     "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
                 ));
                 self.warn(&format!(
-                    "{RETRYING}{symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
+                    "{RETRYING}{symbol} order {id} is still open: {}. It can still fill until it is cancelled. Cancellation is being retried. {CANCEL_WAY_OUT}",
                     if signer_offline(&error) {
                         "the browser that signs for this account is offline"
                     } else {

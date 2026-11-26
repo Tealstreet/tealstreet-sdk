@@ -207,12 +207,12 @@ export class RustTwapOwnership {
     );
   }
 
-  private cancelForOwnerChange(id: string, symbol: string, reason?: string) {
+  private cancelForOwnerChange(id: string, symbol: string, _reason?: string) {
     this.pending.delete(id);
     this.release(id);
     this.exchange.emitter.emit(
       'warning',
-      `TWAP ${symbol} restore cancelled-for-owner-change${reason ? `: ${reason}` : ''}`,
+      `TWAP ${symbol} wasn’t restored because the account connection changed.`,
     );
     this.publish();
   }

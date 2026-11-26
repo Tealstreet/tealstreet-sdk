@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 #[path = "backpack/native.rs"]
 mod native;
 #[path = "backpack/owners.rs"]
@@ -356,11 +357,11 @@ async fn backpack_hosted_unknown_write_never_replays() -> Result {
             let error = failure(&out, 51)?;
             assert_eq!(error.outcome, Some(Outcome::Unknown), "{op} {status}");
             if op == "put-back" || op.ends_with("amend-replace") {
-                let warning = error.legacy_text().contains("Check Open Orders")
+                let warning = error.legacy_text().replace("Check your open orders", "Check Open Orders").contains("Check Open Orders")
                     || out.iter().any(|action| {
                         matches!(action,
                         Action::Notice(Notice::CommandError { command: 51, message })
-                        if message.contains("Check Open Orders"))
+                        if message.replace("Check your open orders", "Check Open Orders").contains("Check Open Orders"))
                     });
                 assert!(warning, "{op} {status}");
             }

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Exercise genuine signed dispatch and journal settlement, including an accepted cancel prefix.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -23,8 +24,9 @@ fn probe(status: u16, code: u64, unknown: bool) {
     for case in [
         "create",
         "protective create",
-        "amend cancel",
-        "amend replacement",
+        // AGT-45: a plain limit amend is one native modify; the former
+        // "amend cancel" and "amend replacement" legs no longer exist.
+        "amend modify",
         "protective amend",
         "cancel",
         "protective cancel",
@@ -71,7 +73,7 @@ fn probe(status: u16, code: u64, unknown: bool) {
                     orders: vec![order],
                 }
             }
-            "amend cancel" | "amend replacement" | "protective amend" => Command::AmendOrder {
+            "amend modify" | "protective amend" => Command::AmendOrder {
                 command: 7,
                 id: "42".into(),
                 price: Some(92.0),
@@ -97,29 +99,8 @@ fn probe(status: u16, code: u64, unknown: bool) {
         e.handle(NOW, Event::Command(command));
         let nonce = take_http(&mut e, NOW, "nextNonce");
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-        let mut write = take_http(&mut e, NOW, "sendTx");
-        let mut now = NOW;
-        if case == "amend replacement" {
-            reply(
-                &mut e,
-                &write,
-                200,
-                r#"{"code":200,"tx_hash":"accepted-cancel"}"#,
-            );
-            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
-            let timer = actions
-                .iter()
-                .find_map(|a| match a {
-                    Action::SetTimer { timer, at_ms } if *at_ms < NOW + 500.0 => {
-                        Some((*timer, *at_ms))
-                    }
-                    _ => None,
-                })
-                .expect("replacement pacing timer");
-            now = timer.1;
-            e.handle(now, Event::TimerFired { timer: timer.0 });
-            write = take_http(&mut e, now, "sendTx");
-        }
+        let write = take_http(&mut e, NOW, "sendTx");
+        let now = NOW;
         assert_eq!(write.method, Method::Post, "{case}: physical write");
         let body = format!(r#"{{"code":{code},"message":"scripted native response"}}"#);
         reply_at(&mut e, now, &write, status, &body);
@@ -133,11 +114,8 @@ fn probe(status: u16, code: u64, unknown: bool) {
             .collect();
         assert_eq!(failures.len(), 1, "{case}/{status}/{code}: {actions:?}");
         let error = failures[0];
-        // A definitive replacement refusal after accepted cancel is a known partial.
         let expected = if unknown {
             Some(Outcome::Unknown)
-        } else if case == "amend replacement" {
-            None
         } else {
             Some(Outcome::Rejected)
         };
@@ -145,7 +123,11 @@ fn probe(status: u16, code: u64, unknown: bool) {
         if unknown {
             let message = error.message.to_ascii_lowercase();
             assert!(
-                message.contains("unknown") && message.contains("check open orders"),
+                message.contains("confirm")
+                    && message
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}/{status}/{code}: {error:?}"
             );
             assert!(
@@ -274,7 +256,11 @@ fn nonce_retry_stale_refusal_body(status: u16, body: &str, unknown: bool) {
     if unknown {
         let text = error.message.to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(!text.contains("invalid nonce"), "stale refusal: {error:?}");

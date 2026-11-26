@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native request contract from the official Aster V3 New Order, Cancel Order,
 //! Change Initial Leverage and STP examples. Synthetic credentials only.
 use safe_cex_engine::model::*;
@@ -1301,7 +1302,10 @@ fn a_refused_limit_replacement_says_the_order_is_gone() {
         r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
-    assert!(message.contains("order is gone"), "{message}");
+    assert!(
+        message.contains("order was cancelled and its replacement was declined"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1372,7 +1376,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("The outcome is unknown. Check Open Orders")
+                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.") || error.message.contains("We couldn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");
@@ -1568,3 +1572,155 @@ mod legacy_parity;
 
 #[path = "support/unknown_exception.rs"]
 mod unknown_exception;
+
+// AGT-115: a stop entry was placed with its attached legs cleared. Any non-limit/market
+// entry with a non-zero leg now refuses the whole command, a plain limit beside it too.
+#[test]
+fn a_stop_entry_with_attached_legs_is_refused_before_any_write() {
+    let refusal = safe_cex_engine::model::stop_entry_legs_refusal("AsterDEX");
+    for entry in [
+        json!({"type":"stop_market","price":9500}),
+        json!({"type":"take_profit_market","price":9100}),
+        json!({"type":"conditional","triggerPrice":9500}),
+        json!({"type":"trailing_stop_market","price":50}),
+    ] {
+        for legs in [
+            json!({"stopLoss":9000}),
+            json!({"takeProfit":9800}),
+            json!({"stopLoss":0,"takeProfit":9800}),
+        ] {
+            let mut bracket = limit();
+            for (k, v) in entry
+                .as_object()
+                .unwrap()
+                .iter()
+                .chain(legs.as_object().unwrap())
+            {
+                bracket[k] = v.clone();
+            }
+            let mut h = Harness::new();
+            h.command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![
+                    serde_json::from_value(limit()).unwrap(),
+                    serde_json::from_value(bracket).unwrap(),
+                ],
+            });
+            assert!(h.requests.is_empty(), "{entry} {legs}");
+            let (_, error) = h.failures.last().expect("refused");
+            assert_eq!(error.legacy_text(), refusal, "{entry} {legs}");
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
+    }
+    // A zero leg means none: the stop entry still goes out.
+    let mut h = Harness::new();
+    let mut stop = limit();
+    stop["type"] = json!("stop_market");
+    stop["stopLoss"] = json!(0);
+    h.place(stop);
+    let entry = h.take(Method::Post);
+    assert!(entry.url.contains("type=STOP_MARKET"), "{}", entry.url);
+}
+
+// AGT-214: an entry with a stop-loss and a take-profit whose take-profit's reply is lost.
+// (A refused leg completes with the placed IDs, as legacy TS does.) Each row names its leg,
+// so the app can say "Entry and stop-loss placed. Take-profit not confirmed".
+#[test]
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_unconfirmed() {
+    use safe_cex_engine::write_plan::{ElementResult, LegRole};
+    let mut h = Harness::new();
+    let mut opts = limit();
+    opts["stopLoss"] = json!(9000);
+    opts["takeProfit"] = json!(9800);
+    h.place(opts);
+    let entry = h.take(Method::Post);
+    h.reply(entry, r#"{"orderId":1}"#);
+    let sl = h.take(Method::Post);
+    assert!(sl.url.contains("type=STOP_MARKET"), "{}", sl.url);
+    h.reply(sl, r#"{"orderId":2}"#);
+    let tp = h.take(Method::Post);
+    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET"), "{}", tp.url);
+    h.engine.handle(
+        1700000000000.0,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "connection lost",
+        },
+    );
+    h.collect();
+    let (_, error) = h.failures.last().expect("an unconfirmed placement");
+    let rows = error.elements.as_ref().expect("each leg's result");
+    let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+    assert!(matches!(rows[0].result, ElementResult::Placed { .. }));
+    assert!(matches!(rows[1].result, ElementResult::Placed { .. }));
+    assert!(
+        matches!(rows[2].result, ElementResult::Unknown { .. }),
+        "{:?}",
+        rows[2].result
+    );
+}
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = Harness::new();
+    let mut bracket = limit();
+    bracket["stopLoss"] = json!(9000);
+    bracket["takeProfit"] = json!(9800);
+    let mut close = limit();
+    close["side"] = json!("sell");
+    close["price"] = json!(9900);
+    close["reduceOnly"] = json!(true);
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![
+            serde_json::from_value(bracket).unwrap(),
+            serde_json::from_value(close).unwrap(),
+        ],
+    });
+    for id in 1..=2 {
+        let request = h.take(Method::Post);
+        h.reply(request, &format!(r#"{{"orderId":{id}}}"#));
+    }
+    let tp = h.take(Method::Post);
+    assert!(tp.url.contains("type=TAKE_PROFIT_MARKET"), "{}", tp.url);
+    h.engine.handle(
+        1700000000000.0,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "connection lost",
+        },
+    );
+    h.collect();
+    let rows = h
+        .failures
+        .last()
+        .expect("an unconfirmed placement")
+        .1
+        .elements
+        .as_ref();
+    let roles: Vec<_> = rows
+        .expect("each row's result")
+        .iter()
+        .map(|row| row.element.role)
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit),
+            None
+        ]
+    );
+}

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { MarginType, PositionMode, PositionSide } from '../types';
+import { nativePosition } from './cutover/nativePosition';
+import { referenceStore } from './cutover/referenceFixture';
 import { BinancePrivateWebsocket } from './reference/binance/binance.ws-private';
 import { BinancePMPrivateWebsocket } from './reference/binance/binancepm.ws-private';
-import { MarginType, PositionMode, PositionSide } from '../types';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -14,40 +16,38 @@ afterEach(() => {
 
 describe('Binance private websocket position refresh', () => {
   it('commits fetched USD-M position risk snapshots to the store', async () => {
-    const positions = [{ id: 'BTCUSDT:long', liquidationPrice: 45000 }];
+    const positions = [nativePosition({ id: 'BTCUSDT:long', symbol: 'BTCUSDT', liquidationPrice: 45000 })];
     const parent = {
       isDisposed: false,
       isBackgroundReconciliationPaused: vi.fn(() => false),
       getPositionStateVersion: vi.fn().mockReturnValue(0),
       fetchPositions: vi.fn().mockResolvedValue(positions),
-      store: {
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
 
     await (ws as any).executePositionFetch();
 
     expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
-    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith(positions);
+    expect(parent.store.positions).toEqual(positions);
   });
 
   it('commits fetched portfolio-margin position risk snapshots to the store', async () => {
-    const positions = [{ id: 'ETHUSDT:short', liquidationPrice: 2500 }];
+    const positions = [
+      nativePosition({ id: 'ETHUSDT:short', symbol: 'ETHUSDT', side: PositionSide.Short, liquidationPrice: 2500 }),
+    ];
     const parent = {
       isDisposed: false,
       getPositionStateVersion: vi.fn().mockReturnValue(0),
       fetchPositions: vi.fn().mockResolvedValue(positions),
-      store: {
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePMPrivateWebsocket(parent as any);
 
     await (ws as any).executePositionFetch();
 
     expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
-    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith(positions);
+    expect(parent.store.positions).toEqual(positions);
   });
 
   it('creates a new one-way position immediately and schedules a full repair', () => {
@@ -55,31 +55,28 @@ describe('Binance private websocket position refresh', () => {
       isDisposed: false,
       markPositionStateUpdatedByWebsocket: vi.fn(),
       fetchPositions: vi.fn().mockResolvedValue([]),
-      store: {
-        positions: [],
-        addOrUpdatePosition: vi.fn(),
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
     vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
 
     ws.handleAccountEvents([{ a: { P: [{ s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '125' }] } }]);
 
-    expect(parent.store.addOrUpdatePosition).toHaveBeenCalledWith({
-      id: 'BTCUSDT',
-      symbol: 'BTCUSDT',
-      side: PositionSide.Long,
-      entryPrice: 60000,
-      contracts: 0.25,
-      notional: 15125,
-      unrealizedPnl: 125,
-      leverage: Number.NaN,
-      liquidationPrice: null,
-      marginType: undefined,
-      positionMode: PositionMode.OneWay,
-      info: { s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '125' },
-    });
+    expect(parent.store.positions).toEqual([
+      expect.objectContaining({
+        id: 'BTCUSDT',
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        entryPrice: 60000,
+        contracts: 0.25,
+        notional: 15125,
+        unrealizedPnl: 125,
+        leverage: 0,
+        liquidationPrice: null,
+        positionMode: PositionMode.OneWay,
+        info: { s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '125' },
+      }),
+    ]);
     expect((ws as any).throttledFetchPositions).toHaveBeenCalledTimes(1);
   });
 
@@ -102,20 +99,16 @@ describe('Binance private websocket position refresh', () => {
       isDisposed: false,
       markPositionStateUpdatedByWebsocket: vi.fn(),
       fetchPositions: vi.fn().mockResolvedValue([]),
-      store: {
-        positions: [existing],
-        addOrUpdatePosition: vi.fn(),
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore({ positions: [existing] }),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
     vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
 
     ws.handleAccountEvents([{ a: { P: [{ s: 'ETHUSDT', ps: 'BOTH', pa: '0', ep: '0', up: '0' }] } }]);
 
-    expect(parent.store.addOrUpdatePosition).toHaveBeenCalledWith(
+    expect(parent.store.positions).toEqual([
       expect.objectContaining({ id: existing.id, contracts: 0, leverage: 10, liquidationPrice: 3300 }),
-    );
+    ]);
     expect((ws as any).throttledFetchPositions).toHaveBeenCalledTimes(1);
   });
 
@@ -123,17 +116,14 @@ describe('Binance private websocket position refresh', () => {
     const parent = {
       isDisposed: false,
       markPositionStateUpdatedByWebsocket: vi.fn(),
-      store: {
-        positions: [],
-        addOrUpdatePosition: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
     vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
 
     ws.handleAccountEvents([{ a: { P: [{ s: 'SOLUSDT', ps: 'BOTH', pa: '0', ep: '0', up: '0' }] } }]);
 
-    expect(parent.store.addOrUpdatePosition).not.toHaveBeenCalled();
+    expect(parent.store.positions).toEqual([]);
     expect((ws as any).throttledFetchPositions).toHaveBeenCalledTimes(1);
   });
 
@@ -142,7 +132,9 @@ describe('Binance private websocket position refresh', () => {
     const firstFetch = new Promise<Array<Record<string, unknown>>>((resolve) => {
       resolveFirstFetch = resolve;
     });
-    const freshPositions = [{ id: 'BTCUSDT', contracts: 2, liquidationPrice: 45000 }];
+    const freshPositions = [
+      nativePosition({ id: 'BTCUSDT', symbol: 'BTCUSDT', contracts: 2, liquidationPrice: 45000 }),
+    ];
     const parent = {
       isDisposed: false,
       positionStateVersion: 0,
@@ -154,26 +146,23 @@ describe('Binance private websocket position refresh', () => {
         return this.positionStateVersion;
       }),
       fetchPositions: vi.fn().mockReturnValueOnce(firstFetch).mockResolvedValueOnce(freshPositions),
-      store: {
-        positions: [],
-        addOrUpdatePosition: vi.fn(),
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
     const scheduleRepair = vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
 
     const staleRequest = (ws as any).executePositionFetch();
     ws.handleAccountEvents([{ a: { P: [{ s: 'BTCUSDT', ps: 'BOTH', pa: '2', ep: '60000', up: '0' }] } }]);
+    const published = parent.store.positions;
     resolveFirstFetch([{ id: 'BTCUSDT', contracts: 1, liquidationPrice: 40000 }]);
     await staleRequest;
 
-    expect(parent.store.addOrUpdatePositionsFull).not.toHaveBeenCalled();
+    expect(parent.store.positions).toBe(published);
     expect(scheduleRepair).toHaveBeenCalledTimes(2);
 
     await (ws as any).executePositionFetch();
 
-    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith(freshPositions);
+    expect(parent.store.positions).toMatchObject(freshPositions);
   });
 
   it('caps event-triggered position repairs at one request per ten seconds', async () => {
@@ -191,11 +180,7 @@ describe('Binance private websocket position refresh', () => {
       }),
       isBackgroundReconciliationPaused: vi.fn(() => false),
       fetchPositions: vi.fn().mockResolvedValue([]),
-      store: {
-        positions: [],
-        addOrUpdatePosition: vi.fn(),
-        addOrUpdatePositionsFull: vi.fn(),
-      },
+      store: referenceStore(),
     };
     const ws = new BinancePrivateWebsocket(parent as any);
     const event = { a: { P: [{ s: 'BTCUSDT', ps: 'BOTH', pa: '0.25', ep: '60000', up: '0' }] } };

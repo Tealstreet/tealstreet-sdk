@@ -125,6 +125,16 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    fn validate_for<V: Venue>(&self) -> io::Result<()> {
+        self.validate()?;
+        if V::max_account_subscriptions()
+            .is_some_and(|capacity| self.max_subscriptions_per_account > capacity)
+        {
+            return Err(invalid("account subscription limit exceeds venue capacity"));
+        }
+        Ok(())
+    }
+
     fn validate(&self) -> io::Result<()> {
         if self.flush_every.is_zero()
             || self.io_timeout.is_zero()
@@ -231,6 +241,7 @@ impl FrameServer {
         signer: Option<safe_cex_engine::signing::Provider>,
     ) -> io::Result<()> {
         struct Register<'a, T> {
+            inputs: safe_cex_store_frames::Inputs,
             server: &'a mut FrameServer,
             id: &'a str,
             token: &'a str,
@@ -239,13 +250,26 @@ impl FrameServer {
         impl<T: Transport + 'static> safe_cex_venues::Visit for Register<'_, T> {
             type Output = io::Result<()>;
             fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
-                self.server
-                    .add_account(self.id, self.token, Host::new(engine, self.transport))
+                self.server.add_account_with_inputs(
+                    self.id,
+                    self.token,
+                    Host::new(engine, self.transport),
+                    self.inputs,
+                )
             }
         }
-        let options = serde_json::from_str(options_json)
+        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let inputs = safe_cex_store_frames::Inputs::new(
+            "",
+            venue,
+            options
+                .tuning
+                .as_ref()
+                .is_some_and(|t| t.calculate_upnl_from_realtime_last_price),
+        );
         let register = Register {
+            inputs,
             server: self,
             id,
             token,
@@ -281,6 +305,17 @@ impl FrameServer {
         token: &str,
         host: Host<V, T>,
     ) -> io::Result<()> {
+        self.add_account_with_inputs(id, token, host, safe_cex_store_frames::Inputs::default())
+    }
+
+    fn add_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
+        &mut self,
+        id: &str,
+        token: &str,
+        host: Host<V, T>,
+        inputs: safe_cex_store_frames::Inputs,
+    ) -> io::Result<()> {
+        self.config.validate_for::<V>()?;
         if host.engine.has_received_commands() {
             return Err(invalid(
                 "account engine must not receive commands before server registration",
@@ -306,6 +341,7 @@ impl FrameServer {
         }
         let (commands, inbox) = mpsc::channel(256);
         let actor = Account::new(host, self.config.clone());
+        *actor.store_inputs.lock().unwrap() = inputs;
         self.tasks.push(tokio::task::spawn_local(
             actor.run(inbox, self.shutdown.subscribe()),
         ));
@@ -388,6 +424,8 @@ pub struct AccountHandle {
     capabilities: safe_cex_engine::Capabilities,
     events: crate::Events,
     sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
+    store_inputs: Arc<std::sync::Mutex<safe_cex_store_frames::Inputs>>,
+    placements: crate::own_placements::Placements,
 }
 
 /// The first disposal request or unrequested actor termination owns this cause.
@@ -411,10 +449,18 @@ pub struct ClientLink {
 /// Starts an account actor without a frame-server listener. The task ends after
 /// `dispose` or when every handle is dropped; await it to observe teardown.
 pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
-    mut host: Host<V, T>,
+    host: Host<V, T>,
     config: ServerConfig,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
-    config.validate()?;
+    spawn_account_with_inputs(host, config, safe_cex_store_frames::Inputs::default())
+}
+
+fn spawn_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
+    mut host: Host<V, T>,
+    config: ServerConfig,
+    inputs: safe_cex_store_frames::Inputs,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    config.validate_for::<V>()?;
     if host.engine.has_received_commands() {
         return Err(invalid(
             "account engine must not receive commands before server registration",
@@ -432,7 +478,10 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
+    *actor.store_inputs.lock().unwrap() = inputs;
     let disposal = actor.disposal.clone();
+    let store_inputs = actor.store_inputs.clone();
+    let placements = actor.placements.clone();
     let task = tokio::task::spawn_local(async move {
         #[cfg(not(feature = "address-nonce"))]
         {
@@ -450,6 +499,8 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         capabilities,
         events,
         sockets,
+        store_inputs,
+        placements,
     };
     Ok((handle, task))
 }
@@ -465,16 +516,17 @@ pub fn spawn_venue_account<T: Transport + 'static>(
     config: ServerConfig,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
     struct Spawn<T> {
+        inputs: safe_cex_store_frames::Inputs,
         transport: T,
         config: ServerConfig,
     }
     impl<T: Transport + 'static> safe_cex_venues::Visit for Spawn<T> {
         type Output = io::Result<(AccountHandle, JoinHandle<io::Result<()>>)>;
         fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
-            spawn_account(Host::new(engine, self.transport), self.config)
+            spawn_account_with_inputs(Host::new(engine, self.transport), self.config, self.inputs)
         }
     }
-    let mut options = serde_json::from_str(options_json)
+    let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if let Some(identities) = &config.trusted_signer_identities {
         identities.apply(venue, signer.as_ref(), &mut options)?;
@@ -484,7 +536,19 @@ pub fn spawn_venue_account<T: Transport + 'static>(
             .apply(venue, &mut options)
             .map_err(construction_refusal)?;
     }
-    let spawn = Spawn { transport, config };
+    let inputs = safe_cex_store_frames::Inputs::new(
+        "",
+        venue,
+        options
+            .tuning
+            .as_ref()
+            .is_some_and(|t| t.calculate_upnl_from_realtime_last_price),
+    );
+    let spawn = Spawn {
+        inputs,
+        transport,
+        config,
+    };
     let entropy = Some(crate::production_entropy());
     let result = match signer {
         Some(signer) => safe_cex_venues::build_with_signer_in_context(
@@ -503,7 +567,13 @@ pub fn spawn_venue_account<T: Transport + 'static>(
             spawn,
         ),
     };
-    result.map_err(construction_refusal)?
+    let (handle, task) = result.map_err(construction_refusal)??;
+    // AGT-196: Coinbase completes a repeated client id with the existing
+    // order's id, which may be another login's, so caller ids prove nothing.
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        crate::own_placements::lock(&handle.placements).set_idempotent_client_ids();
+    }
+    Ok((handle, task))
 }
 
 /// Why `AccountHandle::input` refused a client message; `notice` is the
@@ -514,6 +584,33 @@ pub struct InputRefused {
 }
 
 impl AccountHandle {
+    /// The order identities this account's own clients placed (AGT-196).
+    pub fn placements(&self) -> crate::own_placements::Placements {
+        self.placements.clone()
+    }
+
+    /// Configure account labels for the native UI sections before clients join.
+    pub fn configure_store_frames(&self, account: &str, venue: &str) {
+        self.store_inputs.lock().unwrap().configure(account, venue);
+    }
+    pub fn store_algos<T: Serialize + ?Sized>(
+        &self,
+        chasers: &[safe_cex_store_frames::ActiveChaser],
+        twaps: &T,
+    ) {
+        self.store_inputs.lock().unwrap().algos(chasers, twaps);
+    }
+    /// Publish pending native UI changes before retiring this account actor.
+    pub async fn flush_store_frames(&self) {
+        let (reply, done) = oneshot::channel();
+        if self.commands.send(Control::FlushStore(reply)).await.is_ok() {
+            let _ = done.await;
+        }
+    }
+    pub fn store_balance_info(&self, info: &serde_json::Value) {
+        self.store_inputs.lock().unwrap().balance_info(info);
+    }
+
     /// The venue's engine capabilities, fixed at construction.
     pub fn capabilities(&self) -> &safe_cex_engine::Capabilities {
         &self.capabilities
@@ -684,6 +781,7 @@ impl Outgoing {
 }
 
 enum Control {
+    FlushStore(oneshot::Sender<()>),
     Join {
         client: u64,
         outgoing: mpsc::Sender<Outgoing>,
@@ -707,6 +805,22 @@ enum Control {
     Books(Vec<String>, oneshot::Sender<Vec<BookLevels>>),
 }
 
+/// AGT-196: the whole command was proven not to have placed anything: the
+/// engine's `notSent`, or `rejected` with no accepted leg, element or
+/// protective side effect (the rule `order_frames::settle_intent` applies).
+fn definitively_refused(error: &VenueError) -> bool {
+    use safe_cex_engine::error::Outcome;
+    use safe_cex_engine::write_plan::ElementResult;
+    matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected))
+        && error.partial.is_none()
+        && error.protection.is_none()
+        && error.elements.as_ref().is_none_or(|elements| {
+            elements
+                .iter()
+                .all(|element| matches!(element.result, ElementResult::NotSent { .. }))
+        })
+}
+
 /// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
 /// `accountAuth` notices; the negotiated protocol stays v1.
 pub const ACCOUNT_AUTH_PROTOCOL: &str = "safe-cex-frame.account-auth";
@@ -723,6 +837,16 @@ struct Peer {
 struct Pending {
     client: Option<u64>,
     original: u32,
+    /// A placement, or an amend of an order this account placed: the symbols
+    /// its completion ids are recorded under as this account's own orders.
+    own: Option<Vec<String>>,
+    /// Identities its receipts newly recorded, forgotten if it is refused.
+    recorded: Vec<crate::own_placements::Key>,
+    /// A placement's legs, by index: their symbols and caller-chosen client ids.
+    legs: Vec<crate::own_placements::Leg>,
+    /// Every (symbol, client id) its receipts named, to match a batch's
+    /// proven legs by identity.
+    sent: Vec<crate::own_placements::Key>,
 }
 
 struct StartupFailure {
@@ -796,6 +920,9 @@ struct Account<V: Venue, T: Transport> {
     /// last line written and how many were held back since.
     mirrored: HashMap<String, (std::time::Instant, u32)>,
     disposal: Arc<OnceLock<DisposalCause>>,
+    store_inputs: Arc<std::sync::Mutex<safe_cex_store_frames::Inputs>>,
+    store_frames: safe_cex_store_frames::Emitter,
+    placements: crate::own_placements::Placements,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -818,6 +945,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
             startup_failure: None,
             mirrored: HashMap::new(),
             disposal: Arc::default(),
+            store_inputs: Arc::default(),
+            store_frames: Default::default(),
+            placements: Arc::default(),
         }
     }
 
@@ -911,12 +1041,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                     Some(Control::Leave(client)) => self.leave(client),
                     Some(Control::Read(read)) => read(self.host.engine.store()),
+                    Some(Control::FlushStore(reply)) => { self.flush(); let _ = reply.send(()); }
                     Some(Control::Snapshot(reply)) => {
                         // Absolute values only: a one-off read leaves every stream baseline alone.
                         let frame = self
                             .host
                             .turn(|host| host.engine.snapshot_frame((host.clock)()).to_vec());
                         if let Some(frame) = frame {
+                            let frame = self.decorate_store_frame(frame, true);
                             let _ = reply.send(frame);
                         }
                     }
@@ -967,7 +1099,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.flush();
         let snapshot = self
             .host
-            .turn(|host| Arc::<[u8]>::from(host.engine.snapshot_frame((host.clock)())));
+            .turn(|host| host.engine.snapshot_frame((host.clock)()).to_vec());
+        let snapshot =
+            snapshot.map(|frame| Arc::<[u8]>::from(self.decorate_store_frame(frame, true)));
         self.execute();
         if let Some(snapshot) = snapshot
             && self.host.terminal.is_none()
@@ -1001,7 +1135,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
         for notice in notices {
             match notice {
                 Notice::CommandDone { command, result } => {
-                    if let Some(pending) = self.pending.remove(&command)
+                    let pending = self.pending.remove(&command);
+                    if let Some(pending) = &pending
+                        && let Some(symbols) = &pending.own
+                    {
+                        crate::own_placements::lock(&self.placements).record_completion(
+                            symbols,
+                            &pending.legs,
+                            &result,
+                        );
+                    }
+                    if let Some(pending) = pending
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1015,7 +1159,18 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandFailed { command, error } => {
-                    if let Some(pending) = self.pending.remove(&command)
+                    let pending = self.pending.remove(&command);
+                    if let Some(pending) = &pending
+                        && pending.own.is_some()
+                    {
+                        let mut placements = crate::own_placements::lock(&self.placements);
+                        if definitively_refused(&error) {
+                            placements.forget(&pending.recorded);
+                        } else if let Some(elements) = &error.elements {
+                            placements.record_proven_legs(&pending.sent, &pending.legs, elements);
+                        }
+                    }
+                    if let Some(pending) = pending
                         && let Some(client) = pending.client
                     {
                         let text = encode_notice(ServerNotice::Done {
@@ -1029,6 +1184,21 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::CommandProgress { command, receipts } => {
+                    if let Some(pending) = self.pending.get_mut(&command)
+                        && let Some(symbols) = &pending.own
+                    {
+                        let added = crate::own_placements::lock(&self.placements).record_receipts(
+                            symbols,
+                            &pending.legs,
+                            &receipts,
+                        );
+                        pending.recorded.extend(added);
+                        pending.sent.extend(
+                            receipts
+                                .iter()
+                                .map(|receipt| (receipt.symbol.clone(), receipt.identity.clone())),
+                        );
+                    }
                     if let Some(pending) = self.pending.get(&command)
                         && let Some(client) = pending.client
                     {
@@ -1038,6 +1208,46 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         });
                         self.send(client, Outgoing::Text(text));
                     }
+                }
+                // Not sent to clients: it only labels this account's own fills.
+                Notice::PlacementNativeId {
+                    command,
+                    symbol,
+                    client_order_id,
+                    native_id,
+                } => {
+                    if let Some(pending) = self.pending.get(&command)
+                        && pending.own.is_some()
+                    {
+                        crate::own_placements::lock(&self.placements).record_placement_native_id(
+                            &pending.legs,
+                            &symbol,
+                            &client_order_id,
+                            &native_id,
+                        );
+                    }
+                }
+                // Applied in the turn that produced its fill, before that
+                // turn's frame (and so the fill) reaches the algo host's tap.
+                Notice::OrderNativeId {
+                    symbol,
+                    order_id,
+                    native_id,
+                    fill_id,
+                } => {
+                    crate::own_placements::lock(&self.placements).note_native_id(
+                        &symbol,
+                        &order_id,
+                        &native_id,
+                        fill_id.as_deref(),
+                    );
+                }
+                Notice::OrderTriggered {
+                    symbol,
+                    order_id,
+                    by,
+                } => {
+                    crate::own_placements::lock(&self.placements).link(&symbol, &order_id, &by);
                 }
                 Notice::AccountAuth {
                     credential,
@@ -1339,13 +1549,43 @@ impl<V: Venue, T: Transport> Account<V, T> {
             self.startup_failure = None;
         }
         let frame = self.host.turn(|host| {
+            let now = (host.clock)();
             host.engine
-                .take_frame((host.clock)())
-                .map(Arc::<[u8]>::from)
+                .take_frame(now)
+                .map(<[u8]>::to_vec)
+                .unwrap_or_else(|| safe_cex_store_frames::empty(now))
         });
-        if let Some(Some(frame)) = frame {
-            self.broadcast(Outgoing::Frame(frame));
+        if let Some(frame) = frame {
+            let frame = self.decorate_store_frame(frame, false);
+            if frame.len() > 16 {
+                self.broadcast(Outgoing::Frame(Arc::from(frame)));
+            }
         }
+    }
+
+    fn decorate_store_frame(&mut self, frame: Vec<u8>, snapshot: bool) -> Vec<u8> {
+        let mut input = self.store_inputs.lock().unwrap();
+        if input.account.is_empty() {
+            return frame;
+        }
+        let summary = self
+            .host
+            .socket_health
+            .cell()
+            .lock()
+            .unwrap()
+            .summary(crate::now_ms() as u64);
+        input.socket_health(&serde_json::json!({
+            "publicHealthy": summary.public_healthy, "privateHealthy": summary.private_healthy,
+            "publicInitialized": summary.public_initialized, "privateInitialized": summary.private_initialized,
+            "publicLastMessage": summary.public_last_message, "privateLastMessage": summary.private_last_message,
+            "publicCloseCode": summary.public.close_code, "privateCloseCode": summary.private.close_code,
+            "publicCloseCountTotal": summary.public.close_count_total, "privateCloseCountTotal": summary.private.close_count_total,
+            "publicCloseStreak": summary.public.close_streak, "privateCloseStreak": summary.private.close_streak,
+            "publicReconnectPaused": false, "privateReconnectPaused": false,
+        }));
+        self.store_frames
+            .frame(frame, self.host.engine.store(), &input, snapshot)
     }
 
     fn recheck_startup(&mut self) {
@@ -1645,14 +1885,63 @@ impl<V: Venue, T: Transport> Account<V, T> {
         };
         self.next_command = internal;
         *id = internal;
+        let own = self.own_symbols(&command);
+        let legs = match &command {
+            Command::PlaceOrders { orders, .. } => orders
+                .iter()
+                .map(|order| (order.symbol.clone(), order.client_order_id.clone()))
+                .collect(),
+            _ => Vec::new(),
+        };
         self.pending.insert(
             internal,
             Pending {
                 client: Some(client),
                 original,
+                own,
+                recorded: Vec::new(),
+                legs,
+                sent: Vec::new(),
             },
         );
         self.handle(command);
+    }
+
+    /// AGT-196: whose ids a command's receipts and completion may record. A
+    /// placement's are this account's, on its orders' symbols. An amend's are
+    /// only when the amended order already is (Hyperliquid and BingX replace it
+    /// under new ids): another login sharing the venue account can amend this
+    /// one's orders, and must not take over their fills. Never cancels.
+    fn own_symbols(&self, command: &Command) -> Option<Vec<String>> {
+        let (id, symbol) = match command {
+            Command::PlaceOrders { orders, .. } => {
+                let mut symbols: Vec<String> =
+                    orders.iter().map(|order| order.symbol.clone()).collect();
+                symbols.sort_unstable();
+                symbols.dedup();
+                return Some(symbols);
+            }
+            Command::AmendOrder { id, .. } => (id, None),
+            Command::AmendOrderWithSymbol { id, symbol, .. } => (id, Some(symbol)),
+            _ => return None,
+        };
+        let mut rows =
+            self.host.engine.store().orders().iter().filter(|order| {
+                order.id == *id && symbol.is_none_or(|symbol| order.symbol == *symbol)
+            });
+        let order = rows.next()?;
+        // Venue ids repeat across symbols: which order an id-only amend edits
+        // is then unknown, so nothing is recorded (fail open).
+        if rows.any(|other| other.symbol != order.symbol) {
+            return None;
+        }
+        let placements = crate::own_placements::lock(&self.placements);
+        let ours = placements.placed(&order.symbol, &order.id)
+            || order
+                .client_order_id
+                .as_deref()
+                .is_some_and(|client| placements.placed(&order.symbol, client));
+        ours.then(|| vec![order.symbol.clone()])
     }
 
     fn subscription_allowed(&self, client: u64, command: &Command) -> bool {
@@ -2365,6 +2654,11 @@ mod tests {
                 cx.command_error(command, "placement rejected");
                 return;
             }
+            if let Some(command) = text.strip_prefix("placed:") {
+                let command: u32 = command.parse().expect("placed command");
+                cx.done(command, format!(r#"["venue-{command}"]"#));
+                return;
+            }
             let command: u32 = text.parse().expect("receipt command");
             cx.command_progress(
                 command,
@@ -2414,6 +2708,53 @@ mod tests {
             Box::new(std::iter::empty())
         }
     }
+    /// AGT-196 review A (5f75821a55): Coinbase answers a repeated client id
+    /// with the existing order's id, so its accounts never claim a caller-id
+    /// placement; other venues do.
+    #[cfg(feature = "venues")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn coinbase_accounts_never_claim_caller_id_placements() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for (venue, idempotent) in
+                    [("coinbase", true), ("coinbasespot", true), ("bybit", false)]
+                {
+                    let options = serde_json::json!({"publicDataOnly": true}).to_string();
+                    let (handle, task) = spawn_venue_account(
+                        venue,
+                        &options,
+                        NoTransport,
+                        None,
+                        ServerConfig::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        crate::own_placements::lock(&handle.placements).idempotent_client_ids(),
+                        idempotent,
+                        "{venue}"
+                    );
+                    handle.dispose();
+                    task.await.unwrap().unwrap();
+                }
+            })
+            .await;
+    }
+
+    #[cfg(feature = "venues")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn hosted_constructor_supplies_display_metadata_and_user_tuning() {
+        tokio::task::LocalSet::new().run_until(async {
+            for (venue, tuning, expected) in [("bybit", false, true), ("bybit", true, true), ("bingx", false, false), ("bingx", true, true)] {
+                let options = serde_json::json!({"publicDataOnly":true,"tuning":{"calculateUpnlFromRealtimeLastPrice":tuning}}).to_string();
+                let (handle, task) = spawn_venue_account(venue, &options, NoTransport, None, ServerConfig::default()).unwrap();
+                handle.configure_store_frames("account-1", venue);
+                assert_eq!(handle.store_inputs.lock().unwrap().calculate_upnl_from_last, expected, "{venue}/{tuning}");
+                handle.dispose();
+                task.await.unwrap().unwrap();
+            }
+        }).await;
+    }
+
     struct NoTransport;
     impl Transport for NoTransport {
         fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
@@ -2485,6 +2826,49 @@ mod tests {
             panic!("expected a text notice");
         };
         serde_json::from_str(&message).unwrap()
+    }
+
+    #[test]
+    fn native_store_inputs_flush_without_a_venue_update_or_text_side_channel() {
+        let (mut actor, mut receivers) = event_actor(1_000_000);
+        actor
+            .store_inputs
+            .lock()
+            .unwrap()
+            .configure("acct", "bybit");
+        // Discard command fixture setup notices, then flush the initial sections.
+        for rx in &mut receivers {
+            while rx.try_recv().is_ok() {}
+        }
+        actor.flush();
+        for rx in &mut receivers {
+            let Ok(Outgoing::Frame(frame)) = rx.try_recv() else {
+                panic!("native frame");
+            };
+            let kinds: Vec<_> = safe_cex_engine::wire::sections(&frame)
+                .map(|(k, _)| k)
+                .collect();
+            for kind in 26..=32 {
+                assert!(kinds.contains(&kind), "missing {kind}");
+            }
+        }
+        actor
+            .store_inputs
+            .lock()
+            .unwrap()
+            .balance_info(&serde_json::json!({"tier":"pro"}));
+        actor.flush();
+        for rx in &mut receivers {
+            let Ok(Outgoing::Frame(frame)) = rx.try_recv() else {
+                panic!("native metadata frame");
+            };
+            let (_, bytes) = safe_cex_engine::wire::sections(&frame)
+                .find(|(k, _)| *k == 32)
+                .unwrap();
+            let info = safe_cex_store_frames::decode_section(bytes).unwrap();
+            assert!(info.get("tier").unwrap().as_str() == Some("pro"));
+            assert!(rx.try_recv().is_err(), "no store side channel");
+        }
     }
 
     #[test]
@@ -2858,6 +3242,82 @@ mod tests {
         actor.execute();
         assert!(receivers[0].try_recv().is_err());
         assert!(receivers[1].try_recv().is_err());
+    }
+
+    /// AGT-196: placement dispatch receipts and completion ids are recorded as
+    /// this account's own orders; other commands' receipts are not. Amends are
+    /// covered in `server_ledger_tests.rs`.
+    #[test]
+    fn placements_record_their_receipts_and_result_ids_only() {
+        let commands = Rc::new(RefCell::new(Vec::new()));
+        let mut actor = Account::new(
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(Stub(commands.clone())),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let (outgoing, _receiver) = mpsc::channel(8);
+        let (cancel, _) = watch::channel(false);
+        actor.peers.insert(
+            1,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+                account_auth: false,
+            },
+        );
+        let order = serde_json::from_value(serde_json::json!({
+            "symbol": "BTC-USD", "type": "limit", "side": "buy", "amount": 1.0, "price": 1.0
+        }))
+        .unwrap();
+        actor.command(
+            1,
+            Command::PlaceOrders {
+                command: 40,
+                orders: vec![order],
+            },
+        );
+        actor.command(
+            1,
+            Command::FetchLeverage {
+                command: 41,
+                symbol: "BTC-USD".into(),
+            },
+        );
+        actor.execute();
+        assert!(
+            commands
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, Command::PlaceOrders { command: 1, .. })),
+            "the placement reached the venue as internal command 1: {:?}",
+            commands.borrow()
+        );
+        let placements = actor.placements.clone();
+        let reply = |actor: &mut Account<_, _>, text: &str| {
+            actor.host.engine.handle(
+                1.,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text,
+                },
+            );
+            actor.execute();
+        };
+        for text in ["1", "2", "placed:1"] {
+            reply(&mut actor, text);
+        }
+        let placements = crate::own_placements::lock(&placements);
+        assert!(placements.placed("BTC-USD", "native-1"), "dispatch receipt");
+        assert!(placements.placed("BTC-USD", "venue-1"), "completion id");
+        assert!(
+            !placements.placed("BTC-USD", "native-2"),
+            "a read's receipt is not a placement"
+        );
     }
 
     #[test]
@@ -3995,4 +4455,52 @@ mod tests {
             })
             .await;
     }
+    #[cfg(feature = "venues")]
+    #[tokio::test]
+    async fn bitunix_subscription_capacity_is_validated_before_account_start() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let config = |limit| ServerConfig {
+                    max_subscriptions_per_account: limit,
+                    ..ServerConfig::default()
+                };
+                let limit = safe_cex_engine::socket_lifecycle::MAX_FRAMES;
+                for max in [limit + 1, limit * 2] {
+                    let result =
+                        spawn_venue_account("bitunix", "{}", NoTransport, None, config(max));
+                    assert!(
+                        matches!(result, Err(ref e) if e.kind() == io::ErrorKind::InvalidInput),
+                        "oversized Bitunix configuration must refuse before spawning"
+                    );
+                    let mut server = FrameServer::new(config(max)).unwrap();
+                    assert!(
+                        matches!(server.add_venue("bitunix", "token", "bitunix", "{}", NoTransport),
+                    Err(ref e) if e.kind() == io::ErrorKind::InvalidInput)
+                    );
+                }
+                for max in [1, limit] {
+                    let (account, task) =
+                        spawn_venue_account("bitunix", "{}", NoTransport, None, config(max))
+                            .expect("within-capacity Bitunix account remains supported");
+                    task.abort();
+                    drop(account);
+                    let mut server = FrameServer::new(config(max)).unwrap();
+                    server
+                        .add_venue("bitunix", "token", "bitunix", "{}", NoTransport)
+                        .unwrap();
+                }
+                // An undeclared venue retains its deployment's larger configured limit.
+                let host = Host::new(
+                    safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                    NoTransport,
+                );
+                let (_, task) = spawn_account(host, config(limit * 2)).unwrap();
+                task.abort();
+            })
+            .await;
+    }
 }
+
+#[cfg(test)]
+#[path = "server_ledger_tests.rs"]
+mod ledger_tests;

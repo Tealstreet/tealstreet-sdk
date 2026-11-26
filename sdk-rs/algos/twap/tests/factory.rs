@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer lifecycle messages; owner, no-cancel and no-replay assertions stay intact.
 //! The runtime adapter: ops in, engine commands and wire replies out.
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -109,6 +110,147 @@ fn placed_amounts(port: &Port) -> Vec<f64> {
             _ => Vec::new(),
         })
         .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_repartitions_only_unplaced_twap_quantity() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({"ordersCount":4})), &cx)
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            settle().await;
+            let id = factory.active_twaps("a")[0]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(placed_amounts(&port), vec![0.25]);
+            factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000,"remainingSlices":2}}).to_string(),
+                    &cx,
+                )
+                .unwrap();
+            assert_eq!(
+                placed_amounts(&port),
+                vec![0.25],
+                "amend has no immediate venue effect"
+            );
+            tokio::time::sleep(Duration::from_millis(999)).await;
+            assert_eq!(placed_amounts(&port), vec![0.25]);
+            tokio::time::sleep(Duration::from_millis(3)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375]);
+            tokio::time::sleep(Duration::from_millis(1002)).await;
+            settle().await;
+            tokio::time::sleep(Duration::from_millis(1002)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375, 0.375]);
+            assert!(factory.active_twaps("a").is_empty());
+            let error = factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000}}).to_string(),
+                    &cx,
+                )
+                .unwrap_err();
+            assert!(error.contains("not amendable"), "{error}");
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_refuses_unknown_twap_and_immutable_quantity() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            for field in ["size", "side", "symbol"] {
+                let error = factory
+                    .handle(
+                        "twap:amend",
+                        &json!({"id":"missing","update":{field:2}}).to_string(),
+                        &cx,
+                    )
+                    .unwrap_err();
+                assert!(error.contains("unsupported amend field"), "{error}");
+            }
+            let error = factory
+                .handle(
+                    "twap:amend",
+                    r#"{"id":"missing","update":{"remainingSlices":3}}"#,
+                    &cx,
+                )
+                .unwrap_err();
+            assert!(error.contains("not amendable"), "{error}");
+            assert!(port.commands.borrow().is_empty());
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_during_a_pending_slice_keeps_its_quantity_and_waits_for_its_answer() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            port.answer_ms.set(5000);
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({"ordersCount":4})), &cx)
+                .unwrap();
+            settle().await;
+            let id = factory.active_twaps("a")[0]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let before = placed_amounts(&port);
+            assert_eq!(before, vec![0.25]);
+            factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000,"remainingSlices":2}}).to_string(),
+                    &cx,
+                )
+                .unwrap();
+            assert_eq!(placed_amounts(&port), before);
+            tokio::time::advance(Duration::from_millis(5001)).await;
+            settle().await;
+            assert_eq!(
+                placed_amounts(&port),
+                before,
+                "pending answer never resets the amended interval to the old 15 seconds"
+            );
+            tokio::time::advance(Duration::from_millis(1001)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375]);
+            factory
+                .handle("twap:stop", &json!(id).to_string(), &cx)
+                .unwrap();
+            assert!(
+                factory
+                    .handle(
+                        "twap:amend",
+                        &json!({"id":id,"update":{"intervalMs":500}}).to_string(),
+                        &cx
+                    )
+                    .unwrap_err()
+                    .contains("not amendable")
+            );
+            cx.scope.dispose();
+        })
+        .await;
 }
 
 async fn settle() {
@@ -231,9 +373,9 @@ async fn typed_start_reports_owner_change_during_first_effects() {
                         result.expect_err("discarded work must never report Starting TWAP");
                     assert!(
                         message.message.contains(if after_dispatch {
-                            "outcome is unknown"
+                            "The account connection changed while the TWAP was starting. Check your open orders before restarting it."
                         } else {
-                            "cancelled-for-owner-change"
+                            "The TWAP couldn’t start because the account connection changed"
                         }),
                         "{message:?}"
                     );
@@ -319,7 +461,7 @@ async fn binding_changes_during_slice_deferral_drop_the_retired_schedule() {
                         );
                         assert!(port.emits.borrow().iter().any(|(op, data)| {
                             op == "error"
-                                && data == "TWAPs stopped: authenticated connection binding changed"
+                                && data == "TWAPs stopped because the account connection changed"
                         }));
                     }
                     cx.scope.dispose();
@@ -1383,10 +1525,12 @@ fn native_partial_facts_distinguish_refusal_from_uncertainty() {
         Element {
             index: 0,
             client_order_id: None,
+            role: None,
         },
         Element {
             index: 1,
             client_order_id: None,
+            role: None,
         },
     ]);
     journal

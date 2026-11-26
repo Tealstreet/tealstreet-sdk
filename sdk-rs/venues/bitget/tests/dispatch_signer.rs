@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 mod support;
 use safe_cex_engine::signing::{Provider, SignError, SignFuture, SignRequest, SignResult, Signer};
 use safe_cex_engine::{Action, Command, Event, Notice, Outcome, Query};
@@ -328,7 +329,7 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     // The note now comes from `end`, which every unfinished rollback reaches.
     assert_eq!(
         error.message,
-        "Bitget 40017: replace rejected (HTTP 200); protection is not in place; re-place it now; Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused; protection rollback failed: Signing provider refused the request"
+        "Bitget 40017: replace rejected (HTTP 200); protection is not in place; re-place it now; Your BTCUSDT long position has no stop: the previous stop was cancelled and its replacement was declined; protection rollback failed: Signing provider refused the request"
     );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }

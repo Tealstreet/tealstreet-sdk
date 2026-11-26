@@ -40,8 +40,9 @@ account require a passphrase or fail private-mode validation.
 
 Native fixture signing compares local and device operations/signatures across
 REST reads, ordinary/protective orders, cancellation, cancel-all, leverage,
-cancel/proof/replacement amendments, signature-rejection re-signing and private
-socket login. Tests retain the independent npm zkLink golden signatures.
+cancel/proof/replacement amendments, write signature-rejection re-signing and private
+socket login. Signed reads never re-sign after a refusal: ApeX verifies the primary
+canonical text and refuses the whole-second legacy text wherever they differ (AGT-75). Tests retain the independent npm zkLink golden signatures.
 Malformed/canceled delegate results cannot publish partial signing batches or
 send a write; dispatched Unknown outcomes retain the existing reconciliation
 and no-replay behavior. Details: `docs/plans/callers/apexomni-hosted-signing.md`.
@@ -64,6 +65,12 @@ uses `PENDING`, `OPEN` (including partial fills), `UNTRIGGERED`, `FILLED`,
 `EXPIRED` and `CANCELED`. The mapper accepts those exact values in REST snapshots
 and private stream rows. Cancellation uses one `L`; no documented `CANCELLED`
 alias is assumed. Canceled and expired rows retain their reported fill quantities.
+
+`CANCELING` is undocumented but observed: the bounded diagnostic above captured
+`unknown order status: "CANCELING"` from apexomni-t on 2026-11-19 (exchange-01,
+11:16:55Z and 11:36:49Z) while a cancel was in flight. It maps to the
+non-terminal `Canceling`, so the order stays listed with its fills and cannot be
+amended; only a later `CANCELED` removes it.
 Unknown statuses produce `row.skipped` and preserve the existing live order;
 they cannot establish cancellation or another terminal outcome. A new mapping
 requires the actual venue value and evidence of its meaning.

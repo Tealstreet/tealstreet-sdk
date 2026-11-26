@@ -26,7 +26,10 @@ const BTC = 'BTC-USDT-SWAP';
 const ETH = 'ETH-USDC-SWAP';
 const INVERSE = 'BTC-USD-SWAP';
 const XPERP = 'BTC-USD_UM_XPERP-310404';
-const records = [];
+// Pin the retention clock: the archive window is eight days old, while its
+// recent overlap and unfilled cancellation are still within two hours.
+const historyNow = 1761571200000;
+const records = [{ t: 0, type: 'meta', epoch: historyNow }];
 let clock = 0;
 let commandCount = 0;
 const envelope = (data) => ({ code: '0', msg: '', data });
@@ -222,10 +225,16 @@ http('GET', `/api/v5/trade/fills-history?${fillsQuery}`, [historicalFill, {
   fillTime: '1760880002000', fee: '-0.759998', fillPnl: '1', execType: 'M',
 }]);
 
-command({ op: 'fetchOrderHistory', symbol: 'BTCUSDT', from: 1760879999000, to: 1760880100000, limit: 2 });
-http('GET', '/api/v5/trade/orders-history?instType=SWAP&instId=BTC-USDT-SWAP&begin=1760879999000&end=1760880100000&limit=100', [
-  order({ state: 'filled', cTime: '1760880000000', uTime: '1760880002000', accFillSz: '4' }),
-  order({ ordId: '303', state: 'canceled', cTime: '1760880000001', uTime: '1760880003000', sz: '2', accFillSz: '0', avgPx: '', px: '39000' }),
+command({ op: 'fetchOrderHistory', symbol: 'BTCUSDT', from: 1760879999000, to: historyNow, limit: 3 });
+const orderQuery = `instType=SWAP&instId=BTC-USDT-SWAP&begin=1760879999000&end=${historyNow}&limit=100`;
+const recentFilled = order({ state: 'filled', cTime: String(historyNow - 2000), uTime: String(historyNow - 1000), accFillSz: '4' });
+http('GET', `/api/v5/trade/orders-history?${orderQuery}`, [
+  recentFilled,
+  order({ ordId: '303', state: 'canceled', cTime: String(historyNow - 1000), uTime: String(historyNow), sz: '2', accFillSz: '0', avgPx: '', px: '39000' }),
+]);
+http('GET', `/api/v5/trade/orders-history-archive?${orderQuery}`, [
+  { ...recentFilled, state: 'canceled', accFillSz: '1' },
+  order({ ordId: 'archive-304', state: 'filled', cTime: '1760880000000', uTime: '1760880002000', accFillSz: '4' }),
 ]);
 
 command({ op: 'fetchIncome', from: 1760879999000, to: 1760880100000, limit: 2 });
@@ -255,8 +264,11 @@ for (const [index, row] of productOrders.entries()) {
   const fill = { ...historicalFill, instId: native, tradeId: `product-execution-${index}`, billId: `930${index}`, fillPx: String(price), fillSz: '1', feeCcy: row.ccy, fee: '-0.001', fillPnl: '0.002' };
   command({ op: 'fetchFills', symbol, from: 1760879999, to: 1760880100, limit: 1 });
   http('GET', `/api/v5/trade/fills?instType=${instType}&instId=${native}&begin=1760879999000&end=1760880100000&limit=1`, [fill]);
-  command({ op: 'fetchOrderHistory', symbol, from: 1760879999000, to: 1760880100000, limit: 1 });
-  http('GET', `/api/v5/trade/orders-history?instType=${instType}&instId=${native}&begin=1760879999000&end=1760880100000&limit=100`, [{ ...live, state: 'canceled', cTime: '1760880000000', avgPx: String(price), accFillSz: '1' }]);
+  command({ op: 'fetchOrderHistory', symbol, from: 1760879999000, to: historyNow, limit: 1 });
+  const productHistory = { ...live, state: 'canceled', cTime: String(historyNow - 1000), avgPx: String(price), accFillSz: '1' };
+  for (const endpoint of ['orders-history', 'orders-history-archive']) {
+    http('GET', `/api/v5/trade/${endpoint}?instType=${instType}&instId=${native}&begin=1760879999000&end=${historyNow}&limit=100`, [productHistory]);
+  }
   command({ op: 'fetchIncome', symbol, from: 1760879999000, to: 1760880100000, limit: 1 });
   http('GET', `/api/v5/account/bills-archive?instType=${instType}&instId=${native}&begin=1760879999000&end=1760880100000&limit=100`, [
     { instId: native, billId: `940${index}`, tradeId: fill.tradeId, type: '2', pnl: '0.002', fee: '-0.001', balChg: '0.001', ccy: row.ccy, ts: '1760880009000' },

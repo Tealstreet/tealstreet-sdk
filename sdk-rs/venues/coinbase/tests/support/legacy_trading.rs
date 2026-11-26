@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Offline regression oracles for legacy Advanced Trade codecs and trading.
 //! Production INTX startup is covered by private_drb; this unit fixture alone
 //! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
@@ -367,10 +368,15 @@ fn advanced_unknown(
         assert_eq!(failure.venue_code.as_deref(), Some(code));
     }
     assert!(
-        message.to_ascii_lowercase().contains("unknown"),
+        message.to_ascii_lowercase().contains("confirm"),
         "{message}"
     );
-    assert!(message.contains("Check Open Orders"), "{message}");
+    assert!(
+        message
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{message}"
+    );
     assert_eq!(serde_json::to_value(s.e.store().orders()).unwrap(), before);
     let until = s.now + 35_000.;
     for _ in 0..1_000 {
@@ -541,7 +547,12 @@ fn advanced_mixed_cancel_keeps_confirmed_sibling_and_unknown_rate_result() {
     });
     let request = s.write();
     s.reply(request, 200, r#"{"results":[{"order_id":"old","success":true},{"order_id":"other","success":false,"failure_reason":"RESOURCE_EXHAUSTED"}]}"#);
-    assert!(s.done(501).unwrap_err().contains("Check Open Orders"));
+    assert!(
+        s.done(501)
+            .unwrap_err()
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders")
+    );
     assert_eq!(s.failures[&501].outcome, Some(Outcome::Unknown));
     assert_eq!(s.failures[&501].kind, Some(ErrorKind::RateLimited));
     assert_eq!(
@@ -897,7 +908,10 @@ fn above_max_partial_batch(status: u16, body: &str, unknown: bool) {
         .collect();
     if unknown {
         assert_eq!(failure.outcome, Some(Outcome::Unknown));
-        assert_eq!(message, "The outcome is unknown. Check Open Orders");
+        assert_eq!(
+            message,
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        );
         let ElementResult::Unknown { error } = &rows[1].result else {
             panic!("uncertain row must remain Unknown")
         };
@@ -1271,7 +1285,7 @@ fn missing_create_id_is_ambiguous_and_never_retried_or_followed_by_second_order(
     s.reply(r, 200, r#"{"success":true}"#);
     assert_eq!(
         s.done(4).unwrap_err(),
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert!(
         s.failures[&4]
@@ -1299,13 +1313,16 @@ fn transport_failure_never_resends_a_write() {
         },
     );
     let error = s.done(5).unwrap_err();
-    assert_eq!(error, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     assert!(
         s.failures[&5]
             .venue_message
             .as_deref()
             .unwrap()
-            .starts_with("Coinbase write outcome requires reconciliation")
+            .starts_with("Coinbase didn’t confirm this change")
     );
     assert_eq!(s.unknown, [5]);
 }
@@ -2064,7 +2081,11 @@ fn quote_sized_zero_fill_spot_user_order_never_gains_native_edit_proof() {
         price: Some(101.0),
         amount: None,
     });
-    assert!(s.done(300).unwrap_err().contains("provenance"));
+    assert!(
+        s.done(300)
+            .unwrap_err()
+            .contains("requires a confirmed, unfilled spot limit order")
+    );
 }
 
 #[test]
@@ -2213,7 +2234,11 @@ fn duplicate_client_ack_preserves_authoritative_quote_sizing_and_edit_provenance
         price: Some(101.0),
         amount: None,
     });
-    assert!(s.done(361).unwrap_err().contains("provenance"));
+    assert!(
+        s.done(361)
+            .unwrap_err()
+            .contains("requires a confirmed, unfilled spot limit order")
+    );
 }
 
 #[test]
@@ -2493,10 +2518,13 @@ fn ambiguous_placement_blocks_cancel_symbol_until_bounded_reconciliation() {
     let r = s.place(303, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
     s.reply(r, 503, r#"{"error":"UNAVAILABLE","message":"try again"}"#);
     let error = s.done(303).unwrap_err();
-    assert_eq!(error, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let diagnostic = s.failures[&303].venue_message.as_deref().unwrap();
     assert!(
-        diagnostic.contains("requires reconciliation"),
+        diagnostic.contains("didn’t confirm this change"),
         "{diagnostic}"
     );
     assert!(diagnostic.contains("try again"), "{diagnostic}");
@@ -3120,5 +3148,8 @@ fn an_intx_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         r#"{"success":false,"error_response":{"error":"INSUFFICIENT_FUND","message":"refused"}}"#,
     );
     let error = s.done(8).unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }

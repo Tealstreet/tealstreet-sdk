@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer lifecycle messages; owner, no-cancel and no-replay assertions stay intact.
 //! Real hosted account/algorithm lifecycles across COSIGNED ownership changes.
 use safe_cex_exchange_server::{
     accounts::{Account, Disposal, Registry, testing},
@@ -222,16 +223,16 @@ async fn different_owner_stops_running_twap_and_fences_queued_work() {
             assert!(f.account.twap_owner.rebind_owner("other-user"));
             assert_ne!(f.account.twap_owner.snapshot().generation, owner.generation);
             f.wait(|frame| {
-                frame
-                    .to_string()
-                    .contains("Algo operation cancelled-for-owner-change")
+                frame.to_string().contains(
+                    "The automated-order request stopped because its account connection changed",
+                )
             })
             .await;
             tokio::time::sleep(Duration::from_secs(61)).await;
             f.wait(|frame| {
                 frame
                     .to_string()
-                    .contains("TWAPs stopped: authenticated connection binding changed")
+                    .contains("TWAPs stopped because the account connection changed")
             })
             .await;
             f.wait(|frame| {
@@ -268,16 +269,16 @@ async fn returning_owner_cannot_reuse_retired_generation_or_queued_work() {
             assert!(f.account.twap_owner.rebind_owner("u"));
             assert_ne!(f.account.twap_owner.snapshot().generation, owner.generation);
             f.wait(|frame| {
-                frame
-                    .to_string()
-                    .contains("Algo operation cancelled-for-owner-change")
+                frame.to_string().contains(
+                    "The automated-order request stopped because its account connection changed",
+                )
             })
             .await;
             tokio::time::sleep(Duration::from_secs(61)).await;
             f.wait(|frame| {
                 frame
                     .to_string()
-                    .contains("TWAPs stopped: authenticated connection binding changed")
+                    .contains("TWAPs stopped because the account connection changed")
             })
             .await;
             f.frames.lock().unwrap().clear();

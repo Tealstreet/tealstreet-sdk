@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { Market } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { BASE_WS_URL, ENDPOINTS } from '../reference/bitrue/bitrue.types';
-import { DefaultStore } from '../../store/store.base';
-import { Market } from '../../types';
 
 const MARKET: Market = {
   id: 'E-BTC-USDT',
@@ -16,8 +17,13 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
 };
 

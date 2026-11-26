@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original native-builder custody assertions, before any signer source cutover.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
@@ -388,7 +389,7 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(
                     error.message,
                     // A 5xx write is the engine's unproven seal; no body is decoded.
-                    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                    "The exchange reply didn’t confirm this change. Check your open orders before trying again."
                 );
                 Some("failure")
             }

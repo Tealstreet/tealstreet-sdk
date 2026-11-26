@@ -18,6 +18,10 @@ macro_rules! suite {
                 delegated_consumed::<$venue>().await;
             }
             #[tokio::test]
+            async fn cosigned_refused_proof_read_is_never_re_signed() {
+                refused_proof_read_is_never_re_signed::<$venue>().await;
+            }
+            #[tokio::test]
             async fn cosigned_other_valid_key_preserves_resident() {
                 cosigned_wrong_key::<$venue>().await;
             }
@@ -46,4 +50,41 @@ suite!(testnet, Apex<true>);
 async fn fixture_routes_only_to_loopback() {
     let f = Fixture::new::<Apex<false>>().await;
     assert!(f.websocket_url.starts_with("ws://127.0.0.1:"));
+}
+
+// AGT-75: setup is answered correctly and only private proof reads get a wrong-key
+// signature. The refused read fails the join; no rounded legacy re-sign is requested.
+async fn refused_proof_read_is_never_re_signed<V: Venue>() {
+    let f = Fixture::new::<V>().await;
+    let mut client = Client::new(&f);
+    client.init(V::init()).await;
+    client
+        .finish_with::<V>(&mut Device::default(), |frame| {
+            if V::replayable(frame) {
+                Answer::OtherKey
+            } else {
+                Answer::Correct
+            }
+        })
+        .await;
+    let mut requests = std::collections::BTreeMap::new();
+    for frame in &client.frames {
+        if frame["t"] == "sign-req" && V::replayable(frame) {
+            let (endpoint, _, _) = V::signature(frame, false);
+            *requests.entry(endpoint).or_insert(0_usize) += 1;
+        }
+    }
+    assert!(!requests.is_empty(), "the private proof must actually run");
+    assert!(
+        requests.values().all(|count| *count == 1),
+        "a refused proof read was signed again: {requests:?}"
+    );
+    assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
+    assert!(
+        client
+            .frames
+            .iter()
+            .any(|frame| frame["d"]["data"][1]["initRefused"] == true)
+    );
+    assert_eq!(f.seen.lock().unwrap().writes, 0);
 }

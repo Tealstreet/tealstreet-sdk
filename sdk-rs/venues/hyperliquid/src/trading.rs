@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 // Canonical engine wording copied under the lead's venue-local literal rule.
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.elements.as_ref().is_some_and(|rows| {
@@ -73,6 +74,8 @@ struct Job {
     amend_total: Option<f64>,
     /// The read that sizes this amend has been issued.
     amend_read: bool,
+    /// A protective amend is re-reading a mark too old to outlast its cancel release.
+    amend_mark_read: bool,
     /// Exclusive absolute bound from command receipt through the cancel release.
     amend_deadline: Option<f64>,
     builder_checked: bool,
@@ -93,6 +96,8 @@ enum Step {
         time_ms: Option<u64>,
     },
     Place(PlaceOrderOpts),
+    /// Plain orders sharing one `na` order action; each keeps its own status row.
+    Places(Vec<PlaceOrderOpts>),
     Restore,
     Cancel(Vec<Order>),
     Leverage {
@@ -137,6 +142,9 @@ impl Job {
                 Step::Place(order) => {
                     matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
                 }
+                Step::Places(orders) => orders
+                    .iter()
+                    .any(|order| matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)),
                 _ => false,
             })
     }
@@ -144,6 +152,7 @@ impl Job {
         self.steps.iter().any(|step| match step {
             Step::ScheduleCancel { .. } | Step::Restore => true,
             Step::Place(order) => order.symbol == symbol,
+            Step::Places(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
             Step::Leverage { symbol: market, .. } => market == symbol,
         })
@@ -152,6 +161,9 @@ impl Job {
         self.amend_source.as_deref() == Some(id)
             || self.steps.iter().any(|step| match step {
                 Step::Place(order) => order.client_order_id.as_deref() == Some(id),
+                Step::Places(orders) => orders
+                    .iter()
+                    .any(|order| order.client_order_id.as_deref() == Some(id)),
                 Step::Cancel(orders) => orders
                     .iter()
                     .any(|order| order.id == id || order.client_order_id.as_deref() == Some(id)),
@@ -170,15 +182,17 @@ impl Job {
         {
             return false;
         }
+        let place = |order: &PlaceOrderOpts| {
+            !older.touches(&order.symbol)
+                && order
+                    .client_order_id
+                    .as_deref()
+                    .is_none_or(|id| !older.references(id))
+        };
         self.steps.iter().all(|step| match step {
             Step::ScheduleCancel { .. } | Step::Restore => false,
-            Step::Place(order) => {
-                !older.touches(&order.symbol)
-                    && order
-                        .client_order_id
-                        .as_deref()
-                        .is_none_or(|id| !older.references(id))
-            }
+            Step::Place(order) => place(order),
+            Step::Places(orders) => orders.iter().all(place),
             Step::Cancel(orders) => orders.iter().all(|order| {
                 !older.touches(&order.symbol)
                     && !older.references(&order.id)
@@ -197,11 +211,16 @@ const AMEND_READ_MS: f64 = 5_000.0;
 const AMEND_RETRY_MS: f64 = 1_000.0;
 /// Hyperliquid refuses an order worth less than this.
 const MIN_ORDER_VALUE: f64 = 10.0;
+/// Batched order actions weigh `1 + floor(n / 40)`, so 40 orders still cost one request.
+/// https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits
+const MAX_BATCH: usize = 40;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OrderReply {
     Rows,
     Attached,
     FullPosition,
+    /// Several independent orders: one row each, and a lone error row proves nothing.
+    Independent,
 }
 impl OrderReply {
     fn for_action(action: &Action, spot: bool) -> Self {
@@ -211,6 +230,9 @@ impl OrderReply {
         else {
             return Self::Rows;
         };
+        if *grouping == "na" && orders.len() > 1 {
+            return Self::Independent;
+        }
         if spot {
             return Self::Rows;
         }
@@ -387,7 +409,7 @@ impl Hyperliquid {
                     cx.refuse_command(Operation::Mutation, not_sent(error));
                     return;
                 }
-                (command, orders.into_iter().map(Step::Place).collect())
+                (command, self.place_steps(orders))
             }
             Command::CancelOrders { command, ids } => {
                 let orders = ids
@@ -582,6 +604,7 @@ impl Hyperliquid {
                 amend_source,
                 amend_total: amend_size,
                 amend_read: false,
+                amend_mark_read: false,
                 amend_filled: false,
                 builder_checked: false,
                 amend_builder: None,
@@ -629,6 +652,13 @@ impl Hyperliquid {
             ) {
                 return Err("Hyperliquid order type is not supported".into());
             }
+            // AGT-115: `wires` groups legs only with a limit or market entry; a trigger entry would
+            // be placed without them, so the whole batch is refused before any write.
+            if o.stop_entry_with_attached_legs() {
+                return Err(safe_cex_engine::model::stop_entry_legs_refusal(
+                    "Hyperliquid",
+                ));
+            }
             if !o.amount.is_finite()
                 || o.amount < 0.0
                 || (o.amount == 0.0 && matches!(o.kind, OrderType::Limit | OrderType::Market))
@@ -650,6 +680,47 @@ impl Hyperliquid {
             }
         }
         Ok(())
+    }
+    /// Consecutive plain orders on one DEX share an `na` order action, in caller order.
+    /// Grouped brackets and triggers keep an action of their own.
+    fn place_steps(&self, orders: Vec<PlaceOrderOpts>) -> VecDeque<Step> {
+        fn flush(steps: &mut VecDeque<Step>, batch: &mut Vec<PlaceOrderOpts>) {
+            match batch.len() {
+                0 => {}
+                1 => steps.extend(batch.pop().map(Step::Place)),
+                _ => steps.push_back(Step::Places(std::mem::take(batch))),
+            }
+        }
+        let mut steps = VecDeque::new();
+        let mut batch = Vec::new();
+        let mut class = None;
+        for order in orders {
+            let key = self.batch_class(&order);
+            if key.is_none() || key != class || batch.len() == MAX_BATCH {
+                flush(&mut steps, &mut batch);
+                class = key;
+            }
+            match key {
+                Some(_) => batch.push(order),
+                None => steps.push_back(Step::Place(order)),
+            }
+        }
+        flush(&mut steps, &mut batch);
+        steps
+    }
+    /// The DEX a plain order trades on: core perps, spot, or one HIP-3 DEX.
+    fn batch_class(&self, order: &PlaceOrderOpts) -> Option<u32> {
+        let plain = matches!(order.kind, OrderType::Limit | OrderType::Market)
+            && [order.stop_loss, order.take_profit]
+                .into_iter()
+                .flatten()
+                .all(|price| price == 0.0);
+        let asset = *self.assets.get(&order.symbol)?;
+        plain.then_some(match asset {
+            0..10_000 => 0,
+            10_000..100_000 => 1,
+            _ => asset / 10_000,
+        })
     }
     /// A spot pair, in the standalone spot venue or merged into the perp account.
     pub(crate) fn spot_market(&self, cx: &Cx<'_, Pending>, symbol: &str) -> bool {
@@ -753,7 +824,9 @@ impl Hyperliquid {
             c: cloid,
         };
         let mut wires = vec![main];
-        if opts.kind == OrderType::Limit {
+        // AGT-117: a market entry is a marketable limit, so it groups its legs the same way;
+        // each leg's `p` is the slippage-capped parent price (verified live 2026-11-21).
+        if matches!(opts.kind, OrderType::Limit | OrderType::Market) {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
                 // Like TS, a zero bracket price means no bracket on every market.
                 if let Some(trigger) = value.filter(|p| *p != 0.0) {
@@ -864,7 +937,7 @@ impl Hyperliquid {
             job.builder_checked = true;
         }
         let job = self.trading.active.as_ref().unwrap();
-        let placing = matches!(job.steps.front(), Some(Step::Place(_)));
+        let placing = matches!(job.steps.front(), Some(Step::Place(_) | Step::Places(_)));
         let standalone_place = placing && job.amend_source.is_none();
         let needs_builder =
             standalone_place && self.account.builder_approved.is_none() && !job.builder_checked;
@@ -1019,76 +1092,32 @@ impl Hyperliquid {
                     return self.prepare_protective_replace(cx, opts);
                 }
                 let (wires, grouping) = self.wires(cx, &opts)?;
-                let records = wires
-                    .iter()
-                    .map(|wire| {
-                        let (kind, price, tif) = match &wire.t {
-                            WireType::Limit { limit } => (
-                                OrderType::Limit,
-                                num::parse(&wire.p),
-                                crate::account::tif(limit.tif),
-                            ),
-                            WireType::Trigger { trigger } => (
-                                if trigger.tpsl == "tp" {
-                                    OrderType::TakeProfit
-                                } else {
-                                    OrderType::StopLoss
-                                },
-                                num::parse(&trigger.trigger_px),
-                                None,
-                            ),
-                        };
-                        let amount = num::parse(&wire.s);
-                        Placement {
-                            at: cx.now,
-                            order: Order {
-                                id: String::new(),
-                                parent_id: None,
-                                status: OrderStatus::Creating,
-                                symbol: opts.symbol.clone(),
-                                kind,
-                                side: if wire.b {
-                                    OrderSide::Buy
-                                } else {
-                                    OrderSide::Sell
-                                },
-                                price,
-                                amount,
-                                filled: 0.0,
-                                remaining: amount,
-                                reduce_only: wire.r,
-                                close: None,
-                                client_order_id: Some(wire.c.clone()),
-                                time_in_force: tif,
-                                last_update: cx.now,
-                                trigger_type: None,
-                                take_profit: None,
-                                stop_loss: None,
-                                extra: None,
-                            },
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let builder = if let Some(job) = self
-                    .trading
-                    .active
-                    .as_ref()
-                    .filter(|job| job.amend_source.is_some())
-                {
-                    job.amend_builder
-                        .clone()
-                        .filter(|_| self.account.builder_approved == Some(true))
-                } else {
-                    self.account
-                        .builder_approved
-                        .filter(|approved| *approved)
-                        .map(|_| self.builder())
-                };
+                let records = placement_records(cx, &opts.symbol, &wires);
                 Ok((
                     Action::Order {
                         orders: wires,
                         grouping,
-                        builder,
+                        builder: self.placement_builder(),
+                    },
+                    Effect::Place(records),
+                ))
+            }
+            Step::Places(orders) => {
+                let mut wires = Vec::with_capacity(orders.len());
+                let mut records = Vec::with_capacity(orders.len());
+                for opts in &orders {
+                    let (row, grouping) = self.wires(cx, opts)?;
+                    if grouping != "na" || row.len() != 1 {
+                        return Err("Hyperliquid batch row is not a plain order".into());
+                    }
+                    records.extend(placement_records(cx, &opts.symbol, &row));
+                    wires.extend(row);
+                }
+                Ok((
+                    Action::Order {
+                        orders: wires,
+                        grouping: "na",
+                        builder: self.placement_builder(),
                     },
                     Effect::Place(records),
                 ))
@@ -1113,7 +1142,7 @@ impl Hyperliquid {
             } => {
                 if self.settings_uncertain(&symbol) {
                     return Err(
-                        "Hyperliquid settings are uncertain; wait for account reconciliation"
+                        "Hyperliquid’s settings update hasn’t been confirmed. Wait for the account to refresh before changing settings again."
                             .into(),
                     );
                 }
@@ -1162,6 +1191,24 @@ impl Hyperliquid {
                     },
                 ))
             }
+        }
+    }
+    /// An amendment keeps the fee decision it captured before cancelling anything.
+    fn placement_builder(&self) -> Option<Builder> {
+        if let Some(job) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| job.amend_source.is_some())
+        {
+            job.amend_builder
+                .clone()
+                .filter(|_| self.account.builder_approved == Some(true))
+        } else {
+            self.account
+                .builder_approved
+                .filter(|approved| *approved)
+                .map(|_| self.builder())
         }
     }
     pub(crate) fn builder_result(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1274,7 +1321,8 @@ impl Hyperliquid {
                 // A refused parent answers one error row for all its legs.
                 kind == "order"
                     && (statuses.len() == records.len()
-                        || matches!(statuses.as_slice(), [Status::Error { .. }]))
+                        || (request.order_reply != OrderReply::Independent
+                            && matches!(statuses.as_slice(), [Status::Error { .. }])))
                     && (request.order_reply != OrderReply::Attached
                         || matches!(
                             statuses.first(),
@@ -1338,6 +1386,8 @@ impl Hyperliquid {
         }
         self.settle_write_rows(&request, &statuses, status);
         let full_position = request.order_reply == OrderReply::FullPosition;
+        // Independent rows have no parent, so a deferred row proves nothing.
+        let independent = request.order_reply == OrderReply::Independent;
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
             Effect::Place(records) => {
@@ -1347,11 +1397,24 @@ impl Hyperliquid {
                     self.finish_trade(cx, Err(unproven("Invalid response from Hyperliquid API")));
                     return;
                 }
+                // One unrecognised row must not drop its batch siblings' acknowledgements.
+                let mut unrecognised = false;
                 for (index, status) in statuses.into_iter().enumerate() {
                     let (id, resting) = match status {
                         Status::Error { .. } => continue,
                         Status::Resting { resting } => (Some(resting.oid.to_string()), true),
-                        Status::Filled { filled } => (Some(filled.oid.to_string()), false),
+                        Status::Filled { filled } => {
+                            if !self.spot
+                                && let Some(record) = records.get(index)
+                                && cx
+                                    .store
+                                    .market(&record.order.symbol)
+                                    .is_some_and(|market| market.is_spot != Some(true))
+                            {
+                                self.schedule_position_refresh(cx, &record.order.symbol);
+                            }
+                            (Some(filled.oid.to_string()), false)
+                        }
                         // Ruled: a rested full-position trigger has no oid, and [] reads as nothing
                         // placed; its cloid is the pending id, and the order read names it.
                         Status::Text(s) if s == "waitingForTrigger" && full_position => {
@@ -1361,16 +1424,15 @@ impl Hyperliquid {
                                 .and_then(|r| r.order.client_order_id.clone());
                             (cloid, false)
                         }
-                        Status::Text(s) if s == "waitingForTrigger" || s == "waitingForFill" => {
+                        Status::Text(s)
+                            if !independent
+                                && (s == "waitingForTrigger" || s == "waitingForFill") =>
+                        {
                             (None, false)
                         }
                         _ => {
-                            self.schedule_orders(cx);
-                            self.finish_trade(
-                                cx,
-                                Err(unproven("Unknown Hyperliquid order status")),
-                            );
-                            return;
+                            unrecognised = true;
+                            continue;
                         }
                     };
                     let Some(id) = id else {
@@ -1436,6 +1498,11 @@ impl Hyperliquid {
                             }
                         }
                     }
+                }
+                if unrecognised {
+                    self.schedule_orders(cx);
+                    self.finish_trade(cx, Err(unproven("Unknown Hyperliquid order status")));
+                    return;
                 }
             }
             Effect::Cancel(orders) => {
@@ -1631,13 +1698,17 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.finish_trade(
-            cx,
-            Err(
-                not_sent("Hyperliquid amendment not sent: the order read did not answer")
-                    .kind(ErrorKind::Timeout),
-            ),
-        );
+        let message = if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.amend_mark_read)
+        {
+            protective::STALE_MARK
+        } else {
+            "Hyperliquid amendment not sent: the order read did not answer"
+        };
+        self.finish_trade(cx, Err(not_sent(message).kind(ErrorKind::Timeout)));
     }
     pub(crate) fn amend_read_current(&self, id: &str, amend: AmendRead) -> bool {
         self.trading.active.as_ref().is_some_and(|job| {
@@ -1726,12 +1797,48 @@ impl Hyperliquid {
                     order.filled = filled;
                     order.remaining = left;
                 });
+                if let Some(symbol) = self.protective_mark_unfresh(cx, amend.deadline) {
+                    // Still parked under the same owner and bound as the sizing read.
+                    self.trading.active.as_mut().unwrap().amend_mark_read = true;
+                    self.trading.amend_wait = Some((cx.set_timer(amend.deadline - cx.now), amend));
+                    self.read_amend_mark(cx, id, amend, &symbol);
+                    return;
+                }
                 self.release_trade_builder(cx);
             }
             Err(error) => {
                 let error = not_sent(format!("Hyperliquid amendment not sent: {error}"));
                 self.finish_trade(cx, Err(error));
             }
+        }
+    }
+    /// The on-demand mark a protective amend waits on; nothing has been canceled yet.
+    pub(crate) fn amend_mark_answered(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: AmendRead,
+        symbol: &str,
+        read: Result<(f64, f64), String>,
+    ) {
+        if !self.amend_read_pending(cx, id, amend) {
+            return;
+        }
+        // A 429 clears soon; the read bound still ends the wait.
+        if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned(), amend));
+            return;
+        }
+        if let Some((timer, _)) = self.trading.amend_wait.take() {
+            cx.clear_timer(timer);
+        }
+        let mark = read.ok().filter(|(mark, _)| mark.is_finite() && *mark > 0.);
+        match mark {
+            Some((mark, issued_at)) => {
+                protective::apply_read_mark(cx, symbol, mark, issued_at);
+                self.release_trade_builder(cx);
+            }
+            None => self.finish_trade(cx, Err(not_sent(protective::STALE_MARK))),
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1746,7 +1853,10 @@ impl Hyperliquid {
             .is_some_and(|(t, _, _)| *t == timer)
             && let Some((_, id, amend)) = self.trading.amend_retry.take()
         {
-            self.read_amend_source(cx, &id, amend);
+            match self.protective_mark_reading() {
+                Some(symbol) => self.read_amend_mark(cx, &id, amend, &symbol),
+                None => self.read_amend_source(cx, &id, amend),
+            }
         }
         if let Some((current, amend)) = self.trading.amend_wait
             && current == timer
@@ -1870,6 +1980,60 @@ pub(crate) fn tp_projection_reference(t: &safe_cex_engine::model::Ticker) -> Opt
         .then_some(reference)
 }
 
+/// The pending store rows for one order's wires, in wire order.
+fn placement_records(cx: &Cx<'_, Pending>, symbol: &str, wires: &[OrderWire]) -> Vec<Placement> {
+    wires
+        .iter()
+        .map(|wire| {
+            let (kind, price, tif) = match &wire.t {
+                WireType::Limit { limit } => (
+                    OrderType::Limit,
+                    num::parse(&wire.p),
+                    crate::account::tif(limit.tif),
+                ),
+                WireType::Trigger { trigger } => (
+                    if trigger.tpsl == "tp" {
+                        OrderType::TakeProfit
+                    } else {
+                        OrderType::StopLoss
+                    },
+                    num::parse(&trigger.trigger_px),
+                    None,
+                ),
+            };
+            let amount = num::parse(&wire.s);
+            Placement {
+                at: cx.now,
+                order: Order {
+                    id: String::new(),
+                    parent_id: None,
+                    status: OrderStatus::Creating,
+                    symbol: symbol.to_owned(),
+                    kind,
+                    side: if wire.b {
+                        OrderSide::Buy
+                    } else {
+                        OrderSide::Sell
+                    },
+                    price,
+                    amount,
+                    filled: 0.0,
+                    remaining: amount,
+                    reduce_only: wire.r,
+                    close: None,
+                    client_order_id: Some(wire.c.clone()),
+                    time_in_force: tif,
+                    last_update: cx.now,
+                    trigger_type: None,
+                    take_profit: None,
+                    stop_loss: None,
+                    extra: None,
+                },
+            }
+        })
+        .collect()
+}
+
 fn mint_cloid(cx: &Cx<'_, Pending>) -> Result<String, String> {
     let mut bytes = [0u8; 16];
     cx.fill_entropy(&mut bytes)?;
@@ -1925,6 +2089,7 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod signing_tests {
     use super::*;

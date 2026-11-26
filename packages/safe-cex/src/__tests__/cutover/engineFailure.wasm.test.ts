@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 // @vitest-environment node
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -14,12 +9,17 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { virtualClock } from '../../utils/virtualClock';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 import { realVenue } from './realVenue';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const accounts: BaseExchange[] = [];
 const inputs: ReturnType<typeof realVenue>[] = [];
@@ -47,7 +47,8 @@ it.each(['setTickerSymbols', 'setPollScale'] as const)(
       start: idle,
       wsOpen: idle,
       wsMessage: idle,
-      wsClose: idle, wsRouteExhausted: idle,
+      wsClose: idle,
+      wsRouteExhausted: idle,
       httpStart: idle,
       httpChunk: idle,
       httpEnd: idle,
@@ -86,7 +87,7 @@ it.each(['setTickerSymbols', 'setPollScale'] as const)(
     const exchange = new RustEngineExchange(
       venue,
       { key: 'fixture-user', secret: 'fixture-password', publicDataOnly: true },
-      new DefaultStore(),
+      new FrameStore(),
     );
     accounts.push(exchange);
     const error = vi.fn();
@@ -147,8 +148,8 @@ it('contains a trap, wakes failed startup, and keeps a sibling native account us
   inputs.push(firstInput, secondInput);
   const transports = [firstInput.transport, secondInput.transport];
   setRustEngineTransport(() => transports.shift()!);
-  const first = new RustEngineExchange('binance', firstInput.options, new DefaultStore());
-  const sibling = new RustEngineExchange('binance', secondInput.options, new DefaultStore());
+  const first = new RustEngineExchange('binance', firstInput.options, new FrameStore());
+  const sibling = new RustEngineExchange('binance', secondInput.options, new FrameStore());
   accounts.push(first, sibling);
   const errors: unknown[] = [];
   const dead: Error[] = [];
@@ -178,7 +179,7 @@ it('contains a trap, wakes failed startup, and keeps a sibling native account us
       }
     },
   }));
-  const startup = new RustEngineExchange('binance', startupInput.options, new DefaultStore());
+  const startup = new RustEngineExchange('binance', startupInput.options, new FrameStore());
   accounts.push(startup);
   await expect(startup.start()).rejects.toMatchObject({ code: 'ENGINE_DEAD' });
   expect(startup.isDisposed).toBe(true);
@@ -200,8 +201,8 @@ it('starts a new forwarded stream with a native empty snapshot, clearing old boo
     precision: { amount: 0.001, price: 0.1 },
     limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 125 } },
   };
-  const main = new BaseExchange('binance', { key: '', secret: '' }, new DefaultStore());
-  const exchange = new RustEngineExchange('binance', input.options, new DefaultStore());
+  const main = new BaseExchange('binance', { key: '', secret: '' }, new FrameStore());
+  const exchange = new RustEngineExchange('binance', input.options, new FrameStore());
   accounts.push(main, exchange);
   main.applyWorkerFrame(consumerFrame({ markets: [market] }, undefined, true));
   const received: Frame[] = [];

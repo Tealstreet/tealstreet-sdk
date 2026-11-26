@@ -1,4 +1,8 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original identity entry and typed-failure assertions on unchanged BingX.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
@@ -396,13 +400,13 @@ fn capacity(branch: Branch) {
         &control,
         900,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     denied(
         &ask(&mut e, NOW, 800),
         800,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     // Recovery/refill is reached only after the original admission assertion turns green.
     retire(&mut e, 1);
@@ -438,13 +442,17 @@ fn capacity(branch: Branch) {
         &ask(&mut e, NOW, 801),
         801,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     for owner in 2..=256 {
         retire(&mut e, owner);
     }
     retire(&mut e, 900);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    if matches!(branch, Branch::Remote) {
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
+    } else {
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+    }
 }
 #[test]
 fn missing_primary_requires_read_capacity() {
@@ -475,7 +483,7 @@ fn invalid_clock_denies_before_native_local_or_remote_work() {
                 &ask(&mut e, now, 810),
                 810,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
         }
     }
@@ -598,7 +606,7 @@ fn real_local_provider_preserves_primary_secondary_wire_and_exact_codec() {
         let out = respond(&mut e, NOW, request, 200, body);
         assert_eq!(terminals(&out, 42), [Ok(result.into())]);
         assert!(diagnostics(&out, 42).is_empty());
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         assert!(respond(&mut e, NOW, request, 200, body).is_empty());
     }
 }
@@ -650,7 +658,15 @@ fn native_malformed_status_and_signature_code_reject_once_without_retry() {
         cleanup(&out, preparation, Some(None));
         native(&out, 42, message);
         assert!(respond(&mut e, NOW, &request, status, body).is_empty());
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]
@@ -680,7 +696,7 @@ fn released_network_failure_keeps_its_typed_kind_and_single_terminal() {
         )
         .is_empty()
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
     assert_eq!(
         (error.kind, error.outcome),
         (Some(ErrorKind::Network), None)
@@ -707,7 +723,7 @@ fn released_root_timer_keeps_timeout_kind_and_denies_late_success() {
         )
         .is_empty()
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
     assert_eq!(
         (error.kind, error.outcome),
         (Some(ErrorKind::Timeout), None)

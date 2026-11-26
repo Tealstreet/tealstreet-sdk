@@ -178,7 +178,7 @@ export class UnifiedExecutor {
       adapter: this.adapter,
       promptConfig,
       mode,
-      onExit: () => exitResolve!(),
+      onExit: () => exitResolve(),
       exitSignal,
     };
 
@@ -187,7 +187,7 @@ export class UnifiedExecutor {
 
     // Set up exit handlers (Escape, Ctrl+X, and Ctrl+C for CLI args)
     const cleanupHandlers = this.terminalManager.setupExitHandlers(mode, () => {
-      exitResolve!();
+      exitResolve();
     });
 
     try {

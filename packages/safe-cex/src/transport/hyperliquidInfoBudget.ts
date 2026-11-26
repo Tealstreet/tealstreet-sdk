@@ -10,6 +10,8 @@ const STORAGE_COOLDOWN_MS = 30_000;
 const DISPATCH_POLL_MS = 100;
 const DISPATCH_LEASE_MS = 2000;
 const MAX_DISPATCH_WAITERS = 128;
+// A chart read queued this long ranks ahead of normal work, still behind Orders and critical reads (AGT-299).
+const CHART_AGE_MS = 5000;
 const dispatchRealm = Math.random().toString(36).slice(2);
 let dispatchSequence = 0;
 export type InfoReadClass = 'critical' | 'reconciliation' | 'normal' | 'bulk';
@@ -17,7 +19,9 @@ const rank = (readClass: InfoReadClass = 'normal') =>
   readClass === 'critical' ? 0 : readClass === 'reconciliation' ? 1 : readClass === 'normal' ? 2 : 3;
 const capacity = (readClass: InfoReadClass) =>
   readClass === 'critical' || readClass === 'reconciliation' ? 1000 : 800;
-type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass };
+type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass; agesAt?: number };
+const queueRank = (row: DispatchWaiter, now: number) =>
+  row.readClass === 'bulk' && row.agesAt !== undefined && row.agesAt <= now ? 1.5 : rank(row.readClass);
 let indexedDBOpenedInRealm = false;
 // c0705fca9 replaces d732927cb30's established-store blackout: local admission
 // spends twice the clock debt, halving burst and refill without weakening known pauses.
@@ -52,6 +56,15 @@ export function warnHyperliquidInfoBudgetUnavailable(): void {
   }
 }
 
+// Sentry keeps console breadcrumbs; these carry closed labels only, never keys or storage errors.
+function storageBreadcrumb(transition: string, facts: Record<string, string | boolean>): void {
+  try {
+    diagnosticConsole.info(`Hyperliquid /info budget storage ${transition}`, facts);
+  } catch {
+    /* Diagnostics cannot interrupt a venue read. */
+  }
+}
+
 function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
   const now = Date.now();
   const timestamp = (value: number | undefined, maximum: number) =>
@@ -72,6 +85,9 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
               row.readClass === 'critical' || row.readClass === 'reconciliation' || row.readClass === 'bulk'
                 ? row.readClass
                 : ('normal' as const),
+            ...(row.readClass === 'bulk' && Number.isFinite(row.agesAt)
+              ? { agesAt: Math.min(row.agesAt!, now + CHART_AGE_MS) }
+              : {}),
           }))
       : [],
     nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
@@ -127,6 +143,8 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
   private retryAt = 0;
   private localRevision = 0;
   private readonly localKeys = new Set<string>();
+  // The latest generation a fallback 429 minted for each key, until shared storage merges it.
+  private readonly unseen429 = new Map<string, number>();
   private readonly snapshots = new Map<string, BudgetState>();
   constructor(private readonly factory: IDBFactory) {}
   private open(): Promise<IDBDatabase> {
@@ -167,7 +185,11 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
       }
       this.localKeys.add(key);
       this.localRevision += 1;
-      return memoryStorage.update(key, change);
+      const before = memoryStorage.snapshot(key).generation;
+      return memoryStorage.update(key, change).finally(() => {
+        const after = memoryStorage.snapshot(key).generation;
+        if (after > before) this.unseen429.set(key, after);
+      });
     };
     this.retryAt = Math.min(this.retryAt, Date.now() + STORAGE_COOLDOWN_MS);
     if (this.retryAt > Date.now()) return local();
@@ -185,14 +207,21 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
           let saved: BudgetState | undefined;
           let expired = false;
           let mergedRevision = this.localRevision;
+          let recovered: { local429: number | undefined } | undefined;
           read.onsuccess = () => {
             if (expired) return;
             try {
               let state = boundedState(read.result ?? emptyState());
               mergedRevision = this.localRevision;
               if (this.localKeys.has(key)) {
-                state = mergeState(state, memoryStorage.snapshot(key));
-                state.generation += 1;
+                // Grants reserve nothing, so recovery keeps the generation unless a fallback 429 never
+                // reached the shared row: then its charged grants cannot refund against shared debt.
+                const local = memoryStorage.snapshot(key);
+                const local429 = this.unseen429.get(key);
+                const generation = Math.max(state.generation, local.generation);
+                state = mergeState(state, local);
+                if (local429 !== undefined) state.generation = generation + 1;
+                recovered = { local429 };
               }
               const changed = { ...state };
               try {
@@ -210,9 +239,12 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
           };
           transaction.oncomplete = () => {
             if (saved) this.snapshots.set(key, { ...saved });
+            if (recovered?.local429 !== undefined && this.unseen429.get(key) === recovered.local429)
+              this.unseen429.delete(key);
             // An earlier transaction cannot clear newer fallback admissions.
             if (mergedRevision === this.localRevision) {
               this.retryAt = 0;
+              if (recovered) storageBreadcrumb('recovered', { local_429: recovered.local429 !== undefined });
               this.localKeys.delete(key);
             }
             return callbackFailed ? fail(callbackError) : done(value);
@@ -230,6 +262,9 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
         this.database = undefined;
         if (!callbackFailed && error instanceof StorageTimeoutError && attempt === 0) continue;
         this.retryAt = Date.now() + STORAGE_COOLDOWN_MS;
+        storageBreadcrumb('fell back to local admission', {
+          storage_failure: error instanceof StorageTimeoutError ? 'timeout' : 'error',
+        });
         warnHyperliquidInfoBudgetUnavailable();
         if (callbackFailed) throw callbackError;
         return local();
@@ -294,18 +329,57 @@ const LIST_READS = new Set([
   'validatorStats',
 ]);
 
+const MINUTE_MS = 60_000;
+const DAY_MS = 1440 * MINUTE_MS;
+// Hyperliquid's 1M candle is a fixed, epoch-aligned 30-day bucket, not a calendar month.
+const CANDLE_STEP_MS = new Map([
+  ['1m', MINUTE_MS],
+  ['3m', 3 * MINUTE_MS],
+  ['5m', 5 * MINUTE_MS],
+  ['15m', 15 * MINUTE_MS],
+  ['30m', 30 * MINUTE_MS],
+  ['1h', 60 * MINUTE_MS],
+  ['2h', 120 * MINUTE_MS],
+  ['4h', 240 * MINUTE_MS],
+  ['8h', 480 * MINUTE_MS],
+  ['12h', 720 * MINUTE_MS],
+  ['1d', DAY_MS],
+  ['3d', 3 * DAY_MS],
+  ['1w', 7 * DAY_MS],
+  ['1M', 30 * DAY_MS],
+]);
+
+// A full reply was seen past 5,000 rows (5,182), so the cap is 6,000 rows: 120 weight.
+const MAX_CANDLE_ROWS = 6000;
+const MAX_CANDLE_WEIGHT = 20 + MAX_CANDLE_ROWS / 60;
+
+/**
+ * 20 plus one per 60 candles, from the span the body asks for: both boundary candles
+ * are returned, so at most ceil(span/step)+1. A flat 104 queued a chart's 330-bar reads
+ * ~15 s each (AGT-113); an unreadable body reserves the maximum.
+ */
+function candleSnapshotWeight(req: unknown): number {
+  const { interval, startTime, endTime } = (req ?? {}) as Record<string, unknown>;
+  const step = typeof interval === 'string' ? CANDLE_STEP_MS.get(interval) : undefined;
+  if (!step || typeof startTime !== 'number' || typeof endTime !== 'number') return MAX_CANDLE_WEIGHT;
+  const span = endTime - startTime;
+  if (!Number.isFinite(span) || span < 0) return MAX_CANDLE_WEIGHT;
+  return 20 + Math.ceil(Math.min(MAX_CANDLE_ROWS, Math.ceil(span / step) + 1) / 60);
+}
+
 export function hyperliquidInfoWeight(body: string | undefined): number {
-  let type: unknown;
+  let parsed: { type?: unknown; req?: unknown };
   try {
-    type = JSON.parse(body ?? '{}').type;
+    parsed = JSON.parse(body ?? '{}') ?? {};
   } catch {
     return 20;
   }
+  const type = parsed.type;
   if (type === 'userRole') return 60;
   if (typeof type === 'string' && LOW_WEIGHT.has(type)) return 2;
-  // Reserve the SDK's maximum 2,000-row history page or 5,000-candle reply before sending.
+  // Reserve the SDK's maximum 2,000-row history page before sending.
   if (typeof type === 'string' && LIST_READS.has(type)) return 120;
-  if (type === 'candleSnapshot') return 104;
+  if (type === 'candleSnapshot') return candleSnapshotWeight(parsed.req);
   return 20;
 }
 
@@ -326,6 +400,14 @@ function waitUntil(at: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function isChartRead(body: string | undefined): boolean {
+  try {
+    return JSON.parse(body ?? '{}')?.type === 'candleSnapshot';
+  } catch {
+    return false;
+  }
+}
+
 function readClassFor(body: string | undefined, readClass: InfoReadClass): InfoReadClass {
   if (readClass === 'critical') return 'critical';
   try {
@@ -340,15 +422,63 @@ export type InfoBudgetGrant = {
   generation: number;
   weight: number;
   readClass?: InfoReadClass;
+  agesAt?: number;
   waiterId?: string;
   cancelWait?: () => void;
 };
 
-// Only an existing deadline refusal inside admission gets this diagnostic label.
-const infoAdmissionFailure = (error: unknown): unknown =>
-  error instanceof HttpPreparationError && error.code === 'HTTP_PREPARATION_TIMED_OUT'
-    ? new HttpPreparationError('timedOut', 'info_admission')
-    : error;
+/** Closed admission state at a refusal: bounded counts, durations and labels, never keys or bodies. */
+export type InfoAdmissionFacts = {
+  info_weight: number;
+  info_read_class: InfoReadClass;
+  info_admission_stage: 'prepare' | 'dispatch';
+  info_queue_depth: number;
+  info_queue_ahead: number;
+  info_debt_ms: number;
+  info_pause_ms: number;
+  info_generation_changed: boolean;
+  info_storage: 'shared' | 'fallback' | 'memory';
+};
+type AdmissionObservation = Omit<InfoAdmissionFacts, 'info_weight' | 'info_read_class' | 'info_admission_stage'>;
+
+function observeAdmission(
+  state: BudgetState,
+  shared: boolean,
+  waiterId: string | undefined,
+  generation: number | undefined,
+): AdmissionObservation {
+  const now = Date.now();
+  const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
+  const ordered = [...queue].sort((a, b) => queueRank(a, now) - queueRank(b, now));
+  const position = waiterId ? ordered.findIndex((row) => row.id === waiterId) : -1;
+  return {
+    info_queue_depth: queue.length,
+    info_queue_ahead: position < 0 ? ordered.length : position,
+    info_debt_ms: Math.max(0, Math.round(state.nextAt - now)),
+    info_pause_ms: Math.max(0, Math.round(state.pausedUntil - now)),
+    info_generation_changed: generation !== undefined && state.generation !== generation,
+    info_storage: shared ? 'shared' : indexedDBOpenedInRealm ? 'fallback' : 'memory',
+  };
+}
+
+// Only an existing deadline refusal inside admission gets this diagnostic label and its facts.
+const infoAdmissionFailure = (
+  error: unknown,
+  facts: Pick<InfoAdmissionFacts, 'info_weight' | 'info_read_class' | 'info_admission_stage'>,
+  observed: AdmissionObservation | undefined,
+): unknown => {
+  if (!(error instanceof HttpPreparationError) || error.code !== 'HTTP_PREPARATION_TIMED_OUT') return error;
+  const refusal = new HttpPreparationError('timedOut', 'info_admission');
+  if (!observed) return refusal;
+  const admission: InfoAdmissionFacts = Object.freeze({ ...facts, ...observed });
+  Object.defineProperty(refusal, 'admission', { value: admission });
+  try {
+    diagnosticConsole.info('Hyperliquid /info admission refused', admission);
+  } catch {
+    /* Diagnostics cannot change the refusal. */
+  }
+  return refusal;
+};
 
 /** Resolve one public network budget, never an account or credential identity. */
 export function hyperliquidInfoBudgetKey(origin: string, endpoint?: string, tunnel = false): string {
@@ -429,6 +559,8 @@ export class HyperliquidInfoBudget {
     const abortedBeforeAdmission = signal.aborted;
     readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
+    const agesAt = isChartRead(body) ? Date.now() + CHART_AGE_MS : undefined;
+    let observed: AdmissionObservation | undefined;
     let waiterId: string | undefined;
     let cancelled = false;
     const cancelWait = () => {
@@ -444,6 +576,7 @@ export class HyperliquidInfoBudget {
       for (;;) {
         signal.throwIfAborted();
         const grant = await this.update(origin, (state, shared) => {
+          observed = observeAdmission(state, shared, waiterId, undefined);
           signal.throwIfAborted();
           const now = Date.now();
           const at = Math.max(
@@ -463,7 +596,12 @@ export class HyperliquidInfoBudget {
               waiterId = `${dispatchRealm}:${++dispatchSequence}`;
               signal.addEventListener('abort', cancelWait, { once: true });
             }
-            const row = { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass };
+            const row = {
+              id: waiterId,
+              until: Math.min(deadline, now + DISPATCH_LEASE_MS),
+              readClass,
+              ...(agesAt ? { agesAt } : {}),
+            };
             state.dispatchQueue = queue.some((entry) => entry.id === waiterId)
               ? queue.map((entry) => (entry.id === waiterId ? row : entry))
               : [...queue, row];
@@ -475,14 +613,29 @@ export class HyperliquidInfoBudget {
           continue;
         }
         signal.throwIfAborted();
-        const current = await this.update(origin, (state) => state.generation === grant.generation);
+        const current = await this.update(origin, (state, shared) => {
+          observed = observeAdmission(state, shared, waiterId, grant.generation);
+          return state.generation === grant.generation;
+        });
         if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
         if (current)
-          return { generation: grant.generation, weight, readClass, ...(waiterId ? { waiterId, cancelWait } : {}) };
+          return {
+            generation: grant.generation,
+            weight,
+            readClass,
+            ...(agesAt ? { agesAt } : {}),
+            ...(waiterId ? { waiterId, cancelWait } : {}),
+          };
       }
     } catch (error) {
       cancelWait();
-      throw abortedBeforeAdmission ? error : infoAdmissionFailure(error);
+      throw abortedBeforeAdmission
+        ? error
+        : infoAdmissionFailure(
+            error,
+            { info_weight: weight, info_read_class: readClass, info_admission_stage: 'prepare' },
+            observed,
+          );
     }
   }
 
@@ -499,6 +652,13 @@ export class HyperliquidInfoBudget {
     let cost = 0;
     const readClass = grant.readClass ?? 'normal';
     const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
+    const lease = () => ({
+      id: waiterId,
+      until: Math.min(deadline, Date.now() + DISPATCH_LEASE_MS),
+      readClass,
+      ...(grant.agesAt ? { agesAt: grant.agesAt } : {}),
+    });
+    let observed: AdmissionObservation | undefined;
     let charged = false;
     let dispatched = false;
     let handoffStarted = false;
@@ -509,6 +669,7 @@ export class HyperliquidInfoBudget {
     try {
       for (;;) {
         const reservation = await this.update(origin, (state, shared) => {
+          observed = observeAdmission(state, shared, waiterId, grant.generation);
           active();
           const reservationCost = admissionCost(grant.weight, shared);
           const now = Date.now();
@@ -527,14 +688,11 @@ export class HyperliquidInfoBudget {
             return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           // Leases order dispatch attempts across realms without charging queued work.
           state.dispatchQueue = existing
-            ? queue.map((row) =>
-                row.id === waiterId
-                  ? { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass }
-                  : row,
-              )
-            : [...queue, { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass }];
-          // FIFO within each class; critical work can pass queued bulk without spending its tokens.
-          state.dispatchQueue.sort((a, b) => rank(a.readClass) - rank(b.readClass));
+            ? queue.map((row) => (row.id === waiterId ? lease() : row))
+            : [...queue, lease()];
+          // FIFO within each class; critical work can pass queued bulk without spending its tokens,
+          // and an aged chart read passes normal work, never Orders or critical reads.
+          state.dispatchQueue.sort((a, b) => queueRank(a, now) - queueRank(b, now));
           if (state.dispatchQueue[0]?.id !== waiterId) return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
           state.nextAt = Math.max(now, state.nextAt) + reservationCost;
@@ -553,6 +711,7 @@ export class HyperliquidInfoBudget {
         const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
           void this.update(origin, (state, shared) => {
             if (handoffCalled) return;
+            observed = observeAdmission(state, shared, undefined, grant.generation);
             active();
             if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
               throw new HttpPreparationError('timedOut');
@@ -589,7 +748,13 @@ export class HyperliquidInfoBudget {
         await waitUntil(decision.at, signal);
       }
     } catch (error) {
-      throw handoffStarted || abortedBeforeAdmission ? error : infoAdmissionFailure(error);
+      throw handoffStarted || abortedBeforeAdmission
+        ? error
+        : infoAdmissionFailure(
+            error,
+            { info_weight: grant.weight, info_read_class: readClass, info_admission_stage: 'dispatch' },
+            observed,
+          );
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {

@@ -78,6 +78,7 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
+| `TEALSTREET_HOST_NOTIFY_URL`, `TEALSTREET_HOST_NOTIFY_TOKEN` | unset | AGT-37 host notification lane to the gateway; unset URL is off. The token is required with the URL, and `TEALSTREET_BOX` (else `TEALSTREET_ROUTER_BOX_ID`) names the box. See `DELEGATED_RETENTION.md` |
 | `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for hosted venues' `order.*` frames: `0` disables, `1` enables only with compiled protocol support and hosted signing/origin support; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
 
@@ -173,7 +174,7 @@ blocks or fails a trading path.
 
 ## HTTP routes
 
-- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner}`. The last field carries aggregates only: no account, symbol or key ever appears here.
+- **`GET /health`:** `{ok, uptime, release, region, connections, accounts, engineThreads, remoteSigner, typedOutcomes}`. `remoteSigner` and `typedOutcomes` carry aggregates only: no account, symbol or key ever appears here. `typedOutcomes` is described under "Order audit stage timings".
 - **`GET /capabilities` and `GET /account/capabilities`:** the same JSON as `getExchangeServerRuntimeCapabilities()`, with `"runtime":"rust"` added.
 - **`OPTIONS`** on the three routes above returns 204 with the existing public CORS headers.
 - **WebSocket upgrade:** accepted on `/` and on `/account`.
@@ -575,8 +576,8 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `msg` | `{op, data?, accountName, instanceId?}` | Account op, see below |
 | `sign-res` | `{id, config?, wsAuthSignature?, error?}`, with `ts` as a sidecar | Goes to the signer (4yjlw0) |
 | `echo-res` | `{id}` | Echo RTT sample |
-| `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is disposed |
-| `dispose` | `{accountName}` | Disposes the account |
+| `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is released like a `dispose` |
+| `dispose` | `{accountName}` | Releases this socket's hold. The account is disposed when no other holder remains; a DELEGATED account keeps running only for a live DELEGATED holder of another client registration (AGT-79, `DELEGATED_RETENTION.md`). A socket that never joined it disposes it outright |
 | `perf` | `{level}` | Legacy compatibility message; use `publishIntervalMs` for connection-local output pacing |
 | `verbose` | `{enabled}` | Authenticated sockets only. Diagnostics |
 
@@ -589,6 +590,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `subscribeOHLCV`, `unsubscribeOHLCV` | `data: {symbol, interval}`. Becomes the engine candle subscription |
 | `sendSnapshot` | Sends a full `snapshot: true` frame to this socket |
 | `set-publish-interval` | `data: {publishIntervalMs}`. Changes public output cadence for this connection’s admitted `accountName` only |
+| `set-active-ticker-symbols` | `data: {activeTickerSymbols}`. Changes which ticker rows this connection’s admitted `accountName` receives; `null` is the full table |
 | `updatePositions` | Answered `updatePositions:done`. Positions are already engine-owned |
 | `exec`, `chaser:*`, `twap:*` | v1 replies `error` "not supported on the Rust exchange server". These are TS worker features; the post-cutover work is listed below |
 
@@ -621,11 +623,38 @@ pumps only finish pending replies and cannot publish cached public state.
 A resumed socket starts at the absent/default rate until its own init or live
 update reapplies a preference. No preference is inherited from a shared account.
 
+### Connection-local ticker selection
+
+`init.d.activeTickerSymbols` is optional (AGT-107). Absent or `null` keeps the
+venue's full ticker table; a list of 0–1024 strings of 1–128 bytes sends only the
+rows whose `symbol` is listed (unknown symbols match nothing). Anything else
+refuses the init before attaching, with closed `kind`
+`invalid_active_ticker_symbols` and `activeTickerSymbolsRefused:true` (plus
+`initRefused`/`forceToast`). The live form is `{t:"msg",d:{op:
+"set-active-ticker-symbols",accountName,data:{activeTickerSymbols}}}`; it refuses
+with that kind, `not_admitted` or `auth_expired` and keeps the current selection.
+It is unrelated to the engine's `tuning.activeTickerSymbols` venue-subscription
+hint: like the interval it is never an engine setting, fingerprint field or
+another holder's preference, and the public pseudo-account may set it too.
+
+The pump's `Publisher` keeps the selected source rows, in source order, as their
+own small ticker table. Its `TICKERS` replaces the client's whole table whenever
+the source table is replaced or the selection changes; per-row diffs become
+`TICKER_DELTAS` on output rows and observations are remapped to them. Books,
+private sections and every unpaced frame without ticker sections keep their
+original bytes. An unpaced frame with ticker sections is split into its other
+sections, then the selected tickers, then any `STATUS`, so readiness still follows
+public rows. A changed selection publishes at once rather than at the pacing
+deadline; clearing it sends the full table once, after which source frames pass
+through again. Before the snapshot nothing publishes. Resumed sockets and
+re-snapshots follow the interval's rules. An older server ignores the init field
+and logs the live op as an ignored account op, so clients need no capability gate.
+
 ### Server to client
 
 | `t` | `d` | When |
 |---|---|---|
-| `session` | `{resumeId, resumed}` | On open, for `resumable=1` sockets |
+| `session` | `{resumeId, resumed, resumeProof?, delegatedResume?}` | On open, for `resumable=1` sockets; `resumeProof` authorizes a later DELEGATED claim, `delegatedResume` lists labels this socket may claim |
 | `msg` | `{op, accountName, data, ...}` | Account output (see Frames and Replies) |
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
@@ -641,6 +670,12 @@ cannot reset an account. Live and parked holders, and a DELEGATED resident copy
 without a socket, prevent an ordinary init from changing private settings.
 The comparison uses normalized engine and routing settings; fields ignored by
 the venue do not create a settings change.
+Fingerprint tuning follows the native projection's effective venue-default OR
+user-tuning behavior; omitted and redundant tuning compare equal. Actual engine
+options and routing remain unchanged. A verified incompatible join replies with
+`kind: "settings-conflict"` and closed `differing_fields` names, also journaled in
+`hosted.admission_refused`; no setting values or raw keys are copied. This refusal
+never stops or replaces the resident actor and never claims invalid credentials.
 
 The action replies `msg` with `op:"applySettings:done"` and
 `data:{success:true,requiresInit:true}` on the admitted registration. This means
@@ -890,15 +925,21 @@ Server to client, one message per engine flush per account:
 - **`snapshot: true`:** marks a full native snapshot. It replaces the client's catalog, book and order baselines.
   - The server sends one immediately after a successful init, and after every `sendSnapshot`.
   - A socket that joins an account later gets its own snapshot before any delta, which is FrameServer's join contract.
-- **Client side:** the client keeps one `FrameApplier` plus `DefaultStore` per account, and applies frames in `seq` order.
+- **Client side:** the client keeps one native `FrameStore` per account and applies frames in `seq` order. Its public rows use the generated types and retain unchanged section identities.
   - A `seq` gap, an `Invalid engine frame` or a `FrameApplyError` makes the client send the existing `{t:'msg', d:{op:'sendSnapshot', accountName}}`.
   - It then ignores deltas until a `snapshot: true` frame arrives. This reuses today's `hostedFrameClient.requestSnapshot` rate limit.
 - **Size:** FrameServer already splits a delta frame that is too big under `max_frame_bytes`. Each segment is its own `seq`.
 
-State that SCXF does not carry stays JSON, under the existing op names and shapes:
+All account state is carried by SCXF. The shared Rust `hosts/store-frames` producer
+adds socket health, active chasers/TWAPs, order risk, displayed positions/margin
+and retained balance info to the account actor's ordered frame stream. Native
+subscription diagnostics use section 25; shared public diagnostics use section 34, request outcomes section 35 and managed-order ownership section 33. Display policy is shared with SDK metadata and optional init tuning; holder relabeling preserves tuning. There is no `op:'store'` side channel.
+The LOCAL wasm host uses the same producer; mobile imports only the pure-JS
+frame reader. See `hosts/store-frames/README.md` for replacement/clear semantics.
 
-- **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
-- **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
+Non-state replies keep their existing envelopes: `error`, `warning`, `log`,
+`engine-event`, `command-progress`, `callMethod:done`, `exec-result`,
+`updatePositions:done`, `chaser:*` and `twap:*`.
 
 Account output captures a socket-local account generation before a callback,
 detached read, signer or frame pump can defer it. An accepted rebuilding init
@@ -957,6 +998,21 @@ How FrameServer notices map onto `msg`:
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
 
+A command-owned `history.incomplete` event also records that pending read's
+positive assertion. A successful `callMethod:done` carries
+`data.completeness: {incomplete:true, reason?, failure?}` beside its retained
+rows. Native NoticeFields encodes command IDs as floating-point JSON numbers;
+only exact integral u32 values can identify a pending owner. String, fractional,
+negative, out-of-range or unrelated IDs cannot mark another reply.
+
+Reasons are the closed engine incompleteness codes. Only `laterPageFailed` can
+carry `failure: {operation, kind, venueCode?}`, with the same five Bybit operations,
+typed error kinds and allowlisted codes as the SDK history-failure validator.
+Unknown metadata retains the incomplete marker without inventing a failure;
+replacement assertions clear previous detail. No native message, URL, cursor,
+credential or response value enters the metadata. Existing rejected replies,
+read completion, request policy and account output ownership remain unchanged.
+
 ### Recovering a refused native startup
 
 FrameServer retains `StartupFailed` for late joins. Only a failure originating
@@ -1012,6 +1068,45 @@ shared typed decoder (`HostInput`). Module: `hosts/server/src/methods.rs`
 - **Cutover set:** `placeOrder(s)`, `placeOrderWithClientOrderId`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`, `cancelAllOrders`, `findOrderByClientOrderId`, `setLeverage`, `fetchLeverage`, `setMarginType`, `setPositionMode`, `fetchPositionMode`, `nuke*`, `fetchOHLCV`, `fetchPublicTrades`, the `fetchHistorical*` reads and `fetchIncomeHistory*`.
 - **Unknown methods:** they fail with `callMethod:done` `{error: {name:'UnsupportedMethod'}}`. They never get a guessed command.
 - **No retries:** the server never retries a trading command. A disconnect never cancels or replays a write, which is FrameServer's orphan rule.
+
+### Order audit stage timings
+
+Every `order audit` line for a Session command (`callMethod` writes and each
+`order.submit`/`order.action` leg) carries `stages_us`: integer microseconds
+from the first stamp, keyed by stage name. Stamps are monotonic `Instant`s taken
+on this box; a stage that was never observed is omitted, never estimated.
+
+| Stage | Stamped when |
+|---|---|
+| `received` | `Session::handle` starts on the socket frame |
+| `admitted` | the command passed Session checks and holds its command ID |
+| `queued` | the account engine's command queue accepted it, after any load wait; a busy or refused handoff has no `queued` |
+| `sent` | its native write identity arrives (`commandProgress`); the engine releases it immediately before that write's I/O, so only placements carry it |
+| `responded` | the native `done` completion arrives |
+| `replied` | the outcome frame is accepted by the socket's output queue |
+
+The origin is `received`, or `admitted` when no frame preceded the command.
+Non-final cancel-all legs have no `replied`: the group answers once. Algo
+(`origin: "algo"`), nuke and preflight refusal lines carry no stages. Stamps
+add only numbers to the existing allowlisted line; no new identifier is logged.
+
+`scripts/audit-latency.sh` (read-only, needs `jq`) reports per-venue
+p50/p95/p99 in milliseconds for `admit` (received to admitted), `queue`
+(admitted to queued), `release` (queued to sent), `venue` (sent to responded),
+`dispatch` (queued to responded, for every write), `reply` and `total`, plus
+each venue's count of all audit lines, stamped or not, and of those whose
+result outcome is `unknown`:
+
+```bash
+journalctl CONTAINER_NAME=exchange-server -o cat --since '1 hour ago' \
+  | sdk-rs/hosts/server/scripts/audit-latency.sh
+```
+
+Router time is not on this line: the box sees a frame only once the router has
+forwarded it. `/health` `typedOutcomes` counts every typed `order.outcome` and
+`order.actionOutcome` this process handed to a live output (`settled`) and
+those that were `unknown`; the box-wide unknown rate is their ratio since
+`bootId` changed. Box Slack alerting stays deferred, so nothing alerts on it yet.
 
 ## Accounts and runtime (fe7lgm)
 
@@ -1105,7 +1200,7 @@ Sessions and resume (same semantics as today):
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
-- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts use a fresh handover and shared admission; their previous parked holders retain the original expiry while verification is pending.
+- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts are not adopted at open. The socket whose resume consumed the id (and only it) may claim each parked DELEGATED label, within the same grace, with `init {signingMode:"delegated", resume:true, resumeProof}` and no `sealed`. `resumeProof` is the parking socket's in-band session-frame value, never sent in a URL; owner, label, venue, identity digest and handover settings must match the parked account. The claim keeps the resident actor and signer, with no key offer, handover or venue probe (AGT-54). Any mismatch, an expired grace, a foreign or second socket, a router fence or the DELEGATED kill switch answers the transient `resume_unavailable` init refusal, and the client falls back to the ordinary handover. Unclaimed parked holders retain their original expiry; a sealed init always takes shared admission.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different private fingerprint is refused until an admitted client uses an
     explicit settings action; parked clients and resident copies keep their settings.
@@ -1138,6 +1233,30 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
   - `lighter-tx`;
   - `paradex-public` and `paradex-stark`.
 - **Address and key binding:** Hyperliquid's address and Paradex's Stark key bind through the engine's owned address setup (`create_public_address_setup`). This needs the native host's `address-nonce` feature for those venues.
+
+### Signing correlation in the journal
+
+`sign.timeout` records the SHA-256 `request_id_hash`, original `sent_socket_id`
+(or null before enqueue/after duplicate-ID waiting), current server `socket_id`,
+monotonic `request_age_ms`, `attachment_age_ms`, `last_heard_age_ms` and a closed
+`cause` (`unanswered`, `suspended`, `duplicate`). Attachment age is time on the
+current link attachment, not the lifetime of the browser tab. The original
+15-second deadline and all response/ownership/fatal guards are unchanged.
+
+After all authenticated Session resolvers decline a reply,
+`sign.response_unmatched` records the same ID hash (null for a malformed ID),
+receiving `socket_id`, `socket_age_ms` and that socket's saturating
+`unmatched_count`. Samples are limited to one per second per receiving socket;
+`coalesced_count` preserves suppressed counts on the next sample or a final
+socket-close summary with a null ID hash. No per-request diagnostic map exists.
+Correlating sampled hashes distinguishes a reply to a timed-out
+request from one seen on a different socket; an unmatched line alone does not
+assert which case occurred. No request history or response payload is retained.
+
+These warning lines are journal-only. IDs are always hashed because incoming
+reply IDs are untrusted; signatures, bodies, keys, labels and user IDs are never
+included. A timeout with a recently heard worker does not prove that its page
+thread was able to sign; missing replies alone do not prove a routing fault.
 
 ## Routing (claude-m26ps4)
 
@@ -1332,6 +1451,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An engine `rejected` error (every released leg definitively refused by the venue)
+with no partial IDs/counts, protection change or non-`notSent` element is that
+proof and settles `refused`/`notSent`, as placement intents already do (AGT-68).
 Every cancel-all leg settles through its shared completion group, including
 pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.

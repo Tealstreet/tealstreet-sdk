@@ -95,14 +95,16 @@ fabricate an ACK or a not-sent proof.
 
 applied: result is exactly {kind:"amend",orderIds:["venue-order-1"]},
 {kind:"cancel"}, {kind:"cancelAll"}, or {kind:"nuke"}; error is null.
-Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes.
+Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes, except the
+ID-less protective amend `{kind:"amend",orderIds:[],protectionApplied:true}` below.
 The result kind must match the original action. Applied means all requested legs
 completed successfully; it does not promise a venue fill or an empty future store.
 
 refused: result is null; error is {message:<bounded text>,outcome:"notSent"}.
 This requires proof that the ENTIRE action was not sent. Pre-dispatch validation,
-unadmitted account, unsupported capability, expired key and explicit native
-notSent are examples. ACK(false) is permitted only with that proof.
+unadmitted account, unsupported capability, expired key, explicit native
+notSent and a whole-action venue rejection (engine `rejected` with no partial
+effects or non-notSent element) are examples. ACK(false) is permitted only with that proof.
 
 unknown: result is null; error is {message:<bounded text>,outcome:"unknown"}.
 Any uncertain/partial action, post-dispatch interruption, malformed completion,
@@ -207,7 +209,7 @@ placement records and is not a WS API version.
 A bounded, authenticated v1 action whose operation or fields are not supported
 fails closed before any dispatch, returning `order.actionOutcome` with
 `version:1`, `outcome:"unsupported"`, `result:null`, and
-`error:{message:"Unsupported v1 action schema",outcome:"unsupported"}`.
+`error:{message:"This action isn’t supported by this version",outcome:"unsupported"}` (callers branch on `outcome`, never the text).
 This includes unknown envelope/request/action fields, nested order/target/update
 fields, unknown algo operations, and unknown nested algo fields. Invalid action
 shapes also receive this schema rejection. The server validates registration,
@@ -269,6 +271,16 @@ placement. Other completed synchronous writes return `{kind}`; setting results
 must be native unit completions. Malformed results remain unknown. Any partial
 native effects prevent a whole-action `notSent` proof, even if a later leg refused.
 The generic command-group completion waits for all leverage/cancel-all legs.
+
+**Hyperliquid caller IDs (AGT-42).** On `hyperliquid`/`hyperliquidspot`, a
+`place`/`close` order's `clientOrderId` is mapped to the native cloid after the
+fingerprint and schema checks (`order_contract::hyperliquid_cloid`): a lowercase
+`0x` + 32-hex value is sent verbatim; any other text becomes `0x` + the first 32
+hex characters of SHA-256 over its UTF-8 bytes. The caller recomputes that cloid
+to look up an uncertain placement. An absent ID stays absent and the venue mints
+a random cloid. Results keep `{kind,orderIds}`. Parity: the TS adapter and the
+Rust venue still reject a non-cloid caller ID (`hyperliquidClientOrderIdRule`,
+`valid_cloid`); the mapping is host-only and LOCAL is unchanged.
 
 `DelegatedOrderParams` is a closed native placement shape: symbol, type, side,
 amount and the existing optional price/trigger/protection, time-in-force,
@@ -354,7 +366,14 @@ ACK or a missing reply. The SDK accepts it only for a protection-only request;
 ordinary empty placement results and interrupted protection writes stay unknown.
 No venue order ID is invented.
 
-## Existing algo lifecycle and deferred parameter changes
+An amend of a protective stop/take-profit/trailing row follows the same rule:
+Bybit edits a Full position stop through trading-stop, which names no order. The
+server captures whether the engine store's target row is protective before
+dispatch, and an authoritative ID-less completion of that amend returns
+`{kind:"amend",orderIds:[],protectionApplied:true}`. An ordinary amend that
+completes without an ID, or any protective amend lost after handoff, stays unknown.
+
+## Existing algo lifecycle and conservative parameter amendments
 
 The typed v1 vocabulary already carries chaser start/terminate/terminateAll and
 TWAP start/pause/resume/stop/cleanup/state through the resident hosted factories.
@@ -362,10 +381,44 @@ Pause/resume keeps the TWAP job ID and its remaining schedule; it does not repla
 parameters, create a new job, or imply that any venue write completed. Algo
 action outcomes remain `unknown`, reconciled through the existing account events.
 
-Parameter amendment is deferred. `chaser:amend` and `twap:amend` are unknown
-operations and return the existing typed `unsupported` outcome before dispatch.
-Do not emulate amendment with automatic stop-and-replace or change the wire
-version. Client controls can expose the existing lifecycle only.
+AGT-97 adds `chaser:amend` and `twap:amend` once in the shared Rust crates;
+LOCAL and hosted use the same implementation. Typed v1 carries
+`{kind:"algo",op,data:{id,update}}`, without a wire-version change.
+
+- Chaser `update` accepts only `limitPrice`, `offset`, and `maxAttempts`.
+  `limitPrice` is an absolute buy ceiling or sell floor; `offset` is a
+  nonnegative price-unit distance away from the passive touch. Constraints round
+  outward to the market tick; a constrained quote already on the tick is kept. Values merge with the job's prior amendments;
+  `offset:0` resets the offset, while nulls/empty patches are invalid. The usual
+  market-driven re-quote trigger is unchanged: no immediate cancel, replace, or
+  job restart. The next placement uses the amended constraints/attempt bound,
+  and a resting order already at the constrained quote is not replaced. A TWAP
+  slice's chase is not amendable on its own; amend its TWAP.
+- TWAP `update` accepts only positive `intervalMs` and `remainingSlices` (1–1000).
+  The issued-plus-remaining count remains bounded by 1000. Repartition only the
+  sum of unplaced slice quantities; preserve issued/pending children, fill
+  ownership and every issued outcome-journal row. Only a changed interval
+  re-anchors the schedule (a slice-count-only edit keeps the next slice's time):
+  it schedules the next slice from amendment time, or from the pending child's answer when
+  one is in flight. Paused jobs stay paused. Persisted duration/count encode the
+  amended interval, so restore retains the same remaining schedule.
+
+Side, symbol, size/total quantity, routing and every other field are immutable.
+Unsupported fields return a named `unsupported amend field` error before
+forwarding; finished, stopping, unknown or missing jobs refuse visibly with
+`not amendable`. Job IDs are scoped to the resident account. Typed amendment
+admission retains the original registration, owner, deadline, IO and drain
+fences. Shared factory refusals and drain refusals settle `refused/notSent`
+because these operations validate synchronously before changing future
+settings. On LOCAL, an amendment the worker cannot dispatch (stopped,
+recovering, owner change, dead engine) is reported as an error, never dropped. A successful dispatch
+retains the existing conservative `unknown` algo receipt; it never claims a
+completed venue write or permits resend. Reconcile through `chaser:amended`
+(`{id,update}`), `activeChasers`, and existing TWAP state/store updates.
+
+Mobile must enable `chaser:amend` and `twap:amend` with these payloads after the
+compatible server/SDK ship. Never emulate amendment with stop/start. Shared
+Rust changes move WASM inputs and require the matching pin at the next cut.
 
 ## Recursive JSON validation
 

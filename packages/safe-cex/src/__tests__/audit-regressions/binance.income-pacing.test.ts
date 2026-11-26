@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 describe('Binance income history pacing', () => {
   afterEach(() => {
@@ -10,7 +10,7 @@ describe('Binance income history pacing', () => {
 
   it('waits two seconds before issuing the next seven-day chunk', async () => {
     vi.useFakeTimers();
-    const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, new FrameStore());
     // Spies on `_fetchIncomeHistoryPage`, not the public `fetchIncomeHistory`. The range
     // walker deliberately uses the RETHROWING variant, because the public method swallows
     // errors into `[]` and a pager cannot distinguish that from an empty window — a 429

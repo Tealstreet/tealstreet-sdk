@@ -1,13 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
 import type { ExchangeOptions } from '../../types';
-import { OrderStopTriggerType } from '../../types';
-import { virtualClock } from '../../utils/virtualClock';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { FrameStore } from '../../store/frameStore';
+import { OrderStopTriggerType } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 
 const NOW = 1_800_000_000_000;
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
@@ -25,7 +26,7 @@ const createExchange = (overrides: Partial<ExchangeOptions> = {}): HyperliquidEx
       tuning: { consoleLogging: false },
       ...overrides,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchange.xhr = { post: vi.fn().mockResolvedValue({ data: { status: 'ok' } }) } as any;
   return exchange;

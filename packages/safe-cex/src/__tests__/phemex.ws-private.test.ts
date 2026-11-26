@@ -1,21 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
+import { nativeMarket } from './cutover/nativeMarket';
+import { nativePosition } from './cutover/nativePosition';
+import { applyReferenceFixture, referenceStore } from './cutover/referenceFixture';
 import { BinancePrivateWebsocket } from './reference/phemex/phemex.ws-private';
-import { OrderSide, OrderStatus, OrderType } from '../types';
-
-type MockStore = {
-  markets: Array<{ symbol: string }>;
-  positions: Array<{ id: string }>;
-  loaded: {
-    orders: boolean;
-    balance: boolean;
-    positions: boolean;
-  };
-  addOrUpdateOrders: ReturnType<typeof vi.fn>;
-  addOrUpdatePositions: ReturnType<typeof vi.fn>;
-  addOrUpdatePositionsFull: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
-};
 
 const createOrder = (ordStatus: string) => ({
   orderID: 'order-1',
@@ -38,19 +27,9 @@ const createOrder = (ordStatus: string) => ({
 });
 
 const createContext = () => {
-  const store: MockStore = {
-    markets: [{ symbol: 'BTCUSDT' }],
-    positions: [],
-    loaded: {
-      orders: false,
-      balance: false,
-      positions: false,
-    },
-    addOrUpdateOrders: vi.fn(),
-    addOrUpdatePositions: vi.fn(),
-    addOrUpdatePositionsFull: vi.fn(),
-    update: vi.fn(),
-  };
+  const store = referenceStore({ markets: [nativeMarket({ symbol: 'BTCUSDT' })], positions: [] });
+  const positionChanges = vi.fn<(rows: typeof store.positions) => void>();
+  store.subscribe('positions', (rows) => positionChanges(rows));
 
   const parent = {
     isDisposed: false,
@@ -85,17 +64,23 @@ const createContext = () => {
     mapPosition: vi.fn(),
     fetchPositions: vi
       .fn()
-      .mockResolvedValue([{ id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: 'Short', contracts: 2 }]),
+      .mockResolvedValue([
+        nativePosition({ id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: PositionSide.Short, contracts: 2 }),
+      ]),
     fetchPositionsAndBalance: vi.fn().mockResolvedValue({
       balance: { used: 1, free: 2, total: 3, upnl: 0 },
-      positions: [{ id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: 'Long', contracts: 1 }],
+      positions: [
+        nativePosition(
+          nativePosition({ id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 }),
+        ),
+      ],
     }),
   };
 
   const ws = new BinancePrivateWebsocket(parent as any);
   ws.lastReceived = Date.now(); // Prevent BaseWebSocket from starting periodic watchdog timer in tests.
 
-  return { ws, store, parent };
+  return { ws, store, parent, positionChanges };
 };
 
 describe('Phemex private websocket reconciliation', () => {
@@ -109,13 +94,13 @@ describe('Phemex private websocket reconciliation', () => {
   });
 
   it('upserts non-zero positions from positions_p updates', () => {
-    const { ws, store, parent } = createContext();
-    const parsedPosition = {
+    const { ws, store, parent, positionChanges } = createContext();
+    const parsedPosition = nativePosition({
       id: 'BTCUSDT:Long',
       symbol: 'BTCUSDT',
-      side: 'Long',
+      side: PositionSide.Long,
       contracts: 2,
-    };
+    });
     parent.mapPosition.mockReturnValue(parsedPosition);
 
     ws.onMessage({
@@ -125,17 +110,19 @@ describe('Phemex private websocket reconciliation', () => {
       }),
     } as MessageEvent);
 
-    expect(store.addOrUpdatePositions).toHaveBeenCalledWith([parsedPosition]);
+    expect(store.positions).toMatchObject([parsedPosition]);
   });
 
   it('ignores brand-new zero-contract WS positions', () => {
-    const { ws, store, parent } = createContext();
-    parent.mapPosition.mockReturnValue({
-      id: 'BTCUSDT:Long',
-      symbol: 'BTCUSDT',
-      side: 'Long',
-      contracts: 0,
-    });
+    const { ws, store, parent, positionChanges } = createContext();
+    parent.mapPosition.mockReturnValue(
+      nativePosition({
+        id: 'BTCUSDT:Long',
+        symbol: 'BTCUSDT',
+        side: PositionSide.Long,
+        contracts: 0,
+      }),
+    );
 
     ws.onMessage({
       data: JSON.stringify({
@@ -144,18 +131,21 @@ describe('Phemex private websocket reconciliation', () => {
       }),
     } as MessageEvent);
 
-    expect(store.addOrUpdatePositions).not.toHaveBeenCalled();
+    expect(positionChanges).not.toHaveBeenCalled();
   });
 
   it('keeps zero-contract WS position updates for already-known positions', () => {
-    const { ws, store, parent } = createContext();
-    store.positions = [{ id: 'BTCUSDT:Long' }];
-    const parsedPosition = {
+    const { ws, store, parent, positionChanges } = createContext();
+    applyReferenceFixture(store, {
+      positions: [nativePosition({ id: 'BTCUSDT:Long', symbol: 'BTCUSDT', contracts: 1 })],
+    });
+    positionChanges.mockClear();
+    const parsedPosition = nativePosition({
       id: 'BTCUSDT:Long',
       symbol: 'BTCUSDT',
-      side: 'Long',
+      side: PositionSide.Long,
       contracts: 0,
-    };
+    });
     parent.mapPosition.mockReturnValue(parsedPosition);
 
     ws.onMessage({
@@ -165,11 +155,11 @@ describe('Phemex private websocket reconciliation', () => {
       }),
     } as MessageEvent);
 
-    expect(store.addOrUpdatePositions).toHaveBeenCalledWith([parsedPosition]);
+    expect(store.positions).toMatchObject([parsedPosition]);
   });
 
   it('debounces REST sync and explicitly reconciles terminal orders with unknown position side', async () => {
-    const { ws, store, parent } = createContext();
+    const { ws, store, parent, positionChanges } = createContext();
     const payload = JSON.stringify({
       type: 'incremental',
       orders_p: [createOrder('Filled')],
@@ -185,19 +175,13 @@ describe('Phemex private websocket reconciliation', () => {
     expect(parent.fetchPositionsAndBalance).toHaveBeenCalledTimes(1);
     expect(parent.fetchPositions).toHaveBeenCalledTimes(1);
     expect(parent.fetchPositions).toHaveBeenCalledWith(['BTCUSDT']);
-    expect(store.addOrUpdatePositionsFull).toHaveBeenCalledTimes(1);
-    expect(store.addOrUpdatePositionsFull).toHaveBeenCalledWith([
-      { id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: 'Long', contracts: 1 },
-      { id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: 'Short', contracts: 2 },
+    expect(positionChanges).toHaveBeenCalledTimes(1);
+    expect(store.positions).toMatchObject([
+      { id: 'BTCUSDT:Long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
+      { id: 'BTCUSDT:Short', symbol: 'BTCUSDT', side: PositionSide.Short, contracts: 2 },
     ]);
-    expect(store.update).toHaveBeenCalledWith({
-      balance: { used: 1, free: 2, total: 3, upnl: 0 },
-      loaded: {
-        ...store.loaded,
-        balance: true,
-        positions: true,
-      },
-    });
+    expect(store.balance).toEqual({ used: 1, free: 2, total: 3, upnl: 0 });
+    expect(store.loaded).toMatchObject({ balance: true, positions: true });
   });
 
   it('does not schedule REST sync for non-terminal order events', async () => {

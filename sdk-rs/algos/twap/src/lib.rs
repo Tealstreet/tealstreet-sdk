@@ -7,6 +7,7 @@
 //! [`TwapBook::placement_settled`], and executes the returned [`TwapEffect`]s
 //! against the engine and the hosted protocol.
 
+mod amend;
 pub mod factory;
 mod instance;
 mod math;
@@ -15,6 +16,7 @@ mod validate;
 
 pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SCHEDULE_GRACE_MS};
 
+pub use amend::{TwapAmendment, TwapUpdate};
 pub use instance::TwapInstance;
 pub use types::{
     InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapOwner,
@@ -65,8 +67,11 @@ pub trait TwapMarketView {
     fn client_order_id(&self, _request: &TwapOrderRequest) -> Option<String> {
         None
     }
-    /// The market's amount step: a slice the venue would round up overfills.
-    fn amount_step(&self, _symbol: &str) -> Option<f64> {
+    /// The market's `(amount step, limits.amount.min)`. Slices are floored to the
+    /// step (a slice the venue would round up overfills), and a start is refused
+    /// when a slice is below the larger of the two (AGT-286). One lookup for both:
+    /// a second market read costs every venue's wasm budget.
+    fn amount_rules(&self, _symbol: &str) -> Option<(f64, f64)> {
         None
     }
 }
@@ -93,7 +98,8 @@ pub struct TwapOrderRequest {
 pub type SliceFailure = safe_cex_engine::error::VenueError;
 
 fn unknown_outcome(mut error: SliceFailure) -> SliceFailure {
-    error.message = "The outcome is unknown. Check Open Orders".to_owned();
+    error.message =
+        "We couldn’t confirm this change. Check your open orders before trying again.".to_owned();
     error.outcome = Some(safe_cex_engine::error::Outcome::Unknown);
     error
 }
@@ -185,6 +191,24 @@ pub enum TwapEffect {
     StateUpdate { data: Value },
     /// Host-side diagnostics the TS worker wrote to `console.error`.
     Diagnostic { message: String },
+    /// A TWAP left `activeTWAPs` by its own end. Hosts send it as `twap:complete`: no
+    /// Completed row is ever listed, so without it a normal end reads as a lost TWAP.
+    Ended {
+        twap_id: String,
+        end: TwapEnd,
+        orders_executed: u32,
+        orders_count: u32,
+    },
+}
+
+/// Why a TWAP ended on its own (`twap:complete`'s `end`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TwapEnd {
+    /// Every slice was handed off.
+    Completed,
+    /// The user's `twap:stop`.
+    Stopped,
 }
 
 /// One account's TWAPs, in insertion order like the TS `Map`.
@@ -278,6 +302,18 @@ impl TwapBook {
     ) -> Vec<TwapEffect> {
         let mut effects = Vec::new();
         match op {
+            "twap:amend" => match TwapAmendment::parse(data) {
+                Ok(amendment) => {
+                    let (result, amended) = self.amend(amendment, env, view);
+                    effects.extend(amended);
+                    if let Err(message) = result {
+                        effects.push(TwapEffect::Log { message });
+                    }
+                }
+                Err(message) => effects.push(TwapEffect::Log {
+                    message: message.into(),
+                }),
+            },
             "twap:start" => match serde_json::from_value::<TwapOptions>(data.clone()) {
                 Ok(options) => {
                     if let Err(message) = self.start_with(options, env, view, &mut effects) {
@@ -291,7 +327,7 @@ impl TwapBook {
             "twap:resume" => self.with_id(data, |instance| instance.resume(env)),
             "twap:cleanup" => self.with_id(data, TwapInstance::cleanup),
             "twap:pause" => self.with_id(data, TwapInstance::pause),
-            "twap:stop" => self.with_id(data, TwapInstance::terminate),
+            "twap:stop" => self.with_id(data, TwapInstance::stop),
             "twap:state" => self.restore(data, env, &mut effects),
             _ => {}
         }
@@ -318,13 +354,33 @@ impl TwapBook {
         let mut effects = Vec::new();
         let found = match self.managed_mut(id) {
             Some(instance) => {
-                instance.terminate();
+                instance.stop();
                 true
             }
             None => false,
         };
         self.settle(&mut effects);
         (found, effects)
+    }
+
+    pub fn amend(
+        &mut self,
+        amendment: TwapAmendment,
+        env: &mut dyn TwapEnv,
+        view: &dyn TwapMarketView,
+    ) -> (Result<(), String>, Vec<TwapEffect>) {
+        if let Err(message) = amendment.validate() {
+            return (Err(message.into()), Vec::new());
+        }
+        let result = self
+            .managed_mut(&amendment.id)
+            .ok_or_else(|| {
+                "TWAP job is not amendable: finished, stopping, unknown or missing".to_owned()
+            })
+            .and_then(|instance| instance.amend(&amendment.update, env, view));
+        let mut effects = Vec::new();
+        self.settle(&mut effects);
+        (result, effects)
     }
 
     fn start_with(
@@ -337,6 +393,7 @@ impl TwapBook {
         validate::options(&options)
             .and_then(|()| self.owns_account(&options))
             .and_then(|()| self.has_capacity())
+            .and_then(|()| validate::slice_minimum(&options, view))
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
@@ -686,6 +743,14 @@ impl TwapBook {
             if entry.managed && entry.instance.state.status == TwapStatus::Completed {
                 entry.managed = false;
                 finished.push(entry.instance.id.clone());
+                if let Some(end) = entry.instance.end() {
+                    effects.push(TwapEffect::Ended {
+                        twap_id: entry.instance.id.clone(),
+                        end,
+                        orders_executed: entry.instance.state.orders_executed,
+                        orders_count: entry.instance.state.orders_count,
+                    });
+                }
             }
         }
         for id in finished {

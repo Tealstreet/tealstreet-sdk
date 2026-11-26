@@ -325,3 +325,126 @@ fn order_history_pacing_is_shared_across_commands_without_delaying_account_reads
     assert!(h.has_request("orderStatus=Cancelled"));
     assert_ne!(first.id, second.id);
 }
+
+#[test]
+fn historical_fills_preserve_milliseconds_sorting_and_execution_identity() {
+    for time in ["1672282722429", "1672282722.429"] {
+        let mut h = ready(false);
+        h.command(Command::Query {
+            command: 101,
+            query: fills(None, None),
+        });
+        let mut body: serde_json::Value = serde_json::from_str(FILL).unwrap();
+        let mut early = body["result"]["list"][0].clone();
+        early["execTime"] = serde_json::json!(time);
+        let mut later = early.clone();
+        later["execTime"] = serde_json::json!(if time.contains('.') {
+            "1672282722.987"
+        } else {
+            "1672282722987"
+        });
+        later["execId"] = serde_json::json!("e2");
+        let mut tied = later.clone();
+        tied["execId"] = serde_json::json!("e0");
+        body["result"]["list"] = serde_json::json!([early.clone(), later, tied, early]);
+        h.respond("/v5/execution/list", 200, &body.to_string());
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(h.result(101).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["id"], "e2");
+        // Equal native times keep venue order; execution IDs are not a clock.
+        assert_eq!(rows[1]["id"], "e0");
+        assert_eq!(rows[2]["id"], "e1");
+        assert_eq!(rows[0]["timestamp"], 1_672_282_722.987);
+        assert_eq!(rows[1]["timestamp"], 1_672_282_722.987);
+        assert_eq!(rows[2]["timestamp"], 1_672_282_722.429);
+        assert_eq!(
+            rows[2]["timestamp"].as_f64().unwrap() * 1000.0,
+            1_672_282_722_429.0
+        );
+    }
+}
+
+#[test]
+fn execution_fee_sign_agrees_with_income_cash_flow() {
+    for (fee, category) in [(-0.07, "rebate"), (0.07, "commission")] {
+        let mut h = ready(false);
+        h.command(Command::Query {
+            command: 80,
+            query: fills(None, None),
+        });
+        let body = FILL
+            .replace("\"execFee\":\"0.07\"", &format!("\"execFee\":\"{fee}\""))
+            .replace("\"isMaker\":false", "\"isMaker\":true");
+        h.respond("/v5/execution/list", 200, &body);
+        let rows: serde_json::Value =
+            serde_json::from_str(h.result(80).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(rows[0]["commission"], fee, "native fee {fee}");
+        assert_eq!(rows[0]["maker"], true);
+
+        let mut income = ready(false);
+        income.command(Command::Query {
+            command: 81,
+            query: Query::Income {
+                symbol: Some("BTCUSDT".into()),
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(100),
+            },
+        });
+        let transaction = format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"id":"ledger-1","symbol":"BTCUSDT","type":"TRADE","tradeId":"e1","currency":"USDT","transactionTime":"1672282722429","fee":"{fee}"}}],"nextPageCursor":""}}}}"#
+        );
+        income.respond("/v5/account/transaction-log", 200, &transaction);
+        let entries: serde_json::Value =
+            serde_json::from_str(income.result(81).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(entries.as_array().unwrap().len(), 1);
+        assert_eq!(entries[0]["category"], category);
+        assert_eq!(entries[0]["income"], -fee);
+        assert_eq!(
+            rows[0]["commission"].as_f64().unwrap(),
+            -entries[0]["income"].as_f64().unwrap()
+        );
+    }
+}
+
+#[test]
+fn execution_fee_preserves_missing_and_explicit_zero() {
+    for fee in [
+        None,
+        Some("null"),
+        Some("\"\""),
+        Some("\"invalid\""),
+        Some("\"0\""),
+    ] {
+        let mut body: serde_json::Value = serde_json::from_str(FILL).unwrap();
+        let row = body["result"]["list"][0].as_object_mut().unwrap();
+        match fee {
+            Some(value) => {
+                row.insert("execFee".into(), serde_json::from_str(value).unwrap());
+            }
+            None => {
+                row.remove("execFee");
+            }
+        }
+        let mut h = ready(false);
+        h.command(Command::Query {
+            command: 82,
+            query: fills(None, None),
+        });
+        h.respond("/v5/execution/list", 200, &body.to_string());
+        let rows: serde_json::Value =
+            serde_json::from_str(h.result(82).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        if fee == Some("\"0\"") {
+            assert_eq!(rows[0]["commission"], 0.0);
+        } else {
+            assert!(
+                rows[0].get("commission").is_none(),
+                "fee {fee:?}: {}",
+                rows[0]
+            );
+        }
+    }
+}

@@ -90,6 +90,11 @@ pub enum Pending {
     History(history::Request),
     Identity(identity::Request),
     Trade(trading::Request),
+    /// A background read proving an acknowledged placement.
+    Proof {
+        context: Context,
+        read: trading::ProofRead,
+    },
     Tier {
         plan: safe_cex_engine::request_context::Plan,
         slot: safe_cex_engine::request_context::plan::Slot,
@@ -984,6 +989,10 @@ impl Lighter {
                 let _ = cx.fail_plan(&plan, error);
             }
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Proof { context, read } => {
+                let _ = cx.finish_http_context(&context);
+                self.proof_failed(cx, read);
+            }
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets {
                 context, fallback, ..
@@ -1512,7 +1521,7 @@ impl Venue for Lighter {
                 }
             }
             Pending::Trade(trading::Request::Reference(read)) => read.item(cx, item),
-            Pending::Trade(_) | Pending::Identity(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) | Pending::Proof { .. } => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets {
                 context,
@@ -1744,6 +1753,17 @@ impl Venue for Lighter {
                 self.trade_response(cx, request, response);
                 return;
             }
+            Pending::Proof { context, read } => {
+                let valid = cx.validate_background_read_http_delivery(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
+                if valid {
+                    self.proof_response(cx, read, response);
+                } else {
+                    // An undeliverable read proves nothing; the next one follows.
+                    self.proof_failed(cx, read);
+                }
+                return;
+            }
             Pending::History(request) => {
                 self.history_response(cx, request, response);
                 return;
@@ -1763,6 +1783,7 @@ impl Venue for Lighter {
             Pending::Account { .. }
             | Pending::Tier { .. }
             | Pending::Trade(_)
+            | Pending::Proof { .. }
             | Pending::History(_)
             | Pending::Identity(_) => unreachable!(),
             Pending::Markets {

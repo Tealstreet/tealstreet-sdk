@@ -37,8 +37,9 @@ const chaseOutcome = ({ symbol, size, filled = 0 }: ChaseEnd) => {
 const unendedChase = (chase: ActiveChaser) => {
   const orders = chase.currentOrderIds?.length ? `order ${chase.currentOrderIds.join(', ')}` : 'order';
   return (
-    `Chase on ${chase.symbol} ended without a result: its account reloaded or its engine restarted while it ran. ` +
-    `Its ${orders} may still be open, or may have filled: check Positions and Open Orders.`
+    // NX isPageEngineLostChaseNotice matches this prefix to keep it off Hosted accounts.
+    `Chase on ${chase.symbol} ended without a result: it was interrupted. ` +
+    `Its ${orders} may still be open or may have filled. Check your open orders and positions.`
   );
 };
 
@@ -205,13 +206,13 @@ export class AlgoControlWatch {
     if (!owed) return;
     if (owed.label !== 'Chase') {
       this.settle(id);
-      this.host.tell(`${owed.label} stop is confirmed now.`);
+      this.host.tell(`${owed.label} has now stopped.`);
       return;
     }
     // A chase says how it ended in its own completion; a confirmation alone cannot.
     const timer = setTimeout(() => {
       this.settle(id);
-      this.host.tell('Chase stop is confirmed, but whether it filled is not known: check Positions and Open Orders.');
+      this.host.tell('The chase has stopped. Check your open orders and positions for fills.');
     }, OUTCOME_WAIT_MS);
     owed.done = () => clearTimeout(timer);
   }
@@ -242,8 +243,8 @@ export class AlgoControlWatch {
         () => {
           stop();
           this.host.tell(
-            `${what} was not confirmed after ${NOT_CONFIRMED_MS / 1000}s and was not sent again. ` +
-              'It may still arrive when the connection returns; check before trying again.',
+            `${what} wasn’t confirmed after ${NOT_CONFIRMED_MS / 1000}s. ` +
+              'Check your open orders before trying again.',
           );
         },
       ],
@@ -261,7 +262,7 @@ export class AlgoControlWatch {
         NOT_CONFIRMED_MS,
         () => {
           this.owe(id, label);
-          this.host.tell(`${label} stop is not confirmed yet; retrying. It may still be running.`);
+          this.host.tell(`Still trying to stop ${label}.`);
         },
       ],
     ];
@@ -285,7 +286,7 @@ export class AlgoControlWatch {
         this.stopping.delete(id);
         this.owe(id, label);
         this.host.tell(
-          `${label} stop was NOT confirmed after ${STOP_GIVE_UP_MS / 1000}s. It may still be running: check it and stop it again.`,
+          `We couldn’t confirm that ${label} stopped after ${STOP_GIVE_UP_MS / 1000}s. Check it before stopping it again.`,
         );
         // Sent no more, but still watched: the user is told how it ends when the connection returns.
         const owed = this.owed.get(id);

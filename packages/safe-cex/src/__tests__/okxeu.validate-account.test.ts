@@ -2,10 +2,10 @@ import type { ExchangeOptions } from '../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../exchanges/okx/okx.types';
+import { FrameStore } from '../store/frameStore';
 import { OKXEUExchange } from './reference/okx/okxeu.exchange';
 import { OKXEUDemoExchange } from './reference/okx/okxeudemo.exchange';
-import { ENDPOINTS } from '../exchanges/okx/okx.types';
-import { DefaultStore } from '../store/store.base';
 
 const createExchange = (): OKXEUExchange => {
   const options: ExchangeOptions = {
@@ -16,7 +16,7 @@ const createExchange = (): OKXEUExchange => {
     tuning: { consoleLogging: false },
   };
 
-  return new OKXEUExchange('okxeu', options, new DefaultStore());
+  return new OKXEUExchange('okxeu', options, new FrameStore());
 };
 
 const createDemoExchange = (): OKXEUDemoExchange => {
@@ -28,7 +28,7 @@ const createDemoExchange = (): OKXEUDemoExchange => {
     tuning: { consoleLogging: false },
   };
 
-  return new OKXEUDemoExchange('okxeudemo', options, new DefaultStore());
+  return new OKXEUDemoExchange('okxeudemo', options, new FrameStore());
 };
 
 describe('OKXEUExchange validateAccount', () => {

@@ -1,5 +1,5 @@
 //! Today's `wss /account` JSON envelope (NX `services/exchange-server/src/server.ts`).
-pub use crate::publication::RequestedInterval;
+pub use crate::publication::{RequestedInterval, RequestedTickers};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -20,17 +20,30 @@ pub struct InitPayload {
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
     pub sealed: Option<crate::delegated::Sealed>,
+    /// AGT-54: claim this session's parked DELEGATED account without a handover.
+    /// Connection-local, like `sealed`; never a setting or fingerprint field.
+    #[serde(default, skip_serializing)]
+    pub resume: Option<bool>,
+    /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
+    #[serde(default, skip_serializing)]
+    pub resume_proof: Option<String>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
     /// Output cadence for this connection only; never an engine setting or identity.
     #[serde(default, skip_serializing)]
     pub publish_interval_ms: RequestedInterval,
+    /// The ticker rows this connection receives; absent or null is the full table.
+    /// Connection-local, like `publish_interval_ms`; unrelated to `tuning.activeTickerSymbols`.
+    #[serde(default, skip_serializing)]
+    pub active_ticker_symbols: RequestedTickers,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
     pub passphrase: Option<String>,
     pub testnet: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<safe_cex_venues::DisplayTuning>,
     #[serde(default, deserialize_with = "text")]
     pub application_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
@@ -111,11 +124,25 @@ fn coinbase_algorithm<'de, D: serde::Deserializer<'de>>(
         .transpose()
 }
 
+/// Builds a malformed publication field's refusal for an account name and init flag.
+pub type PublicationRefusal = fn(Option<&str>, bool) -> String;
+
 impl InitPayload {
     /// Identifies what an account's engine is built from; an init with the same
     /// one shares the account (see `accounts::build_fingerprint`).
     pub fn fingerprint(&self) -> String {
         crate::accounts::build_fingerprint(self)
+    }
+
+    /// This connection's publication choices, or the refusal for a malformed one.
+    pub fn publication(&self) -> Result<crate::publication::Preferences, PublicationRefusal> {
+        let interval: PublicationRefusal =
+            |name, init| publish_interval_refused(name, "invalid_publish_interval", init);
+        let tickers: PublicationRefusal =
+            |name, init| active_ticker_symbols_refused(name, "invalid_active_ticker_symbols", init);
+        let interval = self.publish_interval_ms.millis().ok_or(interval)?;
+        let tickers = self.active_ticker_symbols.selection().ok_or(tickers)?;
+        Ok(crate::publication::Preferences { interval, tickers })
     }
 }
 
@@ -214,32 +241,16 @@ pub(crate) fn with_account_label(text: String, label: &str) -> String {
     if data.get("accountName").and_then(Value::as_str) == Some(label) {
         return text;
     }
-    match data.get("op").and_then(Value::as_str) {
-        Some("store") => {
-            if let Some(rows) = data
-                .get_mut("data")
-                .and_then(|data| data.get_mut("activeTWAPs"))
-                .and_then(Value::as_array_mut)
-            {
-                for row in rows {
-                    if let Some(row) = row.as_object_mut() {
-                        row.insert("accountName".into(), label.into());
-                    }
+    if data.get("op").and_then(Value::as_str) == Some("twap:stateUpdate")
+        && let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut)
+    {
+        for row in rows.values_mut() {
+            for field in ["options", "state"] {
+                if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                    fields.insert("accountName".into(), label.into());
                 }
             }
         }
-        Some("twap:stateUpdate") => {
-            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
-                for row in rows.values_mut() {
-                    for field in ["options", "state"] {
-                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
-                            fields.insert("accountName".into(), label.into());
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
     data.insert("accountName".into(), label.into());
     envelope(kind, frame["d"].take())
@@ -341,6 +352,27 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
     )
 }
 
+/// Verified credentials with incompatible shared settings are not a key refusal.
+pub(crate) fn init_settings_conflict(
+    account_name: &str,
+    conflict: crate::accounts::SettingsConflict,
+    stage: InitRefusalStage,
+) -> String {
+    let fields = conflict.names();
+    let message = format!(
+        "Shared account settings differ ({}). Existing orders and algos are unchanged. Join with the current settings and use apply-settings before reinitializing.",
+        fields.join(", ")
+    );
+    msg(
+        account_name,
+        "error",
+        json!([message, {
+            "forceToast": true, "initRefused": true, "kind": "settings-conflict", "transient": false,
+            "differing_fields": fields, "stage": stage,
+        }]),
+    )
+}
+
 /// A closed refusal for connection-local publication metadata; never echo input.
 pub fn publish_interval_refused(
     account_name: Option<&str>,
@@ -353,6 +385,28 @@ pub fn publish_interval_refused(
         _ => "Publish interval must be an integer number of milliseconds",
     };
     let mut options = json!({"kind":kind,"publishIntervalRefused":true});
+    if init {
+        options["initRefused"] = true.into();
+        options["forceToast"] = true.into();
+    }
+    envelope(
+        "msg",
+        json!({"op":"error","accountName":account_name,"data":[message,options]}),
+    )
+}
+
+/// A closed refusal for a connection-local ticker selection; never echo input.
+pub fn active_ticker_symbols_refused(
+    account_name: Option<&str>,
+    kind: &'static str,
+    init: bool,
+) -> String {
+    let message = match kind {
+        "not_admitted" => "Account is not admitted; active ticker symbols were not changed",
+        "auth_expired" => crate::auth::TOKEN_EXPIRED,
+        _ => "Active ticker symbols must be null or a list of at most 1024 symbols of 1-128 bytes",
+    };
+    let mut options = json!({"kind":kind,"activeTickerSymbolsRefused":true});
     if init {
         options["initRefused"] = true.into();
         options["forceToast"] = true.into();
@@ -623,6 +677,35 @@ pub fn session(resume_id: &str, resumed: bool) -> String {
     envelope(
         "session",
         json!({"resumeId": resume_id, "resumed": resumed}),
+    )
+}
+
+/// `resumeProof` travels only in-band and must accompany a later `resume` init;
+/// `delegatedResume` names the labels this socket may claim with one. The latter
+/// is omitted when empty, so clients only send that init to a box that offers it.
+pub fn session_with_delegated(
+    resume_id: &str,
+    resumed: bool,
+    proof: &str,
+    delegated: &[String],
+) -> String {
+    let mut data = json!({"resumeId": resume_id, "resumed": resumed, "resumeProof": proof});
+    if !delegated.is_empty() {
+        data["delegatedResume"] = json!(delegated);
+    }
+    envelope("session", data)
+}
+
+/// The `resume` init found nothing to claim; the client falls back to a handover.
+pub fn init_resume_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Session resume is unavailable; a fresh key handover is required",
+            {"initRefused": true, "kind": "admission", "reason": "resume_unavailable",
+             "transient": true, "attached": false, "outcome": "notSent"}
+        ]),
     )
 }
 

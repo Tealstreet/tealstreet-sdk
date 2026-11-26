@@ -7,6 +7,8 @@ pub(super) const DELEGATED_RETENTION: Duration = Duration::from_secs(48 * 60 * 6
 pub(super) struct Retention {
     generation: u64,
     pub deadline: Instant,
+    /// Wall-clock deadline, for host notifications only.
+    deadline_ms: u64,
     proxy_expired: bool,
     pub(super) labels: std::collections::BTreeSet<String>,
     task: tokio::task::AbortHandle,
@@ -62,8 +64,8 @@ impl Registry {
             return;
         }
         let now = Instant::now();
-        // Interim #3424 / 8625fd869: unusable proxy authority stops and erases.
-        // Issuer-backed renewal versus long-term early stop remains Sam's choice.
+        // #3424 / 8625fd869: unusable proxy authority stops and erases. AGT-37
+        // (2026-11-20) made this the permanent contract; there is no renewal.
         let (deadline, proxy_expired) = if account.proxy_authority_required() {
             let maximum_ms = DELEGATED_RETENTION.as_secs() * 1000;
             let remaining_ms = account
@@ -86,9 +88,21 @@ impl Registry {
         };
         let generation = self.next_id();
         resident.retain_until(deadline);
+        let interval = deadline.saturating_duration_since(now);
+        let deadline_ms = now_ms().saturating_add(interval.as_millis() as u64);
+        // AGT-37: armed with, and aborted by, the retention task; never when off
+        // or when the interval is shorter than the lead.
+        let warn_at = (self.host_notify.is_some() && interval >= crate::host_notify::WARNING_LEAD)
+            .then(|| deadline - crate::host_notify::WARNING_LEAD);
         let registry = Arc::downgrade(self);
         let captured = Arc::downgrade(account);
         let task = tokio::spawn(async move {
+            if let Some(warn_at) = warn_at {
+                tokio::time::sleep_until(warn_at).await;
+                if let (Some(registry), Some(account)) = (registry.upgrade(), captured.upgrade()) {
+                    registry.warn_delegated(&account, generation);
+                }
+            }
             tokio::time::sleep_until(deadline).await;
             if let (Some(registry), Some(account)) = (registry.upgrade(), captured.upgrade()) {
                 registry.expire_delegated(&account, generation);
@@ -110,9 +124,35 @@ impl Registry {
             generation,
             labels,
             deadline,
+            deadline_ms,
             proxy_expired,
             task: task.abort_handle(),
         });
+    }
+
+    /// The warning re-checks the same identity and generation as expiry does.
+    fn warn_delegated(&self, account: &Arc<Account>, generation: u64) {
+        let accounts = self.accounts.lock().unwrap();
+        let key = (account.user.clone(), account.registry_name().to_owned());
+        if !accounts
+            .get(&key)
+            .is_some_and(|current| Arc::ptr_eq(current, account))
+        {
+            return;
+        }
+        let holders = account.holders.lock().unwrap();
+        let Some(retention) = holders.retention.as_ref().filter(|retention| {
+            retention.generation == generation
+                && !holders.disposed
+                && !holders.by_id.values().any(Option::is_some)
+        }) else {
+            return;
+        };
+        let draft =
+            crate::host_notify::shutdown_warning(retention.proxy_expired, retention.deadline_ms);
+        drop(holders);
+        drop(accounts);
+        self.host_notify(account, draft);
     }
 
     fn expire_delegated(&self, account: &Arc<Account>, generation: u64) {
@@ -135,6 +175,9 @@ impl Registry {
         {
             return;
         }
+        let shutdown = holders.retention.as_ref().map(|state| {
+            crate::host_notify::retention_shutdown(state.proxy_expired, state.deadline_ms)
+        });
         let (disposal, reason) = if holders
             .retention
             .as_ref()
@@ -152,11 +195,16 @@ impl Registry {
         accounts.remove(&key);
         drop(holders);
         drop(accounts);
+        if let Some(shutdown) = shutdown {
+            self.host_notify(account, shutdown);
+        }
         let stopped = self.keep_notice(account, "delegated-retention");
         self.dispose_for(account, disposal, reason, Some(stopped));
     }
 
     /// Explicit removal/disable also applies while this user's account is retained.
+    /// AGT-79 left this unconditional: an unjoined socket names no registration, so
+    /// its dispose cannot be told apart from this device's own stale socket.
     pub(crate) fn dispose_delegated(&self, user: &str, name: &str) {
         let accounts = self.accounts.lock().unwrap();
         let mut matches = accounts.values().filter(|account| {

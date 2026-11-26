@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from './reference/binance/binance.exchange';
 import { loop } from '../utils/loop';
+import { referenceStore } from './cutover/referenceFixture';
+import { BinanceExchange } from './reference/binance/binance.exchange';
 
 vi.mock('../utils/loop', () => ({ loop: vi.fn() }));
 
@@ -21,11 +22,7 @@ describe('Binance REST reconciliation ordering', () => {
     const accountRequest = new Promise<Record<string, unknown>>((resolve) => {
       resolveAccount = resolve;
     });
-    const store = {
-      loaded: {},
-      subscribe: vi.fn(),
-      update: vi.fn(),
-    };
+    const store = referenceStore({ orders: [] });
     const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
     const balance = { total: 100, free: 80, used: 20, upnl: 5 };
     const stalePositions = [{ id: 'BTCUSDT', contracts: 1 }];
@@ -44,18 +41,13 @@ describe('Binance REST reconciliation ordering', () => {
     resolveAccount({ balance, positions: stalePositions });
     await tick;
 
-    expect(store.update).toHaveBeenLastCalledWith({
-      balance,
-      loaded: { balance: true, positions: true },
-    });
+    expect(store.balance).toMatchObject(balance);
+    expect(store.loaded).toMatchObject({ balance: true, positions: true });
+    expect(store.positions).toEqual([]);
   });
 
   it('uses a 25-second healthy snapshot and a 3-second degraded fallback', async () => {
-    const store = {
-      loaded: {},
-      subscribe: vi.fn(),
-      update: vi.fn(),
-    };
+    const store = referenceStore({ orders: [] });
     const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
     const fetchPositions = vi.fn().mockResolvedValue([]);
     const fetchPositionsAndBalance = vi.fn().mockResolvedValue({
@@ -96,11 +88,7 @@ describe('Binance REST reconciliation ordering', () => {
   });
 
   it('pauses background snapshots before the shared IP request-weight limit is exhausted', async () => {
-    const store = {
-      loaded: {},
-      subscribe: vi.fn(),
-      update: vi.fn(),
-    };
+    const store = referenceStore({ orders: [] });
     const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
     const fetchPositions = vi.fn().mockResolvedValue([]);
     const fetchPositionsAndBalance = vi.fn().mockResolvedValue({
@@ -132,11 +120,7 @@ describe('Binance REST reconciliation ordering', () => {
   });
 
   it('honors Binance retry-after after a rate-limit response', async () => {
-    const store = {
-      loaded: {},
-      subscribe: vi.fn(),
-      update: vi.fn(),
-    };
+    const store = referenceStore({ orders: [] });
     const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
 
     (exchange as any).observeRequestWeight({
@@ -152,11 +136,7 @@ describe('Binance REST reconciliation ordering', () => {
   });
 
   it('stops the second background snapshot when the first response reaches the weight threshold', async () => {
-    const store = {
-      loaded: {},
-      subscribe: vi.fn(),
-      update: vi.fn(),
-    };
+    const store = referenceStore({ orders: [] });
     const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store as any);
     const fetchPositions = vi.fn().mockImplementation(async () => {
       (exchange as any).observeRequestWeight({

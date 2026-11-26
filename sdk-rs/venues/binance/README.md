@@ -26,6 +26,9 @@ does not validate every lot against native minimum quantities or notionals.
 A venue refusal can therefore follow an accepted order. USD-M/PM attached algo
 orders retain their whole intent quantity, and derivatives can continue later batches
 after a definite per-row refusal. These are known legacy partial-placement paths.
+One former path is closed: a USD-M/PM `conditional` or trailing entry with an attached
+stop-loss/take-profit used to be placed without its legs, and now refuses before any
+write with the engine's shared `stop_entry_legs_refusal` copy (AGT-115).
 
 | Audit path | Legacy reference evidence | Verdict |
 | --- | --- | --- |
@@ -86,7 +89,7 @@ attribution is kept separately from the engine's aggregate physical classificati
 The journal adds no filter validation, reallocation, retries or dispatch decisions.
 It also reaches engine-owned unproven HTTP seals through the existing read-only
 capture hook. Venue-authored Unknown failures and warnings include exactly
-`The outcome is unknown. Check Open Orders`; engine-owned seals retain their
+`We couldn’t confirm this change. Check your open orders before trying again.`; engine-owned seals retain their
 existing canonical wording. Existing cancellation and amendment paths continue
 to use their physical lifecycle journal.
 
@@ -103,3 +106,20 @@ also pins an accepted batch followed by a mixed refused/accepted batch, then HTT
 503. The caller retains the complete 16-row journal and native accepted IDs,
 including five Unknown dispatched rows and the final unissued row. The engine's
 canonical unknown-after-refusal message remains unchanged.
+
+## Bounded fill and order history
+
+Bounded userTrades and allOrders reads treat limit as a physical page size.
+A full page subdivides its current range into disjoint inclusive millisecond
+windows and drains both before completing. Parent rows remain available on a
+later failure; native IDs deduplicate parent/child overlap. All requests stay
+under the caller's original read root and deadline. Unbounded requests and an
+indivisible saturated millisecond retain explicit incomplete markers; the
+latter needs an ID-cursor strategy before it can ever be called complete.
+
+The TypeScript Binance positions fold sends its whole 14-day straddle lookback
+through one native fill-range request per symbol. Existing seven-day windows
+are preserved, and additional reads occur only when a physical page saturates.
+All pages retain that request's original read root and deadline. The fold
+reconstructs intervals after native draining and refuses an incomplete source.
+Other venues retain their existing fill-read windows.

@@ -33,13 +33,16 @@ open([row(7001)]);
 const orderInfo=(price,amount,type=0,tif=1,ask=0,reduce=0,trigger=0)=>({AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,ClientOrderIndex:123,BaseAmount:amount,Price:price,IsAsk:ask,Type:type,TimeInForce:tif,ReduceOnly:reduce,TriggerPrice:trigger,OrderExpiry:1,ExpiredAt:1,Nonce:0,Sig:'placeholder',...(attributed?{L2TxAttributes:{1:integrator,2:250,3:0}}:{})});
 const write=(type,info,nonce)=>http('POST','/api/v1/sendTx',{code:200,tx_hash:'offline-tx-'+nonce},new URLSearchParams({tx_type:String(type),tx_info:JSON.stringify({...info,Nonce:nonce})}).toString());
 const cancel=(id,nonce)=>write(15,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,Index:id,ExpiredAt:1,Sig:'placeholder'},nonce);
+// Rust proves every ordinary placement by client index before reporting it (AGT-45).
+const proven=(command,count,status='open')=>http('GET',`/api/v1/accountOrders?account_index=42&client_order_indexes=${Array.from({length:count},(_,i)=>`<created:${command}:${i}>`).join(',')}`,{code:200,orders:Array.from({length:count},(_,i)=>({client_order_index:`<created:${command}:${i}>`,status,filled_base_amount:'0'}))},undefined,{afterCommand:command,impl:'rust'});
+const only=(impl)=>{records.at(-1).impl=impl;};
 const setting=(fraction,mode,nonce)=>write(20,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,InitialMarginFraction:fraction,MarginMode:mode,ExpiredAt:1,Sig:'placeholder'},nonce);
 ws(0,{type:'update/market_stats',channel:'market_stats:all',market_stats:Object.fromEntries(stats.map(s=>[s.market_id,s]))});
 ws(1,{type:'subscribed/account_all',channel:'account_all:42'});
 ws(1,{type:'subscribed/account_all_orders',channel:'account_all_orders:42'});
 ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:[row(7001)]}});
 command({op:'cancelOrders',ids:['7001']}); cancel(7001,7);open([],1);
-command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:90,amount:0.25,timeInForce:'PostOnly'}]});write(14,orderInfo(9000,250,0,2),8);
+command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:90,amount:0.25,timeInForce:'PostOnly'}]});write(14,orderInfo(9000,250,0,2),8);proven(2,1);
 command({op:'setLeverage',symbol:'ETH',leverage:5});setting(2000,0,9);http('GET','/api/v1/account?by=index&value=42',account(5,0),undefined,{afterCommand:3});
 command({op:'setMarginType',symbol:'ETH',isolated:true});setting(2000,1,10);http('GET','/api/v1/account?by=index&value=42',account(5,1),undefined,{afterCommand:4});
 command({op:'setPositionMode',hedged:false});
@@ -54,9 +57,17 @@ const legs=[row(7002,{client_order_index:'<created:6:0>'}),row(7003,{client_orde
 ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:legs}});Object.assign(records.at(-1),{beforeAck:true,afterCommand:6});
 // The ordinary account update follows the command, as for any placement.
 ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:legs}});open(legs.map((r)=>({...r,client_order_index:Number(r.order_index)})),6);
-command({op:'amendOrder',id:'7002',price:95,amount:0.5});cancel(7002,12);write(14,orderInfo(9500,500),13);open(legs.slice(1).map((r)=>({...r,client_order_index:Number(r.order_index)})),7);
+command({op:'amendOrder',id:'7002',price:95,amount:0.5});
+// TS cancels and replaces; Rust edits the resting limit in place with ModifyOrder (tx 17).
+cancel(7002,12);only('ts');write(14,orderInfo(9500,500),13);only('ts');open(legs.slice(1).map((r)=>({...r,client_order_index:Number(r.order_index)})),7);only('ts');
+write(17,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,Index:7002,BaseAmount:500,Price:9500,TriggerPrice:0,ExpiredAt:1,Sig:'placeholder'},12);only('rust');
+// Rust completes the modify only once its tx has executed (AGT-77; status 2).
+http('GET','/api/v1/tx?by=hash&value=offline-tx-12',{code:200,hash:'offline-tx-12',status:2},undefined,{afterCommand:7,impl:'rust'});
+open([{...legs[0],price:'95',initial_base_amount:'0.5',remaining_base_amount:'0.5'},...legs.slice(1)].map((r)=>({...r,client_order_index:Number(r.order_index)})),7);only('rust');
 command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:96,amount:0.25},{symbol:'ETH',type:'limit',side:'buy',price:97,amount:0.5}]});
-http('POST','/api/v1/sendTxBatch',{code:200,tx_hash:['offline-tx-14','offline-tx-15']},new URLSearchParams({tx_types:'[14,14]',tx_infos:JSON.stringify([JSON.stringify({...orderInfo(9600,250),Nonce:14}),JSON.stringify({...orderInfo(9700,500),Nonce:15})])}).toString());
+// The modify spends one nonce where TS spent two, so Rust's batch starts one lower.
+const batch=(nonce,impl)=>{http('POST','/api/v1/sendTxBatch',{code:200,tx_hash:['offline-tx-'+nonce,'offline-tx-'+(nonce+1)]},new URLSearchParams({tx_types:'[14,14]',tx_infos:JSON.stringify([JSON.stringify({...orderInfo(9600,250),Nonce:nonce}),JSON.stringify({...orderInfo(9700,500),Nonce:nonce+1})])}).toString());only(impl);};
+batch(14,'ts');batch(13,'rust');proven(8,2);
 // The legacy array payload makes TS emit both a FILLED order and the execution.
 // Rust accepts the execution once; the independent gate oracle removes the TS duplicate.
 const filled=row(8001,{status:'filled',price:'100',initial_base_amount:'0.25',filled_base_amount:'0.25',remaining_base_amount:'0',updated_at:EPOCH+6500});

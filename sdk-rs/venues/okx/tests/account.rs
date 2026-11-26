@@ -715,6 +715,44 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     assert_eq!(fill_count(e.take_frame(10.0).unwrap()), 2);
 }
 
+// AGT-83: the native tradeId is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER, 5.0);
+    e.take_frame(6.0);
+    for (filled, identity) in [
+        ("2", r#""tradeId":"t1""#),
+        ("3", r#""tradeId":"t2""#),
+        ("4", r#""fillTime":"3""#),
+    ] {
+        let row = ORDER.replace("\"live\"", "\"partially_filled\"").replace(
+            "\"accFillSz\":\"1\"",
+            &format!(r#""accFillSz":"{filled}","fillSz":"1","fillPx":"38000",{identity}"#),
+        );
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    let fills = safe_cex_engine::wire::fills(e.take_frame(10.0).unwrap()).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| (fill.id.as_deref(), fill.order_id.as_str()))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        [
+            (Some("t1"), "123"),
+            (Some("t2"), "123"),
+            (Some("123"), "123")
+        ]
+    );
+    assert!(fills.iter().all(|fill| fill.amount == fills[0].amount));
+}
+
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();
@@ -872,6 +910,92 @@ fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
         ),
     );
     assert_eq!(e.store().order("algo123_tp").unwrap().price, 43000.0);
+}
+
+/// AGT-98: amend-algos adds a leg (`conditional` -> `oco`) or deletes one
+/// (`oco` -> `conditional`) under the same algoId. The update after a deletion
+/// no longer lists that leg, so its row goes and the other leg stays.
+#[test]
+fn an_algo_update_without_a_leg_removes_that_leg_row() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |row: &str| format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#);
+    let stop_only = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"conditional","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","reduceOnly":"true"}"#;
+    let both = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"oco","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","tpTriggerPx":"42000","tpOrdPx":"-1","tpTriggerPxType":"last","reduceOnly":"true"}"#;
+    ws(&mut e, business, &frame(stop_only));
+    assert!(e.store().order("algo7_sl").is_some());
+    assert!(e.store().order("algo7_tp").is_none());
+    ws(&mut e, business, &frame(both));
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    ws(&mut e, business, &frame(stop_only));
+    assert!(
+        e.store().order("algo7_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    let tp_only = both.replace("\"oco\"", "\"conditional\"").replace(
+        r#""slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","#,
+        "",
+    );
+    ws(&mut e, business, &frame(&tp_only));
+    assert!(e.store().order("algo7_sl").is_none());
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+}
+
+/// AGT-98 review: a reduce-only `trigger` amended across the reference price
+/// changes kind (TP to SL) and so its row suffix. The update removes the old
+/// suffix's row, and a cancel of the trigger stays a cancel-algos.
+#[test]
+fn a_trigger_crossing_the_reference_keeps_one_row_and_cancels_whole() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |px: &str| {
+        format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT-SWAP","algoId":"algo9","ordType":"trigger","state":"live","side":"sell","sz":"1","triggerPx":"{px}","triggerPxType":"last","ordPx":"-1","reduceOnly":"true"}}]}}"#
+        )
+    };
+    ws(&mut e, business, &frame("42000"));
+    assert_eq!(
+        e.store().order("algo9_tp").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::TakeProfit)
+    );
+    ws(&mut e, business, &frame("38000"));
+    assert!(
+        e.store().order("algo9_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(
+        e.store().order("algo9_sl").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::StopLoss)
+    );
+    // A stale sibling (as a census could restore) still never turns the cancel into a leg delete.
+    let mut stale = e.store().order("algo9_sl").unwrap().clone();
+    stale.id = "algo9_tp".into();
+    stale.kind = safe_cex_engine::model::OrderType::TakeProfit;
+    e.store_mut().upsert_order(stale);
+    e.handle(
+        6.0,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 9,
+            ids: vec!["algo9_sl".into()],
+        }),
+    );
+    let out = prepared(&mut e, 6.0);
+    let write = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r),
+            _ => None,
+        })
+        .expect("a cancel write");
+    assert!(
+        write.url.contains("/api/v5/trade/cancel-algos"),
+        "{}",
+        write.url
+    );
 }
 
 #[test]
@@ -1170,6 +1294,95 @@ fn triggered_order_row_survives_its_parent_algo_going_effective() {
         r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"900","algoId":"algo9","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}]}"#,
     );
     assert!(e.store().order("900").is_some());
+}
+
+// OKX's published `orders` push (docs-v5 "WS / Order channel", "Push data
+// example", fetched 2026-11-25), verbatim except where that page's field table
+// says a triggered stop-market child differs: `algoId`/`algoClOrdId` ("a value
+// when algo order is triggered"), `source` 7 ("the normal order triggered by the
+// TP/SL order"), `ordType` market, and a SWAP instrument and size. No recorded
+// live capture of such a child exists in this repo.
+const TRIGGERED_STOP_MARKET_FILLED: &str = r#"{"arg":{"channel":"orders","instType":"SWAP","instId":"BTC-USDT-SWAP","uid":"614488474791936"},"data":[{"accFillSz":"1","algoClOrdId":"0f6b1d2c3e4a5b6c7d8e9f0a1b2c3d4e","algoId":"452197707845865000","amendResult":"","amendSource":"","avgPx":"31527.1","cancelSource":"","category":"normal","ccy":"","clOrdId":"","code":"0","cTime":"1654084334977","execType":"T","fee":"-0.02522168","feeCcy":"USDT","fillFee":"-0.02522168","fillFeeCcy":"USDT","fillNotionalUsd":"31.50818374","fillPx":"31527.1","fillSz":"1","fillPnl":"0.01","fillTime":"1654084353263","fillPxVol":"","fillPxUsd":"","fillMarkVol":"","fillFwdPx":"","fillMarkPx":"","fillIdxPx":"","instId":"BTC-USDT-SWAP","instType":"SWAP","lever":"10","msg":"","notionalUsd":"31.50818374","ordId":"452197707845865472","ordType":"market","pnl":"0","posSide":"net","px":"","pxUsd":"","pxVol":"","pxType":"","quickMgnType":"","rebate":"0","rebateCcy":"USDT","reduceOnly":"true","reqId":"","side":"sell","attachAlgoClOrdId":"","slOrdPx":"","slTriggerPx":"","slTriggerPxType":"last","source":"7","state":"filled","stpId":"","stpMode":"","sz":"1","tag":"","tdMode":"cross","tgtCcy":"","tpOrdPx":"","tpTriggerPx":"","tpTriggerPxType":"last","attachAlgoOrds":[],"tradeId":"242589207","tradeQuoteCcy":"USDT","lastPx":"38892.2","uTime":"1654084353264","isTpLimit":"false","riskBypassResult":"","linkedAlgoOrd":{"algoId":""}}]}"#;
+
+/// (order id, its algo's identities), each on the fill's own symbol.
+fn triggered(actions: &[Action]) -> Vec<(String, Vec<String>)> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::OrderTriggered {
+                symbol,
+                order_id,
+                by,
+            }) => {
+                assert_eq!(symbol, "BTCUSDT", "the child's symbol");
+                Some((order_id.clone(), by.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+// AGT-196: a stop-market child's first private frame is already `filled`, so no
+// row for it is ever stored. Its fill still names the algo that placed it, by
+// `algoId` and `algoClOrdId`, so the placer's host can claim it.
+#[test]
+fn a_stop_market_child_filled_in_its_first_frame_names_its_algo_with_the_fill() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    e.take_frame(6.0);
+    ws(&mut e, private, TRIGGERED_STOP_MARKET_FILLED);
+    let actions = prepared(&mut e, 7.0);
+    assert!(
+        e.store().order("452197707845865472").is_none(),
+        "no row stored"
+    );
+    let fills = safe_cex_engine::wire::fills(e.take_frame(8.0).unwrap()).unwrap();
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].order_id, "452197707845865472");
+    assert_eq!(
+        triggered(&actions),
+        [(
+            "452197707845865472".to_owned(),
+            vec![
+                "452197707845865000".to_owned(),
+                "0f6b1d2c3e4a5b6c7d8e9f0a1b2c3d4e".to_owned()
+            ]
+        )]
+    );
+}
+
+// A trigger-limit child that rests first links on its later fill too, by
+// `algoClOrdId` alone when that is all it carries; a plain order links nothing.
+// Hand-built rows in OKX's documented `orders` field names, not a live capture.
+#[test]
+fn a_resting_triggered_child_links_on_its_fill_and_a_plain_order_never_does() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let child = r#"{"instId":"BTC-USDT-SWAP","ordId":"900","clOrdId":"","algoId":"","algoClOrdId":"tsalgo900","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}"#;
+    let plain = r#"{"instId":"BTC-USDT-SWAP","ordId":"901","clOrdId":"caller901","algoId":"","algoClOrdId":"","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"38000"}"#;
+    for row in [child, plain] {
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    assert!(triggered(&prepared(&mut e, 6.0)).is_empty(), "no fill yet");
+    for row in [child, plain] {
+        let filled = row.replace("\"live\"", "\"filled\"").replace(
+            "\"accFillSz\":\"0\"",
+            "\"accFillSz\":\"4\",\"fillSz\":\"4\",\"fillPx\":\"39000\",\"tradeId\":\"t\"",
+        );
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#),
+        );
+    }
+    assert_eq!(
+        triggered(&prepared(&mut e, 7.0)),
+        [("900".to_owned(), vec!["tsalgo900".to_owned()])]
+    );
 }
 
 #[test]

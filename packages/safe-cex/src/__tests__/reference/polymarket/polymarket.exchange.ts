@@ -1,3 +1,4 @@
+import type { TickSize } from '@polymarket/clob-client-v2';
 /**
  * Polymarket Exchange Implementation
  *
@@ -13,18 +14,19 @@
  * Reference: https://docs.polymarket.com/
  */
 
-import type { Store } from '../../../store/store.interface';
 import type {
   GammaMarketInfo,
   PolymarketCredentials,
   PolymarketExchangeOptions,
   PolymarketOrderResponse,
 } from './polymarket.types';
-import type { TickSize } from '@polymarket/clob-client-v2';
 
 import { ethers } from 'ethers';
 import sumBy from 'lodash/sumBy';
+import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -52,14 +54,10 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, replacing } from '../stopEntryLegs';
 import { PolymarketAPI } from './polymarket.api';
-import {
-  ORDER_SIDE_MAP,
-  ORDER_STATUS_MAP,
-  ORDER_TYPE_MAP,
-  SignatureType,
-} from './polymarket.constants';
+import { ORDER_SIDE_MAP, ORDER_STATUS_MAP, ORDER_TYPE_MAP, SignatureType } from './polymarket.constants';
 import { createSignedOrder, createWallet, signApiKeyDerivationMessage } from './polymarket.signing';
 import { PolymarketPrivateWebSocket } from './polymarket.ws-private';
 import { PolymarketPublicWebSocket } from './polymarket.ws-public';
@@ -126,7 +124,7 @@ export class PolymarketExchange extends BaseExchange {
   // Position cost basis tracking (token_id -> avg_price)
   private costBasis: Map<string, number> = new Map();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     // Initialize wallet if private key provided
@@ -229,11 +227,7 @@ export class PolymarketExchange extends BaseExchange {
     try {
       const nonce = 0;
       const serverTimestamp = await this.api.getServerTime();
-      const { address, signature, timestamp } = await signApiKeyDerivationMessage(
-        this.wallet,
-        nonce,
-        serverTimestamp,
-      );
+      const { address, signature, timestamp } = await signApiKeyDerivationMessage(this.wallet, nonce, serverTimestamp);
 
       this.credentials = await this.api.deriveApiKey(address, nonce, signature, timestamp);
       this.log('Successfully derived API credentials', LogSeverity.Info);
@@ -254,10 +248,14 @@ export class PolymarketExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // Fetch tickers
       const tickers = await this.fetchTickers();
@@ -265,16 +263,24 @@ export class PolymarketExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Polymarket markets`);
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -293,10 +299,14 @@ export class PolymarketExchange extends BaseExchange {
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
 
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 
@@ -319,19 +329,27 @@ export class PolymarketExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         // Fetch orders
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
 
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
     } catch (err: any) {
       this.log(`Error in tick: ${err?.message}`, LogSeverity.Error);
@@ -373,12 +391,22 @@ export class PolymarketExchange extends BaseExchange {
    */
   fetchMarkets = async (): Promise<Market[]> => {
     const slugs = this.options.polymarket?.marketSlugs;
-    if (slugs !== undefined && (!Array.isArray(slugs) || slugs.length === 0 || slugs.length > 100 ||
-        slugs.some((slug) => typeof slug !== 'string' || !slug.trim()) || new Set(slugs).size !== slugs.length)) {
+    if (
+      slugs !== undefined &&
+      (!Array.isArray(slugs) ||
+        slugs.length === 0 ||
+        slugs.length > 100 ||
+        slugs.some((slug) => typeof slug !== 'string' || !slug.trim()) ||
+        new Set(slugs).size !== slugs.length)
+    ) {
       throw new Error('Polymarket marketSlugs must contain 1-100 unique nonempty strings');
     }
     try {
-      const gammaMarkets = await this.api.getGammaMarkets({ active: true, closed: false, ...(slugs !== undefined ? { slug: slugs } : {}) });
+      const gammaMarkets = await this.api.getGammaMarkets({
+        active: true,
+        closed: false,
+        ...(slugs !== undefined ? { slug: slugs } : {}),
+      });
 
       const markets: Market[] = [];
 
@@ -400,11 +428,7 @@ export class PolymarketExchange extends BaseExchange {
             symbol,
             base: gm.slug,
             quote: 'pUSD',
-            active:
-              gm.active &&
-              !gm.closed &&
-              gm.enableOrderBook !== false &&
-              gm.acceptingOrders !== false,
+            active: gm.active && !gm.closed && gm.enableOrderBook !== false && gm.acceptingOrders !== false,
             precision: {
               amount: 2,
               price: precisionFromTickSize(gm.orderPriceMinTickSize),
@@ -532,7 +556,7 @@ export class PolymarketExchange extends BaseExchange {
           leverage: 1, // No leverage
           unrealizedPnl,
           contracts: holding.size,
-          liquidationPrice: 0, // No liquidation in prediction markets
+          liquidationPrice: null, // No liquidation in prediction markets
           positionMode: PositionMode.OneWay,
           info: {
             tokenId,
@@ -558,10 +582,14 @@ export class PolymarketExchange extends BaseExchange {
   fetchAndSetPositions = async (): Promise<Position[]> => {
     const positions = await this.fetchPositions();
     if (!this.isDisposed) {
-      this.store.update({
-        positions,
-        loaded: { ...this.store.loaded, positions: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          positions,
+          loaded: { positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
     return positions;
   };
@@ -573,7 +601,7 @@ export class PolymarketExchange extends BaseExchange {
     try {
       const apiOrders = await this.api.getOpenOrders();
 
-      return apiOrders.map((o) => this.mapOrder(o));
+      return this.privateWebsocket.filterSnapshotOrders(apiOrders.map((o) => this.mapOrder(o)));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
       throw err;
@@ -602,10 +630,20 @@ export class PolymarketExchange extends BaseExchange {
     };
   }
 
+  // AGT-120: the inherited batch places one by one, so refuse a reduce-only order with legs first.
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
+    this.assertCallerClientOrderIds(orders);
+    const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
+    return orderIds.flat();
+  };
+
   /**
    * Place an order
    */
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     const rejectOrder = (message: string): never => {
       this.emitAndLogError(message);
@@ -622,9 +660,7 @@ export class PolymarketExchange extends BaseExchange {
       opts.reduceOnly === true ||
       opts.close === true
     ) {
-      return rejectOrder(
-        'Polymarket limit orders do not support trigger, bracket, or close-only options',
-      );
+      return rejectOrder('Polymarket limit orders do not support trigger, bracket, or close-only options');
     }
     if (opts.timeInForce !== undefined && opts.timeInForce !== OrderTimeInForce.GoodTillCancel) {
       return rejectOrder(`Polymarket does not support ${opts.timeInForce} in safe-cex`);
@@ -718,13 +754,15 @@ export class PolymarketExchange extends BaseExchange {
     const price = 'price' in update ? update.price : order.price;
 
     // Place a new order with updated parameters
-    return this.placeOrder({
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      amount,
-      price,
-    });
+    return replacing(this, () =>
+      this.placeOrder({
+        symbol: order.symbol,
+        type: order.type,
+        side: order.side,
+        amount,
+        price,
+      }),
+    );
   };
 
   /**
@@ -802,9 +840,12 @@ export class PolymarketExchange extends BaseExchange {
 
     const fidelityByInterval: Record<string, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
     const fidelity = fidelityByInterval[opts.interval];
-    if (!fidelity || opts.limit === 0 ||
-        [opts.from, opts.to].some((v) => v !== undefined && (!Number.isFinite(v) || v < 0)) ||
-        (opts.from !== undefined && opts.to !== undefined && opts.from > opts.to)) {
+    if (
+      !fidelity ||
+      opts.limit === 0 ||
+      [opts.from, opts.to].some((v) => v !== undefined && (!Number.isFinite(v) || v < 0)) ||
+      (opts.from !== undefined && opts.to !== undefined && opts.from > opts.to)
+    ) {
       throw new Error('Invalid Polymarket candle bounds or interval');
     }
     if (opts.from === undefined && opts.to !== undefined) {
@@ -820,15 +861,22 @@ export class PolymarketExchange extends BaseExchange {
       opts.from === undefined ? 'max' : undefined,
       fidelity,
     );
-    const candles: Candle[] = history.map((h) => {
-      const timestamp = Number(h.t) * 1000;
-      const price = Number(h.p);
-      if (!Number.isFinite(timestamp) || timestamp < 0 || !Number.isFinite(price) || price < 0 || price > 1) {
-        throw new Error('Invalid Polymarket price history');
-      }
-      return { timestamp, open: price, high: price, low: price, close: price, volume: 0 };
-    }).filter((c) => (opts.from === undefined || c.timestamp >= opts.from) && (opts.to === undefined || c.timestamp <= opts.to));
-    const unique = [...new Map(candles.map((c) => [c.timestamp, c])).values()].sort((a, b) => a.timestamp - b.timestamp);
+    const candles: Candle[] = history
+      .map((h) => {
+        const timestamp = Number(h.t) * 1000;
+        const price = Number(h.p);
+        if (!Number.isFinite(timestamp) || timestamp < 0 || !Number.isFinite(price) || price < 0 || price > 1) {
+          throw new Error('Invalid Polymarket price history');
+        }
+        return { timestamp, open: price, high: price, low: price, close: price, volume: 0 };
+      })
+      .filter(
+        (c) =>
+          (opts.from === undefined || c.timestamp >= opts.from) && (opts.to === undefined || c.timestamp <= opts.to),
+      );
+    const unique = [...new Map(candles.map((c) => [c.timestamp, c])).values()].sort(
+      (a, b) => a.timestamp - b.timestamp,
+    );
     return opts.limit === undefined ? unique : unique.slice(-opts.limit);
   };
 

@@ -472,9 +472,9 @@ fn encode(
                 || order.base_amount == 0
                 || order.base_amount > MAX_ORDER_VALUE
                 || order.price == 0
-                || order.trigger_price == 0
             {
-                return Err("Invalid Lighter protective modification".into());
+                // A zero trigger is the venue's nil trigger: a plain limit edit.
+                return Err("Invalid Lighter order modification".into());
             }
             append_words(
                 &mut data,

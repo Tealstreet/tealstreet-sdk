@@ -148,13 +148,24 @@ test('enabled Bitget collection retains an eligible miss as unresolved without r
     report: { ...entries()[1].report, ...value, tapeSha256: String(index + 1).repeat(64) }, exitCode: 0,
   }))];
   const before = JSON.stringify(values);
-  const collected = verifyGateSuite({ suite: 'bitget', entries: values, manifest, mode: 'collect' });
+  // Synthetic tape SHAs: the real AGT-83 Bitget accepted differences name tapes this fixture does not replay.
+  const accepted = { schema: 1, differences: [] };
+  const collected = verifyGateSuite({ suite: 'bitget', entries: values, manifest, accepted, mode: 'collect' });
   assert.deepEqual(collected.errors, []);
   assert.equal(collected.pending.length, 1);
   assert.equal(collected.passes, 2, 'only the two ordinary strict private passes count');
   assert.equal(collected.strictFailures, 1);
   assert.equal(collected.rows[0].label, 'UNRESOLVED CPU MISS (not certification)');
   assert.equal(JSON.stringify(values), before, 'strict FAIL, exit1 and original raw remain unchanged');
-  assert.ok(verifyGateSuite({ suite: 'bitget', entries: values, manifest }).errors.length, 'default strict still rejects');
-  assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, mode: 'collect' }).errors.length, 'wrong suite cannot substitute Bitget workload identities');
+  assert.ok(verifyGateSuite({ suite: 'bitget', entries: values, manifest, accepted }).errors.length, 'default strict still rejects');
+  assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, accepted, mode: 'collect' }).errors.length, 'wrong suite cannot substitute Bitget workload identities');
+});
+
+test('missing replay output reports the earlier failed build instead of a raw ENOENT', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'missing-replay-output-'));
+  try {
+    assert.throws(() => loadGateLedger({ root: directory }), /no strict replay ledger.*earlier.*build|size/i);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

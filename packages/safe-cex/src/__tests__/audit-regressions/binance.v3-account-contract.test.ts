@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/binance/binance.types';
 import { BASE_FAPI_URL, BASE_PAPI_URL, BASE_WS_URL as PM_BASE_WS_URL } from '../../exchanges/binance/binancepm.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 const market = {
   id: 'BTC/USDT:USDT',
@@ -39,11 +40,16 @@ describe('Binance USD-M V3 account contract', () => {
   });
 
   it('joins V3 position risk with symbol config and synthesizes omitted zero positions', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [market, { ...market, id: 'ETH/USDT:USDT', symbol: 'ETHUSDT', base: 'ETH' }],
-      options: { isHedged: false },
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [market, { ...market, id: 'ETH/USDT:USDT', symbol: 'ETHUSDT', base: 'ETH' }],
+          options: { isHedged: false },
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange.xhr, 'get').mockImplementation(async (url: string) => {
       if (url === ENDPOINTS.POSITION_RISK) {
@@ -96,7 +102,7 @@ describe('Binance USD-M V3 account contract', () => {
   });
 
   it('does not overwrite rich V3 position-risk state with compact account rows', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const richPosition = {
       id: 'BTCUSDT:short:oneway',
       symbol: 'BTCUSDT',
@@ -108,7 +114,12 @@ describe('Binance USD-M V3 account contract', () => {
       unrealizedPnl: 10,
       liquidationPrice: 70_000,
     };
-    store.update({ positions: [richPosition] });
+    store.apply(
+      nativeFixture(
+        { positions: [richPosition] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({
       data: {
@@ -116,7 +127,9 @@ describe('Binance USD-M V3 account contract', () => {
         availableBalance: '75',
         totalUnrealizedProfit: '10',
         totalInitialMargin: '25',
-        assets: [{ asset: 'USDT', walletBalance: '100', availableBalance: '75', unrealizedProfit: '10', initialMargin: '25' }],
+        assets: [
+          { asset: 'USDT', walletBalance: '100', availableBalance: '75', unrealizedProfit: '10', initialMargin: '25' },
+        ],
         positions: [{ symbol: 'BTCUSDT', positionSide: 'BOTH', positionAmt: '-0.01', unrealizedProfit: '10' }],
       },
     } as any);

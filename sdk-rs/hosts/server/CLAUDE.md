@@ -5,12 +5,47 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Bybit acknowledgement audit
+
+Order audits decode the native legacy error wrapper before their unchanged
+160-character message cap, including algo dispatch failures. The closed
+`bybitBatchAcknowledgement` field retains list shapes/counts and at most eight
+child summaries, plus at most eight bounded native IDs as reconciliation evidence.
+It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
+client echoes or raw responses. This journal field changes no outcome, algo
+ownership, retry or resend authority; it is not forwarded to Sentry.
+
+## Order audit stage timings
+
+Session command audit lines carry `stages_us` (µs offsets for received, admitted,
+queued, sent, responded, replied); `/health` `typedOutcomes` counts settled and
+unknown typed receipts. Contract and the `scripts/audit-latency.sh` report are in
+`DESIGN.md` under "Order audit stage timings". The audit line is written after the
+reply is handed to the socket, so `replied` is real; keep that order. Add only
+numeric stages here, never identifiers, and never estimate a stage not observed.
+
+## History reply completeness
+
+Command-owned `history.incomplete` notices retain a closed reason and optional
+later-page failure record in that command's pending reply. Successful hosted
+history rows carry it in `data.completeness`; unknown metadata falls back to the
+positive incomplete marker. No venue text or response values enter this record.
+Native floating-point and integer JSON command IDs must both name an exact u32;
+malformed or unrelated owners cannot mark another reply or become command zero.
+Replacement assertions clear previous failure detail. Read results, rejection,
+paging, retries, deadlines and write behavior retain their existing contracts.
+
 ## Connection-local public pacing
 
 The optional `publishIntervalMs` init field and `set-publish-interval` account op
 are documented in `DESIGN.md` under Connection-local publication interval.
 Keep cadence in the socket/account pump, never in shared engine identity or
 configuration. Private financial sections and outcomes bypass the public coalescer.
+
+The optional `activeTickerSymbols` init field and `set-active-ticker-symbols` op
+(AGT-107) select this connection's ticker rows the same way; see DESIGN.md under
+Connection-local ticker selection. A selected table renumbers rows, so every
+selection change must re-send a full `TICKERS`, never deltas against old rows.
 
 ## Sentry owner identity
 
@@ -233,6 +268,8 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+A refused proof read fails the join without a second signature: the venue crate
+no longer sends ApeX's whole-second legacy read resend (AGT-75).
 
 Exact `binanceoptions` mainnet proves possession through its existing signed
 EAPI margin-account, position and open-order startup reads. Public exchange-info,
@@ -340,17 +377,42 @@ Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits;
 Bitget, OKX, BloFin and Binance PM use the bare 32 hex digits. Bybit and other
 compatible text adapters retain the UUID. Lighter/Robinhood, Binance inverse,
 AsterDEX, Kraken and MEXC receive no caller venue ID, per the spec's supported-ID
-condition; receipts keep `clientOrderId: null`. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Numeric adapters retain their current
-refusal pending their separate bounded-hash mapping. Bybit protection also omits
-its unsupported caller ID and reports null. HyroTrader retains its native
-caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
+condition; receipts keep `clientOrderId: null`. WOO also receives none: until
+2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
+before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
+to accept it before the box emits one. The router UUID/fingerprint ledger
+remains primary dedupe in every case. Backpack and GRVT also omit the caller ID: their numeric fields cannot carry
+the UUID losslessly. HyroTrader omits it because the native codec supports no
+caller IDs. Those native validators are unchanged; explicit unsupported caller
+IDs still refuse. Bybit protection also omits its unsupported caller ID and
+reports null, as do orders whose adapter refuses a caller ID by shape
+(`trigger_refuses_caller_id`: BloFin, Phemex, OKX, Bitget, KuCoin, Bitunix, ApeX Omni,
+Crypto.com, Binance (USD-M/Spot/PM), BingX, Paradex, Coinbase/Coinbase Spot; AGT-46/#3758/AGT-110). Adding a newly hosted
+venue means auditing its adapter's caller-ID guard first. A pre-dispatch refusal of
+such a submit also reports null, since no ID was sent (`OrderReceipt::Placement`'s
+`caller_id`). Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
 the server supplies no dedupe ledger or queued-order storage. `order.cancelQueued`
 is a router operation and never becomes a venue cancellation. The interception
 contract is documented in `docs/plans/callers/delegated-order-frames.md`.
+
+Placement completions (`settle_intent`) send `refused` with `error.outcome:
+"rejected"` and the venue's message only when the engine marked the whole order
+`rejected` and its detail carries no partial IDs/count, non-`notSent` element or
+`protection`. Every other failure without `notSent` proof, including a partially
+accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
+as the venue's refusal; the SDK still keeps the intent unknown and never resends.
+A successful completion is `placed` only with one native ID, or (a single bracket on a
+venue that places its legs after the entry: OKX limit/market, Binance limit/market and
+stop-type, Kraken limit; `order_contract::bracket_protective_legs`) one entry ID followed by
+exactly its separately placed legs, reported as the entry (AGT-111/AGT-112; live: OKX and
+Kraken limit, Binance USD-M stop entry; the other Binance shapes rest on the adapter trace).
+Where legs are expected, a lone ID is a missing leg and stays unknown. A `conditional`
+entry (and an OKX stop-type one) with legs counts none: OKX, Binance USD-M/PM and Kraken
+refuse it before any write (AGT-115; OKX and Binance used to drop the legs). Ten more
+adapters refuse the entry kinds whose legs they would drop; `delegated-order-frames.md` lists them.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
@@ -413,6 +475,10 @@ reduce-only LIMIT price amendments use the ordinary native amend path.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An amend whose engine-store target is a stop/take-profit/trailing row, read
+before dispatch, settles an authoritative ID-less completion as applied with
+`protectionApplied` (Bybit Full stops edit via trading-stop; AGT-40 reported
+9/9 such edits as unknown). Ordinary ID-less amends stay unknown.
 Every raw typed-action payload checks recursive key uniqueness before `Value`
 conversion: placement arrays, close orders, scheduling values and algo data.
 Schema rejection follows binding/hash checks and precedes ACK or native work.
@@ -431,6 +497,21 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Algo outcome notices
+
+`warning`, `chaser:complete` and `twap:complete` reach every live tab/device
+holding the account, as algo errors do, not only the signing socket: a
+non-signing tab that missed an algo's end reported it as lost. Both ends are
+kept as unheard, replayed with `replayed: true`, and survive a dispose like
+chase ends. Correlated `callMethod:done` replies stay on the signing socket.
+
+`twap:complete` (`{id, end: "completed" | "stopped", ordersExecuted,
+ordersCount}`) is `TwapEffect::Ended`: every slice handed off, or the user's
+`twap:stop`. No completed TWAP is ever listed in `activeTWAPs`, so without it a
+page reads a normal finish as a lost TWAP (AGT-58). A halt on an unknown outcome
+(`twap:outcome` tells it) and an account disposal (`terminate_all`) send none:
+a disposal must never read as a normal end.
 
 ## Classified admission refusals
 
@@ -453,12 +534,68 @@ without a seed remains unchanged and supplies no placement-signing capability.
 Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
-cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
-For a selected proxy transport, token expiry has an explicitly interim terminal
-stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
-fallback or authority extension is implied. Sam still owns the long-term policy.
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately
+once the last live holder disposes; see DELEGATED holder-refcounted dispose.
+For a selected proxy transport, token expiry is a terminal stop/erase with
+recorded reason `proxy-token-expired`; there is no issuer renewal, direct
+fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
 
+## DELEGATED holder-refcounted dispose
+
+AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
+detaches only that holder in `Registry::release_with_labels`. The shared actor and
+resident signer keep running only while a LIVE holder of ANOTHER client
+registration (init `instanceId`, kept in `Holders::confirmed`) confirmed a
+DELEGATED request; otherwise `dispose_for` stops and erases as before. Before this,
+one device switching that account to LOCAL/COSIGNED (which disposes first) stopped
+it for every device. What never keeps the key: a COSIGNED tab attached to the
+resident, a parked holder, and the leaving registration's own half-open socket
+(detached with it, so its idle-out cannot start 48 h retention). An unjoined
+socket's `dispose_delegated` stays unconditional: it names no registration.
+Detachment and the keep decision run on EVERY disposed alias, including when the
+socket keeps another alias. A detached label loses command authority through
+`Registry::holds_label`, which session cleanup, order admission and the deferred
+action guard check instead of the socket-wide `holds`.
+Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
+
+## Host notifications (AGT-37)
+
+`src/host_notify.rs` queues DELEGATED notifications for the gateway when
+`TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
+timer. Retention arms `delegated.shutdownWarning` in its own task and emits
+`delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
+emits `fill` (every fill, with a venue-account-scoped, user-independent `fillKey` and `placedHere`
+from the native host's `own_placements` ledger, so the gateway can withhold a
+fill another user's resident placed on a shared venue account; the box never
+withholds, AGT-196), `orderRejected` (chase/TWAP placements only, through
+`RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
+the key owner's life. The gateway only logs the drain's `serverRestart`
+shutdown, so a box stop (drain, SIGTERM, forced user drain) marks its
+`AlgoInput::Dispose` with `server_stopped`, and the host sends one
+`algoStopped`/`serverRestart` per chase and TWAP it cuts short (AGT-119); the
+drain waits for those before its bounded flush. Never re-promote the
+resident-level shutdown to cover them. Build notifications only through
+`HostNotification::build` and the typed `Fields` setters: never add a free-text
+field, and never log the token. Contract, env vars and delivery semantics:
+`DELEGATED_RETENTION.md` "Host notification lane".
+
+
+## DELEGATED reconnect resume
+
+AGT-54: a reconnect inside the 60-second resume grace re-attaches a parked
+DELEGATED label without a key offer, handover or venue probe. `open()` advertises
+claimable labels as `session.delegatedResume`; the client then sends
+`init {signingMode:"delegated", resume:true, resumeProof}` without `sealed`.
+`resumeProof` is the parking socket's in-band session-frame value: the resume id
+rides the URL (with the proxy token), so it alone must never authorize a signer.
+Only the socket whose resume consumed the id may claim, one label at a time, and
+owner, label, venue, identity digest and `same_handover_settings` must match.
+The claim cancels retention like any admitted hold and never revives a disposed,
+replaced or retention-expired account. Every refusal is the transient
+`resume_unavailable` init error; the client falls back to the ordinary handover.
+Clients send `resume` only for advertised labels, so an older box never sees it.
 
 ## DELEGATED intent clock skew
 
@@ -470,3 +607,31 @@ Action deadlines use the same bounded age, clamp future-key wall expiry to
 arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
+
+## User-facing notices
+
+Order/action receipt messages and algo interruption notices use plain wording
+and at most one action; typed outcomes and receipt fields remain unchanged.
+Proof-check details stay in `partial.proof_failed` diagnostics rather than the
+Bybit action message. Cancel-warning cleanup still recognizes retained old text.
+## Venue rejections in typed action outcomes
+
+`order_actions::settle` treats an engine `rejected` error with no partial
+evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
+`refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
+definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
+"still unconfirmed" toast. Partial or uncertain failures stay `unknown`.
+
+## Running algo amendments (AGT-97)
+
+Typed v1 `kind:algo` carries `chaser:amend` and `twap:amend` to the same shared
+Rust factories as LOCAL. Chaser accepts only limitPrice/offset/maxAttempts;
+TWAP only intervalMs/remainingSlices. Identity and quantity remain immutable.
+Finished/stopping/unknown jobs refuse; no stop-and-replace or in-flight order
+edit. Future TWAP repartition retains every issued child and journal result.
+The original registration/owner/deadline/IO fences remain; amendments also use
+the start admission fence while draining. Synchronous amendment refusals and
+drain refusals settle notSent (a drained start still keeps its pre-existing
+interrupted receipt); accepted edits keep the existing unknown algo receipt and
+reconcile through account events/state. Exact units/limits and mobile event
+names live in docs/plans/callers/delegated-action-frames.md.

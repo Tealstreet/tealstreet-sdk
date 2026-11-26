@@ -33,7 +33,7 @@ const validTiming = (value, now) =>
   Number(value) < now + 1000;
 
 export const createAsterRequestValidator = (options = {}) => {
-  const { AbiCoder, getAddress, getBytes, hashMessage, keccak256, recoverAddress, TypedDataEncoder, Wallet } = initializeAsterCrypto();
+  const { getAddress, recoverAddress, TypedDataEncoder, Wallet } = initializeAsterCrypto();
   const nonces = new Map();
   return ({ method, url, headers = {}, body, now = Date.now() }) => {
     const parsed = new URL(url);
@@ -84,42 +84,21 @@ export const createAsterRequestValidator = (options = {}) => {
     if (!fresh(nonce, now, 1000n)) throw new Error('Aster V3 nonce is not fresh microseconds');
     const scope = signer.toLowerCase();
     if (nonces.get(scope)?.has(nonce)) throw new Error('Aster V3 signer nonce was reused');
-    const code =
-      (method === 'POST' && parsed.pathname.endsWith('/order')) ||
-      (method === 'GET' && /\/(builder|agent)$/.test(parsed.pathname));
-    let digest;
-    if (code) {
-      const testnet = parsed.hostname === 'fapi.asterdex-testnet.com';
-      if (
-        params.get('asterChain') !== (testnet ? 'Testnet' : 'Mainnet') ||
-        params.has('timestamp') ||
-        params.has('recvWindow')
-      )
-        throw new Error('Aster Code signing fields/domain mismatch');
-      const rawQuery = parsed.search.slice(1);
-      const suffix = `&signature=${signature}`;
-      if (!rawQuery.endsWith(suffix)) throw new Error('Aster Code signature must follow the exact signed query');
-      digest = TypedDataEncoder.hash(
-        { name: 'AsterSignTransaction', version: '1', chainId: testnet ? 714 : 1666, verifyingContract: ZERO },
-        { Message: [{ name: 'msg', type: 'string' }] },
-        { msg: rawQuery.slice(0, -suffix.length) },
-      );
-    } else {
-      if (
-        params.get('recvWindow') !== '20000' ||
-        !validTiming(params.get('timestamp'), now) ||
-        params.has('asterChain')
-      )
-        throw new Error('Aster V3 timestamp/window is invalid');
-      const payload = Object.fromEntries(
-        signed.filter(([name]) => !['user', 'signer', 'nonce'].includes(name)).sort(([a], [b]) => a.localeCompare(b)),
-      );
-      const encoded = AbiCoder.defaultAbiCoder().encode(
-        ['string', 'address', 'address', 'uint256'],
-        [JSON.stringify(payload), user, signer, BigInt(nonce)],
-      );
-      digest = hashMessage(getBytes(keccak256(encoded)));
-    }
+    const testnet = parsed.hostname === 'fapi.asterdex-testnet.com';
+    if (
+      params.get('asterChain') !== (testnet ? 'Testnet' : 'Mainnet') ||
+      params.has('timestamp') ||
+      params.has('recvWindow')
+    )
+      throw new Error('Aster V3 signing fields/domain mismatch');
+    const rawQuery = parsed.search.slice(1);
+    const suffix = `&signature=${signature}`;
+    if (!rawQuery.endsWith(suffix)) throw new Error('Aster V3 signature must follow the exact signed query');
+    const digest = TypedDataEncoder.hash(
+      { name: 'AsterSignTransaction', version: '1', chainId: testnet ? 714 : 1666, verifyingContract: ZERO },
+      { Message: [{ name: 'msg', type: 'string' }] },
+      { msg: rawQuery.slice(0, -suffix.length) },
+    );
     const recovered = recoverAddress(digest, signature);
     if (recovered !== new Wallet(secret).address || recovered !== signer)
       throw new Error('Aster V3 recoverable signature mismatch');

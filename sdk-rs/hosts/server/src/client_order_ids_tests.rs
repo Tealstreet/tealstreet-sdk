@@ -17,14 +17,12 @@ fn client_id_asterdex() {
     assert_eq!(actual, Value::Null, "asterdex: native none contract");
 }
 
+// AGT-50: the hosted intent UUID is not a native caller ID for backpack;
+// omit it and retain the router ledger/UUID as the dedupe authority.
 #[test]
 fn client_id_backpack() {
     let actual = serde_json::to_value(client_order_id("backpack", INTENT)).unwrap();
-    assert_eq!(
-        actual,
-        json!(INTENT),
-        "backpack: native numeric-follow-up contract"
-    );
+    assert_eq!(actual, Value::Null, "backpack: native none contract");
 }
 
 #[test]
@@ -139,14 +137,12 @@ fn client_id_cryptocom() {
     assert_eq!(actual, json!(INTENT), "cryptocom: native uuid contract");
 }
 
+// AGT-50: the hosted intent UUID is not a native caller ID for grvt;
+// omit it and retain the router ledger/UUID as the dedupe authority.
 #[test]
 fn client_id_grvt() {
     let actual = serde_json::to_value(client_order_id("grvt", INTENT)).unwrap();
-    assert_eq!(
-        actual,
-        json!(INTENT),
-        "grvt: native numeric-follow-up contract"
-    );
+    assert_eq!(actual, Value::Null, "grvt: native none contract");
 }
 
 #[test]
@@ -169,10 +165,12 @@ fn client_id_hyperliquidspot() {
     );
 }
 
+// AGT-50: the hosted intent UUID is not a native caller ID for hyrotrader;
+// omit it and retain the router ledger/UUID as the dedupe authority.
 #[test]
 fn client_id_hyrotrader() {
     let actual = serde_json::to_value(client_order_id("hyrotrader", INTENT)).unwrap();
-    assert_eq!(actual, json!(INTENT), "hyrotrader: native uuid contract");
+    assert_eq!(actual, Value::Null, "hyrotrader: native none contract");
 }
 
 #[test]
@@ -251,14 +249,12 @@ fn client_id_phemex() {
     assert_eq!(actual, json!(INTENT), "phemex: native uuid contract");
 }
 
+// Was `json!(INTENT)` until the 2026-11-19 woo-t report: WOO refused the UUID
+// before the venue, so every DELEGATED plain market `order.submit` failed.
 #[test]
 fn client_id_woo() {
     let actual = serde_json::to_value(client_order_id("woo", INTENT)).unwrap();
-    assert_eq!(
-        actual,
-        json!(INTENT),
-        "woo: native numeric-follow-up contract"
-    );
+    assert_eq!(actual, Value::Null, "woo: native none contract");
 }
 
 #[test]

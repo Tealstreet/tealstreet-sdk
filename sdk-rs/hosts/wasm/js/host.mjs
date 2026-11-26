@@ -1,3 +1,5 @@
+import { historyFailureOf } from './history-failure.mjs';
+export { historyFailureOf } from './history-failure.mjs';
 import { bingxWriteShapeFromError } from './bingx-write-shape.mjs';
 export { bingxWriteShapeOf, bingxWriteShapeFromError } from './bingx-write-shape.mjs';
 import { historyDecodeOf } from './history-decode.mjs';
@@ -216,7 +218,7 @@ function interruptedCommand(error, command, interrupted) {
   error.command = command.op;
   if (interrupted && WRITE_COMMANDS.has(command.op)) {
     error.outcome = 'unknown';
-    error.message += '; command outcome is unknown. Reconcile before retrying';
+    error.message += '. This action wasn’t confirmed. Check your open orders before trying again.';
   }
   if (command.clientOrderId !== undefined) error.clientOrderId = command.clientOrderId;
   if (command.clientOrderIds?.length) error.clientOrderIds = command.clientOrderIds;
@@ -284,6 +286,8 @@ function writePlanErrorOf(value, active, depth) {
 }
 
 const APPLIED_EFFECTS = new Set(['cancel', 'amend', 'tradingStop', 'settings', 'deferredChild', 'positionTrigger']);
+// `write_plan::LegRole` (AGT-214): display data, so an unrecognised role drops only itself.
+const LEG_ROLES = new Set(['entry', 'takeProfit', 'stopLoss', 'other']);
 
 function parseWritePlanElements(value, active, depth) {
   if (!Array.isArray(value) || active.has(value) || depth > 32) return undefined;
@@ -295,6 +299,7 @@ function parseWritePlanElements(value, active, depth) {
         || (row.clientOrderId !== undefined && typeof row.clientOrderId !== 'string')) return undefined;
       const element = { index: row.index };
       if (row.clientOrderId !== undefined) element.clientOrderId = row.clientOrderId;
+      if (LEG_ROLES.has(row.role)) element.role = row.role;
       if (row.status === 'placed') {
         if (!Array.isArray(row.orderIds) || !row.orderIds.length
           || !Array.from(row.orderIds).every((id) => typeof id === 'string' && id.length > 0)) return undefined;
@@ -358,7 +363,7 @@ export class ExchangeError extends Error {
 
 export class CommandTimeoutError extends Error {
   constructor(timeoutMs, command) {
-    super(`Engine command timed out after ${timeoutMs} ms`);
+    super(`This action timed out after ${timeoutMs} ms`);
     this.name = 'CommandTimeoutError';
     this.code = 'COMMAND_TIMEOUT';
     this.timeoutMs = timeoutMs;
@@ -368,7 +373,7 @@ export class CommandTimeoutError extends Error {
 
 export class CommandDeadlineError extends Error {
   constructor(cause, command) {
-    super('Unable to establish engine command deadline', { cause });
+    super('This action’s time limit couldn’t be set', { cause });
     this.name = 'CommandDeadlineError';
     this.code = 'COMMAND_DEADLINE_FAILED';
     interruptedCommand(this, command, true);
@@ -377,7 +382,7 @@ export class CommandDeadlineError extends Error {
 
 export class CommandProtocolError extends Error {
   constructor(cause, command) {
-    super('Invalid exchange engine command response', { cause });
+    super('The account reply couldn’t be read', { cause });
     this.name = 'CommandProtocolError';
     this.code = 'ENGINE_PROTOCOL_ERROR';
     interruptedCommand(this, command, true);
@@ -386,7 +391,7 @@ export class CommandProtocolError extends Error {
 
 export class EngineDisposedError extends Error {
   constructor(command, interrupted = false) {
-    super('engine disposed');
+    super('The account was closed');
     this.name = 'EngineDisposedError';
     this.code = 'ENGINE_DISPOSED';
     interruptedCommand(this, command, interrupted);
@@ -396,7 +401,7 @@ export class EngineDisposedError extends Error {
 /** A trapped engine cannot be reused. An interrupted write may already exist at the venue. */
 export class EngineDeadError extends Error {
   constructor(cause, command) {
-    super('Exchange engine stopped unexpectedly', { cause });
+    super('Trading was interrupted for this account', { cause });
     this.name = 'EngineDeadError';
     this.code = 'ENGINE_DEAD';
     // A trap (a Rust panic) is the engine's own fault, never a venue answer.
@@ -405,7 +410,7 @@ export class EngineDeadError extends Error {
       this.command = command.op;
       if (WRITE_COMMANDS.has(command.op)) {
         this.outcome = 'unknown';
-        this.message = 'Exchange engine stopped; command outcome is unknown. Reconcile before retrying';
+        this.message = 'Trading was interrupted before this action was confirmed. Check your open orders before trying again.';
       }
       if (command.clientOrderId !== undefined) this.clientOrderId = command.clientOrderId;
       if (command.clientOrderIds?.length) this.clientOrderIds = command.clientOrderIds;
@@ -798,7 +803,7 @@ export class EngineHost {
   /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
   health() {
     this.assertHttpHandoffIdle();
-    if (this.disposed) throw new Error('engine disposed');
+    if (this.disposed) throw new Error('The account was closed');
     const json = this.engine.health?.();
     return json ? JSON.parse(json) : undefined;
   }
@@ -877,14 +882,14 @@ export class EngineHost {
     if (isOwnerCurrent !== undefined && typeof isOwnerCurrent !== 'function')
       throw new TypeError('Algo owner check must be a function');
     if (typeof this.engine.algoStart !== 'function')
-      throw new ExchangeError('This engine has no algos', { kind: 'unsupported', outcome: 'notSent' });
+      throw new ExchangeError('Automated orders aren’t available for this account', { kind: 'unsupported', outcome: 'notSent' });
     this.algoOwnerCurrent = isOwnerCurrent;
     if (twapOwner !== undefined) {
       const bound = twapOwner && typeof twapOwner.ownerId === 'string' && twapOwner.ownerId
         && Number.isSafeInteger(twapOwner.generation) && twapOwner.generation >= 0;
       const start = bound ? this.engine.algoStartOwned : this.engine.algoStartUnowned;
       if (typeof start !== 'function')
-        throw new ExchangeError('This engine build predates TWAP ownership; update the engine to run algos', { kind: 'unsupported', outcome: 'notSent' });
+        throw new ExchangeError('TWAP isn’t available in this version. Update Tealstreet to use it.', { kind: 'unsupported', outcome: 'notSent' });
       // An owner hook without a current owner still starts algos; only TWAP restores are refused.
       if (bound) this.invoke(start, accountName, JSON.stringify({ ownerId: twapOwner.ownerId, generation: twapOwner.generation }), this.transport.now(), Date.now());
       else this.invoke(start, accountName, this.transport.now(), Date.now());
@@ -930,7 +935,7 @@ export class EngineHost {
     // A user nuke is execution, so keep the strict fence outside the pure getter.
     if (!this.checkAlgosForExecution()) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
     if (typeof this.engine.algoStopAll !== 'function')
-      throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
+      throw new ExchangeError('The account couldn’t stop automated orders before Nuke', { kind: 'unsupported', outcome: 'notSent' });
     const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
     this.runAlgos(this.invoke(this.engine.algoStopAll, this.transport.now(), Date.now(), reason));
     if (this.deadError) throw this.deadError;
@@ -1630,7 +1635,12 @@ export class EngineHost {
         const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
           ? this.commands.get(command) : undefined;
         // The engine's closed reason code, never the message (which may quote the venue).
-        if (code === 'history.incomplete' && pending) pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+        if (code === 'history.incomplete' && pending) {
+          pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+          pending.historyFailure = fields?.reason === 'laterPageFailed' ? historyFailureOf({
+            operation: fields.historyOperation, kind: fields.historyFailureKind, venueCode: fields.historyVenueCode,
+          }) : undefined;
+        }
         const event = { level, code, message, fields };
         let callbackFailure;
         try { pending?.onEvent?.(event); }
@@ -1710,6 +1720,7 @@ export class EngineHost {
           if (pending.incomplete && Array.isArray(result)) {
             Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
             if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
+            if (pending.historyFailure) Object.defineProperty(result, 'historyFailure', { value: pending.historyFailure, writable: true, configurable: true });
           }
           this.settleCommand(action.command, result);
         }

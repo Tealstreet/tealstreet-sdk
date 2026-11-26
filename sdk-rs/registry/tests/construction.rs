@@ -498,7 +498,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     assert_eq!(v3.outcome, Some(Outcome::NotSent));
     assert_eq!(
         v3.message,
-        "AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only"
+        "This signing connection supports AsterDEX V1 but not V3 account keys"
     );
     for venue in [
         "binance",

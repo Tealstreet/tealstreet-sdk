@@ -1,4 +1,7 @@
-//! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+//! Actual native identity requests: exact routes/signers, failure ownership, no financial Store commits.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use support::Options;
 mod support;
 use safe_cex_crypto::{Encoding, hmac_sha256};
@@ -160,7 +163,11 @@ fn identity_uses_balance_list_for_both_products_and_selected_exact_signer() {
                     result(respond(&mut engine, &request, 200, body), false).unwrap(),
                     r#"{"userId":"9007199254740993"}"#
                 );
-                assert_eq!(engine.account_snapshot_frame(NOW), before);
+                assert_unchanged_account(
+                    &before,
+                    engine.account_snapshot_frame(NOW),
+                    [1, 0, 0, 0, 0],
+                );
                 assert!(respond(&mut engine, &request, 200, body).is_empty());
             }
         }
@@ -195,7 +202,7 @@ fn aliases_keep_masked_text_and_required_first_row_never_falls_back() {
         let before = engine.account_snapshot_frame(NOW).to_vec();
         let request = identity_request(&mut engine);
         result(respond(&mut engine, &request, 200, body), true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, engine.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -217,7 +224,15 @@ fn failures_preserve_state_and_finish_once() {
             respond(&mut engine, &request, 503, "unavailable")
         };
         result(actions, true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            engine.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

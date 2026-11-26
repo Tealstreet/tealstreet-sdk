@@ -189,7 +189,7 @@ pub fn is_unsigned(request: &Request) -> bool {
     request.path == "/v3/klines" && request.method == Method::Get
 }
 
-/// Integer protocol milliseconds; the legacy retry floors to whole seconds.
+/// Integer protocol milliseconds; the legacy write retry floors to whole seconds.
 fn stamp(now: f64, legacy: bool) -> f64 {
     if legacy {
         (now / 1000.0).floor() * 1000.0
@@ -737,7 +737,7 @@ pub struct Http {
     timestamp: String,
 }
 impl Http {
-    /// `legacy` selects the one signature-rejection resend canonicalization.
+    /// `legacy` selects the one write signature-rejection resend canonicalization.
     pub fn new(identity: Identity, request: Request, legacy: bool) -> Self {
         Self::with_contracts(identity, request, legacy, vec![])
     }

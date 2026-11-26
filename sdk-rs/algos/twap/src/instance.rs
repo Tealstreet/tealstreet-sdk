@@ -6,7 +6,8 @@ use crate::types::{
     InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
 };
 use crate::{
-    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnv, TwapMarketView, TwapOrderRequest,
+    ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnd, TwapEnv, TwapMarketView,
+    TwapOrderRequest,
 };
 use safe_cex_engine::error::{Outcome, VenueError};
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
@@ -17,9 +18,20 @@ const SLICE_CHASER_MAX_ATTEMPTS: u32 = 1000;
 /// How often a timed-out slice looks whether its chase has settled.
 const SLICE_SETTLE_POLL_MS: f64 = 250.0;
 
+/// A slice's size on the market's step.
+enum SliceSize {
+    Whole(f64),
+    /// Below one amount step: the venue would refuse it.
+    BelowStep {
+        size: f64,
+        step: f64,
+    },
+}
+
 /// A slice placement awaiting [`TwapInstance::placement_settled`].
 #[derive(Clone, Debug)]
 struct PendingSlice {
+    schedule_revision: u64,
     token: u64,
     element_index: usize,
     priced_limit: bool,
@@ -39,6 +51,7 @@ struct SliceTimeout {
 
 #[derive(Debug)]
 pub struct TwapInstance {
+    schedule_revision: u64,
     pub id: String,
     pub options: TwapOptions,
     pub state: TwapState,
@@ -56,7 +69,16 @@ pub struct TwapInstance {
     terminal_unknown: Option<VenueError>,
     next_element_index: usize,
     elements_per_slice: usize,
+    /// How it ended when that was its own doing: every slice handed off, or the user's stop.
+    /// None for a halt or a disposal, which report themselves (or must not read as an end).
+    end: Option<TwapEnd>,
+    /// Definite slice refusals since the last placed slice; see [`REFUSALS_BEFORE_PAUSE`].
+    consecutive_refusals: u32,
 }
+
+/// Definite refusals in a row that pause a running TWAP (AGT-286): a plan that cannot
+/// place must not refuse, and toast, every remaining slice until it runs out.
+pub const REFUSALS_BEFORE_PAUSE: u32 = 5;
 
 impl TwapInstance {
     pub fn new(
@@ -87,9 +109,11 @@ impl TwapInstance {
                 } else {
                     None
                 },
+                role: None,
             })
             .collect();
         Self {
+            schedule_revision: 0,
             id,
             options,
             state,
@@ -107,6 +131,8 @@ impl TwapInstance {
             terminal_unknown: None,
             next_element_index: restored_in_flight,
             elements_per_slice,
+            end: None,
+            consecutive_refusals: 0,
         }
     }
 
@@ -248,19 +274,42 @@ impl TwapInstance {
     }
 
     /// `size` floored to the market's step; the rest rides on the next slice.
-    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> f64 {
+    /// A slice below one step is a [`SliceSize::BelowStep`] and carries nothing:
+    /// riding it on let sub-step slices pile into one last-slice order (AGT-144).
+    fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> SliceSize {
         let Some(step) = view
-            .amount_step(self.options.symbol())
+            .amount_rules(self.options.symbol())
+            .map(|(step, _)| step)
             .filter(|step| step.is_finite() && *step > 0.0)
         else {
-            return size;
+            return SliceSize::Whole(size);
         };
         let steps = (size / step + 1e-9).floor();
+        if steps < 1.0 && size > 0.0 {
+            return SliceSize::BelowStep { size, step };
+        }
         let whole = multiply(steps, step);
         if let Some(next) = self.state.orders_sizes.first_mut() {
             *next = add(*next, subtract(size, whole));
         }
-        whole
+        SliceSize::Whole(whole)
+    }
+
+    /// Count a definite slice refusal; pause after [`REFUSALS_BEFORE_PAUSE`] in a row.
+    fn note_refusal(&mut self, reason: &str, effects: &mut Vec<TwapEffect>) {
+        self.consecutive_refusals += 1;
+        if self.consecutive_refusals >= REFUSALS_BEFORE_PAUSE
+            && self.state.status == TwapStatus::Running
+        {
+            self.consecutive_refusals = 0;
+            self.pause();
+            effects.push(TwapEffect::Log {
+                message: format!(
+                    "TWAP {} paused after 5 refused slices: {reason}",
+                    self.options.symbol()
+                ),
+            });
+        }
     }
 
     fn set_status(&mut self, status: TwapStatus) {
@@ -270,6 +319,103 @@ impl TwapInstance {
 
     fn slice_interval_ms(&self) -> f64 {
         self.options.duration / f64::from(self.options.orders_count) * 60.0 * 1000.0
+    }
+
+    pub(crate) fn amend(
+        &mut self,
+        update: &crate::TwapUpdate,
+        env: &dyn TwapEnv,
+        view: &dyn TwapMarketView,
+    ) -> Result<(), String> {
+        if !matches!(self.state.status, TwapStatus::Running | TwapStatus::Paused)
+            || self.terminal_unknown.is_some()
+            || self.state.orders_sizes.is_empty()
+            || self.tracked_chaser_ids.iter().any(|id| {
+                view.chaser(id)
+                    .is_some_and(|progress| progress.order_may_be_open)
+            })
+        {
+            return Err("TWAP job is not amendable: finished, stopping, unknown or missing".into());
+        }
+        let interval = update
+            .interval_ms
+            .unwrap_or_else(|| self.slice_interval_ms());
+        let remaining = update
+            .remaining_slices
+            .unwrap_or(self.state.orders_sizes.len() as u32);
+        let issued = self.state.orders_count - self.state.orders_sizes.len() as u32;
+        let total = issued
+            .checked_add(remaining)
+            .filter(|total| *total <= crate::MAX_ORDERS_COUNT)
+            .ok_or("Invalid TWAP amendment: total slice count exceeds its bound")?;
+        let next_at = env.now_ms() + interval;
+        let duration = interval * f64::from(total) / 60_000.0;
+        let quantity: f64 = self.state.orders_sizes.iter().sum();
+        if !(interval.is_finite()
+            && interval > 0.0
+            && next_at.is_finite()
+            && next_at <= 9_007_199_254_740_991.0
+            && duration.is_finite()
+            && duration > 0.0
+            && remaining > 0
+            && quantity.is_finite()
+            && quantity > 0.0)
+        {
+            return Err("Invalid TWAP amendment".into());
+        }
+        // Only a changed interval re-anchors the schedule; a slice-count edit keeps it.
+        let reschedule = update.interval_ms.is_some();
+        let revision = if reschedule {
+            self.schedule_revision
+                .checked_add(1)
+                .ok_or("TWAP job is not amendable")?
+        } else {
+            self.schedule_revision
+        };
+        let mut sizes = self.state.orders_sizes.clone();
+        if update.remaining_slices.is_some() {
+            sizes = vec![quantity / f64::from(remaining); remaining as usize];
+            let residue = quantity - sizes.iter().sum::<f64>();
+            *sizes.last_mut().ok_or("Invalid TWAP amendment")? += residue;
+            if sizes.iter().any(|size| !size.is_finite() || *size <= 0.0) {
+                return Err("Invalid TWAP amendment".into());
+            }
+        }
+        // Retain every issued child and result; only unissued reporting slots change.
+        let past: Vec<_> = self
+            .journal
+            .outcomes()
+            .into_iter()
+            .filter(|row| row.element.index < self.next_element_index)
+            .collect();
+        let mut elements: Vec<_> = past.iter().map(|row| row.element.clone()).collect();
+        elements.extend(
+            (self.next_element_index
+                ..self.next_element_index + sizes.len() * self.elements_per_slice)
+                .map(|index| Element {
+                    index,
+                    client_order_id: None,
+                    role: None,
+                }),
+        );
+        let mut journal = WritePlan::new(elements);
+        for row in past {
+            journal
+                .record(row.element.index, row.result)
+                .map_err(|_| "Invalid TWAP amendment: issued journal differs")?;
+        }
+        self.journal = journal;
+        self.state.orders_sizes = sizes;
+        self.state.orders_count = total;
+        self.options.orders_count = total;
+        self.options.duration = duration;
+        self.schedule_revision = revision;
+        if reschedule && self.pending.is_empty() {
+            self.state.next_order_at = next_at;
+            self.slice_due_at = (self.state.status == TwapStatus::Running).then_some(next_at);
+        }
+        self.state_changed = true;
+        Ok(())
     }
 
     pub fn start(
@@ -287,6 +433,7 @@ impl TwapInstance {
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
         let order_size = order_size.map(|size| self.whole_steps(size, view));
+        let slice_number = self.state.orders_count as usize - self.state.orders_sizes.len();
         let randomness = self.options.randomness_percentage;
         let rand = multiply(
             lodash_random(-randomness, randomness, env.random_unit()),
@@ -307,6 +454,33 @@ impl TwapInstance {
         let executed_before = self.state.orders_executed;
         let element_index = self.next_element_index;
         self.next_element_index += self.elements_per_slice;
+        // Legacy TS sends a sub-step slice and the venue refuses it: a definite
+        // refusal for this slice that leaves later slices scheduled.
+        if let Some(SliceSize::BelowStep { size, step }) = order_size {
+            let message = format!(
+                "TWAP {} slice {slice_number} of {} not sent: {size} is below the market's amount step of {step}",
+                self.options.symbol(),
+                self.state.orders_count,
+            );
+            self.record(
+                element_index,
+                ElementResult::NotSent {
+                    error: Some(Box::new(
+                        VenueError::new(message.clone()).outcome(Outcome::NotSent),
+                    )),
+                },
+                effects,
+            );
+            effects.push(TwapEffect::Log { message });
+            self.finish_slice(executed_before, next_order_at, wait_ms, now);
+            self.report_shortfall(effects);
+            self.note_refusal("below the market's amount step", effects);
+            return;
+        }
+        let order_size = order_size.and_then(|size| match size {
+            SliceSize::Whole(size) => Some(size),
+            SliceSize::BelowStep { .. } => None,
+        });
         // TS tests `if (orderSize)`: a zero or NaN slice places nothing.
         let Some(order_size) = order_size.filter(|size| *size != 0.0 && !size.is_nan()) else {
             self.finish_slice(executed_before, next_order_at, wait_ms, now);
@@ -314,7 +488,10 @@ impl TwapInstance {
         };
 
         if self.options.use_chaser_orders {
-            let started = self.start_slice_chaser(order_size, element_index, env, view, effects);
+            let refused = self
+                .start_slice_chaser(order_size, element_index, env, view, effects)
+                .err();
+            let started = refused.is_none();
             self.record(
                 element_index,
                 if started {
@@ -339,6 +516,10 @@ impl TwapInstance {
                 now,
             );
             self.report_shortfall(effects);
+            match refused {
+                None => self.consecutive_refusals = 0,
+                Some(reason) => self.note_refusal(&reason, effects),
+            }
             return;
         }
 
@@ -356,6 +537,7 @@ impl TwapInstance {
         let token = self.next_token;
         self.next_token += 1;
         self.pending.push(PendingSlice {
+            schedule_revision: self.schedule_revision,
             token,
             element_index,
             priced_limit: priced,
@@ -438,8 +620,10 @@ impl TwapInstance {
             self.state.in_flight = None;
         }
         let mut executed = pending.executed_before + 1;
+        let mut refusal = None;
         match outcome {
             Ok(order_ids) => {
+                self.consecutive_refusals = 0;
                 self.record_success(pending.element_index, &order_ids, effects);
                 if pending.priced_limit && !order_ids.is_empty() {
                     self.tracked_limit_order_ids.extend(order_ids);
@@ -452,7 +636,8 @@ impl TwapInstance {
                     return;
                 }
                 let placed_ids = crate::retained_order_ids(&failure);
-                if placed_ids.is_empty() {
+                let placed_some = !placed_ids.is_empty();
+                if !placed_some {
                     executed = pending.executed_before;
                 }
                 if pending.priced_limit {
@@ -472,6 +657,12 @@ impl TwapInstance {
                         failure.message
                     ),
                 });
+                // A partial failure that placed orders is a placed slice, not a refusal.
+                if placed_some {
+                    self.consecutive_refusals = 0;
+                } else {
+                    refusal = Some(failure);
+                }
             }
         }
         // terminate() may have run while the placement was in flight.
@@ -480,8 +671,17 @@ impl TwapInstance {
             return;
         }
         let now = env.now_ms();
-        self.finish_slice(executed, pending.next_order_at, pending.wait_ms, now);
+        let (next_at, wait_ms) = if pending.schedule_revision == self.schedule_revision {
+            (pending.next_order_at, pending.wait_ms)
+        } else {
+            let interval = self.slice_interval_ms();
+            (now + interval, interval)
+        };
+        self.finish_slice(executed, next_at, wait_ms, now);
         self.report_shortfall(effects);
+        if let Some(failure) = refusal {
+            self.note_refusal(&failure.message, effects);
+        }
     }
 
     /// `Completed` alone must not read as done: say how few slices were placed.
@@ -504,13 +704,14 @@ impl TwapInstance {
         self.state_changed = true;
         if self.state.orders_sizes.is_empty() {
             self.state.status = TwapStatus::Completed;
+            self.end.get_or_insert(TwapEnd::Completed);
             return;
         }
         self.state.next_order_at = next_order_at;
         self.slice_due_at = Some(now + wait_ms);
     }
 
-    /// False when the chaser runtime refused it: nothing runs for this slice.
+    /// The chaser runtime's reason when it refused: nothing runs for this slice.
     fn start_slice_chaser(
         &mut self,
         size: f64,
@@ -518,7 +719,7 @@ impl TwapInstance {
         env: &mut dyn TwapEnv,
         view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
-    ) -> bool {
+    ) -> Result<(), String> {
         let chaser_id = env.new_id();
         let request = ChaserRequest {
             id: chaser_id.clone(),
@@ -531,8 +732,10 @@ impl TwapInstance {
             twap_id: self.id.clone(),
         };
         if let Err(message) = view.start_chaser(&request) {
-            effects.push(TwapEffect::Log { message });
-            return false;
+            effects.push(TwapEffect::Log {
+                message: message.clone(),
+            });
+            return Err(message);
         }
         self.tracked_chaser_ids.push(chaser_id.clone());
         self.chaser_elements.push(element_index);
@@ -548,7 +751,7 @@ impl TwapInstance {
                 market_when_settled: false,
             });
         }
-        true
+        Ok(())
     }
 
     fn fire_slice_timeout(
@@ -562,7 +765,7 @@ impl TwapInstance {
         if chaser.is_some_and(|chaser| chaser.order_may_be_open) {
             self.halt_unknown(
                 timeout.element_index.saturating_sub(1),
-                VenueError::new("chaser order may be open"),
+                VenueError::new("The chase order wasn’t confirmed cancelled"),
                 effects,
             );
             return;
@@ -579,7 +782,7 @@ impl TwapInstance {
                 Some(_) => {}
                 None => self.halt_unknown(
                     timeout.element_index.saturating_sub(1),
-                    VenueError::new("chaser end is unknown"),
+                    VenueError::new("The chase completion wasn’t confirmed"),
                     effects,
                 ),
             }
@@ -658,7 +861,11 @@ impl TwapInstance {
                     .map(|_| *index)
             })
         {
-            self.halt_unknown(index, VenueError::new("chaser order may be open"), effects);
+            self.halt_unknown(
+                index,
+                VenueError::new("The chase order wasn’t confirmed cancelled"),
+                effects,
+            );
             return;
         }
         let now = env.now_ms();
@@ -714,6 +921,18 @@ impl TwapInstance {
         self.slice_due_at = None;
         self.slice_timeouts.clear();
         self.chaser_watch_at = None;
+    }
+
+    /// The user's `twap:stop`: unlike [`Self::terminate`] (halts, disposal), an end clients hear.
+    pub fn stop(&mut self) {
+        if self.state.status != TwapStatus::Completed {
+            self.end = Some(TwapEnd::Stopped);
+        }
+        self.terminate();
+    }
+
+    pub fn end(&self) -> Option<TwapEnd> {
+        self.end
     }
 
     pub fn cleanup(&mut self) {

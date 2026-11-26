@@ -1,6 +1,7 @@
 use safe_cex_exchange_server::accounts::Registry;
 use safe_cex_exchange_server::auth::{PROXY_PUBLIC_KEY, Verifier};
 use safe_cex_exchange_server::config::Config;
+use safe_cex_exchange_server::host_notify::HostNotifier;
 use safe_cex_exchange_server::http::{App, drain, router};
 use safe_cex_exchange_server::state::{Log, Metrics};
 use safe_cex_exchange_server::threads::EngineThreads;
@@ -11,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Before anything can panic or fail; held until exit so pending events flush.
     let _sentry = safe_cex_exchange_server::telemetry::init_from_env();
     let config = Config::from_env()?;
+    let host_notify = safe_cex_exchange_server::host_notify::Config::from_env()?;
     // A malformed proxy or tunnel override refuses here, not on the first account.
     let bases = safe_cex_native::resolve::route_bases()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -18,9 +20,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     runtime.block_on(async move {
         let threads = EngineThreads::start(config.engine_threads)?;
+        let host_notifier = match &host_notify {
+            Some(host_notify) => {
+                Log::info(&format!("host notifications on: {host_notify:?}"));
+                Some(HostNotifier::start(host_notify)?)
+            }
+            None => None,
+        };
         let registry = Arc::new(
             Registry::new(threads, config.account_flush, config.resume_grace)
-                .with_router_lease(config.router_lease.clone()),
+                .with_router_lease(config.router_lease.clone())
+                .with_host_notify(host_notifier),
         );
         let app = Arc::new(App {
             registry,

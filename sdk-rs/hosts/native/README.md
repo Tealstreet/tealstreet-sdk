@@ -157,6 +157,46 @@ normalizes legacy credential inputs through trusted setup until cutover callers
 migrate. Neither registration method adds credential setup to the client wire.
 See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
 
+Each account actor also keeps a bounded, memory-only ledger of the order
+identities its own clients placed, read through `AccountHandle::placements`
+(poison-safe `own_placements::lock`):
+
+- **Receipts.** Engine-generated client ids from `PlaceOrders` dispatch receipts,
+  on the symbols the command was checked against. A command the venue
+  definitively refuses (`notSent`, or `rejected` with no accepted leg) forgets
+  them; an Unknown outcome keeps them.
+- **Caller-chosen client ids** never claim: a venue may report a duplicate as
+  Unknown (Bybit, BingX, BloFin), and a closed id can be reused by another
+  order. Only the venue's own native order id from a proven placement claims.
+  A completion's ids are recorded only for a single-symbol command, and never
+  an id equal to a caller id; a failed batch claims only the legs the venue
+  proved placed, matched by client id to their receipts, never by row index
+  (a client id sent on two symbols matches neither). Binance spot and
+  portfolio margin and GRVT key orders by client id, so their completions
+  carry it; their acks send `Notice::PlacementNativeId` with the native id
+  instead, and an ack without one records nothing. Their fills send
+  `Notice::OrderNativeId` with the fill's own id, applied before that fill's
+  frame reaches the fill tap, which resolves each fill's native id when it
+  records it (`OwnPlacements::resolve`): two orders under one client id stay
+  two notifications with two keys. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated
+  client id with the existing order's id, which may be another login's, so no
+  caller-id placement claims there at all (`set_idempotent_client_ids`).
+- **Amends** record their receipts and completion ids (Hyperliquid's
+  `{orderIds, clientOrderId}` replacement, BingX's new id, OKX's unchanged id)
+  only when the amended row's id or client id is already recorded; an id-only
+  amend whose id names rows on two symbols records nothing.
+- **Triggered children.** A venue's `Notice::OrderTriggered` adds one (an OKX
+  stop's `ordId`, a Binance futures algo's `ALGO_UPDATE.ai`) when the algo it
+  names, by id or client id, is already recorded.
+
+Every identity is keyed by its symbol (venue ids repeat across symbols) and
+expires 24 hours after it was last recorded (`own_placements::RETENTION`); a
+resting order older than that is unclaimed. Matching is exact, never by leg
+suffix. It is how a host says which of a shared venue account's orders it placed
+(the exchange server's fill claims, AGT-196); a miss proves nothing, and it
+grants no command authority. The notice never reaches clients and does not
+exist on WASM.
+
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with
 pre-existing venue jobs. Registration rejects an engine that has received any

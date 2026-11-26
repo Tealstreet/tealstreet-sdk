@@ -22,9 +22,64 @@ export interface DelegatedOrderOutcomeFrame {
     outcome: 'placed' | 'refused' | 'unknown';
     venueOrderId: string | null;
     clientOrderId: string | null;
-    error: { message: string; outcome?: 'notSent' | 'unknown' } | null;
+    /** `rejected`: the venue refused the whole order. Not notSent proof; the outbox keeps it unknown. */
+    error: { message: string; outcome?: 'notSent' | 'rejected' | 'unknown'; elements?: DelegatedLegResult[] } | null;
   };
 }
+/**
+ * One leg of an unknown multi-leg placement, as the box reports it (AGT-185). It only lets the
+ * client say which legs landed; it never proves the intent's outcome, which stays unknown.
+ */
+export type DelegatedLegResult = { index: number; clientOrderId?: string; role?: DelegatedLegRole } & (
+  | { status: 'placed'; orderIds: string[] }
+  | { status: 'applied' }
+  | { status: 'notSent'; error?: { message: string } }
+  | { status: 'unknown'; error: { message: string } }
+);
+/** The leg's part in a split placement (AGT-214); absent when the venue does not say. */
+export type DelegatedLegRole = 'entry' | 'takeProfit' | 'stopLoss' | 'other';
+const LEG_ROLES: ReadonlySet<unknown> = new Set<DelegatedLegRole>(['entry', 'takeProfit', 'stopLoss', 'other']);
+const LEGS_MAX = 32;
+const LEG_ID_MAX = 256;
+const LEG_REASON_MAX = 160;
+const LEGS_BYTES_MAX = 4 * 1024;
+
+/** The box's per-leg results, or undefined when any leg is unreadable or out of bounds. */
+export function delegatedLegResults(value: unknown): DelegatedLegResult[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > LEGS_MAX) return undefined;
+  const boundedId = (id: unknown): id is string =>
+    typeof id === 'string' && id.length > 0 && utf8ToBytes(id).length <= LEG_ID_MAX;
+  const reason = (error: unknown): { message: string } | undefined | null => {
+    if (error === undefined) return undefined;
+    if (typeof error !== 'object' || error === null || Array.isArray(error)) return null;
+    const message = (error as Record<string, unknown>).message;
+    return typeof message === 'string' && [...message].length <= LEG_REASON_MAX ? { message } : null;
+  };
+  const legs: DelegatedLegResult[] = [];
+  for (const leg of value) {
+    if (typeof leg !== 'object' || leg === null || Array.isArray(leg)) return undefined;
+    const { index, clientOrderId, role, status, orderIds, error } = leg as Record<string, unknown>;
+    if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0) return undefined;
+    if (clientOrderId !== undefined && !boundedId(clientOrderId)) return undefined;
+    // An unrecognised role is display data the reader cannot use: it drops the role, never the leg.
+    const identity = {
+      index,
+      ...(clientOrderId !== undefined ? { clientOrderId } : {}),
+      ...(LEG_ROLES.has(role) ? { role: role as DelegatedLegRole } : {}),
+    };
+    const why = reason(error);
+    if (why === null) return undefined;
+    if (status === 'placed') {
+      if (!Array.isArray(orderIds) || orderIds.length > LEGS_MAX || !orderIds.every(boundedId)) return undefined;
+      legs.push({ ...identity, status, orderIds: [...orderIds] });
+    } else if (status === 'applied') legs.push({ ...identity, status });
+    else if (status === 'notSent') legs.push({ ...identity, status, ...(why ? { error: why } : {}) });
+    else if (status === 'unknown' && why) legs.push({ ...identity, status, error: why });
+    else return undefined;
+  }
+  return utf8ToBytes(JSON.stringify(legs)).length <= LEGS_BYTES_MAX ? legs : undefined;
+}
+
 export interface DelegatedOrderCancelQueuedFrame {
   t: 'order.cancelQueued';
   d: DelegatedOrderBinding & { fingerprint: string };

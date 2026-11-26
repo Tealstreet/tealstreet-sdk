@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 use safe_cex_exec::{Exec, Host};
 use serde_json::{Value, json};
 #[derive(Default)]
@@ -363,7 +364,10 @@ fn unknown_notional_inverse_close_refuses_before_size_coercion() {
     assert!(p.calls.is_empty());
     assert_eq!(result(&p)["success"], false);
     assert!(
-        result(&p)["error"].as_str().unwrap().contains("unknown"),
+        result(&p)["error"]
+            .as_str()
+            .unwrap()
+            .contains("Position size is unknown"),
         "{}",
         result(&p)
     );
@@ -377,7 +381,10 @@ fn unknown_notional_percentage_size_refuses_before_arithmetic() {
     assert!(p.calls.is_empty());
     assert_eq!(result(&p)["success"], false);
     assert!(
-        result(&p)["error"].as_str().unwrap().contains("unknown"),
+        result(&p)["error"]
+            .as_str()
+            .unwrap()
+            .contains("Position size is unknown"),
         "{}",
         result(&p)
     );
@@ -415,7 +422,12 @@ fn explicit_unknown_native_quantity_cannot_fall_back_to_base_size() {
         Exec::default().handle(&req(command), &mut p);
         assert!(p.calls.is_empty(), "{command}: {:?}", p.calls);
         assert_eq!(result(&p)["success"], false);
-        assert!(result(&p)["error"].as_str().unwrap().contains("unknown"));
+        assert!(
+            result(&p)["error"]
+                .as_str()
+                .unwrap()
+                .contains("Position size is unknown")
+        );
     }
 }
 
@@ -427,6 +439,11 @@ fn explicit_unknown_contract_size_cannot_assume_one() {
         Exec::default().handle(&req(command), &mut p);
         assert!(p.calls.is_empty(), "{command}: {:?}", p.calls);
         assert_eq!(result(&p)["success"], false);
-        assert!(result(&p)["error"].as_str().unwrap().contains("unknown"));
+        assert!(
+            result(&p)["error"]
+                .as_str()
+                .unwrap()
+                .contains("Position size is unknown")
+        );
     }
 }

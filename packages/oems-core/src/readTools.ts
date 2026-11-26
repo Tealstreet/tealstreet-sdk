@@ -79,9 +79,9 @@ const nullable = (field: JsonSchemaField): JsonSchemaField => {
  * ever does, the build fails at module load, which is the intent.
  */
 export const buildReadCallProperties = (
-  tools: readonly ReadManifestEntry[],
+  tools: readonly (Pick<ReadManifestEntry, 'params'> & { readonly method: string })[],
 ): Readonly<Record<string, JsonSchemaField>> => {
-  const properties: Record<string, JsonSchemaField> = Object.create(null) as Record<string, JsonSchemaField>;
+  const properties: Record<string, JsonSchemaField> = Object.create(null);
   const seenBase = new Map<string, string>();
   for (const tool of tools) {
     for (const [name, field] of Object.entries(tool.params.properties)) {
@@ -210,7 +210,7 @@ export const parseReadCalls = (raw: unknown, context: OemsContext): ReadCallReso
       continue;
     }
     if (typeof entry !== 'object' || entry === null) continue;
-    const flat = entry as Record<string, unknown>;
+    const flat: Record<string, unknown> = entry;
     const name = typeof flat.tool === 'string' ? flat.tool : '';
     const tool = toolByName.get(name);
     if (!tool) {
@@ -257,7 +257,7 @@ export const parseReadCalls = (raw: unknown, context: OemsContext): ReadCallReso
       rejections.push({ tool: name, reason: 'The accounts argument must be a list of account names.' });
       continue;
     }
-    const accounts = args.accounts as readonly unknown[] | undefined;
+    const accounts: readonly unknown[] | undefined = args.accounts;
     const badIndex = accounts?.findIndex((value) => typeof value !== 'string' || !known.has(value)) ?? -1;
     if (badIndex >= 0) {
       rejections.push({ tool: name, reason: `No account named "${String(accounts?.[badIndex])}" is connected.` });

@@ -21,7 +21,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -35,14 +35,16 @@ const BROKER_PREFIX: &str = "x-s3vFFRQp";
 /// Errors callers handle themselves; they are not shown to the user.
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
-        && !error.message.contains(UNKNOWN_TEXT)
+        && !error.message.contains("Check your open orders")
         && !error
             .message
             .contains("outcome of this order change is unknown")
+        && !error.message.contains("This order change wasn’t confirmed")
     {
         format!("{}. {UNKNOWN_TEXT}", error.message)
     } else {
@@ -163,6 +165,8 @@ struct Planned {
     path: &'static str,
     query: Query,
     call: Call,
+    /// Reporting only: each reported row's part in a split bracket (AGT-214).
+    roles: Vec<Option<LegRole>>,
 }
 
 #[derive(Default)]
@@ -202,16 +206,18 @@ impl PlacementReport {
             .flatten()
             .flat_map(|planned| {
                 (0..reporting_count(&planned.call)).map(|index| {
-                    planned
+                    let client_order_id = planned
                         .receipts
                         .get(index)
-                        .map(|receipt| receipt.identity.clone())
+                        .map(|receipt| receipt.identity.clone());
+                    (client_order_id, planned.roles.get(index).copied().flatten())
                 })
             })
             .enumerate()
-            .map(|(index, client_order_id)| Element {
+            .map(|(index, (client_order_id, role))| Element {
                 index,
                 client_order_id,
+                role,
             })
             .collect();
         Self {
@@ -333,9 +339,10 @@ pub struct TradingState {
     id_generator: Option<fn() -> Result<String, String>>,
 }
 
-/// Request parameters in order, rendered as a query or as a batch JSON object.
+/// Request parameters in order, rendered as a query or as a batch JSON object, and
+/// (reporting only, never sent) the order's part in a split bracket (AGT-214).
 #[derive(Clone, Default)]
-struct Params(Vec<(&'static str, String)>);
+struct Params(Vec<(&'static str, String)>, Option<LegRole>);
 
 impl Params {
     fn set(&mut self, name: &'static str, value: impl Into<String>) {
@@ -548,6 +555,7 @@ impl BinanceFutures {
                             }),
                             ids: ids(regular),
                         },
+                        roles: Vec::new(),
                     },
                     Planned {
                         receipts: Vec::new(),
@@ -564,6 +572,7 @@ impl BinanceFutures {
                             }),
                             ids: ids(algo),
                         },
+                        roles: Vec::new(),
                     },
                 ];
                 if self.is_spot() || self.is_inverse() || self.is_options() {
@@ -767,7 +776,10 @@ impl BinanceFutures {
                     Ok(plan) => job.steps.extend(plan.steps),
                     Err(error) => {
                         job.planning_error = Some(match job.gone_text(false) {
-                            Some(gone) => VenueError::new(format!("{gone}: {error}")),
+                            Some(gone) => VenueError::new(safe_cex_engine::error::with_detail(
+                                &gone,
+                                &error.to_string(),
+                            )),
                             None => error.into(),
                         });
                     }
@@ -1130,6 +1142,12 @@ impl BinanceFutures {
                 Ok(body),
             ) if self.is_spot() => match serde_json::from_str::<PlacedOrder>(body) {
                 Ok(placed) if placed.order_id.is_some() => {
+                    // Spot keys the order by this client id; the placer claims
+                    // its native id (AGT-196). Native only.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let (Some(native), Some(symbol)) = (placed.order_id, &placed.symbol) {
+                        cx.placement_native_id(command, symbol, &id, &native.to_string());
+                    }
                     ids.push(id);
                     None
                 }
@@ -1142,14 +1160,24 @@ impl BinanceFutures {
                 Call::PlaceOne {
                     client_id: Some(id),
                 },
-                Ok(_),
+                Ok(_body),
             )
             | (
                 Call::PlaceAlgo {
                     client_id: Some(id),
                 },
-                Ok(_),
+                Ok(_body),
             ) => {
+                // Portfolio margin keys the order by this client id; the placer
+                // claims its native order or algo id (AGT-196). An ack without
+                // one claims nothing. Native only.
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Ok(placed) = serde_json::from_str::<PlacedOrder>(_body)
+                    && let (Some(native), Some(symbol)) =
+                        (placed.order_id.or(placed.algo_id), &placed.symbol)
+                {
+                    cx.placement_native_id(command, symbol, &id, &native.to_string());
+                }
                 ids.push(id);
                 None
             }
@@ -1248,11 +1276,11 @@ impl BinanceFutures {
                         }
                     } else {
                         unproven = true;
-                        rejection = Some((0, "Binance batch response malformed".into()));
+                        rejection = Some((0, "Binance’s batch reply couldn’t be read".into()));
                     }
                 } else {
                     unproven = true;
-                    rejection = Some((0, "Binance batch response malformed".into()));
+                    rejection = Some((0, "Binance’s batch reply couldn’t be read".into()));
                 }
                 rejection
             }
@@ -1391,16 +1419,25 @@ impl BinanceFutures {
                     .get(&command)
                     .and_then(|job| job.restoring.clone());
                 let told = match (&gone, &restoring) {
-                    (Some(gone), Some(refusal)) if refused => {
-                        format!("{gone}: {refusal}; putting it back failed too: {message}")
-                    }
-                    // The put-back itself may have landed: no claim either way.
+                    (Some(gone), Some(refusal)) if refused => safe_cex_engine::error::with_detail(
+                        gone,
+                        &format!("{refusal}; putting it back failed too: {message}"),
+                    ),
+                    // The replacement was declined; only the put-back may have landed.
                     (Some(gone), Some(refusal)) => {
-                        format!(
-                            "{gone}: {refusal}; putting it back has an unknown outcome: {message}"
+                        let declined = self
+                            .trading
+                            .jobs
+                            .get(&command)
+                            .and_then(|job| job.gone_text(false))
+                            .unwrap_or_default();
+                        safe_cex_engine::error::restore_unconfirmed_text(
+                            &safe_cex_engine::error::with_detail(&declined, refusal),
+                            gone,
+                            &message,
                         )
                     }
-                    (Some(gone), None) => format!("{gone}: {message}"),
+                    (Some(gone), None) => safe_cex_engine::error::with_detail(gone, &message),
                     _ => message.clone(),
                 };
                 // Only a proven refusal of a stop's replacement puts the old stop back, once;
@@ -1757,7 +1794,7 @@ impl BinanceFutures {
                     }
                 }
             }
-            let (r, a) = if self.is_options() {
+            let (mut r, mut a) = if self.is_options() {
                 (self.format_option(cx, opts)?, Vec::new())
             } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
@@ -1766,6 +1803,12 @@ impl BinanceFutures {
             } else {
                 self.format_order(cx, opts)?
             };
+            if opts.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
+                for params in r.iter_mut().chain(a.iter_mut()) {
+                    params.1.get_or_insert(LegRole::Entry);
+                }
+            }
             regular.extend(r);
             algo.extend(a);
         }
@@ -1797,6 +1840,7 @@ impl BinanceFutures {
                             .then(|| only.get("newClientOrderId"))
                             .flatten(),
                     },
+                    roles: vec![only.1],
                 },
                 (_, Some(path)) => {
                     let batch: Vec<String> = lot.iter().map(Params::json).collect();
@@ -1809,6 +1853,7 @@ impl BinanceFutures {
                         call: Call::PlaceBatch {
                             expected: lot.len(),
                         },
+                        roles: lot.iter().map(|params| params.1).collect(),
                     }
                 }
                 (_, None) => unreachable!("lots are single orders without a batch endpoint"),
@@ -1824,6 +1869,7 @@ impl BinanceFutures {
                 call: Call::PlaceAlgo {
                     client_id: pm.then(|| params.get("clientAlgoId")).flatten(),
                 },
+                roles: vec![params.1],
             }]);
         }
         job.report = Some(PlacementReport::new(&job.steps));
@@ -1884,6 +1930,7 @@ impl BinanceFutures {
                         ids: vec![order.id.clone()],
                         proof: Some(CancelProof::One(self.cancel_target(order))),
                     },
+                    roles: Vec::new(),
                 }]);
             }
             return job;
@@ -1930,6 +1977,7 @@ impl BinanceFutures {
                             CancelProof::One(self.cancel_target(order))
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
                 if strategy {
                     job.steps.push_back(vec![Planned {
@@ -1938,6 +1986,7 @@ impl BinanceFutures {
                         path: crate::paths::PM_ALGO_QUERY,
                         query: Query::new().str("algoId", &identity),
                         call: Call::VerifyPmAlgo { target },
+                        roles: Vec::new(),
                     }]);
                 }
             }
@@ -1972,6 +2021,7 @@ impl BinanceFutures {
                             })
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
                 continue;
             }
@@ -1999,6 +2049,7 @@ impl BinanceFutures {
                             )
                         }),
                     },
+                    roles: Vec::new(),
                 }]);
             }
         }
@@ -2025,6 +2076,7 @@ impl BinanceFutures {
                     ids: vec![order.id.clone()],
                     proof: Some(CancelProof::Algo(self.cancel_target(order))),
                 },
+                roles: Vec::new(),
             })
             .collect()
     }
@@ -2184,6 +2236,11 @@ impl BinanceFutures {
                 // Attached protection keeps the whole intent quantity, independent of entry lots.
                 p.set("quantity", number(amount));
                 p.set("newClientOrderId", self.generated_id(cx)?);
+                p.1 = Some(if kind == "STOP_LOSS" {
+                    LegRole::StopLoss
+                } else {
+                    LegRole::TakeProfit
+                });
                 out.push(p);
             }
         }
@@ -2325,7 +2382,10 @@ impl BinanceFutures {
                 bracket.take_profit = None;
                 bracket.reduce_only = Some(true);
                 bracket.close = Some(false);
-                let (r, a) = self.format_inverse(cx, &bracket, false)?;
+                let (mut r, mut a) = self.format_inverse(cx, &bracket, false)?;
+                for params in r.iter_mut().chain(a.iter_mut()) {
+                    params.1 = Some(LegRole::of_kind(kind));
+                }
                 regular.extend(r);
                 algo.extend(a);
             }
@@ -2584,6 +2644,15 @@ impl BinanceFutures {
             .store
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        // AGT-115: these return before the leg loop below, so attached legs would be
+        // dropped; refuse instead. Stop-type entries do place their legs after the entry.
+        if matches!(
+            opts.kind,
+            OrderType::TrailingStopLoss | OrderType::Conditional
+        ) && opts.stop_entry_with_attached_legs()
+        {
+            return Err(safe_cex_engine::model::stop_entry_legs_refusal("Binance"));
+        }
         if opts.kind == OrderType::TrailingStopLoss {
             return Ok((Vec::new(), vec![self.format_trailing(cx, opts)?]));
         }
@@ -2725,6 +2794,7 @@ impl BinanceFutures {
             };
             params.set("workingType", working_type(&bracket));
             params.set("clientAlgoId", self.generated_id(cx)?);
+            params.1 = Some(LegRole::of_kind(kind));
             algo.push(params);
         }
         Ok((regular, algo))
@@ -2986,6 +3056,7 @@ fn single(method: Method, path: &'static str, query: Query, call: Call) -> Job {
             path,
             query,
             call,
+            roles: Vec::new(),
         }]]),
         ..Job::default()
     }
@@ -3466,7 +3537,7 @@ impl BinanceFutures {
         let invalid = || {
             Some((
                 0,
-                "Binance cancellation acknowledgement malformed or mismatched".to_owned(),
+                "Binance didn’t confirm the requested cancellation".to_owned(),
             ))
         };
         match proof {
@@ -3665,6 +3736,7 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
     .collect()
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod audit_tests {
     use super::generated_id_with;
@@ -4257,5 +4329,66 @@ mod resend_guard_tests {
             !super::may_resend(false, false),
             "the command already ended"
         );
+    }
+}
+
+// Rule 5 (#3726): display decoration must preserve existing guidance and all typed error facts.
+#[cfg(test)]
+mod notification_display_tests {
+    use super::*;
+
+    fn display(error: &VenueError) -> VenueError {
+        {
+            let mut rendered = error.clone();
+            rendered.message = terminal_failure_text(error);
+            rendered
+        }
+    }
+
+    #[test]
+    fn already_guided_unknown_display_is_idempotent() {
+        for message in [
+            "We couldn’t confirm this change. Check your open orders before trying again.",
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "The outcome of this order change is unknown. Check Open Orders",
+            "Restoring the original wasn’t confirmed. Check your open orders before adding protection.",
+        ] {
+            let original = VenueError::new(message)
+                .outcome(Outcome::Unknown)
+                .kind(ErrorKind::RateLimited)
+                .venue_code("429");
+            let rendered = display(&original);
+            assert_eq!(rendered.message, message);
+            assert_eq!(display(&rendered).message, message);
+            assert_eq!(rendered.outcome, original.outcome);
+            assert_eq!(rendered.kind, original.kind);
+            assert_eq!(rendered.venue_code, original.venue_code);
+        }
+    }
+
+    #[test]
+    fn unguided_unknown_gets_one_action_and_refusals_remain_unchanged() {
+        let original = VenueError::new("No reply arrived").outcome(Outcome::Unknown);
+        let rendered = display(&original);
+        assert_eq!(
+            rendered
+                .message
+                .matches("Check your open orders before trying again.")
+                .count(),
+            1
+        );
+        assert_eq!(display(&rendered).message, rendered.message);
+        assert_eq!(rendered.outcome, original.outcome);
+        for outcome in [None, Some(Outcome::NotSent), Some(Outcome::Rejected)] {
+            let mut refusal = VenueError::new("Order declined")
+                .kind(ErrorKind::Rejected)
+                .venue_code("10001");
+            refusal.outcome = outcome;
+            let rendered = display(&refusal);
+            assert_eq!(rendered.message, refusal.message);
+            assert_eq!(rendered.outcome, refusal.outcome);
+            assert_eq!(rendered.kind, refusal.kind);
+            assert_eq!(rendered.venue_code, refusal.venue_code);
+        }
     }
 }

@@ -1495,8 +1495,11 @@ fn payload_signing_rules_in_mode(
             Some(safe_cex_venue_asterdex::sign::Version::V3)
         )
     {
-        return Err(VenueError::new("AsterDEX V3 requires RemoteSigner API-wallet custody; PayloadSigner supports V1 HMAC only")
-            .kind(ErrorKind::Unsupported).outcome(safe_cex_engine::Outcome::NotSent));
+        return Err(VenueError::new(
+            "This signing connection supports AsterDEX V1 but not V3 account keys",
+        )
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
     }
     // Hosted (device-key) Paradex has no Rust route in this release; its legacy
     // digest-only delegate is never constructed.
@@ -2809,6 +2812,14 @@ pub struct PublicFeedOptions {
     pub mode: safe_cex_engine::PublicFeedPolicy,
 }
 
+/// Display-only account tuning, shared by LOCAL and hosted frame producers.
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayTuning {
+    #[serde(default)]
+    pub calculate_upnl_from_realtime_last_price: bool,
+}
+
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2849,6 +2860,8 @@ pub struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineOptions {
+    #[serde(default)]
+    pub tuning: Option<DisplayTuning>,
     /// Injected (remote, delegated or hosted) refs always carry a signing ref;
     /// credential-only slots come only from trusted local setup.
     #[serde(default, deserialize_with = "EngineOptions::injected_identities")]
@@ -3217,6 +3230,7 @@ fn tighter_recv_window(value: Option<f64>) -> Option<u32> {
         .map(|value| value.floor().clamp(1.0, 20_000.0) as u32)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,9 +1,9 @@
-import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
-import type { ExchangeName } from '../../../types';
 import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
+import type { StoreData } from '../../../generated/StoreData';
+import type { ExchangeName } from '../../../types';
+import type { BybitIncomeContext } from './bybit.income';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -14,6 +14,26 @@ import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
+import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
+import {
+  BybitApiKeyInfo as BybitInverseApiKeyInfo,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TIME_IN_FORCE,
+  ORDER_TIME_IN_FORCE_OUTBOUND,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+} from '../../../exchanges/bybit/bybit.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -54,41 +74,23 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, divide, subtract } from '../../../utils/safe-math';
 import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs, stopEntryLegsRefusal } from '../stopEntryLegs';
 import { createAPI } from './bybit.api';
-import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange, type BybitIncomeContext } from './bybit.income';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
-import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from '../../../exchanges/bybit/bybit.order-params';
+import { bybitDropsStopEntryLegs } from './bybit.exchange';
+import { normalizeBybitExecutionTimestampMs, normalizeBybitExecutionTimestampSeconds } from './bybit.execution-time';
+import { bybitFeeOverlay } from './bybit.fee-overlay';
+import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
 import {
   BYBIT_RATE_LIMIT_TABLE as BYBITINVERSE_RATE_LIMIT_TABLE,
   BybitAccountType as BybitInverseAccountType,
   BybitProductType as BybitInverseProductType,
   BybitVipLevel as BybitInverseVipLevel,
 } from './bybit.rateLimits';
-import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
-import {
-  normalizeBybitExecutionTimestampMs,
-  normalizeBybitExecutionTimestampSeconds,
-} from './bybit.execution-time';
-import {
-  BybitApiKeyInfo as BybitInverseApiKeyInfo,
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TIME_IN_FORCE,
-  ORDER_TIME_IN_FORCE_OUTBOUND,
-  ORDER_TRIGGER_TYPE,
-  ORDER_TYPE,
-  POSITION_SIDE,
-  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
-} from '../../../exchanges/bybit/bybit.types';
 import { BybitInversePrivateWebsocket } from './bybitinverse.ws-private';
 import { BybitInversePublicWebsocket } from './bybitinverse.ws-public';
-import { bybitFeeOverlay } from './bybit.fee-overlay';
 
 const REINIT_RETRY_MS = 15_000;
 const REINIT_RETRY_MAX_MS = 5 * 60_000;
@@ -251,7 +253,7 @@ export class BybitInverseExchange extends BaseExchange {
     return this.getTickerSymbolsForSubscription(inverseSymbols);
   }
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
@@ -315,7 +317,22 @@ export class BybitInverseExchange extends BaseExchange {
     this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
 
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
-      this.store.addOrUpdateOrders([order]);
+      (() => {
+        const incoming: StoreData['orders'] = [order];
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -327,7 +344,14 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
-      this.store.removeOrders(orders.map(({ id }) => ({ id })));
+      (() => {
+        const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map(({ id }) => ({ id }));
+        return applyReferenceFixture(
+          this.store,
+          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -346,7 +370,22 @@ export class BybitInverseExchange extends BaseExchange {
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
-    this.store.addOrUpdateOrders([nextOrder]);
+    (() => {
+      const incoming: StoreData['orders'] = [nextOrder];
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
@@ -447,10 +486,14 @@ export class BybitInverseExchange extends BaseExchange {
         await this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
           this.log(`Loaded ${markets.length} BybitInverse markets`);
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
 
           // start public websocket stream for inverse markets
           this.publicInverseWebsocket.connectAndSubscribe();
@@ -464,10 +507,14 @@ export class BybitInverseExchange extends BaseExchange {
 
       if (this.isDisposed) return;
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
 
     // Awaited here rather than inside the branch above: it must run on both
@@ -489,9 +536,13 @@ export class BybitInverseExchange extends BaseExchange {
     // start ticking live data
     // balance, tickers, positions
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -507,10 +558,14 @@ export class BybitInverseExchange extends BaseExchange {
       const [, , rawBalance] = await Promise.all([
         this.fetchOrders().then((orders) => {
           if (this.isDisposed) return [];
-          this.store.update({
-            orders,
-            loaded: { ...this.store.loaded, orders: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              orders,
+              loaded: { orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return orders;
         }),
         this.fetchPositions().then((fetchedPositions) => {
@@ -521,10 +576,26 @@ export class BybitInverseExchange extends BaseExchange {
               INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY
               ? mergeUpdatesUsingLastUpdate(fetchedPositions, this.store.positions)
               : fetchedPositions;
-          this.store.addOrUpdatePositionsFull(positions);
-          this.store.update({
-            loaded: { ...this.store.loaded, positions: true },
-          });
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return positions;
         }),
         this.fetchRawBalance(),
@@ -532,10 +603,15 @@ export class BybitInverseExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const balance = this.formatBalance(rawBalance);
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          // All three source reads completed; partial consumer flags are clamped.
+          loaded: { balance: true, orders: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err);
     }
@@ -551,10 +627,13 @@ export class BybitInverseExchange extends BaseExchange {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
 
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
 
       const fetchedPositions = await this.fetchPositions();
@@ -566,18 +645,31 @@ export class BybitInverseExchange extends BaseExchange {
           ? mergeUpdatesUsingLastUpdate(fetchedPositions, this.store.positions)
           : fetchedPositions;
 
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        loaded: { ...this.store.loaded, positions: true },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       const balance = await this.fetchBalance();
 
       if (this.isDisposed) return;
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          // FrameStore clamps account flags until every dataset has decoded.
+          // Publish source completion together; copying partial clamped flags
+          // would erase the orders/positions reads that already completed.
+          loaded: { balance: true, positions: true, orders: fetchOrders || this.store.loaded.orders },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err);
     }
@@ -606,9 +698,7 @@ export class BybitInverseExchange extends BaseExchange {
         this.needsReinit = false;
         this.lastReinitAt = Date.now();
         await this.fetchOrdersPositionsAndBalance();
-        this.reinitRetryMs = this.needsReinit
-          ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS)
-          : REINIT_RETRY_MS;
+        this.reinitRetryMs = this.needsReinit ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS) : REINIT_RETRY_MS;
       }
 
       try {
@@ -688,7 +778,7 @@ export class BybitInverseExchange extends BaseExchange {
       throw new Error(v(data, 'retMsg'));
     }
 
-    // Store the API key info locally
+    // FrameStore the API key info locally
     this.apiKeyInfo = data.result;
 
     return data.result;
@@ -699,9 +789,15 @@ export class BybitInverseExchange extends BaseExchange {
       await this.fetchApiKeyInfo();
       if (this.apiKeyInfo) {
         this.updateBatchLimitBasedOnVipLevel();
-        this.store.updateUserData({
-          bybitinverseApiKeyInfo: this.apiKeyInfo,
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            userData: {
+              bybitinverseApiKeyInfo: this.apiKeyInfo,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
       this.log(
         `API key info cached. VIP Level: ${this.apiKeyInfo?.vipLevel || 'Unknown'}, Batch Limit: ${this.batchLimit}`,
@@ -1470,6 +1566,9 @@ export class BybitInverseExchange extends BaseExchange {
     return this.publicInverseWebsocket.listenOrderBook(symbol, callback);
   };
 
+  private dropsStopEntryLegs = (order: PlaceOrderOpts) =>
+    bybitDropsStopEntryLegs(order, this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount));
+
   _hasFullSizedPositionOppositeSide = (symbol: string, side: OrderSide, amount: number) => {
     return side === OrderSide.Buy
       ? this.store.positions.some(
@@ -1491,7 +1590,11 @@ export class BybitInverseExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
+    // AGT-115: as linear, trailing and position stops would drop attached legs.
+    if (this.dropsStopEntryLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     const category = this.getCategoryForSymbol(opts.symbol);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -1764,11 +1867,14 @@ export class BybitInverseExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     if (orders.length === 0) {
       return [];
     }
 
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(this.dropsStopEntryLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bybit'));
     for (const order of orders) {
       this.getOrderExecutionParams(order);
     }
@@ -2291,7 +2397,22 @@ export class BybitInverseExchange extends BaseExchange {
     let foundPositions = this.store.positions.filter((p) => p.symbol === symbol);
     if (foundPositions.length === 0) {
       foundPositions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(foundPositions);
+      (() => {
+        const incoming: StoreData['positions'] = foundPositions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
     const currentLeverage = foundPositions[0]?.leverage ?? 1;
 
@@ -2311,7 +2432,22 @@ export class BybitInverseExchange extends BaseExchange {
       }
 
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -2347,10 +2483,29 @@ export class BybitInverseExchange extends BaseExchange {
     });
 
     const positions = await this.fetchPositions();
-    this.store.update({ positions });
+    applyReferenceFixture(
+      this.store,
+      { positions },
+      this.store.markets.map((row) => row.symbol),
+    );
     if (symbol) {
       const symbolPos = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(symbolPos);
+      (() => {
+        const incoming: StoreData['positions'] = symbolPos;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
 
     if (data.retMsg === 'All symbols switched successfully.') {
@@ -2386,7 +2541,11 @@ export class BybitInverseExchange extends BaseExchange {
 
     this.marginType = isolated ? MarginType.Isolated : MarginType.Cross;
     const positions = await this.fetchPositions();
-    this.store.update({ positions });
+    applyReferenceFixture(
+      this.store,
+      { positions },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   mapPosition(p: Record<string, any>) {
@@ -2439,6 +2598,10 @@ export class BybitInverseExchange extends BaseExchange {
 
     const marginType = this.marginType;
     const positionIM = parseFloat(v(p, 'positionIM') || 0);
+    const rawLiquidationPrice = parseFloat(v(p, 'liqPrice'));
+    // The generated native contract uses null for absent/nonpositive prices.
+    const liquidationPrice =
+      Number.isFinite(rawLiquidationPrice) && rawLiquidationPrice > 0 ? rawLiquidationPrice : null;
     const position: Position = {
       id: createPositionId(p.symbol, side, positionMode),
       symbol: p.symbol,
@@ -2449,7 +2612,7 @@ export class BybitInverseExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'curRealisedPnl') || 0),
       contracts,
-      liquidationPrice: parseFloat(v(p, 'liqPrice') || 0),
+      liquidationPrice,
       marginSize: positionIM > 0 ? positionIM : undefined,
       positionMode,
       marginType,
@@ -2565,7 +2728,22 @@ export class BybitInverseExchange extends BaseExchange {
     }
 
     const formattedData = data?.result?.list?.map(this.mapPosition.bind(this));
-    this.store.addOrUpdatePositions(formattedData);
+    (() => {
+      const incoming: StoreData['positions'] = formattedData;
+      return applyReferenceFixture(
+        this.store,
+        {
+          positions: [
+            ...this.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
     return formattedData?.length > 0 ? formattedData[0].positionMode : PositionMode.OneWay;
   };
 

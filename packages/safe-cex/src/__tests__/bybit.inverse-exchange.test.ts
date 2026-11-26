@@ -1,9 +1,12 @@
+import type { Position } from '../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
-import { OrderSide, OrderType } from '../types';
+import { OrderSide, OrderType, PositionSide } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
@@ -29,7 +32,7 @@ const live: Array<BybitExchange | BybitInverseExchange> = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose()));
 
 const create = (enableInverseMarkets: boolean, Exchange: typeof BybitExchange = BybitExchange) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new Exchange(
     'bybit',
     { key: 'k', secret: 's', enableInverseMarkets, tuning: { consoleLogging: false } } as any,
@@ -66,13 +69,38 @@ const inversePosition = {
 };
 
 describe('Bybit inverse contracts on the bybit connection', () => {
+  it.each(['', '0', '-1', 'invalid'])('publishes unknown liquidation %s as native null', (liqPrice) => {
+    const { exchange, store } = create(true);
+    const position = exchange.mapPosition({ ...inversePosition, liqPrice });
+    expect(position.liquidationPrice).toBeNull();
+    store.apply(nativeFixture({ positions: [position] }, ['BTCUSD']));
+    expect(store.positions[0].liquidationPrice).toBeNull();
+  });
+
+  it.each([false, true])(
+    'publishes complete private readiness from decoded empty tables (initial=%s)',
+    async (initial) => {
+      const { exchange, store } = create(true);
+      store.apply(
+        nativeFixture({ markets: [], tickers: [], loaded: { ...store.loaded, markets: true, tickers: true } }),
+      );
+      vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+      vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+      vi.spyOn(exchange, 'fetchBalance').mockResolvedValue({ used: 0, free: 0, total: 0, upnl: 0 });
+      vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([]);
+      if (initial) await exchange.fetchOrdersPositionsAndBalance();
+      else await exchange.fetchAndSetPrivateSnapshot();
+      expect(store.loaded).toEqual({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    },
+  );
+
   it.each(['40', '2000000', '0', '-1', '', 'invalid', undefined])(
     'dedicated inverse reference publishes a conservative maximum with native market cap %s',
     async (marketCap) => {
       const exchange = new BybitInverseExchange(
         'bybitinverse',
         { key: 'k', secret: 's', tuning: { consoleLogging: false } },
-        new DefaultStore(),
+        new FrameStore(),
       );
       live.push(exchange);
       vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
@@ -152,8 +180,23 @@ describe('Bybit inverse contracts on the bybit connection', () => {
 
   it('keeps inverse positions the store holds when one poll of them fails', async () => {
     const { exchange, store } = create(true);
-    const held = { id: 'p', symbol: 'BTCUSD', contracts: 0.0125 } as any;
-    store.update({ positions: [held] });
+    const held: Position = {
+      id: 'p',
+      symbol: 'BTCUSD',
+      side: PositionSide.Long,
+      contracts: 0.0125,
+      entryPrice: 80000,
+      notional: 1000,
+      leverage: 10,
+      unrealizedPnl: 0.0025,
+      liquidationPrice: null,
+    };
+    store.apply(
+      nativeFixture(
+        { positions: [held] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.xhr.get as any) = vi.fn((_url: string, config: any) =>
       config.params.category === 'inverse'
         ? Promise.resolve({ data: { retCode: 10002, retMsg: 'timeout' } })
@@ -172,7 +215,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
 
   it('values inverse PnL in USD in the account balance', () => {
     const { exchange, store } = create(true);
-    store.update({ positions: [exchange.mapPosition(inversePosition)] });
+    store.apply(
+      nativeFixture(
+        { positions: [exchange.mapPosition(inversePosition)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const balance = exchange.formatBalance([{ totalEquity: '1250', coin: [] }]);
     expect(balance.upnl).toBeCloseTo(250);
     expect(balance.total).toBeCloseTo(1000);
@@ -181,39 +229,83 @@ describe('Bybit inverse contracts on the bybit connection', () => {
   it('keeps the balance PnL a number while a closed inverse position is still in the store', () => {
     const { exchange, store } = create(true);
     const closed = { ...inversePosition, size: '0', positionValue: '0', unrealisedPnl: '0' };
-    store.update({ positions: [exchange.mapPosition(closed)] });
+    store.apply(
+      nativeFixture(
+        { positions: [exchange.mapPosition(closed)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(exchange.formatBalance([{ totalEquity: '1000', coin: [] }])).toMatchObject({ upnl: 0, total: 1000 });
   });
 
   it('sizes an inverse position at the ticker mark ahead of the last price, and values its PnL at that price', () => {
     const { exchange, store } = create(true);
-    store.update({ tickers: [{ id: 'BTCUSD', symbol: 'BTCUSD', mark: 100000, last: 90000 } as any] });
+    store.apply(
+      nativeFixture(
+        { tickers: [{ id: 'BTCUSD', symbol: 'BTCUSD', mark: 100000, last: 90000 } as any] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const position = exchange.mapPosition({ ...inversePosition, markPrice: '80000' });
     expect(position.contracts).toBe(0.01);
 
-    store.update({ positions: [position] });
+    store.apply(
+      nativeFixture(
+        { positions: [position] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(exchange.formatBalance([{ totalEquity: '1250', coin: [] }]).upnl).toBeCloseTo(250);
   });
 
   it('values inverse PnL in USD when position updates refresh the balance', () => {
     const { exchange, store } = create(true);
-    store.update({
-      balance: { total: 1000, upnl: 0, used: 0, free: 1000 } as any,
-      positions: [exchange.mapPosition(inversePosition)],
-    });
+    store.apply(
+      nativeFixture(
+        {
+          balance: { total: 1000, upnl: 0, used: 0, free: 1000 } as any,
+          positions: [exchange.mapPosition(inversePosition)],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.syncBalanceUpnlFromPositions();
     expect(store.balance.upnl).toBeCloseTo(250);
   });
 
   it('reads inverse ticker volume from the fields Bybit puts the coin and USD amounts in, over REST and the socket', () => {
     const { exchange, store } = create(true);
-    store.update({ markets: [{ symbol: 'BTCUSD', id: 'BTCUSD', isInverse: true } as any] });
+    store.apply(
+      nativeFixture(
+        {
+          markets: [
+            {
+              symbol: 'BTCUSD',
+              id: 'BTCUSD',
+              base: 'BTC',
+              quote: 'USD',
+              active: true,
+              isInverse: true,
+              contractSize: 1,
+              precision: { amount: 1, price: 0.5 },
+              limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     // Recorded 2026-10-15: the coin volume times the last price is not the USD volume.
     const frame = { symbol: 'BTCUSD', lastPrice: '80880', volume24h: '467074752', turnover24h: '5722' };
     const [ticker] = exchange.parseTickers([frame]);
     expect(ticker).toMatchObject({ volume: 5722, quoteVolume: 467074752 });
 
-    store.update({ tickers: [{ ...ticker, volume: 0, quoteVolume: 0 }] });
+    store.apply(
+      nativeFixture(
+        { tickers: [{ ...ticker, volume: 0, quoteVolume: 0 }] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.publicWebsocketSecondary as any).handleTickersEvent({ data: frame });
     expect(store.tickersBySymbol.BTCUSD).toMatchObject({ volume: 5722, quoteVolume: 467074752 });
   });
@@ -226,7 +318,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
       [`${ENDPOINTS.TICKERS}:linear`]: [{ symbol: 'BTCUSDT', lastPrice: '80000' }],
       [`${ENDPOINTS.TICKERS}:inverse`]: [{ symbol: 'BTCUSD', lastPrice: '80000' }],
     });
-    store.update({ markets: await exchange.fetchMarkets() });
+    store.apply(
+      nativeFixture(
+        { markets: await exchange.fetchMarkets() },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect((await exchange.fetchTickers()).map((t) => t.symbol)).toEqual(['BTCUSDT', 'BTCUSD']);
   });
 
@@ -257,7 +354,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
   it('sends an inverse order in whole USD contracts on the inverse category', async () => {
     const { exchange, store } = create(true);
     routeGets(exchange, { [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow] });
-    store.update({ markets: await exchange.fetchMarkets() });
+    store.apply(
+      nativeFixture(
+        { markets: await exchange.fetchMarkets() },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange as any, 'fetchPositionMode').mockResolvedValue('oneway');
     const post = vi.fn(() => Promise.resolve({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'o-1' } } }));
     (exchange.xhr.post as any) = post;
@@ -295,7 +397,12 @@ describe('Bybit inverse contracts on the bybit connection', () => {
   it('records a placed inverse order with remaining in the coin', async () => {
     const { exchange, store } = create(true);
     routeGets(exchange, { [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow] });
-    store.update({ markets: await exchange.fetchMarkets() });
+    store.apply(
+      nativeFixture(
+        { markets: await exchange.fetchMarkets() },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any).recordRecentlyPlacedOrderFromOpts(
       'o-1',
       { symbol: 'BTCUSD', side: OrderSide.Buy, type: OrderType.Limit, amount: 1000, price: 80000 },
@@ -311,8 +418,18 @@ describe('Bybit inverse contracts on the bybit connection', () => {
   it('sends a stop-loss for a whole inverse position to the position trading stop', async () => {
     const { exchange, store } = create(true);
     routeGets(exchange, { [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow] });
-    store.update({ markets: await exchange.fetchMarkets() });
-    store.update({ positions: [exchange.mapPosition(inversePosition)] });
+    store.apply(
+      nativeFixture(
+        { markets: await exchange.fetchMarkets() },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    store.apply(
+      nativeFixture(
+        { positions: [exchange.mapPosition(inversePosition)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange as any, 'fetchPositionMode').mockResolvedValue('oneway');
     const post = vi.fn(() => Promise.resolve({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'o-1' } } }));
     (exchange.xhr.post as any) = post;
@@ -435,7 +552,7 @@ describe('Bybit inverse contracts on the bybit connection', () => {
         transport: tealstreetTransport,
         tuning: { consoleLogging: false },
       } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     live.push(exchange);
     const urls: string[] = [];
@@ -462,11 +579,11 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     vi.resetModules();
     try {
       const { HyrotraderExchange } = await import('./reference/bybit/hyrotrader.exchange');
-      const { DefaultStore: Store } = await import('../store/store.base');
+      const { FrameStore: FrameStore } = await import('../store/frameStore');
       const exchange = new HyrotraderExchange(
         'hyrotrader',
         { key: 'k', secret: 's', enableInverseMarkets: true, tuning: { consoleLogging: false } } as any,
-        new Store(),
+        new FrameStore(),
       );
       expect(exchange.publicWebsocketSecondary).toBeUndefined();
       exchange.dispose();
@@ -480,7 +597,7 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     const shared = new BybitExchange(
       'bybit',
       { key: 'k', secret: 's', enableInverseMarkets: true, externalPublicData: {} } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     live.push(shared);
     expect(shared.publicWebsocketSecondary).toBeUndefined();

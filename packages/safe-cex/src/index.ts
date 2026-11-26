@@ -7,7 +7,6 @@
  */
 
 import type { BaseExchange } from './exchanges/base';
-import type { Store } from './store/store.interface';
 import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './types';
 
 import { getExchangeMetadata } from './exchangeMetadata';
@@ -15,7 +14,9 @@ import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/regist
 import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from './exchanges/rust/delegatedSigningSnapshot';
 import { validateSigningMode } from './signingMode';
-import { DefaultStore } from './store/store.base';
+import { FrameStore } from './store/frameStore';
+export { FrameStore, FrameApplyError } from './store/frameStore';
+export type { FrameSection, FrameVersions, FrameListener } from './store/frameStore';
 import { getTransport } from './transport/registry';
 import { unsupportedVenueError } from './unsupportedVenue';
 import { virtualClock } from './utils/virtualClock';
@@ -124,7 +125,7 @@ async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
  *
  * @param exchangeName - The name of the exchange to create
  * @param options - Exchange configuration options
- * @param store - Optional store instance (defaults to DefaultStore)
+ * @param store - Optional store instance (defaults to FrameStore)
  * @returns Promise resolving to the exchange instance
  *
  * @example
@@ -139,7 +140,7 @@ async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
 export const createExchange = async (
   exchangeName: ExchangeName,
   options: ExchangeOptions,
-  store?: Store,
+  store?: FrameStore,
 ): Promise<BaseExchange> => {
   assertBetaVenue(exchangeName);
   options = snapshotDelegatedSigningOptions(exchangeName, options);
@@ -147,7 +148,7 @@ export const createExchange = async (
   assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
   // Rejected venues never start the clock, load WASM or construct transports.
-  const exchange = new Exchange(exchangeName, { ...options, engine: 'rust' }, store || new DefaultStore());
+  const exchange = new Exchange(exchangeName, { ...options, engine: 'rust' }, store || new FrameStore());
   virtualClock.start();
   return exchange;
 };
@@ -240,7 +241,7 @@ export const getAvailableExchanges = (): ExchangeName[] => {
  *
  * @param exchangeName - The name of the exchange to create
  * @param options - Optional exchange configuration (key/secret not required)
- * @param store - Optional store instance (defaults to DefaultStore)
+ * @param store - Optional store instance (defaults to FrameStore)
  * @returns Promise resolving to the exchange instance
  *
  * @example
@@ -252,7 +253,7 @@ export const getAvailableExchanges = (): ExchangeName[] => {
 export const createPublicExchange = async (
   exchangeName: ExchangeName,
   options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
-  store?: Store,
+  store?: FrameStore,
 ): Promise<BaseExchange> => {
   assertBetaVenue(exchangeName);
   return createExchange(exchangeName, buildPublicExchangeOptions(exchangeName, options), store);

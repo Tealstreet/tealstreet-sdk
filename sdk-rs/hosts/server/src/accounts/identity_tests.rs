@@ -106,38 +106,27 @@ fn bybit_key_id_preserves_case_and_its_declared_no_trim_policy() {
 
 #[test]
 fn identity_outputs_keep_twap_labels_local_and_preserve_owner_ids() {
-    for (op, data, path) in [
-        (
-            "store",
-            serde_json::json!({"activeTWAPs":[{"accountName":"first","symbol":"BTCUSDT"}]}),
-            "/d/data/activeTWAPs/0/accountName",
-        ),
-        (
-            "twap:stateUpdate",
-            serde_json::json!({"twap-1":{"options":{"accountName":"first"},"state":{"accountName":"first"},"ownerId":"digest"}}),
-            "/d/data/twap-1/options/accountName",
-        ),
-    ] {
-        let output = crate::envelope::with_account_label(
-            crate::envelope::msg("first", op, data.clone()),
-            "second",
-        );
-        let output: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(output["d"]["accountName"], "second");
-        assert_eq!(output.pointer(path).unwrap(), "second");
-        if op == "twap:stateUpdate" {
-            assert_eq!(output["d"]["data"]["twap-1"]["ownerId"], "digest");
-            assert_eq!(
-                output["d"]["data"]["twap-1"]["state"]["accountName"],
-                "second"
-            );
-        }
-        let unchanged = crate::envelope::msg("first", op, data);
-        assert_eq!(
-            crate::envelope::with_account_label(unchanged.clone(), "first"),
-            unchanged
-        );
-    }
+    let data = serde_json::json!({"twap-1":{"options":{"accountName":"first"},"state":{"accountName":"first"},"ownerId":"digest"}});
+    let output = crate::envelope::with_account_label(
+        crate::envelope::msg("first", "twap:stateUpdate", data.clone()),
+        "second",
+    );
+    let output: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(output["d"]["accountName"], "second");
+    assert_eq!(
+        output["d"]["data"]["twap-1"]["options"]["accountName"],
+        "second"
+    );
+    assert_eq!(
+        output["d"]["data"]["twap-1"]["state"]["accountName"],
+        "second"
+    );
+    assert_eq!(output["d"]["data"]["twap-1"]["ownerId"], "digest");
+    let unchanged = crate::envelope::msg("first", "twap:stateUpdate", data);
+    assert_eq!(
+        crate::envelope::with_account_label(unchanged.clone(), "first"),
+        unchanged
+    );
 }
 
 #[test]
@@ -330,7 +319,7 @@ async fn identity_broadcast_reaches_each_label_once_and_counts_one_socket() {
                     .unwrap();
                 assert!(Arc::ptr_eq(&joined, &account));
             }
-            let update = crate::envelope::msg(&account.name, "store", json!({"activeChasers":[]}));
+            let update = crate::envelope::msg(&account.name, "log", json!({"message":"fixture"}));
             let holding = account.reach_live(Some(update.clone()));
             assert_eq!(holding.live, [7]);
             assert!(!holding.parked);
@@ -736,4 +725,70 @@ fn twap_binding_tracks_verified_identity_across_labels_and_key_changes() {
     assert!(binding.rebind_owner(&b));
     assert!(binding.rebind_owner(&a));
     assert_ne!(binding.snapshot().generation, original.generation);
+}
+
+/// AGT-196: the venue account digest leaves out the Tealstreet user and the
+/// label, so two logins holding one key agree, and any venue scope or key
+/// change is another account.
+#[test]
+fn venue_account_is_the_same_for_every_login_and_distinct_per_venue_account() {
+    let first = init();
+    let digest = identity::venue_account(&first).unwrap();
+    assert_eq!(digest.len(), 64);
+    let relabelled = InitPayload {
+        account_name: "another login's label".into(),
+        instance_id: Some("another device".into()),
+        ..first.clone()
+    };
+    assert_eq!(identity::venue_account(&relabelled).unwrap(), digest);
+    for changed in [
+        InitPayload {
+            key: "synthetic-key-B".into(),
+            ..first.clone()
+        },
+        InitPayload {
+            exchange_name: "okx".into(),
+            ..first.clone()
+        },
+        InitPayload {
+            testnet: Some(true),
+            ..first.clone()
+        },
+        InitPayload {
+            bybit_site_id: Some("BRA_BTL".into()),
+            ..first.clone()
+        },
+        InitPayload {
+            subaccount: Some("sub".into()),
+            ..first.clone()
+        },
+    ] {
+        assert_ne!(identity::venue_account(&changed).unwrap(), digest);
+    }
+    // A vault names another account only where the engine trades through one.
+    let vault = |exchange_name: &str, vault: Option<&str>| {
+        identity::venue_account(&InitPayload {
+            exchange_name: exchange_name.into(),
+            vault: vault.map(Into::into),
+            ..first.clone()
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        vault("bybit", Some("0xvault")),
+        digest,
+        "a stray vault on Bybit is the same venue account"
+    );
+    assert_ne!(
+        vault("hyperliquid", Some("0xvault")),
+        vault("hyperliquid", None)
+    );
+    assert_eq!(vault("hyperliquid", Some("")), vault("hyperliquid", None));
+    assert!(
+        identity::venue_account(&InitPayload {
+            key: String::new(),
+            ..first
+        })
+        .is_err()
+    );
 }

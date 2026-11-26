@@ -9,7 +9,8 @@ use safe_cex_engine::{
     },
     write_plan::{AppliedEffect, Element, ElementResult, WritePlan},
 };
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const ORDER: &str = "/openApi/spot/v1/trade/order";
 const CANCEL: &str = "/openApi/spot/v1/trade/cancel";
 const CANCEL_ALL: &str = "/openApi/spot/v1/trade/cancelOpenOrders";
@@ -467,6 +468,7 @@ impl BingxSpot {
                         .map(|(index, step)| Element {
                             index,
                             client_order_id: step.receipt.as_ref().map(|r| r.identity.clone()),
+                            role: None,
                         })
                         .collect(),
                 );

@@ -12,7 +12,8 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::signing::{Algorithm, KeyUse, Need};
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 
-const CANCEL_UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
+const CANCEL_UNKNOWN: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) const PACING: safe_cex_engine::request_context::Pacing =
     safe_cex_engine::request_context::Pacing {
@@ -601,6 +602,9 @@ const BATCH: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::C
         place_refusal("Order has zero size."),
         place_refusal("Builder fee has not been approved."),
         place_refusal("Reduce-only is invalid for spot trading."),
+        // AGT-117: a spot bracket (limit or marketable entry) answers this as one row for the
+        // whole group, with nothing filled or resting (live 2026-11-21, HYPE/USDC).
+        place_refusal("Placing trigger orders is not enabled on spot trading yet."),
     ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(Some(ErrorKind::Rejected)),
@@ -963,6 +967,7 @@ impl Hyperliquid {
                         .map(|index| Element {
                             index,
                             client_order_id: None,
+                            role: None,
                         })
                         .collect(),
                 );

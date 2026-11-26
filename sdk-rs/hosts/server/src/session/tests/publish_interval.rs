@@ -108,7 +108,7 @@ async fn tick(ms: u64) {
         tokio::task::yield_now().await;
     }
 }
-fn drain(sent: &mut crate::out::Receiver) -> Vec<Value> {
+pub(super) fn drain(sent: &mut crate::out::Receiver) -> Vec<Value> {
     std::iter::from_fn(|| sent.try_recv().ok())
         .map(|s| serde_json::from_str(&s).unwrap())
         .collect()
@@ -145,7 +145,9 @@ async fn first(sent: &mut crate::out::Receiver) -> Value {
         }
     }
 }
-async fn setup(interval: Option<Value>) -> (Session, crate::out::Receiver, Arc<Account>, Value) {
+pub(super) async fn setup(
+    interval: Option<Value>,
+) -> (Session, crate::out::Receiver, Arc<Account>, Value) {
     let registry = crate::accounts::tests::registry();
     let init = acct_init();
     let link = safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| true));
@@ -437,7 +439,7 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
                         method: "fetchCandles".into(),
                         reply: methods::Reply::Result,
                         group: None,
-                        incomplete: false,
+                        incomplete: None,
                         audit: None,
                     },
                 );
@@ -446,13 +448,14 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
             assert_eq!(snapshot["d"]["seq"], 1);
             assert_eq!(session.joined["acct"].old.len(), 1);
             assert_eq!(
-                *session.joined["acct"].client.publish_interval.borrow(),
+                session.joined["acct"].client.publication.borrow().interval,
                 500
             );
-            drain(&mut sent);
+            let mut after_snapshot = drain(&mut sent);
             tick(600).await;
+            after_snapshot.extend(drain(&mut sent));
             assert!(
-                public_frames(&drain(&mut sent)).is_empty(),
+                public_frames(&after_snapshot).is_empty(),
                 "old pump emitted a stale cached frame"
             );
             update(&session, &account, 222, 2);
@@ -460,7 +463,17 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
             let messages = drain(&mut sent);
             let updates = public_frames(&messages);
             assert_eq!(updates.len(), 1);
-            assert_eq!(updates[0]["d"]["seq"], 2);
+            // Rule 5 / #3640 (7b723d8837): section 35 request statistics publish
+            // immediately and may precede the public update after resnapshot.
+            let frames: Vec<_> = after_snapshot
+                .iter()
+                .chain(messages.iter())
+                .filter(|message| message["d"]["op"] == "frame")
+                .collect();
+            for (offset, frame) in frames.iter().enumerate() {
+                assert_eq!(frame["d"]["seq"], offset + 2);
+            }
+            assert_eq!(updates[0]["d"]["seq"], frames.len() + 1);
             session.close();
             account.handle.dispose();
         })
@@ -471,14 +484,14 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
 async fn integer_bounds_are_clamped_and_invalid_updates_never_replace_them() {
     tokio::task::LocalSet::new().run_until(async {
         let (mut session, mut sent, account, _) = setup(Some(json!(-1))).await;
-        assert_eq!(*session.joined["acct"].client.publish_interval.borrow(), 50);
+        assert_eq!(session.joined["acct"].client.publication.borrow().interval, 50);
         for (value, expected) in [(json!(0),50), (json!(49),50), (json!(250),250), (json!(u64::MAX),5000)] {
             set(&mut session, "acct", value).await;
-            assert_eq!(*session.joined["acct"].client.publish_interval.borrow(), expected);
+            assert_eq!(session.joined["acct"].client.publication.borrow().interval, expected);
         }
         for value in [json!(null),json!(true),json!("50"),json!(500.5),json!([]),json!({})] {
             set(&mut session, "acct", value).await;
-            assert_eq!(*session.joined["acct"].client.publish_interval.borrow(),5000);
+            assert_eq!(session.joined["acct"].client.publication.borrow().interval,5000);
             assert!(drain(&mut sent).iter().any(|v| v["d"]["data"][1]["kind"]=="invalid_publish_interval"));
         }
         session.handle(&json!({"t":"msg","d":{"op":"set-publish-interval","data":{"publishIntervalMs":50}}}).to_string()).await.unwrap();
@@ -509,12 +522,16 @@ async fn saturated_pump(change_interval: bool) {
     let (_cancel, canceled) = tokio::sync::watch::channel(false);
     let (out, mut sent, _) = Out::channel(backlog + 32);
     let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (rate, rate_rx) = tokio::sync::watch::channel(if change_interval { 5000 } else { 50 });
+    let (rate, rate_rx) = tokio::sync::watch::channel(Preferences {
+        interval: if change_interval { 5000 } else { 50 },
+        tickers: None,
+    });
     let task = tokio::task::spawn_local(pump(
         safe_cex_native::ClientLink { outgoing, canceled },
         1,
         dropped,
         handle,
+        "acct".into(),
         "acct".into(),
         out,
         Arc::default(),
@@ -549,7 +566,7 @@ async fn saturated_pump(change_interval: bool) {
         input.try_send(Outgoing::Frame(control.clone())).unwrap();
     }
     if change_interval {
-        rate.send_replace(50);
+        rate.send_modify(|preferences| preferences.interval = 50);
     }
     tokio::time::advance(Duration::from_millis(60)).await;
     let mut before_public = 0;
@@ -586,4 +603,224 @@ async fn live_interval_progresses_while_the_native_inbox_is_ready() {
     tokio::task::LocalSet::new()
         .run_until(saturated_pump(true))
         .await;
+}
+
+fn view(messages: &[Value]) -> safe_cex_engine::Store {
+    let mut store = safe_cex_engine::Store::default();
+    let mut state = safe_cex_engine::ingest::IngestState::default();
+    for message in messages.iter().filter(|v| v["d"]["op"] == "frame") {
+        let data = bytes(message);
+        let frame = safe_cex_engine::ingest::parse(&data).unwrap();
+        safe_cex_engine::ingest::apply(
+            &mut store,
+            &mut state,
+            &frame,
+            message["d"]["snapshot"] == true,
+        )
+        .unwrap();
+    }
+    store
+}
+fn ticker_frames(messages: &[Value]) -> Vec<&Value> {
+    messages
+        .iter()
+        .filter(|v| {
+            v["d"]["op"] == "frame"
+                && safe_cex_engine::wire::sections(&bytes(v))
+                    .any(|(kind, _)| matches!(kind, section::TICKERS | section::TICKER_DELTAS))
+        })
+        .collect()
+}
+async fn select_tickers(session: &mut Session, account: &str, value: Value) {
+    session.handle(&json!({"t":"msg","d":{"op":"set-active-ticker-symbols","accountName":account,"data":{"activeTickerSymbols":value}}}).to_string()).await.unwrap();
+}
+async fn selected_setup(
+    tickers: Value,
+) -> (Session, crate::out::Receiver, Arc<Account>, Vec<Value>) {
+    let registry = crate::accounts::tests::registry();
+    let init = acct_init();
+    let link = safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| true));
+    let (mut account, _) = crate::accounts::testing::account_on(
+        Updates {
+            book: Book::default(),
+        },
+        ("u", "acct", &init.exchange_name),
+        Some(link),
+        init.fingerprint(),
+        Arc::default(),
+    );
+    crate::accounts::testing::bind_identity(&mut account, &init);
+    crate::accounts::testing::register(&registry, &account);
+    let (mut session, mut sent) = user_session(registry, "u");
+    let mut data = serde_json::to_value(init).unwrap();
+    data["activeTickerSymbols"] = tickers;
+    session
+        .handle(&json!({"t":"init", "d":data}).to_string())
+        .await
+        .unwrap();
+    let mut messages = vec![first(&mut sent).await];
+    tick(5).await;
+    messages.extend(drain(&mut sent));
+    (session, sent, account, messages)
+}
+
+#[tokio::test(start_paused = true)]
+async fn init_ticker_selection_sends_only_selected_rows_and_live_updates_replace_them() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (mut session, mut sent, account, mut seen) =
+                selected_setup(json!(["ETHUSDT"])).await;
+            assert!(view(&seen).tickers().is_empty(), "unselected row escaped");
+            update(&session, &account, 111, 1);
+            tick(70).await;
+            let messages = drain(&mut sent);
+            assert!(ticker_frames(&messages).is_empty(), "{messages:?}");
+            assert_eq!(public_frames(&messages).len(), 1, "books keep publishing");
+            seen.extend(messages);
+            select_tickers(&mut session, "acct", json!(null)).await;
+            tick(5).await;
+            let messages = drain(&mut sent);
+            assert_eq!(ticker_frames(&messages).len(), 1);
+            seen.extend(messages);
+            assert_eq!(view(&seen).ticker("BTCUSDT").map(|t| t.last), Some(111.));
+            select_tickers(&mut session, "acct", json!([])).await;
+            tick(5).await;
+            seen.extend(drain(&mut sent));
+            assert!(view(&seen).tickers().is_empty());
+            select_tickers(&mut session, "acct", json!(["BTCUSDT"])).await;
+            update(&session, &account, 222, 2);
+            tick(70).await;
+            seen.extend(drain(&mut sent));
+            assert_eq!(
+                view(&seen).ticker("BTCUSDT").map(|t| (t.last, t.mark)),
+                Some((111., 222.))
+            );
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn malformed_ticker_selections_refuse_without_changing_the_current_one() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let oversized = json!(vec!["BTCUSDT"; crate::publication::MAX_TICKER_SYMBOLS + 1]);
+            let long = json!(["X".repeat(crate::publication::MAX_TICKER_SYMBOL_BYTES + 1)]);
+            let invalid = [
+                json!("BTCUSDT"),
+                json!([1]),
+                json!([""]),
+                json!({}),
+                json!(true),
+                long,
+                oversized,
+            ];
+            for value in invalid.clone() {
+                let registry = crate::accounts::tests::registry();
+                let init = acct_init();
+                let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                let (mut session, mut sent) = user_session(registry, "u");
+                let mut data = serde_json::to_value(init).unwrap();
+                data["activeTickerSymbols"] = value;
+                session
+                    .handle(&json!({"t":"init","d":data}).to_string())
+                    .await
+                    .unwrap();
+                assert!(session.joined.is_empty() && session.pending_verifications.is_empty());
+                let messages = drain(&mut sent);
+                assert!(
+                    messages.iter().any(|v| v["d"]["data"][1]["kind"]
+                        == "invalid_active_ticker_symbols"
+                        && v["d"]["data"][1]["activeTickerSymbolsRefused"] == true
+                        && v["d"]["data"][1]["initRefused"] == true),
+                    "{messages:?}"
+                );
+                session.close();
+                account.handle.dispose();
+            }
+            let (mut session, mut sent, account, _) = selected_setup(json!(["ETHUSDT"])).await;
+            for value in invalid {
+                select_tickers(&mut session, "acct", value).await;
+                assert!(
+                    drain(&mut sent)
+                        .iter()
+                        .any(|v| v["d"]["data"][1]["kind"] == "invalid_active_ticker_symbols")
+                );
+                assert!(
+                    session.joined["acct"]
+                        .client
+                        .publication
+                        .borrow()
+                        .tickers
+                        .is_some()
+                );
+            }
+            select_tickers(&mut session, "unheld", json!(null)).await;
+            assert!(
+                drain(&mut sent)
+                    .iter()
+                    .any(|v| v["d"]["data"][1]["kind"] == "not_admitted"
+                        && v["d"]["data"][1]["activeTickerSymbolsRefused"] == true)
+            );
+            update(&session, &account, 111, 1);
+            tick(70).await;
+            assert!(ticker_frames(&drain(&mut sent)).is_empty());
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn ticker_selection_is_per_connection_and_survives_a_resnapshot() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (mut selected, mut selected_sent, account, _) =
+                selected_setup(json!(["ETHUSDT"])).await;
+            let (mut full, mut full_sent) = user_session(selected.registry.clone(), "u");
+            full.handle(&json!({"t":"init","d":acct_init()}).to_string())
+                .await
+                .unwrap();
+            first(&mut full_sent).await;
+            drain(&mut full_sent);
+            assert!(Arc::ptr_eq(
+                &selected.joined["acct"].account,
+                &full.joined["acct"].account
+            ));
+            update(&selected, &account, 111, 1);
+            tick(70).await;
+            assert_eq!(ticker_frames(&drain(&mut full_sent)).len(), 1);
+            assert!(ticker_frames(&drain(&mut selected_sent)).is_empty());
+            assert!(selected.resnapshot("acct", None).await);
+            let mut seen = vec![first(&mut selected_sent).await];
+            tick(5).await;
+            seen.extend(drain(&mut selected_sent));
+            assert!(view(&seen).tickers().is_empty());
+            select_tickers(&mut full, "acct", json!(["ETHUSDT"])).await;
+            assert!(
+                selected.joined["acct"]
+                    .client
+                    .publication
+                    .borrow()
+                    .tickers
+                    .is_some()
+            );
+            selected.close();
+            full.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[test]
+fn ticker_selection_is_not_an_engine_option_or_account_identity() {
+    let plain = acct_init();
+    let mut selected = plain.clone();
+    selected.active_ticker_symbols = serde_json::from_value(json!(["BTCUSDT"])).unwrap();
+    assert_eq!(plain.fingerprint(), selected.fingerprint());
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap(),
+        serde_json::to_value(&selected).unwrap()
+    );
 }

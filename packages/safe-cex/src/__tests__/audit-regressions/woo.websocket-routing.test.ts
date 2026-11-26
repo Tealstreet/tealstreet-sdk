@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const makeExchange = () =>
   new WOOXExchange(
@@ -12,7 +12,7 @@ const makeExchange = () =>
       applicationId: 'application-id',
       tuning: { consoleLogging: false },
     } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 let exchange: WOOXExchange | undefined;

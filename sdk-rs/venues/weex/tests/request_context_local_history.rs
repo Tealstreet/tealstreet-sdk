@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Local history terminals require genuine Read custody without changing native decisions.
 mod support;
 
@@ -339,13 +340,13 @@ fn capacity(branch: Local) {
         &actions,
         900,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     refused(
         &local(&mut e, NOW, 800, branch),
         800,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     retire(&mut e, 1);
     native(&local(&mut e, NOW, 800, branch), 800, branch);
@@ -354,7 +355,7 @@ fn capacity(branch: Local) {
         &local(&mut e, NOW, 801, branch),
         801,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     for owner in 2..=256 {
         retire(&mut e, owner);
@@ -399,7 +400,7 @@ fn invalid_clock_refuses_all_seven_local_terminals() {
                 &local(&mut e, now, 810, branch),
                 810,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
             native(&local(&mut e, NOW, 810, branch), 810, branch);
             no_store_effects(&mut e);

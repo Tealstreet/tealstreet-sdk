@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { EngineHost, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -57,7 +58,7 @@ it('admits Woo RemoteSigner through its declaration, while an undeclared venue s
   expect(() => assertBetaAccount('woo', { key: 'fixture-public', secret: '', remoteSigner })).not.toThrow();
   expect(() => assertBetaVenue('mode')).not.toThrow();
   expect(deriveRemoteSigningPolicy('mode')).toBeUndefined();
-  expect(() => assertBetaAccount('mode', { key: 'fixture-public', secret: '', remoteSigner })).toThrow(/isn't available on the Hosted Server/);
+  expect(() => assertBetaAccount('mode', { key: 'fixture-public', secret: '', remoteSigner })).toThrow(/isn’t available for server trading/);
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });
 
@@ -76,7 +77,7 @@ it.each([
       setup = new DelegatedSignerSetup('woo', { key: 'fixture-public', secret: '', remoteSigner, ...secondary });
       setup.construct(Constructor as unknown as new (venue: string, options: string) => WasmEngineLike, 'woo', '{}');
     }).toThrowError(expect.objectContaining({
-      kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('WOO X secondary read keys'),
+      kind: 'unsupported', outcome: 'notSent', message: expect.stringContaining('WOO X doesn’t support extra read-only keys for server trading'),
     }));
     expect(Constructor).not.toHaveBeenCalled();
     expect(remoteSigner.sign).not.toHaveBeenCalled();

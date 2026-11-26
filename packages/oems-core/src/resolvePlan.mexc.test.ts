@@ -89,7 +89,7 @@ describe('OEMS refuses pre-rounding of MEXC close-like intent', () => {
     );
   });
 
-  it.each([
+  it.each<OemsIntent>([
     {
       kind: 'place_order',
       account: 'mexc',
@@ -101,7 +101,7 @@ describe('OEMS refuses pre-rounding of MEXC close-like intent', () => {
     },
     { kind: 'place_stop_loss', account: 'mexc', symbol: 'DOGEUSDT', side: 'sell', amount: 130.4, price: 0.09 },
     { kind: 'amend_order', account: 'mexc', orderId: 'close', amount: 130.4 },
-  ] as OemsIntent[])('refuses $kind before rounding hides the requested quantity', (step) => {
+  ])('refuses $kind before rounding hides the requested quantity', (step) => {
     const out = resolve(step);
     expect(out.commands).toEqual([]);
     expect(out.rejections[0]?.reason).toMatch(/lot step/);

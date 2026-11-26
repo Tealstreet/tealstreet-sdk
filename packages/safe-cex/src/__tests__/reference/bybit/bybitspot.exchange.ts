@@ -1,8 +1,8 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
-import type { ExchangeName } from '../../../types';
 import type { BybitPlaceOrderOpts } from '../../../exchanges/bybit/bybit.order-params';
+import type { StoreData } from '../../../generated/StoreData';
+import type { ExchangeName } from '../../../types';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -13,6 +13,24 @@ import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { getBybitOrderExecutionParams } from '../../../exchanges/bybit/bybit.order-params';
+import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
+import {
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TIME_IN_FORCE,
+  ORDER_TIME_IN_FORCE_OUTBOUND,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+} from '../../../exchanges/bybit/bybit.types';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -41,24 +59,9 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './bybit.api';
-import { getBybitOrderExecutionParams } from '../../../exchanges/bybit/bybit.order-params';
-import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
-import {
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TIME_IN_FORCE,
-  ORDER_TIME_IN_FORCE_OUTBOUND,
-  ORDER_TRIGGER_TYPE,
-  ORDER_TYPE,
-  POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
-} from '../../../exchanges/bybit/bybit.types';
 import { BybitPrivateWebsocket } from './bybitspot.ws-private';
 import { BybitPublicWebsocket } from './bybitspot.ws-public';
 
@@ -107,7 +110,7 @@ export class BybitSpotExchange extends BaseExchange {
     return this.unifiedMarginStatus === 1 ? 'CONTRACT' : 'UNIFIED';
   }
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
@@ -166,7 +169,22 @@ export class BybitSpotExchange extends BaseExchange {
     this.recentlyPlacedOrders.set(order.id, { placedAt: virtualClock.getCurrentTimeMs(), order });
 
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
-      this.store.addOrUpdateOrders([order]);
+      (() => {
+        const incoming: StoreData['orders'] = [order];
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -178,7 +196,14 @@ export class BybitSpotExchange extends BaseExchange {
     }
 
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
-      this.store.removeOrders(orders.map(({ id }) => ({ id })));
+      (() => {
+        const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map(({ id }) => ({ id }));
+        return applyReferenceFixture(
+          this.store,
+          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -188,13 +213,26 @@ export class BybitSpotExchange extends BaseExchange {
     const nextOrder: Order = {
       ...order,
       ...update,
-      ...(typeof update.amount === 'number'
-        ? { remaining: Math.max(0, update.amount - (order.filled || 0)) }
-        : {}),
+      ...(typeof update.amount === 'number' ? { remaining: Math.max(0, update.amount - (order.filled || 0)) } : {}),
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 
-    this.store.addOrUpdateOrders([nextOrder]);
+    (() => {
+      const incoming: StoreData['orders'] = [nextOrder];
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   private preserveRecentlyPlacedOrders = (fetched: Order[]): Order[] => {
@@ -278,10 +316,14 @@ export class BybitSpotExchange extends BaseExchange {
         await this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
           this.log(`Loaded ${markets.length} Bybit markets`);
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
@@ -295,10 +337,14 @@ export class BybitSpotExchange extends BaseExchange {
 
       if (this.isDisposed) return;
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
 
     // Awaited here rather than inside the branch above: it must run on both
@@ -320,9 +366,13 @@ export class BybitSpotExchange extends BaseExchange {
     // start ticking live data
     // balance, tickers, positions
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -338,18 +388,38 @@ export class BybitSpotExchange extends BaseExchange {
       const [, , rawBalance] = await Promise.all([
         this.fetchOrders().then((orders) => {
           if (this.isDisposed) return [];
-          this.store.update({
-            orders,
-            loaded: { ...this.store.loaded, orders: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              orders,
+              loaded: { orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return orders;
         }),
         this.fetchPositions().then((positions) => {
           if (this.isDisposed) return [];
-          this.store.addOrUpdatePositionsFull(positions);
-          this.store.update({
-            loaded: { ...this.store.loaded, positions: true },
-          });
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return positions;
         }),
         this.fetchRawBalance(),
@@ -357,10 +427,14 @@ export class BybitSpotExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const balance = this.formatBalance(rawBalance);
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err);
     }
@@ -376,10 +450,14 @@ export class BybitSpotExchange extends BaseExchange {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
 
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
 
       // Always `[]` — bybit spot reports no positions. Kept because it is what
@@ -388,18 +466,35 @@ export class BybitSpotExchange extends BaseExchange {
       const positions = await this.fetchPositions();
       if (this.isDisposed) return;
 
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        loaded: { ...this.store.loaded, positions: true },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       const balance = await this.fetchBalance();
 
       if (this.isDisposed) return;
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err);
     }
@@ -427,9 +522,7 @@ export class BybitSpotExchange extends BaseExchange {
         this.needsReinit = false;
         this.lastReinitAt = Date.now();
         await this.fetchOrdersPositionsAndBalance();
-        this.reinitRetryMs = this.needsReinit
-          ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS)
-          : REINIT_RETRY_MS;
+        this.reinitRetryMs = this.needsReinit ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS) : REINIT_RETRY_MS;
       }
 
       try {
@@ -738,6 +831,8 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: BybitPlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
@@ -879,6 +974,8 @@ export class BybitSpotExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: BybitPlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
       this.getOrderExecutionParams(order);

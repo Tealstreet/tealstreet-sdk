@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original controls execute the native venue through a genuine engine entry.
 use super::super::{AsterDex, Pending};
 use crate::fixture::Options;
@@ -627,7 +628,10 @@ fn capacity_refused(out: &[Action], read: bool) {
         })
         .collect();
     assert_eq!(failures.len(), 1, "{out:?}");
-    assert_eq!(failures[0].message, "Engine request capacity reached");
+    assert_eq!(
+        failures[0].message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert_eq!(failures[0].outcome, (!read).then_some(Outcome::NotSent));
     assert!(
         !out.iter()

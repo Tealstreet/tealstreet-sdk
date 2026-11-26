@@ -1,7 +1,6 @@
-import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -13,6 +12,10 @@ import uniqBy from 'lodash/uniqBy';
 
 import { parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_exchange';
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { mapBitunixPositionHistory } from '../../../journal/bitunix.position-adapter';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Candle,
   ClosedPnlEntry,
@@ -52,12 +55,19 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  replacing,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createAPI } from './bitunix.api';
-import { mapBitunixPositionHistory } from '../../../journal/bitunix.position-adapter';
-import { mapBitunixTradeToIncomeRecords } from './bitunix.income';
 import { mapBitunixClosedPosition } from './bitunix.closed-pnl';
+import { mapBitunixTradeToIncomeRecords } from './bitunix.income';
 import { mapBitunixHistoricalOrder } from './bitunix.order-history';
 import {
   ENDPOINTS,
@@ -108,7 +118,7 @@ export class BitunixExchange extends BaseExchange {
   // amendable before the first REST reconciliation.
   orderReduceOnlyCache: Map<string, boolean> = new Map();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 5 }) });
@@ -456,10 +466,14 @@ export class BitunixExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // start futures right away for load book
       this.futuresWebsocket.connectAndSubscribe();
@@ -471,10 +485,14 @@ export class BitunixExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Bitunix markets`);
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // Each public connection carries one channel per market. Bitunix caps a
       // connection at 300 subscriptions, so shard both ticker and price feeds.
@@ -482,16 +500,24 @@ export class BitunixExchange extends BaseExchange {
     }
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
     this.privateWebsocket.connectAndSubscribe();
 
     // fetch current position mode (Hedge/One-way)
-    this.store.setSetting('isHedged', await this.fetchPositionMode());
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: await this.fetchPositionMode() } },
+      this.store.markets.map((row) => row.symbol),
+    );
 
     // start ticking live data
     // balance, tickers, positions
@@ -506,10 +532,14 @@ export class BitunixExchange extends BaseExchange {
 
     this.log(`Loaded Bitunix orders`);
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   tick = async (count = 0) => {
@@ -520,23 +550,31 @@ export class BitunixExchange extends BaseExchange {
         if (count % 32 === 0 || this.lastTickAccountPositionMode !== this.accountPositionMode) {
           this.lastTickAccountPositionMode = this.accountPositionMode;
           const positionsWithRisk = await this.fetchPositions();
-          this.store.update({ positions: positionsWithRisk });
+          applyReferenceFixture(
+            this.store,
+            { positions: positionsWithRisk },
+            this.store.markets.map((row) => row.symbol),
+          );
           const orders = await this.fetchOrders();
-          this.store.update({ orders });
+          applyReferenceFixture(
+            this.store,
+            { orders },
+            this.store.markets.map((row) => row.symbol),
+          );
           if (this.isDisposed) return;
         }
         const { balance, positions } = await this.fetchBalance();
         if (this.isDisposed) return;
 
-        this.store.update({
-          balance,
-          positions,
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-            positions: true,
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { balance: true, positions: true },
           },
-        });
+          this.store.markets.map((row) => row.symbol),
+        );
       } catch (err: any) {
         this.emitAndLogError(err?.message);
       }
@@ -712,7 +750,9 @@ export class BitunixExchange extends BaseExchange {
           ),
           realizedPnl: this.parseFiniteNumber(this.getFirstValue(p, ['realizedPNL', 'realizedPnl'])),
           contracts: Math.abs(contracts),
-          liquidationPrice: this.parseFiniteNumber(this.getFirstValue(p, ['liqPrice', 'liquidationPrice', 'liqPx'])),
+          liquidationPrice: nativeLiquidationPrice(
+            this.parseFiniteNumber(this.getFirstValue(p, ['liqPrice', 'liquidationPrice', 'liqPx'])),
+          ),
           marginType,
           positionMode,
           info: p,
@@ -735,7 +775,7 @@ export class BitunixExchange extends BaseExchange {
           unrealizedPnl: 0,
           contracts: 0,
           leverage: symbolSettings?.leverage || 10,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           positionMode,
           marginType: symbolSettings?.marginType || MarginType.Cross,
         };
@@ -1467,7 +1507,9 @@ export class BitunixExchange extends BaseExchange {
           continue;
         }
         // tradeId identifies an execution; equal partial fills of one order are distinct.
-        const key = execution.id ?? `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        const key =
+          execution.id ??
+          `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         deduped.set(key, execution);
       }
 
@@ -1562,7 +1604,11 @@ export class BitunixExchange extends BaseExchange {
       await this.xhr.post(ENDPOINTS.HEDGE_MODE, {
         positionMode: hedged ? 'HEDGE' : 'ONE_WAY',
       });
-      this.store.setSetting('isHedged', hedged);
+      applyReferenceFixture(
+        this.store,
+        { options: { ...this.store.options, ['isHedged']: hedged } },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
@@ -1582,14 +1628,27 @@ export class BitunixExchange extends BaseExchange {
       });
       // HTTP 200 may still carry a business rejection; only an accepted change
       // is applied, to both legs like setLeverage.
-      if (data?.code !== undefined && Number(data.code) !== 0) throw new Error(data?.msg || 'Bitunix rejected margin mode');
+      if (data?.code !== undefined && Number(data.code) !== 0)
+        throw new Error(data?.msg || 'Bitunix rejected margin mode');
       const marginType = isolated ? MarginType.Isolated : MarginType.Cross;
       const settings = this.symbolSettings.get(symbol);
       if (settings) this.symbolSettings.set(symbol, { ...settings, marginType });
-      this.store.updatePositions([
-        [{ id: createPositionId(symbol, PositionSide.Long) }, { marginType }],
-        [{ id: createPositionId(symbol, PositionSide.Short) }, { marginType }],
-      ]);
+      (() => {
+        const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> = [
+          [{ id: createPositionId(symbol, PositionSide.Long) }, { marginType }],
+          [{ id: createPositionId(symbol, PositionSide.Short) }, { marginType }],
+        ];
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: this.store.positions.map((row) => {
+              const change = updates.find(([target]) => target.id === row.id);
+              return change ? { ...row, ...change[1] } : row;
+            }),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (e: any) {
       this.emitAndLogError(e?.response?.data?.msg || e?.message);
       throw new Error(e?.response?.data?.msg || e?.message);
@@ -1613,10 +1672,23 @@ export class BitunixExchange extends BaseExchange {
           leverage,
         });
 
-        this.store.updatePositions([
-          [{ id: createPositionId(symbol, PositionSide.Long) }, { leverage }],
-          [{ id: createPositionId(symbol, PositionSide.Short) }, { leverage }],
-        ]);
+        (() => {
+          const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
+            [
+              [{ id: createPositionId(symbol, PositionSide.Long) }, { leverage }],
+              [{ id: createPositionId(symbol, PositionSide.Short) }, { leverage }],
+            ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: this.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
       }
@@ -1693,10 +1765,19 @@ export class BitunixExchange extends BaseExchange {
       }
 
       // Update store to mark all cancelled orders
-      this.store.updateOrdersStatus(
-        orders.map((o) => ({ id: o.id })),
-        OrderStatus.Canceled,
-      );
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((o) => ({ id: o.id }));
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       // Recreate parent orders only if some TP/SL should be preserved.
       // Skip if: parent itself is being canceled, or both TP and SL are removed.
@@ -1728,7 +1809,7 @@ export class BitunixExchange extends BaseExchange {
           newOrderOpts.slTriggerType = slOrder.slTriggerType;
         }
 
-        await this.placeOrder(newOrderOpts);
+        await replacing(this, () => this.placeOrder(newOrderOpts));
       }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -1804,17 +1885,28 @@ export class BitunixExchange extends BaseExchange {
     });
     const cancelCode = Number(cancelResponse?.data?.code);
     if (cancelCode !== 0) {
-      throw new Error(cancelResponse?.data?.msg || `Bitunix cancel order failed with code ${cancelResponse?.data?.code}`);
+      throw new Error(
+        cancelResponse?.data?.msg || `Bitunix cancel order failed with code ${cancelResponse?.data?.code}`,
+      );
     }
 
-    this.store.updateOrdersStatus(
-      this.store.orders
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders
         .filter((candidate) => candidate.id === targetOrder.id || candidate.id.startsWith(`${targetOrder.id}__`))
-        .map((candidate) => ({ id: candidate.id })),
-      OrderStatus.Canceled,
-    );
+        .map((candidate) => ({ id: candidate.id }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: this.store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
 
-    const replacementIds = await this.placeOrder(replacementOrder);
+    const replacementIds = await replacing(this, () => this.placeOrder(replacementOrder));
     const replacementParentId = replacementIds[0];
     return replacementParentId ? [`${replacementParentId}__${virtualTpslLeg}`] : [];
   };
@@ -2078,7 +2170,11 @@ export class BitunixExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
+    // AGT-115: a stop entry becomes a position TP/SL order without the legs; refuse first.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
     try {
       await this.hydratePositionIdBeforeFormatting(opts);
       const payloads = this.formatCreateOrder(opts);
@@ -2101,7 +2197,11 @@ export class BitunixExchange extends BaseExchange {
         this.positionIdCache.delete(`${opts.symbol}:short`);
 
         const freshPositions = await this.fetchPositions();
-        this.store.update({ positions: freshPositions });
+        applyReferenceFixture(
+          this.store,
+          { positions: freshPositions },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         // Retry — formatTPSLOrder will fall through to position.info.positionId
         const payloads = this.formatCreateOrder(opts);
@@ -2112,7 +2212,10 @@ export class BitunixExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Bitunix'));
     for (const order of orders) {
       await this.hydratePositionIdBeforeFormatting(order);
     }
@@ -2138,18 +2241,22 @@ export class BitunixExchange extends BaseExchange {
     });
 
     if (data) {
-      this.store.update({
-        positions: this.store.positions.map((position) => {
-          if (position.symbol === symbol) {
-            return {
-              ...position,
-              leverage: data.leverage,
-              marginType,
-            };
-          }
-          return position;
-        }),
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          positions: this.store.positions.map((position) => {
+            if (position.symbol === symbol) {
+              return {
+                ...position,
+                leverage: data.leverage,
+                marginType,
+              };
+            }
+            return position;
+          }),
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 
@@ -2187,12 +2294,20 @@ export class BitunixExchange extends BaseExchange {
 
     if (!position.info?.positionId && !this.positionIdCache.get(cacheKey)) {
       const freshPositions = await this.fetchPositions();
-      this.store.update({ positions: freshPositions });
+      applyReferenceFixture(
+        this.store,
+        { positions: freshPositions },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
 
     if (isFullPositionTpsl) {
       const freshOrders = await this.fetchOrders();
-      this.store.update({ orders: freshOrders });
+      applyReferenceFixture(
+        this.store,
+        { orders: freshOrders },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 

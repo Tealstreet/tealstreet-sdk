@@ -1,8 +1,8 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
 import type { ClientOrderLookup, ReplacementOrderIds } from '../../../exchanges/clientOrderId';
 import type { HyperliquidPlacementRecord } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
 import type { BuilderFeeCheckResult, BuilderInfo } from '../../../exchanges/hyperliquid/hyperliquid.types';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
@@ -19,6 +19,44 @@ import {
   SIGNIFICANT_DIGITS,
 } from '@tealstreet/ccxt-compat/src/functions/number';
 import { safeString } from '@tealstreet/ccxt-compat/src/functions/type';
+import { BaseExchange } from '../../../exchanges/base';
+import { orderCarriesClientOrderId, withReplacementClientOrderId } from '../../../exchanges/clientOrderId';
+import { checkBuilderFeeApproved } from '../../../exchanges/hyperliquid/hyperliquid.builderFee';
+import {
+  HYPERLIQUID_CLOID_PATTERN,
+  hyperliquidClientOrderIdRule,
+  mintHyperliquidCloid,
+  placementRecordFromWire,
+  readHyperliquidCloid,
+} from '../../../exchanges/hyperliquid/hyperliquid.cloid';
+import {
+  PERP_MAX_PRICE_DECIMALS,
+  resolveHyperliquidBuilder,
+  SPOT_ASSET_INDEX_OFFSET,
+  SPOT_MAX_PRICE_DECIMALS,
+} from '../../../exchanges/hyperliquid/hyperliquid.constants';
+import {
+  inferHyperliquidOrderTypeAndPrice,
+  parseHyperliquidOrderTimeInForce,
+} from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
+import {
+  AssetCtx,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  HyperliquidUserAbstractionMode,
+  INFO_TYPES,
+  Meta,
+  OrderWire,
+  PerpDex,
+  PerpDexs,
+  ScheduleCancelAction,
+  SpotAssetCtx,
+  SpotClearinghouseState,
+  SpotMeta,
+  SpotToken,
+} from '../../../exchanges/hyperliquid/hyperliquid.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Candle,
   ClosedPnlEntry,
@@ -57,23 +95,15 @@ import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { orderCarriesClientOrderId, withReplacementClientOrderId } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  REDUCE_ONLY_LEGS_REFUSAL,
+  refusesReduceOnlyLegs,
+  stopEntryLegsRefusal,
+  stopEntryWithAttachedLegs,
+} from '../stopEntryLegs';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
-import { checkBuilderFeeApproved } from '../../../exchanges/hyperliquid/hyperliquid.builderFee';
-import {
-  HYPERLIQUID_CLOID_PATTERN,
-  hyperliquidClientOrderIdRule,
-  mintHyperliquidCloid,
-  placementRecordFromWire,
-  readHyperliquidCloid,
-} from '../../../exchanges/hyperliquid/hyperliquid.cloid';
-import {
-  PERP_MAX_PRICE_DECIMALS,
-  SPOT_ASSET_INDEX_OFFSET,
-  SPOT_MAX_PRICE_DECIMALS,
-  resolveHyperliquidBuilder,
-} from '../../../exchanges/hyperliquid/hyperliquid.constants';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
   deriveHyperliquidClosedPositions,
@@ -86,7 +116,6 @@ import {
   fetchHip3MetaAndAssetCtxsWithRetry,
 } from './hyperliquid.market-startup-helpers';
 import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from './hyperliquid.order-history';
-import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
 import {
   hyperliquidOrderResponseHasDeferredOrderStatus,
   HyperliquidUnreadableOrderResponseError,
@@ -100,23 +129,6 @@ import {
   orderWiresToPositionalTPSLAction,
   signL1Action,
 } from './hyperliquid.signing';
-import {
-  AssetCtx,
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  HyperliquidUserAbstractionMode,
-  INFO_TYPES,
-  Meta,
-  OrderWire,
-  PerpDex,
-  PerpDexs,
-  ScheduleCancelAction,
-  SpotAssetCtx,
-  SpotClearinghouseState,
-  SpotMeta,
-  SpotToken,
-} from '../../../exchanges/hyperliquid/hyperliquid.types';
 import { calculatePricePrecision, symbolToCoin } from './hyperliquid.utils';
 import { HyperliquidPrivateWebSocket } from './hyperliquid.ws-private';
 import { HyperliquidPublicWebSocket } from './hyperliquid.ws-public';
@@ -387,7 +399,11 @@ export class HyperliquidExchange extends BaseExchange {
   }
 
   // Strict trigger-only match for core-perp stop entries (see cross-cache)
-  public matchPrePlacementTrigger(coin: string, side: OrderSide, wsAmount: number): { type: OrderType; price: number } | undefined {
+  public matchPrePlacementTrigger(
+    coin: string,
+    side: OrderSide,
+    wsAmount: number,
+  ): { type: OrderType; price: number } | undefined {
     return getCrossCache().matchPrePlacementTrigger(coin, side, wsAmount);
   }
 
@@ -485,7 +501,7 @@ export class HyperliquidExchange extends BaseExchange {
   // Debug instance ID to track if multiple instances exist
   public readonly _instanceId = Math.random().toString(36).substr(2, 9);
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = rateLimit(createExchangeAPI(opts, this), { maxRPS: 3 });
@@ -701,21 +717,25 @@ export class HyperliquidExchange extends BaseExchange {
         },
       };
 
-      this.store.update({
-        balance: {
-          total,
-          used,
-          free,
-          upnl,
-          currencies: currencies as any,
-          coins: spotSnapshot.coins,
-          info: {
-            userAbstractionMode: this.userAbstractionMode,
-            source: 'spotClearinghouseState+clearinghouseState',
-            spotCollateralCurrencies: spotSnapshot.spotCurrencies,
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: {
+            total,
+            used,
+            free,
+            upnl,
+            currencies: currencies as any,
+            coins: spotSnapshot.coins,
+            info: {
+              userAbstractionMode: this.userAbstractionMode,
+              source: 'spotClearinghouseState+clearinghouseState',
+              spotCollateralCurrencies: spotSnapshot.spotCurrencies,
+            },
           },
         },
-      });
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -732,20 +752,24 @@ export class HyperliquidExchange extends BaseExchange {
         ? this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances)
         : null;
 
-    this.store.update({
-      balance: {
-        total: accountValue - upnl,
-        used,
-        free: accountValue - used,
-        upnl,
-        ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
-        info: {
-          userAbstractionMode: this.userAbstractionMode,
-          source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
-          ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          total: accountValue - upnl,
+          used,
+          free: accountValue - used,
+          upnl,
+          ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
+          info: {
+            userAbstractionMode: this.userAbstractionMode,
+            source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
+            ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
+          },
         },
       },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   public applyCorePerpsBalanceSnapshot = (snapshot: {
@@ -1267,12 +1291,7 @@ export class HyperliquidExchange extends BaseExchange {
         total: 0,
         upnl: 0,
       },
-      loaded: {
-        ...this.store.loaded,
-        orders: shouldMarkPrivateLoaded,
-        balance: shouldMarkPrivateLoaded,
-        positions: shouldMarkPrivateLoaded,
-      },
+      loaded: { orders: shouldMarkPrivateLoaded, balance: shouldMarkPrivateLoaded, positions: shouldMarkPrivateLoaded },
     };
 
     if (!useExternalPublicData) {
@@ -1282,7 +1301,11 @@ export class HyperliquidExchange extends BaseExchange {
       storeUpdate.loaded.tickers = true;
     }
 
-    this.store.update(storeUpdate);
+    applyReferenceFixture(
+      this.store,
+      storeUpdate,
+      this.store.markets.map((row) => row.symbol),
+    );
 
     if (shouldStartPrivateData) {
       await userAbstractionModePromise;
@@ -1335,10 +1358,14 @@ export class HyperliquidExchange extends BaseExchange {
     const [orders, coreState] = await Promise.all([this.fetchOrders(), this.fetchCorePerpsState()]);
     if (this.isDisposed) return;
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
     if (coreState) this.privateWebsocket.applyCoreClearinghouseState(coreState, true);
   };
 
@@ -2230,13 +2257,17 @@ export class HyperliquidExchange extends BaseExchange {
       return;
     }
 
-    this.store.update({
-      balance: {
-        ...balance,
-        upnl: nextUpnl,
-        free: nextFree,
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          ...balance,
+          upnl: nextUpnl,
+          free: nextFree,
+        },
       },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   /**
@@ -2303,7 +2334,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ]
@@ -2316,7 +2347,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
             {
@@ -2327,7 +2358,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ];
@@ -2409,7 +2440,19 @@ export class HyperliquidExchange extends BaseExchange {
         });
 
         const allPositions = uniqBy([...currentPositions, ...this.getFakePositions()], 'id');
-        this.store.addOrUpdatePositionsFull(allPositions);
+        (() => {
+          const incoming: StoreData['positions'] = allPositions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.log(`Cleared HIP-3 positions for dex: ${dexName} (empty response)`, LogSeverity.Info);
 
         // If we had positions before and now have none, the position was closed
@@ -2468,7 +2511,7 @@ export class HyperliquidExchange extends BaseExchange {
           leverage: pos.leverage.value,
           unrealizedPnl: parseFloat(pos.unrealizedPnl),
           contracts: Math.abs(szi),
-          liquidationPrice: pos.liquidationPx ? parseFloat(pos.liquidationPx) : 0,
+          liquidationPrice: nativeLiquidationPrice(pos.liquidationPx ? parseFloat(pos.liquidationPx) : 0),
           marginSize: pos.marginUsed ? parseFloat(pos.marginUsed) : undefined,
           positionMode: PositionMode.OneWay,
           marginType: pos.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
@@ -2503,7 +2546,16 @@ export class HyperliquidExchange extends BaseExchange {
       // Deduplicate before updating store - real positions take precedence over fake ones
       // Use uniqBy to keep first occurrence (real positions come before fakes)
       const allPositions = uniqBy([...currentPositions, ...newPositions, ...this.getFakePositions()], 'id');
-      this.store.addOrUpdatePositionsFull(allPositions);
+      (() => {
+        const incoming: StoreData['positions'] = allPositions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       if (newPositions.length > 0) {
         this.log(`Successfully updated ${newPositions.length} HIP-3 positions for dex: ${dexName}`, LogSeverity.Info);
@@ -2693,7 +2745,11 @@ export class HyperliquidExchange extends BaseExchange {
         const existing = currentOrdersById.get(newOrder.id);
         if (!existing) {
           // New order - add it
-          this.store.addOrder(newOrder);
+          applyReferenceFixture(
+            this.store,
+            { orders: [...this.store.orders, newOrder] },
+            this.store.markets.map((row) => row.symbol),
+          );
         } else if (
           existing.status !== newOrder.status ||
           existing.price !== newOrder.price ||
@@ -2704,7 +2760,15 @@ export class HyperliquidExchange extends BaseExchange {
           existing.clientOrderId !== newOrder.clientOrderId
         ) {
           // Order changed - update only this order
-          this.store.updateOrder({ id: newOrder.id }, newOrder);
+          (() => {
+            const target = { id: newOrder.id };
+            const changes: Partial<StoreData['orders'][number]> = newOrder;
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
         // Unchanged orders are left alone (preserves object reference)
       }
@@ -2724,7 +2788,14 @@ export class HyperliquidExchange extends BaseExchange {
           const orderDex = market?.info?.hip3Dex?.toLowerCase();
           if (orderDex && !fetchedDexes.has(orderDex)) continue;
 
-          this.store.removeOrder({ id: currentOrder.id });
+          (() => {
+            const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: currentOrder.id }];
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
 
@@ -3670,53 +3741,46 @@ export class HyperliquidExchange extends BaseExchange {
     //                     }
     //                 }
 
-    if (opts.stopLoss) {
-      orderWires.push(
-        orderRequestToOrderWire(
-          {
-            coin,
-            is_buy: opts.side !== OrderSide.Buy,
-            sz: orderSize,
-            limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-            order_type: {
-              trigger: {
-                isMarket: true,
-                tpsl: 'sl',
-                triggerPx: +this.priceToPrecision(market.symbol, opts.stopLoss),
-              },
-            },
-            reduce_only: this.resolveReduceOnly(market, true),
-            cloid: mintHyperliquidCloid(),
-          },
-          assetIndex,
-        ),
-      );
-    }
-
-    if (opts.takeProfit) {
-      orderWires.push(
-        orderRequestToOrderWire(
-          {
-            coin,
-            is_buy: opts.side !== OrderSide.Buy,
-            sz: orderSize,
-            limit_px: +this.priceToPrecision(market.symbol, opts.price || 0),
-            order_type: {
-              trigger: {
-                isMarket: true,
-                tpsl: 'tp',
-                triggerPx: +this.priceToPrecision(market.symbol, opts.takeProfit),
-              },
-            },
-            reduce_only: this.resolveReduceOnly(market, true),
-            cloid: mintHyperliquidCloid(),
-          },
-          assetIndex,
-        ),
-      );
-    }
+    orderWires.push(...this.bracketLegWires(opts, market, coin, orderSize, opts.price || 0));
 
     return orderWires;
+  };
+
+  /**
+   * The SL/TP legs a limit or market entry carries under `normalTpsl`: reduce-only market
+   * triggers on the opposite side, each at the entry's size and limit price. A zero or absent
+   * price adds no leg. AGT-117: market entries dropped them until 2026-11-21.
+   */
+  private bracketLegWires = (opts: PlaceOrderOpts, market: Market, coin: string, size: number, limitPx: number) => {
+    const assetIndex = market.info.hyperliquidId;
+    const legs: OrderWire[] = [];
+    for (const [tpsl, triggerPx] of [
+      ['sl', opts.stopLoss],
+      ['tp', opts.takeProfit],
+    ] as const) {
+      if (!triggerPx) continue;
+      legs.push(
+        orderRequestToOrderWire(
+          {
+            coin,
+            is_buy: opts.side !== OrderSide.Buy,
+            sz: size,
+            limit_px: +this.priceToPrecision(market.symbol, limitPx),
+            order_type: {
+              trigger: {
+                isMarket: true,
+                tpsl,
+                triggerPx: +this.priceToPrecision(market.symbol, triggerPx),
+              },
+            },
+            reduce_only: this.resolveReduceOnly(market, true),
+            cloid: mintHyperliquidCloid(),
+          },
+          assetIndex,
+        ),
+      );
+    }
+    return legs;
   };
 
   placeLimitOrder = async (opts: PlaceOrderOpts, cloid: string = mintHyperliquidCloid()) => {
@@ -3793,7 +3857,22 @@ export class HyperliquidExchange extends BaseExchange {
               : OrderTimeInForce.GoodTillCancel,
           lastUpdate: virtualClock.getCurrentTimeMs(),
         };
-        this.store.addOrUpdateOrder(optimisticOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [optimisticOrder];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
       this.refreshHip3OrdersWithRetry(orderIds);
     }
@@ -3827,6 +3906,8 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     // The caller's ID goes on the main wire verbatim; otherwise we mint one.
     const cloid = this.resolveCallerClientOrderId(opts) ?? mintHyperliquidCloid();
     return this.placeOrderWithCloid(opts, cloid);
@@ -3835,6 +3916,8 @@ export class HyperliquidExchange extends BaseExchange {
   // `cloid` is the main wire's client order ID. `updateOrder` calls this directly
   // so it knows which cloid its replacement went out with.
   private placeOrderWithCloid = async (opts: PlaceOrderOpts, cloid: string): Promise<string[]> => {
+    // AGT-115: legs are grouped only with a limit or market entry; a trigger entry would drop them.
+    if (stopEntryWithAttachedLegs(opts)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     if (opts.type === OrderType.TrailingStopLoss) {
       throw new Error('Not supported');
     }
@@ -3889,13 +3972,16 @@ export class HyperliquidExchange extends BaseExchange {
       // would rest as a limit instead of crossing. Perps keep mark-first
       // (closer to oracle, avoids "price too far from oracle" rejections).
       const basePrice = this.getOrderBasePrice(market, 'market order');
+      const coin = symbolToCoin(market.symbol);
+      const size = adjust(opts.amount, nAmount);
+      const limitPx = basePrice * (opts.side === OrderSide.Buy ? 1.05 : 0.95);
 
       const orderWire = orderRequestToOrderWire(
         {
-          coin: symbolToCoin(market.symbol),
+          coin,
           is_buy: opts.side === OrderSide.Buy,
-          sz: adjust(opts.amount, nAmount),
-          limit_px: +this.priceToPrecision(market.symbol, basePrice * (opts.side === OrderSide.Buy ? 1.05 : 0.95)),
+          sz: size,
+          limit_px: +this.priceToPrecision(market.symbol, limitPx),
           order_type: {
             limit: {
               tif: 'Gtc' as any,
@@ -3906,11 +3992,16 @@ export class HyperliquidExchange extends BaseExchange {
         },
         assetIndex,
       );
+      // AGT-117: the entry is a marketable limit, so its legs group with it as a limit's do.
+      const orderWires = [orderWire, ...this.bracketLegWires(opts, market, coin, size, limitPx)];
 
       // Get builder info if wallet is approved for builder fee
       const builderInfo = await this.getBuilderInfo();
 
-      const action = orderWiresToOrderAction([orderWire], builderInfo);
+      const action =
+        orderWires.length > 1
+          ? orderWiresToNormalTPSLAction(orderWires, builderInfo)
+          : orderWiresToOrderAction(orderWires, builderInfo);
 
       const nonce = this.generateNonce();
       const signature = await signL1Action(
@@ -3923,7 +4014,7 @@ export class HyperliquidExchange extends BaseExchange {
 
       const payload = { action, nonce, signature, ...(this.options.vault ? { vaultAddress: this.options.vault } : {}) };
       // A market order is a Gtc limit at 5% slippage; an unfilled remainder rests as one.
-      this.recordPlacement([orderWire], market.symbol);
+      this.recordPlacement(orderWires, market.symbol);
       const data = await this.postOrderAction(payload);
 
       const orderIds = this.validateResponseAndExtractOrderIds(data);
@@ -4140,7 +4231,22 @@ export class HyperliquidExchange extends BaseExchange {
             reduceOnly: Boolean(opts.reduceOnly),
             lastUpdate: virtualClock.getCurrentTimeMs(),
           };
-          this.store.addOrUpdateOrder(optimisticOrder);
+          (() => {
+            const incoming: StoreData['orders'] = [optimisticOrder];
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
 
         // Still refresh to get any additional fields from REST when available
@@ -4257,7 +4363,14 @@ export class HyperliquidExchange extends BaseExchange {
       }
     }
 
-    this.store.removeOrders(orders.map((o) => ({ id: o.id })));
+    (() => {
+      const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((o) => ({ id: o.id }));
+      return applyReferenceFixture(
+        this.store,
+        { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   /**
@@ -4405,7 +4518,22 @@ export class HyperliquidExchange extends BaseExchange {
         reduceOnly: Boolean(newOrder.reduceOnly),
         lastUpdate: virtualClock.getCurrentTimeMs(),
       };
-      this.store.addOrUpdateOrder(updatingOrder);
+      (() => {
+        const incoming: StoreData['orders'] = [updatingOrder];
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
 
     await this.cancelOrders([order]);
@@ -4437,7 +4565,10 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
+    if (orders.some(stopEntryWithAttachedLegs)) this.rejectPreflight(stopEntryLegsRefusal('Hyperliquid'));
     const orderIds = await mapSeries(orders, (order) => this.placeOrder(order));
     return orderIds.flat();
   };

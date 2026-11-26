@@ -107,8 +107,19 @@ explicit critical; account State/Orders, reconnect snapshots and Role/Mode/Spot
 are financial reconciliation, below explicit critical but above normal work.
 Both classes may use the same 200-weight reserve. Caller history and candles are bulk. Noncritical work has an 800-weight
 ceiling, leaving 200 for critical work within the same total. Native and shared
-queues keep FIFO within each class, and native refill is continuous. Queued
+queues keep FIFO within each class, and native refill is continuous. A shared
+`candleSnapshot` waiter queued 5 s ranks ahead of normal reads but behind
+reconciliation and critical, so queued discovery cannot starve a chart read
+past its bound (AGT-299); history reads stay bulk. Queued
 candles retain their original 20 s bound, shortened by a smaller caller wait.
+**A candle read reserves its requested span, not the venue maximum**: 20 plus one
+per 60 candles, counting ceil(span/step)+1 because both boundary candles return
+(`1M` is a fixed, epoch-aligned 30-day bucket, not a calendar month). The cap is
+6,000 rows (120), not 5,000: a full 1m reply was observed at 5,182 rows. Both the
+native queue and the shared host budget derive it from the sent `startTime`/`endTime`;
+an unreadable body reserves 120. Until AGT-113 every read reserved 104, about four
+times a 330-bar chart read's real cost, so a chart's first reads queued ~15 s each
+behind each other (Sentry E6Z).
 Startup-only fees/builder wait for pending financial reads before their managed
 20 s deadline starts. A live placement may release its queued builder check;
 this does not promote it to critical. Catalogue completion refreshes its own DEX,
@@ -127,7 +138,14 @@ timeouts use a shared local budget, retaining known pacing state. Local admissio
 keeps normal speed until IndexedDB has opened successfully in this realm; later
 storage failures use one-quarter speed because shared and local budgets may split.
 After a 30-second cooldown, reads retry IndexedDB and max-merge local
-reservations and 429 pauses back into shared state, invalidating prior grants.
+reservations and 429 pauses back into shared state. Recovery keeps the token
+generation: grants reserve nothing, and only a 429 retires one. Bumping it on
+every recovery refused every waiter on the row as an admission expiry (AGT-299).
+A fallback 429 the shared row never saw does bump it past both generations, as
+that 429 would have: otherwise a grant charged locally could refund its cost from
+another realm's post-429 debt. A refund after a recovery without a 429 can still
+return a charge the max-merge absorbed; that leak is bounded by the read's cost.
+Fallback and recovery each leave a closed-label console breadcrumb.
 While storage is unavailable, independent realms cannot share their 429 pauses.
 If IDB never opens, each realm has its own full 1,000-weight initial bucket.
 Only pacing timestamps and retry counters are stored, never account or request
@@ -135,7 +153,11 @@ data. Persisted pauses/reservations are
 bounded relative to the current clock, and Retry-After pauses cap at five minutes.
 Admission and pauses spend the existing HTTP deadline and abort signal before
 managed send claim. Response bookkeeping never rejects a received answer; a
-successful response does not wait for it. Storage degradation logs once per realm.
+successful response does not wait for it. Storage degradation warns once per realm
+and breadcrumbs every fallback/recovery. An admission refusal carries closed
+`admission` facts (weight, class, stage, queue depth/position, debt, pause,
+generation change, storage mode) and breadcrumbs them; the WASM host allowlists
+them into `http.request_failed`.
 
 The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
 startup time, the original 60-second warning threshold, the 20-second read timeout
@@ -698,7 +720,7 @@ Private diagnostics should include outbound user/order subscription frames and i
 | `Market`           | `{ limit: { tif: "Gtc" } }` with 5% slippage price          | `na`                                                      |
 | `TakeProfit`       | `{ trigger: { isMarket: true, tpsl: "tp", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
 | `StopLoss`         | `{ trigger: { isMarket: true, tpsl: "sl", triggerPx: X } }` | `positionTpsl` (full close, sz=0) or `na` (partial, sz>0) |
-| Limit + TP + SL    | Combined wires                                              | `normalTpsl`                                              |
+| Limit/Market+TP/SL | Combined wires (market entries too since AGT-117)           | `normalTpsl`                                              |
 | `TrailingStopLoss` | **Not supported** (throws before submission)                | -                                                         |
 
 ### Reduce-only sizing
@@ -890,7 +912,13 @@ instead of waiting until REST actually stops returning the order.
 ### Order Grouping
 
 - `na`: Standalone order (limit, market, partial TP/SL with `sz > 0`)
-- `normalTpsl`: Limit order with attached TP and/or SL
+- `normalTpsl`: Limit or market order with attached TP and/or SL. Each leg is a market
+  trigger (reduce-only on perps) at the entry's size and limit price (the slippage-capped price
+  for a market entry; the venue applies its own 10% slippage when the trigger fires). Market
+  entries dropped their legs until AGT-117 (verified live 2026-11-21 on a perp: filled parent,
+  then two `waitingForTrigger` legs that rest as reduce-only triggers). The reply names only the
+  entry. Spot has no trigger orders: the venue refuses a spot bracket as one error row, "Placing
+  trigger orders is not enabled on spot trading yet." (live 2026-11-21).
 - `positionTpsl`: Full position TP/SL (size = 0, closes entire position)
 
 ### Market Order Implementation

@@ -26,8 +26,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
-const CENSUS_UNCERTAIN: &str =
-    "Bitrue protective placement outcome is uncertain; complete fresh order census is required";
+const CENSUS_UNCERTAIN: &str = "A Bitrue protection order hasn’t been confirmed. Check your open orders before adding protection.";
 /// Native's Network/Timeout retries on a read, chained per call (D3).
 const READ_RETRIES: u8 = 3;
 /// An amend's cancel is re-read this long for a terminal status, then unproven.
@@ -996,7 +995,7 @@ impl Bitrue {
             }
             Command::CancelSymbolOrders { symbol, .. } => {
                 if self.trading.unresolved_protection.contains_key(&symbol) {
-                    return Err("Bitrue protective placement outcome is uncertain; reconcile before cancel-all".into());
+                    return Err("A Bitrue protection order hasn’t been confirmed. Check your open orders before cancelling all orders.".into());
                 }
                 work.cancel_batch = true;
                 let orders = cx
@@ -1427,7 +1426,7 @@ impl Bitrue {
         {
             let order = &stop.guard.order;
             let words = format!(
-                "Your {} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                "Your {} replacement {} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection.",
                 order.symbol,
                 what(order.kind)
             );
@@ -1525,7 +1524,7 @@ impl Bitrue {
         let read = check(response).and_then(|()| {
             let Reply { data } =
                 serde_json::from_str::<Reply<OneOrMany<Detail<'_>>>>(response.body)
-                    .map_err(|e| format!("Malformed Bitrue order detail: {e}"))?;
+                    .map_err(|e| format!("Bitrue’s order details couldn’t be read: {e}"))?;
             let detail = data.one()?;
             let quantities = target.quantities(&detail)?;
             Ok((detail.status.to_string(), quantities))
@@ -1605,7 +1604,7 @@ impl Bitrue {
         let symbol = active.work.symbols.first().cloned().unwrap_or_default();
         let what = active.work.amend.map_or("order", |(_, kind)| what(kind));
         let mut error = VenueError::new(format!(
-            "Your {symbol} {what} was not replaced: its cancel was sent but could not be confirmed, so whether it still stands is unknown. Check Open Orders"
+            "Your {symbol} {what} wasn’t replaced because its cancellation wasn’t confirmed. Check your open orders before trying again."
         ));
         error.presents = true;
         self.end(cx, active, current, error)
@@ -1668,7 +1667,7 @@ impl Bitrue {
             ),
             (true, false, false) => (
                 format!(
-                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                    "Your {symbol} replacement {what} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
                 ),
                 None,
             ),
@@ -2318,7 +2317,7 @@ impl Bitrue {
                     Ok(vec![id])
                 }
                 Ok(_) => Err("Bitrue placement returned no order identity".to_owned()),
-                Err(error) => Err(format!("Malformed Bitrue placement: {error}")),
+                Err(error) => Err(format!("Bitrue’s order reply couldn’t be read: {error}")),
             },
             Effect::Cancel(target) => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body);
@@ -2409,7 +2408,7 @@ impl Bitrue {
         body: &str,
     ) -> Result<(), String> {
         let Reply { data } = serde_json::from_str::<Reply<OneOrMany<Detail<'_>>>>(body)
-            .map_err(|e| format!("Malformed Bitrue order detail: {e}"))?;
+            .map_err(|e| format!("Bitrue’s order details couldn’t be read: {e}"))?;
         let detail = data.one()?;
         match &step.effect {
             Effect::Verify(target) => {
@@ -2492,7 +2491,7 @@ impl Bitrue {
                         })
                     {
                         return Err(
-                            "Bitrue protective replacement has incomplete trigger provenance"
+                            "The Bitrue stop’s trigger details aren’t complete enough to replace it"
                                 .into(),
                         );
                     }
@@ -2694,6 +2693,7 @@ pub(crate) fn trade_reconciliation(
     ReconciliationData::new(request.step.path.clone())
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod serial_auth_tests {
     use super::*;

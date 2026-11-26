@@ -4,6 +4,8 @@ import type { ExchangeName, ExchangeOptions } from '../types';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
+
 import '../transport/registerTealstreetTransport';
 
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
@@ -12,7 +14,6 @@ import {
   bigIntAxiosHttpOverWebsocketAdapter,
   disposeHOWWebSockets,
 } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { DefaultStore } from '../store/store.base';
 import { legacyVenueRegistry as exchangeRegistry } from './reference/legacyVenueRegistry';
 
 vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -144,7 +145,7 @@ describe('transport adapter selection per exchange', () => {
           const exchange = new Exchange(
             exchangeName,
             { ...BASE_OPTIONS, ...transport, publicDataOnly },
-            new DefaultStore(),
+            new FrameStore(),
           );
           liveInstances.push(exchange);
           selection[`${publicDataOnly ? 'public' : 'private'} ${combo}`] = collectAxiosInstances(exchange);

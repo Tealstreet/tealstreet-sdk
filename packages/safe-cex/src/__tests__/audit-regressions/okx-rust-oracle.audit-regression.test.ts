@@ -2,24 +2,31 @@ import type { Market } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const setup = (publicDataOnly = true) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC-USDT-SWAP',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT', active: true,
-        limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
-        contractSize: 0.01,
-        precision: { amount: 0.01, price: 0.1 },
-      } satisfies Market,
-    ],
-  });
+        markets: [
+          {
+            id: 'BTC-USDT-SWAP',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
+            contractSize: 0.01,
+            precision: { amount: 0.01, price: 0.1 },
+          } satisfies Market,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new OKXExchange(
     'okx',
     {

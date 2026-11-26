@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
@@ -9,12 +10,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { prepareRecordedHttp } from '../support/managedHttp';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 // Clock synchronization is host policy; keep the worker lifecycle without a live time read.
 vi.mock('../../utils/virtualClock', async (original) => {
@@ -184,7 +185,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     setRustEngineTransport(() => tape.transport);
     setMainAcceptsFrames(frames);
     const options = { key: 'k', secret: 's' };
-    main = new RustEngineExchange('binance', options, new DefaultStore());
+    main = new RustEngineExchange('binance', options, new FrameStore());
     const ctx = bridge(() => worker, main);
     ctx.attach();
     worker = new ExchangeWorker(
@@ -292,25 +293,29 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     ['store payload', false],
   ])('Nuke sends no second close when the read fails, and says not confirmed (%s bridge)', async (_mode, frames) => {
     const { tape } = await start(frames, () => ({ status: 500, body: '{"code":-1000,"msg":"down"}' }));
-    await expect(main!.nuke()).rejects.toThrow(/could not confirm the account is flat/);
+    await expect(main!.nuke()).rejects.toThrow(/Nuke couldn’t confirm all positions were closed/);
     expect(closesIn(tape.writes())).toHaveLength(1);
   });
 
   it.each([
     ['frame', true],
     ['store payload', false],
-  ])('Nuke with delayed frames sends a cancel for the traded symbol and never reports flat from the store (%s bridge)', async (_mode, frames) => {
-    // The close fills against a bid the store never saw, so the venue stays long.
-    const { tape } = await start(frames, () => ({ status: 200, body: positionRisk('0.5') }), true);
-    const before = tape.writes().length;
-    const outcome = await main!.nuke().then(
-      () => 'ok',
-      (error: Error) => error.message,
-    );
-    const nuke = tape.writes().slice(before);
-    expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
-    expect(outcome).toMatch(/not leave the account flat|could not confirm/);
-  }, 30_000);
+  ])(
+    'Nuke with delayed frames sends a cancel for the traded symbol and never reports flat from the store (%s bridge)',
+    async (_mode, frames) => {
+      // The close fills against a bid the store never saw, so the venue stays long.
+      const { tape } = await start(frames, () => ({ status: 200, body: positionRisk('0.5') }), true);
+      const before = tape.writes().length;
+      const outcome = await main!.nuke().then(
+        () => 'ok',
+        (error: Error) => error.message,
+      );
+      const nuke = tape.writes().slice(before);
+      expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
+      expect(outcome).toMatch(/not leave the account flat|could not confirm/);
+    },
+    30_000,
+  );
 
   it('reads public trades and adopts capabilities from the worker without a main-thread engine', async () => {
     const { tape, loader } = await start(true);
@@ -351,7 +356,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     main = new RustEngineExchange(
       'binance',
       { key: 'k', secret: 's', extra: { rustCommandTimeoutMs: 1 } },
-      new DefaultStore(),
+      new FrameStore(),
     );
     main.on('callMethod', () => {});
     const failure = await main
@@ -373,9 +378,9 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
   });
 
   it('keeps an unstarted instance without a worker bridge local, sending nothing', async () => {
-    main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
     const dispatch = vi.spyOn(main.emitter, 'dispatch');
-    await expect(main.cancelSymbolOrders('BTCUSDT')).rejects.toThrow('engine is not started');
+    await expect(main.cancelSymbolOrders('BTCUSDT')).rejects.toThrow('binance is still loading');
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

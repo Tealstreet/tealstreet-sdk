@@ -59,6 +59,11 @@ order preparation and venue bracket handling; venue restrictions still apply.
 For a take-profit on an existing position, use `stop at PRICE`: above the mark
 for a long, below the mark for a short.
 
+`reduce` cannot be combined with `stop` or `tp`: the legs would outlive the
+position they close, so the command is refused before anything is sent ("A
+stop-loss or take-profit can't be attached to a reduce-only order. Place it as
+its own order."). Place the stop separately with the `stop` command.
+
 **`at` is required for a limit order.** `buy 100$ 50000` is not a limit — there
 is nothing for the price to attach to, so it would be a market order with a
 stray number. Any leftover bare number is rejected with "did you mean
@@ -694,6 +699,11 @@ used by web. Exchange-specific fields include `--passphrase`,
 `--paradex-address`, `--subkey-address`, `--subaccount`,
 `--grvt-signer-address`, `--grvt-trading-account-id`, `--vault`,
 `--tealstreet-tunnel`, and `--tealstreet-ws-route`.
+
+`tealstreet account list` shows the first and last four characters of each
+API key. Paradex and Polymarket store a private key there, so for them it shows
+the account's public address when it has one, and `******` otherwise — never
+any part of the key.
 
 Source: `AccountsCommand.ts`.
 

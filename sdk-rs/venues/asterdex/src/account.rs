@@ -91,6 +91,17 @@ enum ModeLoad {
     Unrequested,
     Loading,
     Known,
+    SignatureRejected,
+}
+
+const SIGNATURE_REJECTED: &str = "Aster API key signature rejected: re-create the key (V3)";
+
+fn signature_rejected(code: i64, message: &str) -> bool {
+    code == -1022
+        || code == -1000
+            && message
+                .trim()
+                .eq_ignore_ascii_case("Signature check failed")
 }
 
 impl AccountState {
@@ -423,6 +434,9 @@ impl AsterDex {
         self.account.tick = Some(cx.set_poll_timer(3_000.0));
     }
     fn request_mode(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.mode == ModeLoad::SignatureRejected {
+            return;
+        }
         let path = self.path("positionSide/dual");
         self.signed(
             cx,
@@ -437,7 +451,10 @@ impl AsterDex {
     }
     /// Placements are refused until the startup position-mode read lands.
     pub(crate) fn position_mode_pending(&self) -> bool {
-        self.account.mode == ModeLoad::Loading
+        matches!(
+            self.account.mode,
+            ModeLoad::Loading | ModeLoad::SignatureRejected
+        )
     }
     fn remember_protection(
         &mut self,
@@ -866,22 +883,43 @@ impl AsterDex {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
+        let mut terminal_signature = false;
+        let mut signature_reported = false;
         let error = match &response {
-            Ok(r) => venue_error(r).map(|(code, m)| {
-                // Aster's whitelist refusal does not always carry a key code; its words do.
-                if matches!(code, -2014 | -2015)
-                    || safe_cex_engine::error::ip_whitelist_text(&m, None)
-                        .is_some_and(|(_, named)| named)
-                {
-                    cx.startup_read_refused(
-                        &safe_cex_engine::VenueError::new(m.clone())
-                            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
-                            .venue_code(code.to_string())
-                            .venue_message(m.clone()),
-                    );
+            Ok(r) => match venue_error(r) {
+                Some((code, m)) => {
+                    if signature_rejected(code, &m) {
+                        terminal_signature = true;
+                        match &request {
+                            Request::ListenKey { .. } | Request::Keepalive { .. } => {}
+                            _ => {
+                                signature_reported = cx.startup_read_refused(
+                                    &VenueError::new(SIGNATURE_REJECTED)
+                                        .kind(ErrorKind::AuthInvalid)
+                                        .venue_code(code.to_string())
+                                        .venue_message(m),
+                                );
+                            }
+                        }
+                        Some(SIGNATURE_REJECTED.into())
+                    } else {
+                        // Aster's whitelist refusal does not always carry a key code; its words do.
+                        if matches!(code, -2014 | -2015)
+                            || safe_cex_engine::error::ip_whitelist_text(&m, None)
+                                .is_some_and(|(_, named)| named)
+                        {
+                            cx.startup_read_refused(
+                                &safe_cex_engine::VenueError::new(m.clone())
+                                    .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                                    .venue_code(code.to_string())
+                                    .venue_message(m.clone()),
+                            );
+                        }
+                        Some(m)
+                    }
                 }
-                m
-            }),
+                None => None,
+            },
             Err(e) => Some((*e).into()),
         };
         let body = response.as_ref().map_or("", |r| r.body);
@@ -987,7 +1025,9 @@ impl AsterDex {
                 }
             }
             Request::Mode { version } => {
-                if version != self.account.mode_version {
+                if version != self.account.mode_version
+                    || self.account.mode == ModeLoad::SignatureRejected
+                {
                     return;
                 }
                 if valid
@@ -996,6 +1036,18 @@ impl AsterDex {
                 {
                     cx.store.set_hedged(value);
                     self.mode_known(cx);
+                } else if terminal_signature {
+                    self.account.mode = ModeLoad::SignatureRejected;
+                    if let Some(timer) = self.account.mode_timer.take() {
+                        cx.clear_timer(timer);
+                    }
+                    if !signature_reported {
+                        cx.notice_error(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            &VenueError::new(SIGNATURE_REJECTED).kind(ErrorKind::AuthInvalid),
+                        );
+                    }
                 } else {
                     let delay = cx.jittered(
                         Backoff::new(1_000.0, 5, f64::INFINITY).delay(self.account.mode_failures),
@@ -1004,7 +1056,7 @@ impl AsterDex {
                     let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
                     cx.retried_failure("asterdex.account:778",
                         format!(
-                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {:.1}s",
+                            "Aster’s position mode couldn’t be loaded ({reason}); trying again in {:.1}s. Orders will be available once it loads.",
                             delay / 1_000.0
                         ));
                     if self.account.mode_timer.is_none() {
@@ -1445,9 +1497,11 @@ impl AsterDex {
         }
         let head = serde_json::from_str::<TradeHead>(text).ok();
         let position_side = head.as_ref().and_then(|h| hedge_side(h.o.ps.as_deref()));
+        // A non-trade update carries `t = 0`; it is no execution identity.
         let execution = head
             .and_then(|h| h.o.t)
-            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
+            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t)
+            .filter(|t| *t > 0);
         let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
             .then(|| {
                 let qty =
@@ -1474,7 +1528,7 @@ impl AsterDex {
                     }
                 }
                 cx.fill(Fill {
-                    id: None,
+                    id: Some(execution.to_string()),
                     order_id: id.clone(),
                     symbol: o.s.to_string(),
                     side: order_side(&o.side),

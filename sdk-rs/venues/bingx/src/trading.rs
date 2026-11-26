@@ -31,6 +31,7 @@ use safe_cex_engine::request_context::{
     Context, Error, HttpOwnerRetirement, Plan, ReconciliationData,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::write_plan::LegRole;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -45,7 +46,8 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
-const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_WORDS: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
@@ -128,6 +130,8 @@ struct Step {
     path: &'static str,
     params: Params,
     call: Call,
+    /// Reporting only: this placement's part in a split bracket (AGT-214).
+    role: Option<LegRole>,
 }
 #[derive(Default)]
 struct Job {
@@ -1092,11 +1096,11 @@ impl Trading {
         };
         let decoded = if guarded && (rate_limited || half_refused || missing_cancel_proof) {
             Err(unknown(if rate_limited {
-                "BingX outcome unknown, check Open Orders"
+                "BingX didn’t confirm this change. Check your open orders before trying again."
             } else if half_refused {
                 "BingX replacement was refused after its target was canceled"
             } else {
-                "BingX cancellation did not prove the target; outcome unknown, check Open Orders"
+                "BingX didn’t confirm this order’s cancellation. Check your open orders before trying again."
             }))
         } else {
             decoded
@@ -1176,7 +1180,7 @@ impl Trading {
                             )
                     });
                 let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
-                message = format!("{lost}: {message}");
+                message = safe_cex_engine::error::with_detail(&lost, &message);
             }
             let native = if half_refused {
                 Some(Native {
@@ -1366,6 +1370,7 @@ impl Trading {
                         path: ORDER,
                         params,
                         call: Call::Place,
+                        role: None,
                     };
                     run.writes.restore(&restore);
                     run.job.steps.push_back(restore);
@@ -1447,7 +1452,13 @@ impl Trading {
             ..Job::default()
         };
         for o in orders {
-            let steps = self.format(cx, o)?;
+            let mut steps = self.format(cx, o)?;
+            if o.has_attached_legs() {
+                // The legs already carry theirs; the rest are this order's entry lots.
+                for step in &mut steps {
+                    step.role.get_or_insert(LegRole::Entry);
+                }
+            }
             if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
                 let lots = steps.len()
                     - usize::from(o.stop_loss.is_some())
@@ -1673,7 +1684,9 @@ impl Trading {
             if !cx.store.hedged() {
                 bracket = bracket.boolean("reduceOnly", true);
             }
-            out.push(place_step(bracket.num("quantity", amount)));
+            let mut leg = place_step(bracket.num("quantity", amount));
+            leg.role = Some(LegRole::of_kind(kind));
+            out.push(leg);
         }
         Ok(out)
     }
@@ -1699,6 +1712,7 @@ impl Trading {
                     symbol: o.symbol.clone(),
                     absent_ok: true,
                 },
+                role: None,
             });
         }
         Ok(job)
@@ -2043,6 +2057,7 @@ impl Trading {
                 leverage,
                 side,
             },
+            role: None,
         };
         let mut job = Job::default();
         if cx.store.hedged() && side.is_none() {
@@ -2078,6 +2093,7 @@ fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
             path,
             params,
             call,
+            role: None,
         }]),
         ..Job::default()
     }
@@ -2089,6 +2105,7 @@ fn place_step(params: Params) -> Step {
         path: ORDER,
         params,
         call: Call::Place,
+        role: None,
     }
 }
 fn positive(value: Option<f64>, field: &str) -> Result<f64, String> {
@@ -2338,6 +2355,7 @@ pub(crate) fn evidence(
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod reply_tests {
     #[test]

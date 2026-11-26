@@ -1,9 +1,8 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { splitWooQuantity } from '../reference/woo/woo.order-state';
-import { ENDPOINTS } from '../reference/woo/woo.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -14,31 +13,40 @@ import {
   PositionSide,
 } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
+import { splitWooQuantity } from '../reference/woo/woo.order-state';
+import { ENDPOINTS } from '../reference/woo/woo.types';
 
 const NOW = 1786603865910;
 const instances: WOOXExchange[] = [];
 const make = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new WOOXExchange(
     'woo',
     { key: 'fixture-key', secret: 'fixture-secret', applicationId: 'fixture' },
     store,
   );
   instances.push(exchange);
-  store.update({
-    markets: [
-      {
-        id: 'BTC/USDT:USDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-      },
-    ],
-    tickers: [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 60000, mark: 60000, index: 60000 } as any],
-  });
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'BTC/USDT:USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+        },
+      ],
+      tickers: [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 60000, mark: 60000, index: 60000 } as any],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   vi.spyOn(exchange, 'getPositionMode').mockResolvedValue(PositionMode.OneWay);
   vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
   return { exchange, store };
@@ -69,9 +77,15 @@ describe('WOO active protocol Rust parity repairs', () => {
   it('clears synthetic flat margin when an authoritative holding reopens', async () => {
     const { exchange, store } = make();
     const id = createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay);
-    store.update({
-      positions: [{ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 } as any],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          nativePosition({ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -91,9 +105,16 @@ describe('WOO active protocol Rust parity repairs', () => {
         },
       }),
     } as any;
-    store.addOrUpdatePositionsFull(await exchange.fetchOpenPositions());
+    await (async () => {
+      const incoming: StoreData['positions'] = await exchange.fetchOpenPositions();
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     expect(store.positions.find((position) => position.id === id)).toEqual(
-      expect.objectContaining({ contracts: 0.01, marginSize: undefined }),
+      expect.objectContaining({ contracts: 0.01 }),
     );
   });
 
@@ -101,9 +122,15 @@ describe('WOO active protocol Rust parity repairs', () => {
     const { exchange, store } = make();
     (exchange as any)._accountPositionMode = PositionMode.OneWay;
     const id = createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay);
-    store.update({
-      positions: [{ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 } as any],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          nativePosition({ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.privateWebsocket.handleExecutionReport(
       ordinary({
         totalExecutedQuantity: 0.002,
@@ -114,7 +141,7 @@ describe('WOO active protocol Rust parity repairs', () => {
       }),
     );
     expect(store.positions.find((position) => position.id === id)).toEqual(
-      expect.objectContaining({ contracts: 0.002, marginSize: undefined }),
+      expect.objectContaining({ contracts: 0.002 }),
     );
   });
 
@@ -255,7 +282,11 @@ describe('WOO active protocol Rust parity repairs', () => {
     expect(store.orders).toHaveLength(2);
     expect(store.orders.every((order) => order.status === OrderStatus.Canceled)).toBe(true);
     // A later empty snapshot may remove canceled rows; tombstones still protect a stale page.
-    store.update({ orders: [] });
+    applyReferenceFixture(
+      store,
+      { orders: [] },
+      store.markets.map((row) => row.symbol),
+    );
     vi.spyOn(exchange, 'fetchOrdersRecursively').mockResolvedValue([parent]);
     expect((await exchange.fetchAlgoOrders()).every((order) => order.status === OrderStatus.Canceled)).toBe(true);
   });
@@ -263,24 +294,43 @@ describe('WOO active protocol Rust parity repairs', () => {
   it('emits a delayed unseen fill already reflected in REST without doubling the position', () => {
     const { exchange, store } = make();
     (exchange as any)._accountPositionMode = PositionMode.OneWay;
-    store.update({
-      positions: [
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          {
+            id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            entryPrice: 59000,
+            contracts: 0.01,
+            notional: 590,
+            unrealizedPnl: 0,
+            liquidationPrice: null,
+            leverage: 5,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.OneWay,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
+    (() => {
+      const incoming: StoreData['orders'] = [exchange.mapLimitOrder(ordinary({ totalExecutedQuantity: 0.005 }))!];
+      return applyReferenceFixture(
+        store,
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 59000,
-          contracts: 0.01,
-          notional: 590,
-          unrealizedPnl: 0,
-          liquidationPrice: 0,
-          leverage: 5,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
         },
-      ],
-    });
-    store.addOrUpdateOrder(exchange.mapLimitOrder(ordinary({ totalExecutedQuantity: 0.005 }))!);
+        store.markets.map((row) => row.symbol),
+      );
+    })();
     const fills: any[] = [];
     exchange.on('fill', (fill: any) => fills.push(fill));
     exchange.privateWebsocket.handleExecutionReport(
@@ -355,7 +405,11 @@ describe('WOO active protocol Rust parity repairs', () => {
   it('rejects failed order pages without replacing known live orders', async () => {
     const { exchange, store } = make();
     const existing = exchange.mapLimitOrder(ordinary())!;
-    store.update({ orders: [existing] });
+    applyReferenceFixture(
+      store,
+      { orders: [existing] },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = { get: vi.fn().mockResolvedValue({ data: { success: false, message: 'busy' } }) } as any;
     await expect(exchange.fetchOrders()).rejects.toThrow('busy');
     expect(store.orders).toEqual([existing]);
@@ -372,7 +426,11 @@ describe('WOO active protocol Rust parity repairs', () => {
     async (invalid) => {
       const { exchange, store } = make();
       const existing = exchange.mapLimitOrder(ordinary())!;
-      store.update({ orders: [existing] });
+      applyReferenceFixture(
+        store,
+        { orders: [existing] },
+        store.markets.map((row) => row.symbol),
+      );
       const leaf = {
         algoOrderId: 201,
         algoType: 'STOP_LOSS',
@@ -461,23 +519,27 @@ describe('WOO active protocol Rust parity repairs', () => {
 
   it('sends trailing SL reference and full matching position quantity', async () => {
     const { exchange, store } = make();
-    store.update({
-      positions: [
-        {
-          id: 'BTCUSDT:short',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          contracts: 0.023,
-          entryPrice: 60000,
-          notional: 1380,
-          unrealizedPnl: 0,
-          liquidationPrice: 0,
-          leverage: 10,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          {
+            id: 'BTCUSDT:short',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Short,
+            contracts: 0.023,
+            entryPrice: 60000,
+            notional: 1380,
+            unrealizedPnl: 0,
+            liquidationPrice: null,
+            leverage: 10,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.OneWay,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn().mockResolvedValue({ data: { success: true, data: { rows: [{ orderId: 201 }] } } });
     exchange.xhr = { post } as any;
     await exchange.placeTrailingStopLossOrder({

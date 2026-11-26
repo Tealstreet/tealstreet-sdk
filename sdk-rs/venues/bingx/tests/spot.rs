@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Official Spot v3 examples; see fixtures/spot/README.md for adaptations.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::{
@@ -881,7 +882,7 @@ fn lost_write_transport_is_unknown_network_and_never_resends() {
         if route == "order" {
             let _reconcile = request(&actions, "/trade/openOrders");
             let second = place(&mut e, "limit", "buy");
-            assert!(second.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error }) if error.outcome == Some(Outcome::NotSent) && error.message == "Placement outcome is uncertain; reconcile before placing or amending")), "{second:?}");
+            assert!(second.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 41, error }) if error.outcome == Some(Outcome::NotSent) && error.message == "An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders.")), "{second:?}");
             assert!(
                 !second
                     .iter()

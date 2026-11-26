@@ -56,7 +56,7 @@ it('opaque HTTP work cannot acquire WS metadata, even when its bytes match the W
 it.each([now, seconds * 1000 + 1])('contradictory native WS receipt %s refuses before callback', async (stampMs) => {
   const actual: RemoteSignerRequest[] = [];
   const provider = createRemoteSignerProvider({ exchangeName: 'okx', identities: { primary: identity }, remoteSigner: remote(actual) });
-  await expect(provider(prepared(true, stampMs), { signal: new AbortController().signal })).rejects.toThrow('Remote signing request refused');
+  await expect(provider(prepared(true, stampMs), { signal: new AbortController().signal })).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
 });
 

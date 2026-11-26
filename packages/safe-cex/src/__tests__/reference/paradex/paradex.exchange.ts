@@ -1,10 +1,13 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type { ParadexSDKAccount } from './paradex.sdk';
 
 import rateLimit from 'axios-rate-limit';
 import sumBy from 'lodash/sumBy';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { isRegularClientOrderShape, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -42,8 +45,9 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { isRegularClientOrderShape, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './paradex.api';
 import { mapParadexFillToIncomeRecords } from './paradex.income';
 import { mapParadexHistoricalOrder } from './paradex.order-history';
@@ -58,9 +62,9 @@ import {
   MARKET_RESPONSE,
   ORDER_RESPONSE,
   ORDER_SIDE,
-  paradexTimeInForce,
   ORDER_TYPE,
   ORDERBOOK_RESPONSE,
+  paradexTimeInForce,
   POSITION_RESPONSE,
   TICKER_RESPONSE,
 } from './paradex.types';
@@ -138,7 +142,7 @@ export class ParadexExchange extends BaseExchange {
   // Stores leverage separately since Paradex doesn't return leverage for zero-size positions
   private leverageSettings = new Map<string, number>();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = rateLimit(createAPI(opts, this), { maxRPS: 10 });
@@ -347,10 +351,14 @@ export class ParadexExchange extends BaseExchange {
         if (this.isDisposed) return;
         this.log(`Fetched ${markets.length} markets`, LogSeverity.Debug);
 
-        this.store.update({
-          markets,
-          loaded: { ...this.store.loaded, markets: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            markets,
+            loaded: { markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         this.log('Fetching tickers...', LogSeverity.Debug);
         const tickers = await this.fetchTickers();
@@ -359,19 +367,27 @@ export class ParadexExchange extends BaseExchange {
 
         this.log(`Loaded ${Math.min(tickers.length, markets.length)} Paradex markets`, LogSeverity.Info);
 
-        this.store.update({
-          tickers,
-          loaded: { ...this.store.loaded, tickers: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            tickers,
+            loaded: { tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         this.log('Connecting to public WebSocket...', LogSeverity.Debug);
         this.publicWebsocket.connectAndSubscribe();
       }
 
       if (publicDataOnly) {
-        this.store.update({
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         this.log('Paradex exchange started in public-only mode', LogSeverity.Info);
         return;
       }
@@ -407,10 +423,14 @@ export class ParadexExchange extends BaseExchange {
 
       this.log(`Loaded Paradex orders`, LogSeverity.Info);
 
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       this.log('Paradex exchange started successfully', LogSeverity.Info);
     } catch (error) {
@@ -426,7 +446,11 @@ export class ParadexExchange extends BaseExchange {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
         this.log(`Tick: Fetched ${positions.length} positions`, LogSeverity.Debug);
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { positions: true } },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         this.log(`Tick: Fetching balance...`, LogSeverity.Debug);
         const balance = await this.fetchBalance();
@@ -436,10 +460,14 @@ export class ParadexExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         // Fetch orders periodically (every 4th tick = every 40 seconds with 10s interval)
         // Note: This needs to be tracked differently without count parameter
@@ -447,7 +475,11 @@ export class ParadexExchange extends BaseExchange {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
         this.log(`Tick: Fetched ${orders.length} orders`, LogSeverity.Debug);
-        this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        applyReferenceFixture(
+          this.store,
+          { orders, loaded: { orders: true } },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         // Fetch leverage settings to refresh our local cache
         this.log(`Tick: Refreshing leverage settings...`, LogSeverity.Debug);
@@ -858,7 +890,7 @@ export class ParadexExchange extends BaseExchange {
       const openOrders = data.results.filter((o) => ['NEW', 'OPEN', 'PENDING', 'UNTRIGGERED'].includes(o.status));
       this.log(`Open orders: ${openOrders.length}`, LogSeverity.Debug);
 
-      return openOrders.map(this.mapOrder);
+      return this.privateWebsocket.filterSnapshotOrders(openOrders.map(this.mapOrder));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
       this.log(`Orders error details: ${describeError(err)}`, LogSeverity.Debug);
@@ -1072,7 +1104,10 @@ export class ParadexExchange extends BaseExchange {
         const filledFromOrder =
           parseFloat(row.size || '0') - parseFloat(row.remaining_size || row.remainingSize || '0');
         const qty = parseFloat(
-          row.fill_size || row.filled_size || row.quantity || (aggregateOrders ? (filledFromOrder > 0 ? filledFromOrder : 0) : row.size || '0'),
+          row.fill_size ||
+            row.filled_size ||
+            row.quantity ||
+            (aggregateOrders ? (filledFromOrder > 0 ? filledFromOrder : 0) : row.size || '0'),
         );
         if (!Number.isFinite(price) || !Number.isFinite(qty) || price <= 0 || qty <= 0) {
           return acc;
@@ -1083,7 +1118,9 @@ export class ParadexExchange extends BaseExchange {
           return acc;
         }
 
-        const executionOrderId = String(row.order_id || row.orderId || (aggregateOrders ? row.id : undefined) || row.client_id || '');
+        const executionOrderId = String(
+          row.order_id || row.orderId || (aggregateOrders ? row.id : undefined) || row.client_id || '',
+        );
         if (orderId && executionOrderId && executionOrderId !== String(orderId)) {
           return acc;
         }
@@ -1177,7 +1214,9 @@ export class ParadexExchange extends BaseExchange {
         if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
           continue;
         }
-        const key = execution.id ?? `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        const key =
+          execution.id ??
+          `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         deduped.set(key, execution);
       }
 
@@ -1241,7 +1280,7 @@ export class ParadexExchange extends BaseExchange {
           notional: contracts * entryPrice,
           leverage,
           entryPrice,
-          liquidationPrice: parseFloat(p.liquidation_price || '0'),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidation_price || '0')),
           marginType: MarginType.Cross, // Paradex uses cross margin
           positionMode: PositionMode.OneWay, // Paradex only supports one-way mode
           lastUpdate: p.last_updated_at,
@@ -1281,7 +1320,7 @@ export class ParadexExchange extends BaseExchange {
           leverage: this.leverageSettings.get(market.symbol) || 10, // Use stored leverage or default to 10
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           marginType: MarginType.Cross, // Paradex default
           positionMode: PositionMode.OneWay, // Paradex uses one-way mode
           info: {},
@@ -1317,7 +1356,9 @@ export class ParadexExchange extends BaseExchange {
   fetchPublicTrades = async (symbol: string, limit = 100): Promise<PublicTrade[]> => {
     const market = this.store.marketsBySymbol[symbol];
     if (!market) return [];
-    const { data } = await this.xhr.get('/trades', { params: { market: market.id, page_size: Math.min(Math.max(limit, 1), 500) } });
+    const { data } = await this.xhr.get('/trades', {
+      params: { market: market.id, page_size: Math.min(Math.max(limit, 1), 500) },
+    });
     if (!Array.isArray(data?.results)) throw new Error('Invalid Paradex trades envelope');
     const trades: PublicTrade[] = [];
     const seen = new Set<string>();
@@ -1326,9 +1367,19 @@ export class ParadexExchange extends BaseExchange {
       const qty = Number(row.size);
       const timestamp = Number(row.created_at);
       const side = ORDER_SIDE[row.side];
-      if (typeof row.id !== 'string' || !row.id || !side || row.market !== market.id ||
-          !Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0 ||
-          !Number.isFinite(timestamp) || timestamp <= 0) throw new Error('Invalid Paradex public trade');
+      if (
+        typeof row.id !== 'string' ||
+        !row.id ||
+        !side ||
+        row.market !== market.id ||
+        !Number.isFinite(price) ||
+        price <= 0 ||
+        !Number.isFinite(qty) ||
+        qty <= 0 ||
+        !Number.isFinite(timestamp) ||
+        timestamp <= 0
+      )
+        throw new Error('Invalid Paradex public trade');
       if (seen.has(row.id)) continue;
       seen.add(row.id);
       trades.push({ id: row.id, symbol, side, price, qty, quoteQty: price * qty, timestamp });
@@ -1407,6 +1458,8 @@ export class ParadexExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.resolveCallerClientOrderId(opts);
     try {
       const orderIds: string[] = [];
@@ -1710,7 +1763,11 @@ export class ParadexExchange extends BaseExchange {
 
     let data: BATCH_ORDER_RESPONSE;
     try {
-      ({ data } = await this.xhr.post<BATCH_ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDERS_BATCH, payloads, ...signerHeaders(batchHeaders)));
+      ({ data } = await this.xhr.post<BATCH_ORDER_RESPONSE>(
+        ENDPOINTS.PLACE_ORDERS_BATCH,
+        payloads,
+        ...signerHeaders(batchHeaders),
+      ));
     } catch (error: any) {
       const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || String(error);
       this.emitAndLogError(message);
@@ -1841,7 +1898,11 @@ export class ParadexExchange extends BaseExchange {
           signature_timestamp: tpTimestamp,
         });
 
-        const { data: tpData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, tpPayload, ...signerHeaders(tpHeaders));
+        const { data: tpData } = await this.xhr.post<ORDER_RESPONSE>(
+          ENDPOINTS.PLACE_ORDER,
+          tpPayload,
+          ...signerHeaders(tpHeaders),
+        );
         orderIds.push(tpData.id);
         this.log(`Take profit order placed: ${tpData.id} @ ${opts.takeProfit}`, LogSeverity.Info);
       }
@@ -1872,7 +1933,11 @@ export class ParadexExchange extends BaseExchange {
           signature_timestamp: slTimestamp,
         });
 
-        const { data: slData } = await this.xhr.post<ORDER_RESPONSE>(ENDPOINTS.PLACE_ORDER, slPayload, ...signerHeaders(slHeaders));
+        const { data: slData } = await this.xhr.post<ORDER_RESPONSE>(
+          ENDPOINTS.PLACE_ORDER,
+          slPayload,
+          ...signerHeaders(slHeaders),
+        );
         orderIds.push(slData.id);
         this.log(`Stop loss order placed: ${slData.id} @ ${opts.stopLoss}`, LogSeverity.Info);
       }
@@ -1936,6 +2001,8 @@ export class ParadexExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     const results: string[] = [];
     let nativeBatch: PlaceOrderOpts[] = [];
@@ -2103,7 +2170,11 @@ export class ParadexExchange extends BaseExchange {
         signature,
         signature_timestamp,
       });
-      const { data } = await this.xhr.put<ORDER_RESPONSE>(ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id), payload, ...signerHeaders(headers));
+      const { data } = await this.xhr.put<ORDER_RESPONSE>(
+        ENDPOINTS.MODIFY_ORDER.replace('{id}', order.id),
+        payload,
+        ...signerHeaders(headers),
+      );
       if (!data || String(data.id || '') !== order.id) {
         throw new Error(`Paradex modify response did not confirm stable order id ${order.id}`);
       }
@@ -2328,7 +2399,7 @@ export class ParadexExchange extends BaseExchange {
 
       this.log(`Response status: ${response.status}, data: ${JSON.stringify(response.data)}`, LogSeverity.Debug);
 
-      // Store leverage setting in our map
+      // FrameStore leverage setting in our map
       this.leverageSettings.set(symbol, leverage);
 
       // Update leverage in local positions immediately (optimistic update)
@@ -2340,7 +2411,22 @@ export class ParadexExchange extends BaseExchange {
           ...p,
           leverage,
         }));
-        this.store.addOrUpdatePositions(updatedPositions);
+        (() => {
+          const incoming: StoreData['positions'] = updatedPositions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.log(`Updated leverage in existing positions for ${symbol}`, LogSeverity.Debug);
       } else {
         // Create fake position if it doesn't exist
@@ -2355,11 +2441,26 @@ export class ParadexExchange extends BaseExchange {
           leverage,
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           marginType: MarginType.Cross,
           positionMode: PositionMode.OneWay,
         };
-        this.store.addOrUpdatePositions([fakePosition]);
+        (() => {
+          const incoming: StoreData['positions'] = [fakePosition];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.log(`Created fake position with leverage ${leverage}x for ${symbol}`, LogSeverity.Debug);
       }
 
@@ -2449,7 +2550,7 @@ export class ParadexExchange extends BaseExchange {
       clientOrderId: o.client_id || o.client_order_id || undefined,
       timeInForce: paradexTimeInForce(o),
       lastUpdate: new Date(o.created_at).getTime(),
-      info: o, // Store all raw data from API
+      info: o, // FrameStore all raw data from API
     };
   };
 

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 // The Workers host against fake Workers primitives (WebSocketPair, upgrade
 // fetch) and the real Node build of the engine. Run after `yarn rust:build-wasm`.
 import assert from 'node:assert/strict';
@@ -817,7 +818,7 @@ for (const phase of ['start', 'flush']) {
       for (const received of r.messages) {
         assert.equal(received.length, 1);
         assert.deepEqual(received[0], { op: 'startupFailed', detail: {
-          message: 'Exchange engine stopped unexpectedly; recreate the engine', kind: 'internal', outcome: 'unknown',
+          message: 'Trading was interrupted for this account. Reload the account.', kind: 'internal', outcome: 'unknown',
         } });
       }
       const failure = r.object.startupFailure;
@@ -843,9 +844,9 @@ test('Workers terminal commands keep their original owners after host replacemen
     for (const [index, received] of r.messages.entries()) {
       const done = received.filter((message) => message.op === 'done');
       assert.deepEqual(done.map((message) => message.id).sort(), index === 0 ? [77, 88] : [77]);
-      assert.ok(done.every((message) => message.error.includes('engine stopped')));
+      assert.ok(done.every((message) => message.error.includes('Trading was interrupted')));
       if (index === 0) assert.match(done.find((message) => message.id === 88).error,
-        /outcome is unknown.*Reconcile before retrying/);
+        /Trading was interrupted.*Check your open orders before trying again/);
       assert.equal(received.filter((message) => message.op === 'startupFailed').length, 1);
     }
   } finally { for (const client of r.clients) r.object.leave(client); }
@@ -900,6 +901,6 @@ test('Workers terminal errors stay silent after their original client departs', 
     assert.equal(r.messages[0].filter((message) => message.op === 'done').length, 0);
     const done = r.messages[1].filter((message) => message.op === 'done');
     assert.deepEqual(done.map((message) => message.id), [88]);
-    assert.match(done[0].error, /outcome is unknown.*Reconcile before retrying/);
+    assert.match(done[0].error, /Trading was interrupted.*Check your open orders before trying again/);
   } finally { for (const client of [...r.object.clients]) r.object.leave(client); }
 });

@@ -1,11 +1,11 @@
 import type { Axios } from 'axios';
+import type { Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
-import type { Order } from '../../types';
 
 const order = (id: string): Order => ({ id }) as Order;
 
@@ -13,7 +13,7 @@ const createExchange = () => {
   const exchange = new ParadexExchange(
     'paradex',
     { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
   vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
   return exchange;
@@ -88,10 +88,7 @@ describe('Paradex native batch cancellation', () => {
     exchange.xhr = {
       delete: vi.fn(async () => ({
         data: {
-          results: [
-            { id: 'two', status: 'QUEUED_FOR_CANCELLATION' },
-            { status: 'NOT_FOUND' },
-          ],
+          results: [{ id: 'two', status: 'QUEUED_FOR_CANCELLATION' }, { status: 'NOT_FOUND' }],
         },
       })),
     } as unknown as Axios;
@@ -104,10 +101,7 @@ describe('Paradex native batch cancellation', () => {
   it.each([
     ['a missing envelope', () => undefined],
     ['a non-array results field', () => ({ results: {} })],
-    [
-      'a missing result',
-      (ids: string[]) => ({ results: [{ id: ids[0], status: 'QUEUED_FOR_CANCELLATION' }] }),
-    ],
+    ['a missing result', (ids: string[]) => ({ results: [{ id: ids[0], status: 'QUEUED_FOR_CANCELLATION' }] })],
     [
       'a duplicate identity',
       (ids: string[]) => ({
@@ -126,10 +120,7 @@ describe('Paradex native batch cancellation', () => {
         ],
       }),
     ],
-    [
-      'a non-object row',
-      (ids: string[]) => ({ results: [null, { id: ids[1], status: 'QUEUED_FOR_CANCELLATION' }] }),
-    ],
+    ['a non-object row', (ids: string[]) => ({ results: [null, { id: ids[1], status: 'QUEUED_FOR_CANCELLATION' }] })],
     [
       'an unsupported status',
       (ids: string[]) => ({
@@ -142,10 +133,7 @@ describe('Paradex native batch cancellation', () => {
     [
       'a row without identity',
       (ids: string[]) => ({
-        results: [
-          { status: 'QUEUED_FOR_CANCELLATION' },
-          { id: ids[1], status: 'ALREADY_CLOSED' },
-        ],
+        results: [{ status: 'QUEUED_FOR_CANCELLATION' }, { id: ids[1], status: 'ALREADY_CLOSED' }],
       }),
     ],
   ])('rejects %s without positional correlation', async (_label, makeResponse) => {

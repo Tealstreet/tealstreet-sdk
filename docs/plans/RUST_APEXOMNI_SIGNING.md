@@ -101,7 +101,9 @@ strip all headers. Public symbols still runs the signing path with public-mode
 empty credentials, matching the active TS client.
 
 Only an explicit response-envelope signing rejection (code 20016, code 401, or
-case-insensitive message `sign`/`signature`) permits one legacy retry. It does
+case-insensitive message `sign`/`signature`) permits one legacy retry of a
+write; signed reads never resend (AGT-75: ApeX verifies the primary text and
+refuses the legacy one where they differ). It does
 not authorize resending after ambiguous transport failure. The legacy timestamp
 is floored to whole seconds but still expressed in milliseconds. Legacy qs
 omits original falsy numeric/boolean values; typed requests must resolve those

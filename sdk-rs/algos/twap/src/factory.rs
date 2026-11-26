@@ -31,6 +31,7 @@ pub trait TwapChasers {
 
 pub const TWAP_OPS: &[&str] = &[
     "twap:start",
+    "twap:amend",
     "twap:resume",
     "twap:pause",
     "twap:stop",
@@ -69,13 +70,11 @@ struct Inner {
 
 fn start_owner_change_error(dispatched: bool) -> VenueError {
     if dispatched {
-        VenueError::new("TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch")
+        VenueError::new("The account connection changed while the TWAP was starting. Check your open orders before restarting it.")
             .outcome(Outcome::Unknown)
     } else {
-        VenueError::new(
-            "TWAP start cancelled-for-owner-change: authenticated connection binding changed",
-        )
-        .outcome(Outcome::NotSent)
+        VenueError::new("The TWAP couldn’t start because the account connection changed")
+            .outcome(Outcome::NotSent)
     }
 }
 
@@ -278,8 +277,31 @@ impl AlgoFactory for TwapFactory {
     /// `_op_cx` is the sending socket's; TWAPs run on the account's context.
     fn handle(&self, op: &str, data: &str, _op_cx: &AlgoCx) -> Result<(), String> {
         let cx = &self.inner.cx;
+        if op == "twap:amend" && cx.scope.is_disposed() {
+            return Err("TWAP job is not amendable: its account is stopping".into());
+        }
         Inner::refresh_owner(&self.inner, cx);
         let data: Value = serde_json::from_str(data).map_err(|error| format!("{op}: {error}"))?;
+        if op == "twap:amend" {
+            let amendment = crate::TwapAmendment::parse(&data)?;
+            let mut env = self.inner.env.borrow_mut();
+            env.now = cx.now_ms();
+            let view = CxView {
+                cx,
+                chasers: &*self.inner.chasers,
+                client_ids: &self.inner.client_ids,
+                chaser_dispatched: Cell::new(false),
+            };
+            let (result, effects) = self
+                .inner
+                .book
+                .borrow_mut()
+                .amend(amendment, &mut *env, &view);
+            drop(env);
+            Inner::run(&self.inner, cx, effects);
+            Inner::ensure_driver(&self.inner, cx);
+            return result;
+        }
         let effects = {
             let mut env = self.inner.env.borrow_mut();
             env.now = cx.now_ms();
@@ -314,10 +336,7 @@ impl Inner {
             return false;
         }
         if had_rows {
-            report(
-                cx,
-                "TWAPs stopped: authenticated connection binding changed",
-            );
+            report(cx, "TWAPs stopped because the account connection changed");
         }
         cx.port.emit("twap:stateUpdate", "{}".into());
         inner.rescheduled.notify_one();
@@ -429,6 +448,21 @@ impl Inner {
                     cx.port.emit("twap:stateUpdate", data.to_string())
                 }
                 TwapEffect::Diagnostic { message } => eprintln!("[TWAP] {message}"),
+                TwapEffect::Ended {
+                    twap_id,
+                    end,
+                    orders_executed,
+                    orders_count,
+                } => cx.port.emit(
+                    "twap:complete",
+                    json!({
+                        "id": twap_id,
+                        "end": end,
+                        "ordersExecuted": orders_executed,
+                        "ordersCount": orders_count,
+                    })
+                    .to_string(),
+                ),
             }
         }
         dispatched
@@ -562,12 +596,12 @@ impl TwapMarketView for CxView<'_> {
         Ok(())
     }
 
-    fn amount_step(&self, symbol: &str) -> Option<f64> {
+    fn amount_rules(&self, symbol: &str) -> Option<(f64, f64)> {
         let store = self.cx.port.store();
         store
             .markets
             .get(symbol)
-            .map(|market| market.precision.amount)
+            .map(|market| (market.precision.amount, market.limits.amount.min))
     }
 
     /// As the chaser's: only the account's markets, never an order the venue would split.

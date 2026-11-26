@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type {
   AccountGreeks,
   Balance,
@@ -27,14 +27,17 @@ import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import { LogSeverity, OrderStatus, OrderType } from '../../../types';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { buildOptionChain, optionExpiries } from '../bybit/bybit.options';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { REDUCE_ONLY_LEGS_REFUSAL, refusesReduceOnlyLegs } from '../stopEntryLegs';
 import { createAPI } from './binanceoptions.api';
 import {
   formatBinanceOptionOrder,
@@ -69,7 +72,7 @@ export class BinanceOptionsExchange extends BaseExchange {
 
   private contracts = new Map<string, BinanceOptionContract>();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
   }
@@ -85,20 +88,32 @@ export class BinanceOptionsExchange extends BaseExchange {
   start = async () => {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
-    this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+    applyReferenceFixture(
+      this.store,
+      { markets, loaded: { markets: true } },
+      this.store.markets.map((row) => row.symbol),
+    );
 
     const tickers = await this.fetchTickers();
     if (this.isDisposed) return;
-    this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+    applyReferenceFixture(
+      this.store,
+      { tickers, loaded: { tickers: true } },
+      this.store.markets.map((row) => row.symbol),
+    );
     this.log(`Loaded ${markets.length} Binance option markets`);
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        orders: [],
-        positions: [],
-        balance: { used: 0, free: 0, total: 0, upnl: 0 },
-        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: [],
+          positions: [],
+          balance: { used: 0, free: 0, total: 0, upnl: 0 },
+          loaded: { orders: true, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -106,7 +121,11 @@ export class BinanceOptionsExchange extends BaseExchange {
     if (this.isDisposed) return;
     const orders = await this.fetchOrders();
     if (this.isDisposed) return;
-    this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+    applyReferenceFixture(
+      this.store,
+      { orders, loaded: { orders: true } },
+      this.store.markets.map((row) => row.symbol),
+    );
     this.log('Ready to trade on Binance Options');
   };
 
@@ -120,12 +139,16 @@ export class BinanceOptionsExchange extends BaseExchange {
         this.fetchTickers(),
       ]);
       if (this.isDisposed) return;
-      this.store.update({
-        balance,
-        positions,
-        tickers,
-        loaded: { ...this.store.loaded, balance: true, positions: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          positions,
+          tickers,
+          loaded: { balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.message);
     }
@@ -239,6 +262,8 @@ export class BinanceOptionsExchange extends BaseExchange {
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (refusesReduceOnlyLegs(this, opts)) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.assertOptionOrderPlaceable(opts);
     return [await this.sendOrder(opts, clientOrderId)];
@@ -246,6 +271,8 @@ export class BinanceOptionsExchange extends BaseExchange {
 
   /** One request per order: a batch is all-or-nothing on preflight, then placed in sequence. */
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    // AGT-120: as the Rust engine, legs on an order that can only reduce are refused first.
+    if (orders.some((order) => refusesReduceOnlyLegs(this, order))) this.rejectPreflight(REDUCE_ONLY_LEGS_REFUSAL);
     this.assertCallerClientOrderIds(orders);
     for (const order of orders) this.assertOptionOrderPlaceable(order);
     return await mapSeries(orders, (order) => this.sendOrder(order, order.clientOrderId));
@@ -288,16 +315,39 @@ export class BinanceOptionsExchange extends BaseExchange {
         // -2011: Binance no longer has it open, which is the state a cancel asks for.
         if (err?.code !== -2011 && err?.response?.data?.code !== -2011) throw err;
       }
-      this.store.updateOrdersStatus([order], OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
   cancelSymbolOrders = async (symbol: string) => {
     await this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } });
-    this.store.updateOrdersStatus(
-      this.store.orders.filter((o) => o.symbol === symbol),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders.filter(
+        (o) => o.symbol === symbol,
+      );
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: this.store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   /**

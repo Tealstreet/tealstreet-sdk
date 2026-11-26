@@ -669,6 +669,75 @@ fn each_native_fill_emits_one_execution_and_duplicate_trade_ids_are_suppressed()
     assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 2);
 }
 
+/// AGT-196 review B (10e8ae20c6): GRVT keys orders by a client id a later
+/// order may reuse once the first is terminal. Each order's fills name its own
+/// native id (`oi`), which the fill claim keys on, so two orders reusing `123`
+/// never share a claim. Fill frames in GRVT's `v1.fill` shape, as above.
+#[test]
+fn fills_of_orders_reusing_a_client_id_name_each_native_id() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let mut named = Vec::new();
+    for (trade, native) in [
+        ("9007199254740993", "0xaaa1"),
+        ("9007199254740994", "0xbbb2"),
+    ] {
+        h.actions.clear();
+        h.ws(&format!(
+            r#"{{"s":"v1.fill","f":{{"i":"BTC_USDT_Perp","ti":"{trade}","co":"123","oi":"{native}","ib":true,"s":"0.2","p":"100"}}}}"#
+        ));
+        named.extend(h.actions.iter().filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::OrderNativeId {
+                symbol,
+                order_id,
+                native_id,
+                fill_id,
+            }) => {
+                assert_eq!(fill_id.as_deref(), Some(trade), "the fill's own trade id");
+                Some((symbol.clone(), order_id.clone(), native_id.clone()))
+            }
+            _ => None,
+        }));
+    }
+    let symbol = h.engine.store().markets()[0].symbol.clone();
+    assert_eq!(
+        named,
+        [
+            (symbol.clone(), "123".to_owned(), "0xaaa1".to_owned()),
+            (symbol, "123".to_owned(), "0xbbb2".to_owned()),
+        ]
+    );
+}
+
+// AGT-83: the native trade id is the fill identity; the order id is kept for attribution.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.engine.take_frame(h.now);
+    for trade in ["9007199254740993", "9007199254740994"] {
+        h.ws(&format!(
+            r#"{{"s":"v1.fill","f":{{"i":"BTC_USDT_Perp","ti":"{trade}","co":"42","oi":"0xabcd","ib":true,"s":"0.2","p":"100"}}}}"#
+        ));
+    }
+    let frame = h.engine.take_frame(h.now).unwrap();
+    let identities: Vec<_> = safe_cex_engine::wire::fills(frame)
+        .unwrap()
+        .into_iter()
+        .map(|fill| (fill.id, fill.order_id, fill.amount))
+        .collect();
+    assert_eq!(
+        identities,
+        ["9007199254740993", "9007199254740994"].map(|trade| (
+            Some(trade.to_owned()),
+            "42".to_owned(),
+            0.2
+        ))
+    );
+}
+
 #[test]
 fn expired_private_session_refreshes_once_then_fails_closed() {
     let mut h = Harness::new(true);

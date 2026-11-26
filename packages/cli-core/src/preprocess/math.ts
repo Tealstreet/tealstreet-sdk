@@ -55,13 +55,13 @@ export function tryEvalMathToken(
   const tail = m[2];
 
   // Build flat list of [operator, operand] pairs after the first.
-  type Pair = { op: '+' | '-' | '*' | '/'; operand: string };
+  type Pair = { op: string; operand: string };
   const pairs: Pair[] = [];
   // Reset regex lastIndex defensively.
   OP_OPERAND_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = OP_OPERAND_RE.exec(tail)) !== null) {
-    pairs.push({ op: match[1] as Pair['op'], operand: match[2] });
+    pairs.push({ op: match[1], operand: match[2] });
   }
   if (pairs.length === 0) {
     // The MATH_TOKEN_RE guarantees at least one trailing op+operand,
@@ -73,7 +73,7 @@ export function tryEvalMathToken(
   //   pass 1: collapse * and / left-to-right
   //   pass 2: collapse + and - left-to-right
   // Standard precedence, no parens.
-  type Term = { value: number; opAfter: '+' | '-' | '*' | '/' | null };
+  type Term = { value: number; opAfter: string | null };
   const terms: Term[] = [];
   terms.push({
     value: resolveOperand(firstOperand),

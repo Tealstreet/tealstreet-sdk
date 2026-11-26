@@ -48,6 +48,8 @@ pub struct Builder {
 
 /// Discovery retry key for the merged spot catalogue; no dex is named `@`.
 const SPOT_SCOPE: &str = "@spot";
+/// Discovery retry key for the HIP-3 dex list (`perpDexs`).
+const DEXS_SCOPE: &str = "@perpDexs";
 
 /// TS `resolveSpotDisplayName`: Unit-bridged tokens (`UBTC`, fullName `Unit …`)
 /// display without the `U`, unless another token already owns that name.
@@ -205,6 +207,9 @@ pub struct Hyperliquid {
     /// Newest trade time per watched symbol whose `last` is now its trade price;
     /// until its first trade, and for every other symbol, `last` is the mid.
     trade_last: HashMap<String, f64>,
+    /// Marks this socket's `fastAssetCtxs` diffs sent, per symbol. A later row for
+    /// the symbol omitting `markPx` confirms a stored mark still equal to it.
+    mark_lineage: Option<(SocketId, HashMap<String, f64>)>,
     assets: HashMap<String, u32>,
     isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
@@ -212,6 +217,9 @@ pub struct Hyperliquid {
     dex_names: Vec<String>,
     advanced_scopes: HashSet<String>,
     core_discovery_incomplete: bool,
+    /// Catalogue reads sent and not yet answered. With `startup`'s scheduled
+    /// retries, this is all the discovery that can still resolve a missing row.
+    discovery_reads: u32,
     http_429_count: u32,
     /// Lowercase coins of catalogue rows excluded by design: never published,
     /// and owned exposure on them is hidden rather than freezing the account.
@@ -251,6 +259,7 @@ impl Hyperliquid {
             candle_complete_scopes: HashSet::new(),
             candle_excluded: HashSet::new(),
             trade_last: HashMap::new(),
+            mark_lineage: None,
             assets: HashMap::new(),
             isolated_only: HashSet::new(),
             coins: HashMap::new(),
@@ -258,6 +267,7 @@ impl Hyperliquid {
             dex_names: Vec::new(),
             advanced_scopes: HashSet::new(),
             core_discovery_incomplete: true,
+            discovery_reads: 0,
             http_429_count: 0,
             excluded: HashSet::new(),
             startup: Default::default(),
@@ -281,6 +291,7 @@ impl Hyperliquid {
         self.spot_meta_attempt(cx, 0);
     }
     fn spot_meta_attempt(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+        self.discovery_reads += 1;
         self.info(
             cx,
             "{\"type\":\"spotMetaAndAssetCtxs\"}".into(),
@@ -522,6 +533,7 @@ impl Hyperliquid {
             #[serde(skip_serializing_if = "str::is_empty")]
             dex: &'a str,
         }
+        self.discovery_reads += 1;
         self.info(
             cx,
             serde_json::to_string(&Read {
@@ -564,6 +576,47 @@ impl Hyperliquid {
             Self::socket_refused(cx, error);
         }
     }
+    fn perp_dexs(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.discovery_reads += 1;
+        self.info(
+            cx,
+            "{\"type\":\"perpDexs\"}".into(),
+            ArrayAt::Root,
+            Pending::Dexs {
+                dexs: Vec::new(),
+                index: 0,
+                valid: true,
+            },
+        );
+    }
+    /// The dex list, first read or retry. A failed or malformed list is retried
+    /// on the startup backoff (AGT-168: once, it was never retried, and every
+    /// HIP-3 row stayed pending for the life of the engine).
+    fn dexs_answered(&mut self, cx: &mut Cx<'_, Pending>, dexs: Vec<(String, u32)>, valid: bool) {
+        self.discovery_reads = self.discovery_reads.saturating_sub(1);
+        self.candle_dex_catalog_complete |= valid;
+        if valid {
+            self.startup.succeeded(cx, &(DEXS_SCOPE.into(), 0));
+        } else {
+            self.startup.failed(cx, (DEXS_SCOPE.into(), 0));
+        }
+        let mut added = false;
+        for (name, offset) in dexs {
+            if !self.dex_names.contains(&name) {
+                self.dex_names.push(name.clone());
+                self.dex_queue.push_back((name, offset));
+                added = true;
+            }
+        }
+        // A dex that a retry adds is read even after the first queue has finished.
+        if added || !self.perps_published {
+            self.next_dex(cx);
+        }
+    }
+    /// Whether a catalogue read is outstanding or scheduled to retry.
+    pub(crate) fn discovery_active(&self) -> bool {
+        self.discovery_reads > 0 || !self.startup.idle()
+    }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if !self.advanced_scopes.insert(dex.into()) {
@@ -577,16 +630,7 @@ impl Hyperliquid {
             self.propose_socket_interests(cx);
         }
         if !self.spot && dex.is_empty() {
-            self.info(
-                cx,
-                "{\"type\":\"perpDexs\"}".into(),
-                ArrayAt::Root,
-                Pending::Dexs {
-                    dexs: Vec::new(),
-                    index: 0,
-                    valid: true,
-                },
-            );
+            self.perp_dexs(cx);
         } else {
             self.next_dex(cx);
         }
@@ -691,7 +735,7 @@ impl Hyperliquid {
             .get(&coin.to_ascii_lowercase())
             .map(String::as_str)
     }
-    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
@@ -722,39 +766,78 @@ impl Hyperliquid {
             }
             "fastAssetCtxs" => {
                 cx.record_socket_topic(&["@fastAssetCtxs|||||||"]);
-                if let Ok(encoded) = serde_json::from_str::<&str>(raw)
-                    && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded)
-                    && let Ok(decoded) =
-                        miniz_oxide::inflate::decompress_to_vec_with_limit(&bytes, 2_000_000)
-                    && let Ok(contexts) = serde_json::from_slice::<HashMap<&str, FastCtx>>(&decoded)
-                {
-                    for (coin, context) in contexts {
-                        if let Some(symbol) = self.symbol(coin) {
-                            let usable =
-                                |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
-                            let mid_is_last = !self.trade_last.contains_key(symbol);
-                            // The references this context carries, changed or not (bits: last, mark).
-                            let observed = (u16::from(mid_is_last && usable(context.mid_px)) << 2)
-                                | (u16::from(usable(context.mark_px)) << 3);
-                            cx.store.update_ticker(symbol, |t| {
-                                if let Some(mark) =
-                                    context.mark_px.filter(|v| v.is_finite() && *v > 0.0)
-                                {
-                                    t.mark = mark;
+                // A diff this socket could not read may have moved any mark.
+                let lineage = self
+                    .mark_lineage
+                    .take()
+                    .filter(|(owner, _)| *owner == socket)
+                    .map(|(_, lineage)| lineage);
+                let Some(contexts) = serde_json::from_str::<&str>(raw)
+                    .ok()
+                    .and_then(|encoded| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(encoded)
+                            .ok()
+                    })
+                    .and_then(|bytes| {
+                        miniz_oxide::inflate::decompress_to_vec_with_limit(&bytes, 2_000_000).ok()
+                    })
+                else {
+                    return;
+                };
+                let Ok(contexts) = serde_json::from_slice::<HashMap<&str, FastCtx>>(&contexts)
+                else {
+                    return;
+                };
+                let mut lineage = lineage.unwrap_or_default();
+                for (coin, context) in contexts {
+                    if let Some(symbol) = self.symbol(coin) {
+                        let usable = |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                        let mid_is_last = !self.trade_last.contains_key(symbol);
+                        let mark = context
+                            .mark_px
+                            .flatten()
+                            .filter(|v| v.is_finite() && *v > 0.0);
+                        // Diffs omit an unchanged mark; only this socket's own value,
+                        // still the stored one, is confirmed by that omission.
+                        let inherited = match context.mark_px {
+                            Some(_) => {
+                                match mark {
+                                    Some(mark) => lineage.insert(symbol.to_owned(), mark),
+                                    None => lineage.remove(symbol),
+                                };
+                                false
+                            }
+                            None => {
+                                let current = cx.store.ticker(symbol).map(|t| t.mark);
+                                let confirmed = lineage
+                                    .get(symbol)
+                                    .is_some_and(|known| Some(*known) == current);
+                                if !confirmed {
+                                    lineage.remove(symbol);
                                 }
-                                if let Some(mid) =
-                                    context.mid_px.filter(|v| v.is_finite() && *v > 0.0)
-                                {
-                                    if mid_is_last {
-                                        t.last = mid;
-                                    }
-                                    t.mid_price = Some(mid);
+                                confirmed
+                            }
+                        };
+                        // The references this context carries, changed or not (bits: last, mark).
+                        let observed = (u16::from(mid_is_last && usable(context.mid_px)) << 2)
+                            | (u16::from(mark.is_some() || inherited) << 3);
+                        cx.store.update_ticker(symbol, |t| {
+                            if let Some(mark) = mark {
+                                t.mark = mark;
+                            }
+                            if let Some(mid) = context.mid_px.filter(|v| v.is_finite() && *v > 0.0)
+                            {
+                                if mid_is_last {
+                                    t.last = mid;
                                 }
-                            });
-                            cx.store.observe_ticker_fields(symbol, observed);
-                        }
+                                t.mid_price = Some(mid);
+                            }
+                        });
+                        cx.store.observe_ticker_fields(symbol, observed);
                     }
                 }
+                self.mark_lineage = Some((socket, lineage));
             }
             "trades" => {
                 if let Ok(rows) = serde_json::from_str::<Vec<TradeRow>>(raw) {
@@ -1640,7 +1723,7 @@ impl Venue for Hyperliquid {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public_frame(cx, text);
+            self.public_frame(cx, socket, text);
         }
         self.account_frame(cx, text);
         self.live_balance(cx);
@@ -1720,6 +1803,7 @@ impl Venue for Hyperliquid {
                 stage,
                 ..
             } if !self.spot => {
+                self.discovery_reads = self.discovery_reads.saturating_sub(1);
                 self.merged_spot_meta(
                     cx,
                     meta.filter(|_| valid && stage == 2),
@@ -1753,6 +1837,7 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                self.discovery_reads = self.discovery_reads.saturating_sub(1);
                 let complete = meta.as_ref().is_some_and(|meta| {
                     meta.universe.iter().all(|row| {
                         row.0.as_ref().is_some_and(|native| {
@@ -1826,6 +1911,7 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                self.discovery_reads = self.discovery_reads.saturating_sub(1);
                 let complete = instruments.iter().all(|row| {
                     row.as_ref().is_some_and(|native| {
                         let id = if dex.is_empty() || native.name.contains(':') {
@@ -1918,12 +2004,7 @@ impl Venue for Hyperliquid {
                     self.advance_scope(cx, &dex);
                 }
             }
-            Pending::Dexs { dexs, valid, .. } => {
-                self.candle_dex_catalog_complete = valid;
-                self.dex_names = dexs.iter().map(|(d, _)| d.clone()).collect();
-                self.dex_queue = dexs.into();
-                self.next_dex(cx);
-            }
+            Pending::Dexs { dexs, valid, .. } => self.dexs_answered(cx, dexs, valid),
             Pending::ManagedCandles(read) => {
                 if read.valid {
                     let _ = cx
@@ -2049,6 +2130,7 @@ impl Venue for Hyperliquid {
             pending,
             Pending::Meta { .. } | Pending::SpotMeta { .. } | Pending::Dexs { .. }
         ) {
+            self.discovery_reads = self.discovery_reads.saturating_sub(1);
             self.private_read_failed(cx, account::PrivateReadKind::Discovery, error);
         }
         match pending {
@@ -2077,7 +2159,12 @@ impl Venue for Hyperliquid {
             }
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
-            Pending::Dexs { .. } => self.next_dex(cx),
+            Pending::Dexs { .. } => {
+                self.startup.failed(cx, (DEXS_SCOPE.into(), 0));
+                if !self.perps_published && self.dex_queue.is_empty() {
+                    self.next_dex(cx);
+                }
+            }
             Pending::Meta { dex, offset, .. } => {
                 let optional = !dex.is_empty();
                 self.startup.failed(cx, (dex.clone(), offset));
@@ -2136,6 +2223,8 @@ impl Venue for Hyperliquid {
         if let Some((dex, offset)) = self.startup.on_timer(timer) {
             if self.spot || dex == SPOT_SCOPE {
                 self.spot_meta(cx);
+            } else if dex == DEXS_SCOPE {
+                self.perp_dexs(cx);
             } else {
                 self.meta(cx, dex, offset);
             }
@@ -2268,7 +2357,7 @@ fn candle_body(
     limit: Option<u32>,
     from_ms: Option<f64>,
     to_ms: Option<f64>,
-) -> Option<String> {
+) -> Option<(String, u32)> {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Req<'a> {
@@ -2296,18 +2385,30 @@ fn candle_body(
     {
         return None;
     }
-    Some(
+    let start_time = start.max(0.0).floor() as u64;
+    let end_time = end as u64;
+    Some((
         serde_json::to_string(&Read {
             r#type: "candleSnapshot",
             req: Req {
                 coin,
                 interval: interval.as_str(),
-                start_time: start.max(0.0).floor() as u64,
-                end_time: end as u64,
+                start_time,
+                end_time,
             },
         })
         .unwrap(),
-    )
+        candle_weight(interval, start_time, end_time),
+    ))
+}
+
+/// Hyperliquid charges 20 plus one per 60 candles returned and returns both boundary
+/// candles (1M is a fixed 30-day bucket), so a span holds ceil(span/step)+1. A full reply
+/// was seen past 5,000 rows (5,182), so the cap is 6,000 (120). A flat 104 starved charts.
+fn candle_weight(interval: Interval, start_ms: u64, end_ms: u64) -> u32 {
+    let span = end_ms.saturating_sub(start_ms) as f64;
+    let rows = ((span / interval.ms()).ceil() + 1.0).min(6000.0) as u32;
+    20 + rows.div_ceil(60)
 }
 
 fn supported(interval: Interval) -> bool {
@@ -2320,3 +2421,21 @@ fn supported(interval: Interval) -> bool {
 
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+mod candle_weight_tests {
+    use super::*;
+    // The same cases as hyperliquidInfoBudget.test.ts, so native and host weights agree.
+    #[test]
+    fn candle_weight_matches_the_host_budget() {
+        const H: u64 = 3_600_000;
+        let t = 1_795_000_000_000;
+        assert_eq!(candle_weight(Interval::M1, t - 329 * 60_000, t), 26);
+        assert_eq!(candle_weight(Interval::H4, t - 329 * 4 * H, t), 26);
+        assert_eq!(candle_weight(Interval::D1, t - 330 * 24 * H, t), 26);
+        assert_eq!(candle_weight(Interval::H1, 21 * H / 2, 12 * H), 21);
+        assert_eq!(candle_weight(Interval::M1, t, t), 21);
+        assert_eq!(candle_weight(Interval::M1, 0, t), 120);
+        assert_eq!(candle_weight(Interval::Mo1, 0, 60 * 24 * H), 21);
+    }
+}

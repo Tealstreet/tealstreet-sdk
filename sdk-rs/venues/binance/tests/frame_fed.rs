@@ -542,6 +542,7 @@ fn portfolio_margin() -> Harness {
         r#"{"dualSidePosition":false}"#,
     );
     h.respond("/papi/v1/um/positionRisk", 200, "[]");
+    h.respond("/papi/v1/um/symbolConfig", 200, "[]");
     h.respond("/papi/v1/balance", 200, "[]");
     h.respond("/papi/v1/um/openOrders", 200, "[]");
     h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");

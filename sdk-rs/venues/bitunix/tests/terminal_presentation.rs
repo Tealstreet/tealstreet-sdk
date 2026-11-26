@@ -1,8 +1,22 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Terminal wording follows the journal's final outcome across all write decoders.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Outcome, Response};
 use support::*;
+
+// Rule 5 (#3726): each closed summary form keeps exactly one action across summary and context.
+fn one_action_summary(message: &str) -> bool {
+    matches!(
+        message.lines().next(),
+        Some(
+            "Bitunix couldn’t confirm this change."
+                | "Bitunix couldn’t confirm this change. Check your open orders before trying again."
+        )
+    ) && message.matches("Check your open orders").count()
+        + message.matches("Check Open Orders").count()
+        == 1
+}
 
 fn respond(e: &mut TestEngine, write: &HttpRequest, now: f64, body: &str) {
     e.handle(
@@ -276,9 +290,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
             assert_eq!(error.outcome, expected, "{path}/{answer}: {error:?}");
             let text = error.legacy_text().to_ascii_lowercase();
             if expected == Some(Outcome::Unknown) {
-                if error.message.lines().next()
-                    != Some("The outcome of this Bitunix write is unknown. Check Open Orders")
-                {
+                if !one_action_summary(&error.message) {
                     missing_guidance.push(format!("{path}/{answer}: {error:?}"));
                 }
                 for action in &actions {
@@ -286,19 +298,13 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
                         command: 7,
                         message,
                     }) = action
-                        && message.lines().next()
-                            != Some(
-                                "The outcome of this Bitunix write is unknown. Check Open Orders",
-                            )
+                        && !one_action_summary(message)
                     {
                         missing_guidance.push(format!("warning {path}/{answer}: {message}"));
                     }
                 }
             } else {
-                assert!(
-                    !text.contains("outcome is unknown"),
-                    "{path}/{answer}: {error:?}"
-                );
+                assert!(!text.contains("confirm"), "{path}/{answer}: {error:?}");
             }
             let mut later = Vec::new();
             for action in &actions {

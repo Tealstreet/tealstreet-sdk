@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original caller-root controls credited to claude-4yjlw0 (#1977).
 //! Requalified against 8fcedfbbdfc with current host handshake and additive
 //! source gates; see RUST_BITGET_HISTORY_READ_FUNNEL.md.
@@ -269,7 +270,7 @@ fn unstamped_receipt_fails_closed_without_a_default_root() {
     // The initial Read entry refusal has no outcome; today the walk starts and
     // its signing times out NotSent at this clock instead.
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{error:?}");
-    assert_eq!(error.message, "Request context was revoked");
+    assert_eq!(error.message, "This request was interrupted");
     assert_eq!(error.outcome, None, "{error:?}");
 }
 

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
-import { DefaultStore } from '../../store/store.base';
 
-const preservedOrders = [{ id: 'regular-order' }, { id: 'algo-order' }] as any[];
+const preservedOrders = ['regular-order', 'algo-order'].map((id) => nativeOrder({ id, symbol: 'BTCUSDT' }));
 
 const transientFailures = [
   ['429 rate limit', { message: 'Too many requests', response: { status: 429 } }],
@@ -13,8 +15,12 @@ const transientFailures = [
 ] as const;
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ orders: preservedOrders as any });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { orders: preservedOrders, positions: [], balance: { total: 0, free: 0, used: 0, upnl: 0 } },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store };
 };
@@ -32,10 +38,14 @@ const runStartupSnapshot = async (exchange: BinanceExchange) => {
 
 const snapshotCommitters = [
   ['private startup', (exchange: BinanceExchange) => runStartupSnapshot(exchange), false],
-  ['private-WS throttled refresh', (exchange: BinanceExchange) => {
-    const websocket = new BinancePrivateWebsocket(exchange);
-    return (websocket as any).fetchThrottledOrders();
-  }, false],
+  [
+    'private-WS throttled refresh',
+    (exchange: BinanceExchange) => {
+      const websocket = new BinancePrivateWebsocket(exchange);
+      return (websocket as any).fetchThrottledOrders();
+    },
+    false,
+  ],
   ['private-WS reconnect snapshot', (exchange: BinanceExchange) => exchange.fetchAndSetPrivateSnapshot(), true],
   ['worker-triggered full refresh', (exchange: BinanceExchange) => exchange.fetchAndSetOrders(), true],
 ] as const;
@@ -59,7 +69,7 @@ describe('Binance order snapshot audit regression', () => {
         }
 
         await expect(exchange.fetchOrders()).resolves.toBe(store.orders);
-        expect(store.orders).toBe(preservedOrders);
+        expect(store.orders).toEqual(preservedOrders);
         expect(get).toHaveBeenCalledTimes(2);
       }
     },
@@ -74,20 +84,23 @@ describe('Binance order snapshot audit regression', () => {
 
       await commitSnapshot(exchange);
 
-      expect(store.orders).toBe(preservedOrders);
+      expect(store.orders).toEqual(preservedOrders);
       // Startup and the throttled refresh leave a failed snapshot UNLOADED (the tick
       // retries it), so an empty startup store never renders as "no open orders".
       expect(store.loaded.orders).toBe(marksLoadedOnFailure);
     },
   );
 
-  it.each(snapshotCommitters)('%s clears orders after a successful genuinely empty response', async (_name, commitSnapshot) => {
-    const { exchange, store } = createExchange();
-    vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: [] } as any);
+  it.each(snapshotCommitters)(
+    '%s clears orders after a successful genuinely empty response',
+    async (_name, commitSnapshot) => {
+      const { exchange, store } = createExchange();
+      vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: [] } as any);
 
-    await commitSnapshot(exchange);
+      await commitSnapshot(exchange);
 
-    expect(store.orders).toEqual([]);
-    expect(store.loaded.orders).toBe(true);
-  });
+      expect(store.orders).toEqual([]);
+      expect(store.loaded.orders).toBe(true);
+    },
+  );
 });

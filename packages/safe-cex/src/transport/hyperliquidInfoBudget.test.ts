@@ -159,6 +159,24 @@ describe('unavailable shared storage', () => {
     });
   });
 
+  // AGT-299: recovery used to bump the generation, refusing every outstanding grant on the
+  // row as an admission expiry although only a 429 can invalidate one.
+  it('recovering storage merges local spend without refusing grants waiting elsewhere', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    const b = client();
+    await b.response(ORIGIN, 200, '');
+    const deadline = Date.now() + 60_000;
+    const grant = await b.wait(ORIGIN, ORDERS, deadline, signal(), 'normal');
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+      throw new DOMException('disabled', 'InvalidStateError');
+    });
+    await admit(a, ORIGIN, ORDERS, deadline, signal());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await a.response(ORIGIN, 200, '');
+    await expect(b.admitDispatch(ORIGIN, grant, deadline, signal(), () => 'sent')).resolves.toBe('sent');
+  });
+
   it('max-merges memory spend from never-opened storage when it becomes available', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let available = false;
@@ -500,9 +518,52 @@ describe('cross-worker Hyperliquid info admission', () => {
     ['metaAndAssetCtxs', 20],
     ['frontendOpenOrders', 20],
     ['userFillsByTime', 120],
-    ['candleSnapshot', 104],
+    // AGT-113: a body with no readable span reserves the 6,000-row maximum (was 104).
+    ['candleSnapshot', 120],
   ])('reserves the documented weight for %s including bounded reply surcharges', (type, weight) => {
     expect(hyperliquidInfoWeight(JSON.stringify({ type }))).toBe(weight);
+  });
+
+  const candles = (interval: string, startTime: unknown, endTime: unknown) =>
+    JSON.stringify({ type: 'candleSnapshot', req: { coin: 'BTC', interval, startTime, endTime } });
+  const HOUR = 3_600_000;
+  const T = Date.parse('2026-11-20T20:33:08Z');
+  it.each([
+    // E6Z's sampled first reads: Hyperliquid returned 330, 95 and 0 candles for these.
+    ['a 330-bar 1m chart read', candles('1m', T - 329 * 60_000, T), 26],
+    ['a 330-bar 4h chart read', candles('4h', T - 329 * 4 * HOUR, T), 26],
+    ['a 330-day daily read', candles('1d', T - 330 * 24 * HOUR, T), 26],
+    // Both boundary candles return: 10:30..12:00 on 1h is 10:00, 11:00 and 12:00.
+    ['a span crossing three hourly opens', candles('1h', 10.5 * HOUR, 12 * HOUR), 21],
+    ['a zero-width span', candles('1m', T, T), 21],
+    // Hyperliquid returned 5,182 rows for a full 1m reply, so the cap is 6,000 rows.
+    ['a span beyond 6,000 candles', candles('1m', 0, T), 120],
+    ['a two-month span of 30-day buckets', candles('1M', 0, 60 * 24 * HOUR), 21],
+    ['an unknown interval', candles('7m', 0, HOUR), 120],
+    ['a reversed span', candles('1m', T, T - HOUR), 120],
+    ['a string timestamp', candles('1m', String(T - HOUR), T), 120],
+    ['a missing request', JSON.stringify({ type: 'candleSnapshot' }), 120],
+  ])('reserves %s by its requested span', (_label, body, weight) => {
+    expect(hyperliquidInfoWeight(body)).toBe(weight);
+  });
+
+  it("admits a chart's first reads behind a saturated bulk ceiling before their 20 s deadline", async () => {
+    // AGT-113: at 104 each, the fourth read needed 25 s of refill and expired at 20 s.
+    const budget = client();
+    await spend(budget, 800);
+    const start = Date.now();
+    const body = candles('1m', T - 329 * 60_000, T);
+    const sent: number[] = [];
+    const reads = [0, 1, 2, 3].map(async () => {
+      const deadline = start + 20_000;
+      const grant = await budget.wait(ORIGIN, body, deadline, signal(), 'bulk');
+      return budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => sent.push(Date.now() - start));
+    });
+    const settled = Promise.allSettled(reads);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await settled).map((read) => read.status)).toEqual(Array(4).fill('fulfilled'));
+    expect(sent).toHaveLength(4);
+    expect(Math.max(...sent)).toBeLessThan(20_000);
   });
 });
 
@@ -618,7 +679,8 @@ describe('managed transport admission', () => {
     ['legacy', 'frontendOpenOrders', 20],
     ['managed', 'frontendOpenOrders', 20],
     ['managed', 'metaAndAssetCtxs', 20],
-    ['managed', 'candleSnapshot', 104],
+    // AGT-113: a span-less candle body reserves the 6,000-row maximum (was 104).
+    ['managed', 'candleSnapshot', 120],
   ] as const)(
     'applies the shared budget to two actual %s transports for %s before dispatch',
     async (mode, type, weight) => {
@@ -1942,4 +2004,220 @@ it('keys resolved routes without account, credential, query or lane-port identit
   expect(custom).toBe(hyperliquidInfoBudgetKey(ORIGIN, 'https://proxy.example.test/another-path'));
   expect(custom).not.toContain('PRIVATE');
   expect(custom).not.toBe(direct);
+});
+
+// AGT-299: every new public engine discovers perpDexs, 11 perp-dex catalogues and spot (13 x 20 weight),
+// all queued at once. Their polling stalls IndexedDB past its 1.5 s bound (like a busy main thread), so
+// the realm falls back and recovers mid-burst. Normal discovery ranks ahead of a bulk chart read until
+// the chart read has queued 5 s; then it ranks ahead of normal work.
+describe('repeated public discovery on the direct row', () => {
+  const DISCOVERY = [
+    JSON.stringify({ type: 'perpDexs' }),
+    ...Array.from({ length: 11 }, (_, dex) => JSON.stringify({ type: 'metaAndAssetCtxs', dex: dex ? `d${dex}` : '' })),
+    JSON.stringify({ type: 'spotMetaAndAssetCtxs' }),
+  ];
+  const read = async (budget: HyperliquidInfoBudget, body: string, budgetMs: number) => {
+    const deadline = Date.now() + budgetMs;
+    const grant = await budget.wait(ORIGIN, body, deadline, signal(), 'normal');
+    return budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => grant);
+  };
+  const discover = (budget: HyperliquidInfoBudget) => DISCOVERY.map((body) => read(budget, body, 60_000));
+  // A 330-bar 1m chart read: 26 weight, bulk, inside the page candle command's 20 s bound.
+  const chartRead = (budget: HyperliquidInfoBudget) => {
+    const end = Date.now();
+    const body = JSON.stringify({
+      type: 'candleSnapshot',
+      req: { coin: 'BTC', interval: '1m', startTime: end - 329 * 60_000, endTime: end },
+    });
+    return read(budget, body, 20_000);
+  };
+  const outcome = async (pending: Promise<unknown>) => {
+    const settled = pending.then(
+      (grant) => ({ grant }),
+      (error: unknown) => ({ error }),
+    );
+    for (let i = 0; i < 400; i++) await vi.advanceTimersByTimeAsync(100);
+    return settled;
+  };
+  const startEngines = async (budget: HyperliquidInfoBudget, engines: number) => {
+    const reads = Array.from({ length: engines }, () => discover(budget)).flat();
+    await flushDatabase();
+    return reads;
+  };
+
+  it('one fresh engine leaves the chart read room within its bound', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    await spend(a, 600);
+    const discovery = await startEngines(a, 1);
+    expect(await outcome(chartRead(a))).toMatchObject({ grant: { weight: 26, readClass: 'bulk' } });
+    await Promise.all(discovery);
+  });
+
+  // Inverted from #3810, where three engines' 780 weight of queued discovery starved the chart read.
+  it('three fresh engines no longer starve the chart read behind their queued discovery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const a = client();
+    await spend(a, 600);
+    const discovery = await startEngines(a, 3);
+    expect(await outcome(chartRead(a))).toMatchObject({ grant: { weight: 26, readClass: 'bulk' } });
+    await outcome(Promise.allSettled(discovery));
+  });
+});
+
+// AGT-299: a queued chart read ages ahead of normal work; Orders and critical reads keep their rank and FIFO.
+describe('chart read aging', () => {
+  const CHART = JSON.stringify({
+    type: 'candleSnapshot',
+    req: { coin: 'BTC', interval: '1h', startTime: 0, endTime: 0 },
+  });
+  const DISCOVERY = JSON.stringify({ type: 'metaAndAssetCtxs' });
+  const queue =
+    (budget: HyperliquidInfoBudget, sent: string[]) =>
+    (label: string, body: string, readClass: 'reconciliation' | 'normal' | 'bulk') => {
+      const deadline = Date.now() + 60_000;
+      return budget
+        .wait(ORIGIN, body, deadline, signal(), readClass)
+        .then((grant) => budget.admitDispatch(ORIGIN, grant, deadline, signal(), () => sent.push(label)));
+    };
+  const drain = async (ms: number) => {
+    for (let i = 0; i < ms / 100; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+      await flushDatabase();
+    }
+  };
+
+  it('an aged chart read passes queued normal reads but never Orders, and both keep FIFO', async () => {
+    const a = client();
+    await spend(a);
+    const sent: string[] = [];
+    const read = queue(a, sent);
+    const reads = [read('orders-1', ORDERS, 'reconciliation')];
+    await flushDatabase();
+    reads.push(read('normal-1', DISCOVERY, 'normal'));
+    await flushDatabase();
+    reads.push(read('chart', CHART, 'bulk'));
+    await flushDatabase();
+    reads.push(read('normal-2', DISCOVERY, 'normal'));
+    await drain(5000);
+    reads.push(read('orders-2', ORDERS, 'reconciliation'));
+    await drain(20_000);
+    await Promise.all(reads);
+    expect(sent).toEqual(['orders-1', 'orders-2', 'chart', 'normal-1', 'normal-2']);
+  });
+
+  it('a chart read queued under 5 s still ranks behind normal work', async () => {
+    const a = client();
+    await spend(a, 800);
+    const sent: string[] = [];
+    const read = queue(a, sent);
+    const reads = [read('chart', CHART, 'bulk')];
+    await flushDatabase();
+    reads.push(read('normal', DISCOVERY, 'normal'));
+    await drain(4000);
+    await Promise.all(reads);
+    expect(sent).toEqual(['normal', 'chart']);
+  });
+});
+
+describe('storage recovery and refusal diagnostics', () => {
+  const storedState = async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = factory.open('safe-cex-hyperliquid-info-budget', 1);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      return await new Promise<{ nextAt: number; generation: number }>((resolve, reject) => {
+        const read = database.transaction('budgets', 'readonly').objectStore('budgets').get(ORIGIN);
+        read.onsuccess = () => resolve(read.result);
+        read.onerror = () => reject(read.error);
+      });
+    } finally {
+      database.close();
+    }
+  };
+  const failNextTransaction = () =>
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+      throw new DOMException('disabled', 'InvalidStateError');
+    });
+
+  // Review B on #3810: a fallback 429 and a shared 429 could share one generation number, so a grant
+  // charged locally and refused at handoff refunded its cost from the shared post-429 debt.
+  it('a fallback 429 the shared row never saw retires locally charged grants on recovery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const a = client();
+    const b = client();
+    await a.response(ORIGIN, 200, '');
+    failNextTransaction();
+    await a.response(ORIGIN, 429, 'Retry-After: 1');
+    await b.response(ORIGIN, 429, 'Retry-After: 30');
+    const shared = await storedState();
+    expect(shared.generation).toBe(1);
+    const deadline = Date.now() + 60_000;
+    const pending = a.wait(ORIGIN, ORDERS, deadline, signal(), 'critical');
+    await vi.advanceTimersByTimeAsync(4000);
+    const grant = await pending;
+    expect(grant.generation).toBe(1);
+    // The claim fails after the cooldown, so its refund is the first write to reach shared storage.
+    const claim = a.admitDispatch(
+      ORIGIN,
+      grant,
+      deadline,
+      signal(),
+      () => {
+        vi.setSystemTime(Date.now() + 30_000);
+        throw new Error('claim failed');
+      },
+      () => false,
+    );
+    await expect(claim).rejects.toThrow('claim failed');
+    const recovered = await storedState();
+    expect(recovered.generation).toBe(2);
+    expect(recovered.nextAt).toBeGreaterThanOrEqual(shared.nextAt);
+    expect(info).toHaveBeenCalledWith('Hyperliquid /info budget storage recovered', { local_429: true });
+  });
+
+  it('breadcrumbs each fallback and recovery with closed labels only', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const a = client();
+    await a.response(ORIGIN, 200, '');
+    for (let round = 0; round < 2; round++) {
+      failNextTransaction();
+      await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
+      await vi.advanceTimersByTimeAsync(30_000);
+      await a.response(ORIGIN, 200, '');
+    }
+    expect(info.mock.calls).toEqual([
+      ['Hyperliquid /info budget storage fell back to local admission', { storage_failure: 'error' }],
+      ['Hyperliquid /info budget storage recovered', { local_429: false }],
+      ['Hyperliquid /info budget storage fell back to local admission', { storage_failure: 'error' }],
+      ['Hyperliquid /info budget storage recovered', { local_429: false }],
+    ]);
+    expect(JSON.stringify(info.mock.calls)).not.toContain(ORIGIN);
+  });
+
+  it('attaches the queue and budget state to an admission refusal', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const a = client();
+    await a.response(ORIGIN, 429, 'Retry-After: 30');
+    const refusal = await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal()).catch((error: unknown) => error);
+    const facts = {
+      info_weight: 20,
+      info_read_class: 'critical',
+      info_admission_stage: 'prepare',
+      info_queue_depth: 0,
+      info_queue_ahead: 0,
+      info_debt_ms: 90_000,
+      info_pause_ms: 30_000,
+      info_generation_changed: false,
+      info_storage: 'shared',
+    };
+    expect(refusal).toMatchObject({ cause: 'info_admission', admission: facts });
+    expect(info).toHaveBeenCalledWith('Hyperliquid /info admission refused', facts);
+    expect(JSON.stringify(info.mock.calls)).not.toContain('local-only');
+  });
 });

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
@@ -108,7 +109,7 @@ describe('OrderBookSubscriptionsHandler', () => {
         expect(mockListenOrderBook).not.toHaveBeenCalled();
       });
 
-      it('should buffer subscription when markets not loaded yet', () => {
+      it('should buffer subscription when Markets are still loading yet', () => {
         mockStore.markets = [];
 
         const payload: StoreWorkerPayload = {
@@ -147,7 +148,7 @@ describe('OrderBookSubscriptionsHandler', () => {
         });
       });
 
-      it('should update ticker BBO from orderbook', () => {
+      it('forwards orderbook BBO while native frames retain ticker authority', () => {
         const payload: StoreWorkerPayload = {
           op: 'subscribeOrderBook',
           data: { subId: 'sub-5', symbol: 'BTCUSDT' },
@@ -164,7 +165,11 @@ describe('OrderBookSubscriptionsHandler', () => {
 
         callback(orderbook);
 
-        expect(mockStore.updateTicker).toHaveBeenCalledWith(mockStore.tickers[0], { ask: 50002, bid: 50000 });
+        expect(mockStore.updateTicker).not.toHaveBeenCalled();
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'listenOrderBook',
+          data: { subId: 'sub-5', symbol: 'BTCUSDT', orderbook },
+        });
       });
 
       it('should not update ticker if BBO unchanged', () => {

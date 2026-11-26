@@ -384,7 +384,7 @@ impl KrakenSpot {
                     fail_job(
                         cx,
                         queued,
-                        not_sent("Kraken Spot queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying"),
+                        not_sent("This Kraken Spot change wasn’t sent because an earlier change hasn’t been confirmed. Check your open orders before trying again."),
                     );
                     false
                 });

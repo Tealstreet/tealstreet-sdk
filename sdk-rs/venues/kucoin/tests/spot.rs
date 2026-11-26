@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![cfg(feature = "spot")]
 //! KuCoin Spot documented HF/public payloads and current TS adapter contracts.
 mod support;
@@ -317,7 +318,8 @@ fn after_failure_middle_spot_row_refusal_or_loss_stops_last_row() {
         );
         assert!(h.done(996).is_err());
         if lost {
-            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            const ENGINE_UNKNOWN_TEXT: &str =
+                "We couldn’t confirm this change. Check your open orders before trying again.";
             let errors: Vec<_> = h
                 .failures
                 .iter()
@@ -1727,8 +1729,8 @@ fn failed_write_diagnostic_precedes_done_without_a_second_uncorrelated_log() {
         request: request.id,
         error: "failed write transport",
     });
-    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="The outcome is unknown. Check Open Orders")).unwrap();
-    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="The outcome is unknown. Check Open Orders")).unwrap();
+    let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="We couldn’t confirm this change. Check your open orders before trying again.")).unwrap();
+    let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: 91, error: message }) if message.legacy_text()=="We couldn’t confirm this change. Check your open orders before trying again.")).unwrap();
     assert!(
         error < done,
         "owner mapping must still exist when diagnostic arrives"
@@ -2734,7 +2736,11 @@ fn dispatched_write_ambiguity_matrix() {
             );
             let text = error.legacy_text().to_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}"
             );
             assert!(
@@ -2799,7 +2805,10 @@ fn review_3259_spot_warning_is_normalized_before_the_terminal() {
         assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
         let (warning_at, message) = warnings[0];
         assert!(
-            message.contains("unknown") && message.contains("Check Open Orders"),
+            message.contains("confirm")
+                && message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "{operation}: {message}"
         );
         assert!(!message.contains("refused"), "{operation}: {message}");
@@ -2868,9 +2877,14 @@ fn postmerge_spot_server_error_warning_is_actionable() {
             .collect();
         assert_eq!(warnings.len(), 1);
         assert!(
-            error.message.contains("unknown")
-                && error.message.contains("Check Open Orders")
-                && warnings[0].contains("Check Open Orders"),
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
+                && warnings[0]
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "terminal={error:?}; warnings={warnings:?}"
         );
     }

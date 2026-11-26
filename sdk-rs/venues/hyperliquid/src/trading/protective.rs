@@ -4,6 +4,12 @@ use crate::wire::OrderRow;
 use safe_cex_engine::Store;
 use safe_cex_engine::error::Protection;
 
+pub(crate) const STALE_MARK: &str =
+    "Hyperliquid requires a fresh mark price before editing protection; order unchanged";
+/// A mark that would not stay fresh this long past sizing (or until the amend bound,
+/// the latest possible cancel release) is re-read before the cancel is released.
+const MARK_HEADROOM_MS: f64 = 1_000.0;
+
 pub(super) struct Amend {
     before: Order,
     original: OrderWire,
@@ -146,6 +152,42 @@ impl Hyperliquid {
         job.protection = Some(Box::new(captured));
         Ok(())
     }
+    /// The protected symbol, when its mark must be re-read before the cancel.
+    pub(super) fn protective_mark_unfresh(
+        &self,
+        cx: &Cx<'_, Pending>,
+        deadline: f64,
+    ) -> Option<String> {
+        let symbol = &self
+            .trading
+            .active
+            .as_ref()?
+            .protection
+            .as_ref()?
+            .before
+            .symbol;
+        let fresh = cx
+            .store
+            .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+            .is_some_and(|seen| seen <= cx.now)
+            && safe_cex_engine::protective_amend::fresh_reference(
+                cx.store,
+                symbol,
+                StopTriggerType::MarkPrice,
+                (cx.now + MARK_HEADROOM_MS).min(deadline),
+            )
+            .is_some();
+        (!fresh).then(|| symbol.clone())
+    }
+    /// The protected symbol while its on-demand mark read is outstanding.
+    pub(super) fn protective_mark_reading(&self) -> Option<String> {
+        let job = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| job.amend_mark_read)?;
+        Some(job.protection.as_ref()?.before.symbol.clone())
+    }
     pub(super) fn prepare_protective_replace(
         &self,
         cx: &Cx<'_, Pending>,
@@ -245,49 +287,55 @@ impl Hyperliquid {
         if !restoring && !matches!(trade.effect, Effect::Cancel(_)) {
             return Ok(());
         }
-        let now = release.time.raw_ms;
-        let source = if restoring {
+        if restoring {
             if job.amend_filled || restore_obsolete(store, protected) {
                 return Err(not_sent(
                     "Hyperliquid original protection is obsolete; restoration not sent",
                 ));
             }
-            &protected.before
-        } else {
-            if !store.loaded().positions || !has_position(store, &protected.before) {
-                return Err(not_sent(
-                    "Hyperliquid position closed or is not loaded; original protection unchanged",
-                ));
-            }
-            let source = store.order(&protected.before.id).ok_or_else(|| {
-                not_sent("Hyperliquid original protection is no longer open; amendment not sent")
-            })?;
-            if source.symbol != protected.before.symbol
-                || source.side != protected.before.side
-                || source.kind != protected.before.kind
-                || source.price != protected.before.price
-                || source.filled != protected.before.filled
-                || source.client_order_id != protected.before.client_order_id
-                || !matches!(
-                    source.status,
-                    OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
-                )
-            {
-                return Err(not_sent(
-                    "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
-                ));
-            }
-            source
-        };
-        let mark = store.reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
+            // The original trigger goes back as-is, even through the mark: the venue
+            // fires it, which is the user's own stop (AGT-47, Sam 2026-11-20).
+            return Ok(());
+        }
+        let now = release.time.raw_ms;
+        if !store.loaded().positions || !has_position(store, &protected.before) {
+            return Err(not_sent(
+                "Hyperliquid position closed or is not loaded; original protection unchanged",
+            ));
+        }
+        let source = store.order(&protected.before.id).ok_or_else(|| {
+            not_sent("Hyperliquid original protection is no longer open; amendment not sent")
+        })?;
+        if source.symbol != protected.before.symbol
+            || source.side != protected.before.side
+            || source.kind != protected.before.kind
+            || source.price != protected.before.price
+            || source.filled != protected.before.filled
+            || source.client_order_id != protected.before.client_order_id
+            || !matches!(
+                source.status,
+                OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
+            )
+        {
+            return Err(not_sent(
+                "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
+            ));
+        }
+        let mark = store
+            .reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
             .filter(|seen| now.is_finite() && *seen <= now)
-            .and_then(|_| safe_cex_engine::protective_amend::fresh_reference(store, &source.symbol, StopTriggerType::MarkPrice, now))
-            .ok_or_else(|| not_sent("Hyperliquid requires a fresh mark price before editing protection; order unchanged"))?;
-        let (kind, trigger) = if restoring {
-            (source.kind, source.price)
-        } else {
-            (protected.target_kind, protected.target)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &source.symbol,
+                    StopTriggerType::MarkPrice,
+                    now,
+                )
+            });
+        let Some(mark) = mark else {
+            return Err(not_sent(STALE_MARK));
         };
+        let (kind, trigger) = (protected.target_kind, protected.target);
         let fires = match (source.side, kind) {
             (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
                 trigger >= mark
@@ -374,7 +422,7 @@ impl Hyperliquid {
                 || error.kind == Some(ErrorKind::RateLimited)
             {
                 error.message = format!(
-                    "Hyperliquid {} put-back's outcome is unknown. Check Open Orders: {}",
+                    "Restoring your Hyperliquid {} wasn’t confirmed: {}. Check your open orders before adding protection.",
                     p.before.symbol, error.message
                 );
                 error.outcome = Some(Outcome::Unknown);
@@ -393,7 +441,7 @@ impl Hyperliquid {
                 .as_ref()
                 .map_or("replacement failed", |e| e.message.as_str());
             error.message = format!(
-                "UNPROTECTED: original {} protection could not be restored after {prior}: {}",
+                "Your original {} protection could not be restored after {prior}: {}. Add protection for this position.",
                 p.before.symbol, error.message
             );
             error.protection = Some(Protection::Unprotected);
@@ -413,7 +461,7 @@ impl Hyperliquid {
         }
         if p.grouping.is_none() {
             error.message = format!(
-                "UNPROTECTED: {} stop removed; please re-place protection. Replacement refused: {}",
+                "Your {} stop was removed and its replacement was declined: {}. Add a new stop.",
                 p.before.symbol, error.message
             );
             error.protection = Some(Protection::Unprotected);
@@ -426,6 +474,20 @@ impl Hyperliquid {
         self.pump_trades(cx);
         None
     }
+}
+
+/// A read mark answers as of some moment after `issued_at`; a mark the stream observed
+/// since then may be newer, so it is kept and the snapshot discarded.
+pub(super) fn apply_read_mark(cx: &mut Cx<'_, Pending>, symbol: &str, mark: f64, issued_at: f64) {
+    if cx
+        .store
+        .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+        .is_some_and(|seen| seen >= issued_at)
+    {
+        return;
+    }
+    cx.store.update_ticker(symbol, |t| t.mark = mark);
+    cx.store.observe_ticker_fields(symbol, 1 << 3);
 }
 
 fn has_position(store: &Store, order: &Order) -> bool {
