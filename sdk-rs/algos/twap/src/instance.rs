@@ -488,7 +488,10 @@ impl TwapInstance {
         };
 
         if self.options.use_chaser_orders {
-            let started = self.start_slice_chaser(order_size, element_index, env, view, effects);
+            let refused = self
+                .start_slice_chaser(order_size, element_index, env, view, effects)
+                .err();
+            let started = refused.is_none();
             self.record(
                 element_index,
                 if started {
@@ -513,10 +516,9 @@ impl TwapInstance {
                 now,
             );
             self.report_shortfall(effects);
-            if started {
-                self.consecutive_refusals = 0;
-            } else {
-                self.note_refusal("chaser refused", effects);
+            match refused {
+                None => self.consecutive_refusals = 0,
+                Some(reason) => self.note_refusal(&reason, effects),
             }
             return;
         }
@@ -634,7 +636,8 @@ impl TwapInstance {
                     return;
                 }
                 let placed_ids = crate::retained_order_ids(&failure);
-                if placed_ids.is_empty() {
+                let placed_some = !placed_ids.is_empty();
+                if !placed_some {
                     executed = pending.executed_before;
                 }
                 if pending.priced_limit {
@@ -654,7 +657,12 @@ impl TwapInstance {
                         failure.message
                     ),
                 });
-                refusal = Some(failure);
+                // A partial failure that placed orders is a placed slice, not a refusal.
+                if placed_some {
+                    self.consecutive_refusals = 0;
+                } else {
+                    refusal = Some(failure);
+                }
             }
         }
         // terminate() may have run while the placement was in flight.
@@ -703,7 +711,7 @@ impl TwapInstance {
         self.slice_due_at = Some(now + wait_ms);
     }
 
-    /// False when the chaser runtime refused it: nothing runs for this slice.
+    /// The chaser runtime's reason when it refused: nothing runs for this slice.
     fn start_slice_chaser(
         &mut self,
         size: f64,
@@ -711,7 +719,7 @@ impl TwapInstance {
         env: &mut dyn TwapEnv,
         view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
-    ) -> bool {
+    ) -> Result<(), String> {
         let chaser_id = env.new_id();
         let request = ChaserRequest {
             id: chaser_id.clone(),
@@ -724,8 +732,10 @@ impl TwapInstance {
             twap_id: self.id.clone(),
         };
         if let Err(message) = view.start_chaser(&request) {
-            effects.push(TwapEffect::Log { message });
-            return false;
+            effects.push(TwapEffect::Log {
+                message: message.clone(),
+            });
+            return Err(message);
         }
         self.tracked_chaser_ids.push(chaser_id.clone());
         self.chaser_elements.push(element_index);
@@ -741,7 +751,7 @@ impl TwapInstance {
                 market_when_settled: false,
             });
         }
-        true
+        Ok(())
     }
 
     fn fire_slice_timeout(

@@ -45,19 +45,24 @@ pub fn options(options: &TwapOptions) -> Result<(), String> {
 
 /// A new plan with a slice below the market minimum (the larger of the amount
 /// step and `limits.amount.min`) would refuse every such slice (AGT-286). The
-/// smallest slice is the worst randomness can draw, as the web preflight checks.
+/// smallest slice is the worst randomness can draw, floored to the step as
+/// `whole_steps` sends it; the web preflight checks the same amount.
 /// The reason is static because every venue's wasm carries it; hosts add numbers.
 pub fn slice_minimum(options: &TwapOptions, view: &dyn TwapMarketView) -> Result<(), String> {
-    let Some(minimum) = view
+    let Some((step, minimum)) = view
         .amount_rules(options.symbol())
-        .map(|(step, min)| step.max(min))
-        .filter(|minimum| minimum.is_finite() && *minimum > 0.0)
+        .map(|(step, min)| (step, step.max(min)))
+        .filter(|(_, minimum)| minimum.is_finite() && *minimum > 0.0)
     else {
         return Ok(());
     };
     let mut smallest = options.size / f64::from(options.orders_count);
     if options.orders_count > 1 {
         smallest *= 1.0 - options.randomness_percentage / 100.0;
+    }
+    // A NaN step fails this test; an infinite one already failed the filter.
+    if step > 0.0 {
+        smallest = (smallest / step + 1e-9).floor() * step;
     }
     if smallest / minimum + 1e-9 < 1.0 {
         return Err(

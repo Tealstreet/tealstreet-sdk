@@ -71,6 +71,8 @@ struct View {
     client_id: Option<String>,
     started: std::cell::RefCell<Vec<safe_cex_algo_twap::ChaserRequest>>,
     refuse_chasers: std::cell::Cell<bool>,
+    /// The chaser runtime's refusal text; "chaser refused" when unset.
+    chaser_refusal: Option<String>,
     step: std::cell::Cell<Option<f64>>,
     min_amount: Option<f64>,
     /// Hide the rules from the start's admission check, its first `amount_rules` read, so a
@@ -89,7 +91,10 @@ impl TwapMarketView for View {
     }
     fn start_chaser(&self, request: &safe_cex_algo_twap::ChaserRequest) -> Result<(), String> {
         if self.refuse_chasers.get() {
-            return Err("chaser refused".to_owned());
+            return Err(self
+                .chaser_refusal
+                .clone()
+                .unwrap_or_else(|| "chaser refused".to_owned()));
         }
         self.started.borrow_mut().push(request.clone());
         Ok(())
@@ -2140,4 +2145,83 @@ fn refused_chaser_slices_also_pause() {
         logs(&all)
     );
     assert_eq!(book.serialize_state()[&id]["state"]["status"], "paused");
+}
+
+#[test]
+fn admission_checks_the_slice_as_floored_to_the_step() {
+    // Step 0.01 with a 0.015 minimum: a 0.016 slice is sent as 0.01, which the venue refuses.
+    let view = View {
+        step: std::cell::Cell::new(Some(0.01)),
+        min_amount: Some(0.015),
+        ..View::default()
+    };
+    let (book, logs, _) = start_logs(&view, json!({ "size": 0.16, "ordersCount": 10 }));
+    assert!(book.ids().next().is_none());
+    assert_eq!(
+        logs,
+        [
+            "TWAP BTCUSDT rejected: a slice is below the market minimum; use fewer slices or a larger size"
+        ]
+    );
+    // 0.02 per slice floors to itself and clears the minimum.
+    let (book, logs, _) = start_logs(&view, json!({ "size": 0.2, "ordersCount": 10 }));
+    assert!(logs.is_empty(), "{logs:?}");
+    assert_eq!(book.ids().count(), 1);
+}
+
+#[test]
+fn a_partial_failure_that_placed_orders_resets_the_refusal_count() {
+    let view = View::default();
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (id, mut effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 10 }));
+    let mut all = Vec::new();
+    // Four refusals, one partial failure that kept an accepted order, four refusals.
+    for slice in 0..9 {
+        let outcome = if slice == 4 {
+            Err(SliceFailure::new("last split lot refused")
+                .outcome(safe_cex_engine::error::Outcome::NotSent)
+                .partial_ids(&["placed-1".to_owned()]))
+        } else {
+            refused("insufficient balance")
+        };
+        all.extend(settle_all(&mut book, &mut env, &id, &effects, outcome));
+        let Some(at) = book.wake_at() else { break };
+        env.advance(at - env.now);
+        effects = book.wake(&mut env, &view);
+    }
+    assert!(
+        !logs(&all).iter().any(|message| message.contains("paused")),
+        "{:?}",
+        logs(&all)
+    );
+    assert_eq!(book.serialize_state()[&id]["state"]["status"], "running");
+}
+
+#[test]
+fn the_pause_names_the_chaser_runtime_refusal() {
+    let view = View {
+        chaser_refusal: Some("child capacity exhausted".to_owned()),
+        ..View::default()
+    };
+    view.refuse_chasers.set(true);
+    let mut env = Env::new();
+    let mut book = owned_book();
+    let (_, _) = start(
+        &mut book,
+        &mut env,
+        &view,
+        json!({ "ordersCount": 10, "useChaserOrders": true }),
+    );
+    let mut all = Vec::new();
+    while let Some(at) = book.wake_at() {
+        env.advance(at - env.now);
+        all.extend(book.wake(&mut env, &view));
+    }
+    assert!(
+        logs(&all)
+            .contains(&"TWAP BTCUSDT paused after 5 refused slices: child capacity exhausted"),
+        "{:?}",
+        logs(&all)
+    );
 }
