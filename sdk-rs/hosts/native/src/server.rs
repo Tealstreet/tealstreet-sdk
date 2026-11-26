@@ -850,6 +850,9 @@ struct Pending {
     /// A placement's `OwnPlacements::held_rows` at dispatch: rows it may join
     /// (an OKX full-position TP/SL) but never claims.
     held: Vec<String>,
+    /// A placement's `OwnPlacements::joinable` at dispatch: own orders it may
+    /// join, whose new leg is then its own.
+    joinable: Vec<String>,
 }
 
 struct StartupFailure {
@@ -1155,7 +1158,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             &result,
                             &pending.held,
                         );
-                        placements.settle(symbols, Some(&result));
+                        placements.settle(symbols, Some(&result), &pending.joinable);
                         completed = true;
                     }
                     if let Some(pending) = pending
@@ -1183,7 +1186,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             placements.record_proven_legs(&pending.sent, &pending.legs, elements);
                         }
                         if let Some(symbols) = &pending.own {
-                            placements.settle(symbols, None);
+                            placements.settle(symbols, None, &[]);
                         }
                         completed = true;
                     }
@@ -1932,12 +1935,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 .collect(),
             _ => Vec::new(),
         };
-        let held = match (&command, &own) {
+        let (held, joinable) = match (&command, &own) {
             (Command::PlaceOrders { .. }, Some(symbols)) => {
-                crate::own_placements::lock(&self.placements)
-                    .held_rows(symbols, self.host.engine.store().orders())
+                let placements = crate::own_placements::lock(&self.placements);
+                (
+                    placements.held_rows(symbols, self.host.engine.store().orders()),
+                    placements.joinable(symbols),
+                )
             }
-            _ => Vec::new(),
+            _ => (Vec::new(), Vec::new()),
         };
         self.pending.insert(
             internal,
@@ -1949,6 +1955,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 legs,
                 sent: Vec::new(),
                 held,
+                joinable,
             },
         );
         self.handle(command);

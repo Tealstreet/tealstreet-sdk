@@ -201,8 +201,11 @@ identities its own clients placed, read through `AccountHandle::placements`
     OKX algo whose ack was lost is known only by its receipt's `algoClOrdId`). A leg new since the last look, added while no
     own command on that symbol was in flight, makes the order joint; one added
     during an own command is settled by it (`settle`: its completion must name
-    the order). A joint order's triggered children link to nobody. A venue
-    that re-keys a row's leg on its own fails open the same way.
+    the order). A placement that joins an order it could join at dispatch
+    (`joinable`) expects that new leg for a minute, when its ack comes before
+    the row. A joint order's triggered children link to nobody, by its native
+    id or by its rows' client ids and parents, for as long as it stays
+    recorded. A venue that re-keys a row's leg on its own fails open the same way.
 - **OKX TP/SL legs** placed with an order are their own `order-algo` writes,
   never `attachAlgoOrds`, so each leg's `algoId` is in its completion and the
   child its trigger creates links as above (`tests/own_placements_okx.rs`).

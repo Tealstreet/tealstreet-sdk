@@ -131,6 +131,16 @@ fn acknowledge(e: &mut Engine<Okx>, mut out: Vec<Action>, acks: &[(&str, &str)])
 
 /// What the placing login's actor records for command 1 (no caller ids).
 fn record(ledger: &mut OwnPlacements, actions: &[Action], held: &[String]) {
+    record_joining(ledger, actions, held, &[]);
+}
+
+/// `record` for a placement dispatched with `joinable` own orders.
+fn record_joining(
+    ledger: &mut OwnPlacements,
+    actions: &[Action],
+    held: &[String],
+    joinable: &[String],
+) {
     let symbols = [SYMBOL.to_owned()];
     let legs = [(SYMBOL.to_owned(), None)];
     for action in actions {
@@ -143,11 +153,11 @@ fn record(ledger: &mut OwnPlacements, actions: &[Action], held: &[String]) {
             }
             Action::Notice(Notice::CommandDone { command: 1, result }) => {
                 ledger.record_completion(&symbols, &legs, result, held);
-                ledger.settle(&symbols, Some(result));
+                ledger.settle(&symbols, Some(result), joinable);
             }
             // Not a definitive refusal: the receipts stay recorded.
             Action::Notice(Notice::CommandFailed { command: 1, .. }) => {
-                ledger.settle(&symbols, None);
+                ledger.settle(&symbols, None, &[]);
             }
             _ => {}
         }
@@ -407,26 +417,36 @@ fn a_joined_algo_whose_ack_was_lost_is_claimed_by_neither_login() {
     assert!(!b_ledger.placed(SYMBOL, CHILD), "B never claims A's leg");
 }
 
-/// A's own TP joins A's own stop: the leg appears while A's command is in
-/// flight and the completion names `77`, so A still claims its child. The
-/// other login never does.
+/// A's own TP joins A's own stop, with the two-leg row arriving before or
+/// after the join's acknowledgement: A still claims its child, the other
+/// login never does.
 #[test]
 fn joining_this_logins_own_algo_keeps_it_claimed() {
-    let (mut e, private, business, mut own) = a_places_the_stop();
-    let held = own.held_rows(&[SYMBOL.into()], e.store().orders());
-    assert!(held.is_empty(), "{held:?}");
-    let out = place(&mut e, FULL_TP);
-    let request = write(&out).clone();
-    // The two-leg row may arrive before the join's acknowledgement.
-    algo_row(&mut e, business, JOINED);
-    observe(&mut own, &e, true);
-    reply(&mut e, &request, &envelope(JOIN_ACK), 8.0);
-    let actions = prepared(&mut e, 8.0);
-    record(&mut own, &actions, &held);
-    observe(&mut own, &e, false);
-    let mut other = OwnPlacements::default();
-    fire(&mut e, private, "77", [&mut own, &mut other]);
-    assert!(own.placed(SYMBOL, CHILD) && !other.placed(SYMBOL, CHILD));
+    for row_first in [true, false] {
+        let (mut e, private, business, mut own) = a_places_the_stop();
+        let held = own.held_rows(&[SYMBOL.into()], e.store().orders());
+        assert!(held.is_empty(), "{held:?}");
+        let joinable = own.joinable(&[SYMBOL.into()]);
+        assert_eq!(joinable, ["77"]);
+        let out = place(&mut e, FULL_TP);
+        let request = write(&out).clone();
+        if row_first {
+            algo_row(&mut e, business, JOINED);
+            observe(&mut own, &e, true);
+        }
+        reply(&mut e, &request, &envelope(JOIN_ACK), 8.0);
+        let actions = prepared(&mut e, 8.0);
+        record_joining(&mut own, &actions, &held, &joinable);
+        observe(&mut own, &e, false);
+        if !row_first {
+            algo_row(&mut e, business, JOINED);
+            observe(&mut own, &e, false);
+        }
+        let mut other = OwnPlacements::default();
+        fire(&mut e, private, "77", [&mut own, &mut other]);
+        assert!(own.placed(SYMBOL, CHILD), "row first: {row_first}");
+        assert!(!other.placed(SYMBOL, CHILD));
+    }
 }
 
 /// A single-leg algo nobody joined stays A's: the control for the above.
