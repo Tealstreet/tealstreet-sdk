@@ -1227,13 +1227,20 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         );
                     }
                 }
+                // Applied in the turn that produced its fill, before that
+                // turn's frame (and so the fill) reaches the algo host's tap.
                 Notice::OrderNativeId {
                     symbol,
                     order_id,
                     native_id,
+                    fill_id,
                 } => {
-                    crate::own_placements::lock(&self.placements)
-                        .note_native_id(&symbol, &order_id, &native_id);
+                    crate::own_placements::lock(&self.placements).note_native_id(
+                        &symbol,
+                        &order_id,
+                        &native_id,
+                        fill_id.as_deref(),
+                    );
                 }
                 Notice::OrderTriggered {
                     symbol,

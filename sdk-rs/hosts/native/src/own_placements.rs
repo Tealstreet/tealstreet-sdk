@@ -56,14 +56,33 @@ pub struct OwnPlacements {
     /// The venue completes a repeated client id with the existing order's id
     /// (Coinbase), so a caller-id placement proves nothing about who placed it.
     idempotent_client_ids: bool,
-    /// A client-keyed venue's native id for each order, by (symbol, client
-    /// id), with its expiry: fill keys use it (`Notice::OrderNativeId`).
+    /// A client-keyed venue's native ids (`Notice::OrderNativeId`), with their
+    /// expiry: the latest by (symbol, client id), and each fill's by (symbol,
+    /// client id, fill id). Fill keys and claims use them.
     native_ids: HashMap<Key, (String, Instant)>,
+    fill_native_ids: HashMap<(String, String, String), (String, Instant)>,
+}
+
+/// A fill's native order id on a client-keyed venue (`OwnPlacements::resolve`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// The order id is already native: no `OrderNativeId` named it.
+    Native,
+    /// Named for this very fill: exact even when two orders share the id.
+    Fill(String),
+    /// The fill carried no id, so only the latest order under this client id
+    /// is known; it may be another order's.
+    Latest(String),
 }
 
 /// Insert into a bounded map of expiring entries, dropping expired then the
 /// soonest-expiring entries when full.
-fn insert_bounded<V>(map: &mut HashMap<Key, (V, Instant)>, key: Key, value: V, now: Instant) {
+fn insert_bounded<K: Eq + std::hash::Hash + Clone, V>(
+    map: &mut HashMap<K, (V, Instant)>,
+    key: K,
+    value: V,
+    now: Instant,
+) {
     if !map.contains_key(&key) && map.len() >= CAPACITY {
         map.retain(|_, (_, expiry)| now < *expiry);
         if map.len() >= CAPACITY
@@ -223,25 +242,64 @@ impl OwnPlacements {
         }
     }
 
-    /// A client-keyed venue named `native_id` for its order `order_id`, the
-    /// latest such order under that client id. Bounded like the claims.
-    pub fn note_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
+    /// A client-keyed venue named `native_id` for its order `order_id`, with
+    /// the fill (`fill_id`) that named it. Bounded like the claims.
+    pub fn note_native_id(
+        &mut self,
+        symbol: &str,
+        order_id: &str,
+        native_id: &str,
+        fill_id: Option<&str>,
+    ) {
+        let now = Instant::now();
         let key = (symbol.to_owned(), order_id.to_owned());
-        insert_bounded(
-            &mut self.native_ids,
-            key,
-            native_id.to_owned(),
-            Instant::now(),
-        );
+        insert_bounded(&mut self.native_ids, key, native_id.to_owned(), now);
+        if let Some(fill) = fill_id.filter(|fill| !fill.is_empty()) {
+            let key = (symbol.to_owned(), order_id.to_owned(), fill.to_owned());
+            insert_bounded(&mut self.fill_native_ids, key, native_id.to_owned(), now);
+        }
     }
 
-    /// The venue's own id for `order_id` on `symbol`, when it keys orders by a
-    /// client id; `None` elsewhere, where `order_id` is already native.
-    pub fn native_id(&self, symbol: &str, order_id: &str) -> Option<&str> {
-        self.native_ids
-            .get(&(symbol.to_owned(), order_id.to_owned()))
-            .filter(|(_, expiry)| Instant::now() < *expiry)
-            .map(|(native, _)| native.as_str())
+    /// The native order id of one fill of `order_id` on `symbol`.
+    pub fn resolve(&self, symbol: &str, order_id: &str, fill_id: Option<&str>) -> Resolved {
+        let now = Instant::now();
+        let live = |entry: Option<&(String, Instant)>| {
+            entry
+                .filter(|(_, expiry)| now < *expiry)
+                .map(|(native, _)| native.clone())
+        };
+        if let Some(fill) = fill_id
+            && let Some(native) = live(self.fill_native_ids.get(&(
+                symbol.to_owned(),
+                order_id.to_owned(),
+                fill.to_owned(),
+            )))
+        {
+            return Resolved::Fill(native);
+        }
+        live(
+            self.native_ids
+                .get(&(symbol.to_owned(), order_id.to_owned())),
+        )
+        .map_or(Resolved::Native, Resolved::Latest)
+    }
+
+    /// Whether any native id seen under client id `order_id` on `symbol` is
+    /// this account's: a fill without its own fill id cannot say which order
+    /// it is, so it is claimed if any could be (a duplicate push, never a
+    /// withheld one).
+    pub fn claims_any_native_of(&self, symbol: &str, order_id: &str) -> bool {
+        let now = Instant::now();
+        self.fill_native_ids
+            .iter()
+            .filter(|((s, o, _), (_, expiry))| s == symbol && o == order_id && now < *expiry)
+            .map(|(_, (native, _))| native)
+            .chain(
+                self.native_ids
+                    .get(&(symbol.to_owned(), order_id.to_owned()))
+                    .map(|(native, _)| native),
+            )
+            .any(|native| self.placed_at(symbol, native, now))
     }
 
     /// A venue order an algo's trigger created is this account's when the algo

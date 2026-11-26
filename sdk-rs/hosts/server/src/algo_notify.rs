@@ -8,7 +8,7 @@ use safe_cex_algos::{AccountPort, AlgoStore, Change, CommandFuture};
 use safe_cex_engine::engine::{Command, CommandId, Fill};
 use safe_cex_engine::error::Outcome;
 use safe_cex_engine::model::OrderSide;
-use safe_cex_native::own_placements::Placements;
+use safe_cex_native::own_placements::{Placements, Resolved};
 use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -89,6 +89,11 @@ impl AlgoNotify {
 
 struct PendingFill {
     symbol: String,
+    /// The fill's order id: on a client-keyed venue, the reusable client id
+    /// the store keys its row by.
+    order_id: String,
+    /// Its native id was not named for its own fill (`Resolved::Latest`).
+    loose: bool,
     side: OrderSide,
     filled: f64,
     /// The order row (amount, filled) right after its latest fill applied, if
@@ -129,7 +134,8 @@ pub(crate) struct Tap {
     /// The main loop ended: disposal's stops are not ordinary ends. Only a box
     /// stop reports them (`server_stopped`).
     ended: Cell<bool>,
-    /// By (symbol, order id): venue order ids can repeat across symbols.
+    /// By (symbol, native order id): venue order ids can repeat across
+    /// symbols, and on a client-keyed venue two orders can share a client id.
     fills: RefCell<HashMap<(String, String), PendingFill>>,
     pub(crate) wake: tokio::sync::Notify,
     twaps: RefCell<HashMap<String, TwapSeen>>,
@@ -265,12 +271,26 @@ impl Tap {
             return;
         }
         let due = Instant::now() + FILL_DEBOUNCE;
+        let placements = safe_cex_native::own_placements::lock(&self.placements);
         let mut pending = self.fills.borrow_mut();
         for fill in fills {
+            // On a client-keyed venue (Binance spot and portfolio margin, GRVT)
+            // the order id is a reusable client id: the fill's own native id,
+            // named by `OrderNativeId` in the turn that produced it, keys it,
+            // so two orders sharing a client id stay two notifications. Every
+            // other venue's order id is already native.
+            let (key_id, loose) =
+                match placements.resolve(&fill.symbol, &fill.order_id, fill.id.as_deref()) {
+                    Resolved::Native => (fill.order_id.clone(), false),
+                    Resolved::Fill(native) => (native, false),
+                    Resolved::Latest(native) => (native, true),
+                };
             let entry = pending
-                .entry((fill.symbol.clone(), fill.order_id.clone()))
+                .entry((fill.symbol.clone(), key_id))
                 .or_insert_with(|| PendingFill {
                     symbol: fill.symbol.clone(),
+                    order_id: fill.order_id.clone(),
+                    loose,
                     side: fill.side,
                     filled: 0.0,
                     row: None,
@@ -287,6 +307,7 @@ impl Tap {
             entry.due = due;
         }
         drop(pending);
+        drop(placements);
         self.wake.notify_one();
     }
 
@@ -320,30 +341,26 @@ impl Tap {
                 .collect()
         };
         ready.sort_by_key(|(_, fill)| fill.due);
-        for ((symbol, order_id), mut fill) in ready {
+        for ((symbol, key_id), mut fill) in ready {
+            let order_id = fill.order_id.clone();
             if let Some(identities) = identities(store, &symbol, &order_id) {
                 fill.identities = identities;
             }
-            // A client-keyed venue's order id is a reusable client id: the key
-            // is the venue's own id, so two orders sharing a client id never
-            // share a key (AGT-196). Only Binance spot and portfolio margin and
-            // GRVT key orders by client id and send `OrderNativeId`; every
-            // other venue's order id is already native, so it falls back here.
-            let key_id = safe_cex_native::own_placements::lock(&self.placements)
-                .native_id(&symbol, &order_id)
-                .map_or_else(|| order_id.clone(), str::to_owned);
-            let placed_here = self.placed_here(&symbol, &order_id, &key_id, &fill.identities);
+            let placed_here =
+                self.placed_here(&symbol, &order_id, &key_id, &fill.identities, fill.loose);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
+            // Keyed by the native id, so two orders under one client id never
+            // collapse into one notification.
             let (verb, natural_key) = match row(store, &symbol, &order_id).or(fill.row) {
-                Some(row) if size_met(row) => (Verb::Filled, format!("{order_id}\0filled")),
+                Some(row) if size_met(row) => (Verb::Filled, format!("{key_id}\0filled")),
                 Some((_, filled)) => (
                     Verb::PartiallyFilled,
-                    format!("{order_id}\0partiallyFilled\0{filled}"),
+                    format!("{key_id}\0partiallyFilled\0{filled}"),
                 ),
                 None => (
                     Verb::PartiallyFilled,
-                    format!("{order_id}\0partiallyFilled\0{}", fill.filled),
+                    format!("{key_id}\0partiallyFilled\0{}", fill.filled),
                 ),
             };
             self.notify.emit_fill(
@@ -358,7 +375,7 @@ impl Tap {
                     deadline: None,
                     collapse: Some(crate::host_notify::opaque_key(
                         &self.notify.scope.account_digest,
-                        &order_id,
+                        &key_id,
                     )),
                 },
                 &fill.symbol,
@@ -378,11 +395,16 @@ impl Tap {
         order_id: &str,
         key_id: &str,
         identities: &Identities,
+        loose: bool,
     ) -> bool {
         let placements = safe_cex_native::own_placements::lock(&self.placements);
         placements.placed(symbol, order_id)
             || placements.placed(symbol, key_id)
             || identities.0.iter().any(|id| placements.placed(symbol, id))
+            // A fill without its own fill id cannot say which order under its
+            // client id it is: claimed if any could be ours (a duplicate push,
+            // never a withheld one).
+            || (loose && placements.claims_any_native_of(symbol, order_id))
     }
 
     /// A server-initiated placement the venue refused outright.

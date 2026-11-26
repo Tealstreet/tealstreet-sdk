@@ -175,8 +175,10 @@ identities its own clients placed, read through `AccountHandle::placements`
   portfolio margin and GRVT key orders by client id, so their completions
   carry it; their acks send `Notice::PlacementNativeId` with the native id
   instead, and an ack without one records nothing. Their fills send
-  `Notice::OrderNativeId`, recorded with `note_native_id`, which fill keys and
-  claims use. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated
+  `Notice::OrderNativeId` with the fill's own id, applied before that fill's
+  frame reaches the fill tap, which resolves each fill's native id when it
+  records it (`OwnPlacements::resolve`): two orders under one client id stay
+  two notifications with two keys. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated
   client id with the existing order's id, which may be another login's, so no
   caller-id placement claims there at all (`set_idempotent_client_ids`).
 - **Amends** record their receipts and completion ids (Hyperliquid's

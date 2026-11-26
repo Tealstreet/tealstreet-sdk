@@ -323,6 +323,7 @@ impl Harness {
                     symbol,
                     order_id,
                     native_id,
+                    ..
                 }) => self.native_ids.push((symbol, order_id, native_id)),
                 Action::Notice(Notice::PlacementNativeId {
                     command,

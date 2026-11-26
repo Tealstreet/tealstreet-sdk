@@ -350,11 +350,14 @@ pub enum Notice {
     /// client id, which a later order may reuse; a fill's claim keys on the
     /// native id so two orders sharing one client id never share a claim
     /// (AGT-196). Native hosts only, like `OrderTriggered`.
+    /// `fill_id` is the fill's own `Fill::id`, so a host can tell apart two
+    /// orders' fills under one client id inside one batch of frames.
     #[cfg(not(target_arch = "wasm32"))]
     OrderNativeId {
         symbol: String,
         order_id: String,
         native_id: String,
+        fill_id: Option<String>,
     },
     /// The venue acknowledged `command`'s order placed under the caller's
     /// `client_order_id` with its own `native_id`. A reusable client id never
@@ -3314,7 +3317,13 @@ impl<P> Cx<'_, P> {
     /// `Notice::OrderNativeId`: `order_id` (a client id) is the venue's order
     /// `native_id`. Nothing is sent when they are equal or either is empty.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn order_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
+    pub fn order_native_id(
+        &mut self,
+        symbol: &str,
+        order_id: &str,
+        native_id: &str,
+        fill_id: Option<&str>,
+    ) {
         if !symbol.is_empty()
             && !order_id.is_empty()
             && !native_id.is_empty()
@@ -3327,6 +3336,7 @@ impl<P> Cx<'_, P> {
                     symbol: symbol.to_owned(),
                     order_id: order_id.to_owned(),
                     native_id: native_id.to_owned(),
+                    fill_id: fill_id.map(str::to_owned),
                 }));
         }
     }

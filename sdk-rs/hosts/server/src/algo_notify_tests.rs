@@ -766,7 +766,7 @@ async fn orders_reusing_one_client_id_get_different_fill_keys() {
         placements
             .lock()
             .unwrap()
-            .note_native_id("BTCUSDT", "desk", native);
+            .note_native_id("BTCUSDT", "desk", native, Some("exec-desk"));
         tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
         tap.flush_fills(&store(Vec::new()), true);
         let sent = sent(&notifier);
@@ -794,7 +794,7 @@ async fn a_client_keyed_fill_claims_by_its_native_id() {
         placements
             .lock()
             .unwrap()
-            .note_native_id("BTCUSDT", "desk", native);
+            .note_native_id("BTCUSDT", "desk", native, Some("exec-desk"));
         tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
         tap.flush_fills(&store(Vec::new()), true);
         claimed.push(
@@ -804,6 +804,91 @@ async fn a_client_keyed_fill_claims_by_its_native_id() {
         );
     }
     assert_eq!(claimed, [true, false]);
+}
+
+/// One `desk` fill with its own trade id.
+fn desk_fill(trade: &str) -> Fill {
+    Fill {
+        id: Some(trade.into()),
+        ..fill("desk", 1.0)
+    }
+}
+
+/// Review A and B (2750605102): A's `desk` (native n-a) fills and B reuses
+/// `desk` (native n-b) inside one 2 s debounce, both before any flush. Each
+/// fill's native id is resolved from its own trade id when recorded, so they
+/// stay two notifications with two keys, and each login claims only its own:
+/// neither is withheld from its placer.
+#[tokio::test(start_paused = true)]
+async fn two_orders_sharing_a_client_id_in_one_debounce_keep_their_own_keys_and_claims() {
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let mut claims = Vec::new();
+    for (user, own) in [("auth0|a", "n-a"), ("auth0|b", "n-b")] {
+        let placements = Placements::default();
+        placements.lock().unwrap().record("BTCUSDT", own);
+        {
+            let mut ledger = placements.lock().unwrap();
+            ledger.note_native_id("BTCUSDT", "desk", "n-a", Some("t-a"));
+            ledger.note_native_id("BTCUSDT", "desk", "n-b", Some("t-b"));
+        }
+        let (tap, notifier) = tap_for(user, true, false, placements);
+        tap.record_fills(&[desk_fill("t-a"), desk_fill("t-b")], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        let sent = sent(&notifier);
+        assert_eq!(sent.len(), 2, "{user}: two orders, two notifications");
+        let scope = Scope::new(user, "bybit", "synthetic-main", "venue-account");
+        let by_native: Vec<(String, bool)> = ["n-a", "n-b"]
+            .iter()
+            .map(|native| {
+                let key = crate::host_notify::fill_key(&scope, "BTCUSDT", native);
+                let n = sent
+                    .iter()
+                    .find(|n| n["fillKey"] == key.as_str())
+                    .unwrap_or_else(|| panic!("{user}: {native}'s own key"));
+                ((*native).to_owned(), n["placedHere"].as_bool().unwrap())
+            })
+            .collect();
+        claims.push(by_native);
+    }
+    assert_eq!(
+        claims,
+        [
+            vec![("n-a".to_owned(), true), ("n-b".to_owned(), false)],
+            vec![("n-a".to_owned(), false), ("n-b".to_owned(), true)],
+        ]
+    );
+    assert_eq!(
+        crate::host_notify::fill_key(&scope, "BTCUSDT", "n-a"),
+        crate::host_notify::fill_key(
+            &Scope::new("auth0|b", "bybit", "synthetic-main", "venue-account"),
+            "BTCUSDT",
+            "n-a"
+        ),
+        "one key per order across logins"
+    );
+}
+
+/// A client-keyed fill without its own trade id can only be matched to the
+/// latest order under its client id. It is claimed when any native id seen
+/// under that client id is this login's: a duplicate push, never a withheld
+/// one.
+#[tokio::test(start_paused = true)]
+async fn a_client_keyed_fill_without_a_trade_id_is_claimed_if_any_order_could_be_ours() {
+    let placements = Placements::default();
+    {
+        let mut ledger = placements.lock().unwrap();
+        ledger.record("BTCUSDT", "n-a");
+        ledger.note_native_id("BTCUSDT", "desk", "n-a", Some("t-a"));
+        ledger.note_native_id("BTCUSDT", "desk", "n-b", Some("t-b"));
+    }
+    let (tap, notifier) = tap_for("auth0|a", true, false, placements);
+    let anonymous = Fill {
+        id: None,
+        ..fill("desk", 1.0)
+    };
+    tap.record_fills(&[anonymous], &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    assert_eq!(sent(&notifier)[0]["placedHere"], true);
 }
 
 /// One fill's key on a tap for `user` connected to `venue_account`.

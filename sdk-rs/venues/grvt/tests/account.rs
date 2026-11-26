@@ -692,7 +692,11 @@ fn fills_of_orders_reusing_a_client_id_name_each_native_id() {
                 symbol,
                 order_id,
                 native_id,
-            }) => Some((symbol.clone(), order_id.clone(), native_id.clone())),
+                fill_id,
+            }) => {
+                assert_eq!(fill_id.as_deref(), Some(trade), "the fill's own trade id");
+                Some((symbol.clone(), order_id.clone(), native_id.clone()))
+            }
             _ => None,
         }));
     }

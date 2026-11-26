@@ -2479,7 +2479,14 @@ impl BinanceFutures {
             // Portfolio margin keys the order by a reusable client id; its
             // claim keys on the native id (AGT-196). Native only.
             #[cfg(not(target_arch = "wasm32"))]
-            cx.order_native_id(&o.s, &id, &o.i.to_string());
+            cx.order_native_id(
+                &o.s,
+                &id,
+                &o.i.to_string(),
+                o.t.filter(|trade| *trade >= 0)
+                    .map(|trade| trade.to_string())
+                    .as_deref(),
+            );
         }
         let is_terminal = matches!(
             status,
@@ -3500,7 +3507,12 @@ impl BinanceFutures {
             // Spot keys the order by a reusable client id; its claim keys on
             // the native id (AGT-196). Native only.
             #[cfg(not(target_arch = "wasm32"))]
-            cx.order_native_id(&event.s, &id, &native.to_string());
+            cx.order_native_id(
+                &event.s,
+                &id,
+                &native.to_string(),
+                event.t.map(|trade| trade.to_string()).as_deref(),
+            );
         }
         let (previous, was_terminal) = self
             .account

@@ -2308,7 +2308,7 @@ impl Grvt {
                             amount: fill.size.0,
                         });
                         #[cfg(not(target_arch = "wasm32"))]
-                        cx.order_native_id(&symbol, &client, &fill.native_id);
+                        cx.order_native_id(&symbol, &client, &fill.native_id, Some(&fill.trade_id));
                     }
                 }
             }
