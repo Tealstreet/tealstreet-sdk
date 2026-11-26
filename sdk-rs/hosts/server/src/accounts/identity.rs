@@ -142,7 +142,13 @@ pub(crate) fn venue_account(init: &InitPayload) -> Result<String, String> {
         network,
         init.bybit_site_id.as_deref().unwrap_or_default(),
         init.subaccount.as_deref().unwrap_or_default(),
-        init.vault.as_deref().unwrap_or_default(),
+        // Only Hyperliquid trades through a vault (`engine_options` drops it
+        // elsewhere): a stray one must not split one venue account in two.
+        if super::HYPERLIQUID_VENUES.contains(&init.exchange_name.as_str()) {
+            init.vault.as_deref().unwrap_or_default()
+        } else {
+            ""
+        },
         key_id(init)?,
     ] {
         input.extend_from_slice(&(component.len() as u64).to_be_bytes());

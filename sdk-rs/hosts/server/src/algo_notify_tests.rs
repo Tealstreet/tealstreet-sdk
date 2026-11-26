@@ -596,7 +596,7 @@ async fn filled_needs_the_order_record_to_show_its_size_met() {
             "auth0|u1",
             &Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account").account_digest,
             Kind::Fill,
-            &format!("{order}\0{key}"),
+            &format!("BTCUSDT\0{order}\0{key}"),
         )
     };
     assert_eq!(verbs[&id("kept-closed", "filled")], "filled");
@@ -889,6 +889,25 @@ async fn a_client_keyed_fill_without_a_trade_id_is_claimed_if_any_order_could_be
     tap.record_fills(&[anonymous], &store(Vec::new()));
     tap.flush_fills(&store(Vec::new()), true);
     assert_eq!(sent(&notifier)[0]["placedHere"], true);
+}
+
+/// CodeRabbit (0562b1e5b2): Binance USDⓈ-M order ids repeat across symbols.
+/// BTCUSDT order 7 and ETHUSDT order 7 filling on one account are two
+/// notifications with distinct ids and collapse keys, so the gateway never
+/// drops one as a duplicate of the other.
+#[tokio::test(start_paused = true)]
+async fn equal_order_ids_on_two_symbols_are_two_notifications() {
+    let (tap, notifier) = tap_for("auth0|u1", true, false, Placements::default());
+    let fills = ["BTCUSDT", "ETHUSDT"].map(|symbol| Fill {
+        symbol: symbol.into(),
+        ..fill("7", 1.0)
+    });
+    tap.record_fills(&fills, &store(Vec::new()));
+    tap.flush_fills(&store(Vec::new()), true);
+    let sent = sent(&notifier);
+    assert_eq!(sent.len(), 2);
+    assert_ne!(sent[0]["id"], sent[1]["id"]);
+    assert_ne!(sent[0]["collapseKey"], sent[1]["collapseKey"]);
 }
 
 /// One fill's key on a tap for `user` connected to `venue_account`.

@@ -762,13 +762,28 @@ fn venue_account_is_the_same_for_every_login_and_distinct_per_venue_account() {
             subaccount: Some("sub".into()),
             ..first.clone()
         },
-        InitPayload {
-            vault: Some("0xvault".into()),
-            ..first.clone()
-        },
     ] {
         assert_ne!(identity::venue_account(&changed).unwrap(), digest);
     }
+    // A vault names another account only where the engine trades through one.
+    let vault = |exchange_name: &str, vault: Option<&str>| {
+        identity::venue_account(&InitPayload {
+            exchange_name: exchange_name.into(),
+            vault: vault.map(Into::into),
+            ..first.clone()
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        vault("bybit", Some("0xvault")),
+        digest,
+        "a stray vault on Bybit is the same venue account"
+    );
+    assert_ne!(
+        vault("hyperliquid", Some("0xvault")),
+        vault("hyperliquid", None)
+    );
+    assert_eq!(vault("hyperliquid", Some("")), vault("hyperliquid", None));
     assert!(
         identity::venue_account(&InitPayload {
             key: String::new(),

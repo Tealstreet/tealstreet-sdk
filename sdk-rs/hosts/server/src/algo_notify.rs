@@ -350,17 +350,18 @@ impl Tap {
                 self.placed_here(&symbol, &order_id, &key_id, &fill.identities, fill.loose);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
-            // Keyed by the native id, so two orders under one client id never
-            // collapse into one notification.
+            // Keyed by symbol and native id: per-symbol order ids (Binance
+            // USDⓈ-M) and two orders under one client id never share a
+            // notification.
             let (verb, natural_key) = match row(store, &symbol, &order_id).or(fill.row) {
-                Some(row) if size_met(row) => (Verb::Filled, format!("{key_id}\0filled")),
+                Some(row) if size_met(row) => (Verb::Filled, format!("{symbol}\0{key_id}\0filled")),
                 Some((_, filled)) => (
                     Verb::PartiallyFilled,
-                    format!("{key_id}\0partiallyFilled\0{filled}"),
+                    format!("{symbol}\0{key_id}\0partiallyFilled\0{filled}"),
                 ),
                 None => (
                     Verb::PartiallyFilled,
-                    format!("{key_id}\0partiallyFilled\0{}", fill.filled),
+                    format!("{symbol}\0{key_id}\0partiallyFilled\0{}", fill.filled),
                 ),
             };
             self.notify.emit_fill(
@@ -375,7 +376,7 @@ impl Tap {
                     deadline: None,
                     collapse: Some(crate::host_notify::opaque_key(
                         &self.notify.scope.account_digest,
-                        &key_id,
+                        &format!("{symbol}\0{key_id}"),
                     )),
                 },
                 &fill.symbol,

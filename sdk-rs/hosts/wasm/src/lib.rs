@@ -1853,6 +1853,7 @@ mod public_custody_tests;
 mod tests {
     /// Review B (942d22190f): a native build of this crate sees the host-only
     /// notice when a venue links a triggered child; it encodes to nothing.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_host_only_order_triggered_notice_encodes_to_nothing() {
         let triggered = safe_cex_engine::Action::Notice(safe_cex_engine::Notice::OrderTriggered {
