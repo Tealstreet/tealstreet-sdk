@@ -17,7 +17,6 @@
 #[path = "../../../venues/okx/tests/support/mod.rs"]
 mod support;
 
-use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::{Action, Command, Engine, Event, Fill, Method, Notice};
 use safe_cex_native::own_placements::OwnPlacements;
 use safe_cex_venue_okx::Okx;
@@ -36,8 +35,10 @@ fn triggered_child(algo: &str) -> String {
     )
 }
 
+type Socket = safe_cex_engine::SocketId;
+
 /// A ready account with authenticated private and business sockets.
-fn ready() -> (Engine<Okx>, safe_cex_engine::SocketId) {
+fn ready() -> (Engine<Okx>, Socket, Socket) {
     let mut e = engine(FixtureOptions {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
@@ -89,7 +90,7 @@ fn ready() -> (Engine<Okx>, safe_cex_engine::SocketId) {
         reply(&mut e, &a, &body, 5.0);
         reads.extend(prepared(&mut e, 5.0));
     }
-    (e, private)
+    (e, private, business)
 }
 
 fn place(e: &mut Engine<Okx>, order: &str) -> Vec<Action> {
@@ -141,6 +142,7 @@ fn record(ledger: &mut OwnPlacements, actions: &[Action], held: &[String]) {
             }
             Action::Notice(Notice::CommandDone { command: 1, result }) => {
                 ledger.record_completion(&symbols, &legs, result, held);
+                ledger.settle(&symbols, Some(result));
             }
             _ => {}
         }
@@ -184,7 +186,7 @@ fn fire(
 #[test]
 fn a_brackets_triggered_leg_is_claimed_by_the_placing_login_only() {
     for (leg, algo) in [("stop-loss", SL_ALGO), ("take-profit", TP_ALGO)] {
-        let (mut e, private) = ready();
+        let (mut e, private, _) = ready();
         let out = place(
             &mut e,
             r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000,"stopLoss":36000,"takeProfit":42000}"#,
@@ -226,53 +228,67 @@ fn a_brackets_triggered_leg_is_claimed_by_the_placing_login_only() {
     }
 }
 
-fn held_stop(id: &str) -> Order {
-    Order {
-        id: id.into(),
-        parent_id: None,
-        status: OrderStatus::Open,
-        symbol: SYMBOL.into(),
-        kind: OrderType::StopLoss,
-        side: OrderSide::Sell,
-        price: 36000.0,
-        amount: 0.0,
-        filled: 0.0,
-        remaining: 0.0,
-        reduce_only: true,
-        close: None,
-        client_order_id: None,
-        time_in_force: Some(TimeInForce::GoodTillCancel),
-        last_update: 4.0,
-        trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
-    }
+/// OKX `orders-algo` rows for full-position algo `77` (as in the venue's
+/// AGT-98 test): its stop alone, then the `oco` a joined take-profit makes.
+const STOP_ONLY: &str = r#"{"instId":"BTC-USDT-SWAP","algoId":"77","ordType":"conditional","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","reduceOnly":"true"}"#;
+const JOINED: &str = r#"{"instId":"BTC-USDT-SWAP","algoId":"77","ordType":"oco","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","tpTriggerPx":"42000","tpOrdPx":"-1","tpTriggerPxType":"last","reduceOnly":"true"}"#;
+const FULL_SL: &str =
+    r#"{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":36000}"#;
+const FULL_TP: &str =
+    r#"{"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":0,"price":42000}"#;
+const JOIN_ACK: &str = r#"{"algoClOrdId":"","algoId":"77","reqId":"","sCode":"0","sMsg":""}"#;
+
+fn algo_row(e: &mut Engine<Okx>, business: Socket, row: &str) {
+    ws(
+        e,
+        business,
+        &format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#),
+    );
+    let _ = prepared(e, 10.0);
 }
 
-/// Another login's full-position stop `77` is held. This login's full TP
-/// joins it through amend-algos, which completes with `77`: that is not a
-/// placement here, so a later trigger of `77` is claimed by neither login
-/// (fail open), never by the one that only joined it.
-#[test]
-fn joining_another_logins_full_position_algo_claims_nothing() {
-    let (mut e, private) = ready();
-    e.store_mut().upsert_order(held_stop("77_sl"));
-    let mut joiner = OwnPlacements::default();
-    let mut placer = OwnPlacements::default();
-    let held = joiner.held_rows(&[SYMBOL.into()], e.store().orders());
-    let out = place(
-        &mut e,
-        r#"{"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":0,"price":42000}"#,
-    );
+/// What the actor's `observe_legs` sees: this resident's store, with its own
+/// command on the symbol in flight or not.
+fn observe(ledger: &mut OwnPlacements, e: &Engine<Okx>, in_flight: bool) {
+    ledger.observe_legs(e.store().orders(), |_| in_flight);
+}
+
+/// Login A places full-position stop `77`; it is A's, and its child is A's.
+fn a_places_the_stop() -> (Engine<Okx>, Socket, Socket, OwnPlacements) {
+    let (mut e, private, business) = ready();
+    let out = place(&mut e, FULL_SL);
     let actions = acknowledge(
         &mut e,
         out,
         &[(
-            "/amend-algos",
-            r#"{"algoClOrdId":"","algoId":"77","reqId":"","sCode":"0","sMsg":""}"#,
+            "/order-algo",
+            r#"{"algoClOrdId":"","algoId":"77","clOrdId":"","sCode":"0","sMsg":"","tag":""}"#,
         )],
     );
+    let mut ledger = OwnPlacements::default();
+    record(&mut ledger, &actions, &[]);
+    observe(&mut ledger, &e, false);
+    algo_row(&mut e, business, STOP_ONLY);
+    observe(&mut ledger, &e, false);
+    assert!(ledger.placed(SYMBOL, "77"));
+    (e, private, business, ledger)
+}
+
+/// Review A/B blocker: B's full TP joins A's full stop `77`, which becomes
+/// an `oco` of A's SL and B's TP. The child of either leg names only `77`,
+/// so neither login may claim it: B records nothing for the joined algo, and
+/// A's resident, seeing `77` gain a leg no command of its own added, stops
+/// linking its children. Both logins are notified (fail open).
+#[test]
+fn a_joined_algo_is_claimed_by_neither_login() {
+    let (mut a, a_private, a_business, mut a_ledger) = a_places_the_stop();
+    let (mut b, b_private, b_business) = ready();
+    algo_row(&mut b, b_business, STOP_ONLY);
+    let mut b_ledger = OwnPlacements::default();
+    let held = b_ledger.held_rows(&[SYMBOL.into()], b.store().orders());
+    assert_eq!(held, ["77_sl"]);
+    let out = place(&mut b, FULL_TP);
+    let actions = acknowledge(&mut b, out, &[("/amend-algos", JOIN_ACK)]);
     assert!(
         actions.iter().any(|a| matches!(
             a,
@@ -280,39 +296,49 @@ fn joining_another_logins_full_position_algo_claims_nothing() {
         )),
         "{actions:?}"
     );
-    record(&mut joiner, &actions, &held);
-    assert!(
-        !joiner.placed(SYMBOL, "77"),
-        "the joined algo is not placed here"
-    );
-    let fills = fire(&mut e, private, "77", [&mut joiner, &mut placer]);
-    assert_eq!(fills.len(), 1);
-    assert!(!joiner.placed(SYMBOL, CHILD), "the joiner never claims it");
+    record(&mut b_ledger, &actions, &held);
+    assert!(!b_ledger.placed(SYMBOL, "77"), "the joiner never claims 77");
+    // Each resident's stream now carries the two-leg algo.
+    for (e, business) in [(&mut a, a_business), (&mut b, b_business)] {
+        algo_row(e, business, JOINED);
+    }
+    observe(&mut a_ledger, &a, false);
+    observe(&mut b_ledger, &b, false);
+    let mut nobody = OwnPlacements::default();
+    let a_fills = fire(&mut a, a_private, "77", [&mut a_ledger, &mut nobody]);
+    let b_fills = fire(&mut b, b_private, "77", [&mut b_ledger, &mut nobody]);
+    assert_eq!((a_fills.len(), b_fills.len()), (1, 1));
+    assert!(!a_ledger.placed(SYMBOL, CHILD), "A never claims B's leg");
+    assert!(!b_ledger.placed(SYMBOL, CHILD), "B never claims A's leg");
 }
 
-/// This login's own held stop: joining it keeps it claimed, and its child is.
+/// A's own TP joins A's own stop: the leg appears while A's command is in
+/// flight and the completion names `77`, so A still claims its child. The
+/// other login never does.
 #[test]
-fn joining_this_logins_own_full_position_algo_keeps_it_claimed() {
-    let (mut e, private) = ready();
-    e.store_mut().upsert_order(held_stop("77_sl"));
-    let mut own = OwnPlacements::default();
-    own.record(SYMBOL, "77");
-    let mut other = OwnPlacements::default();
+fn joining_this_logins_own_algo_keeps_it_claimed() {
+    let (mut e, private, business, mut own) = a_places_the_stop();
     let held = own.held_rows(&[SYMBOL.into()], e.store().orders());
     assert!(held.is_empty(), "{held:?}");
-    let out = place(
-        &mut e,
-        r#"{"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":0,"price":42000}"#,
-    );
-    let actions = acknowledge(
-        &mut e,
-        out,
-        &[(
-            "/amend-algos",
-            r#"{"algoClOrdId":"","algoId":"77","reqId":"","sCode":"0","sMsg":""}"#,
-        )],
-    );
+    let out = place(&mut e, FULL_TP);
+    let request = write(&out).clone();
+    // The two-leg row may arrive before the join's acknowledgement.
+    algo_row(&mut e, business, JOINED);
+    observe(&mut own, &e, true);
+    reply(&mut e, &request, &envelope(JOIN_ACK), 8.0);
+    let actions = prepared(&mut e, 8.0);
     record(&mut own, &actions, &held);
+    observe(&mut own, &e, false);
+    let mut other = OwnPlacements::default();
+    fire(&mut e, private, "77", [&mut own, &mut other]);
+    assert!(own.placed(SYMBOL, CHILD) && !other.placed(SYMBOL, CHILD));
+}
+
+/// A single-leg algo nobody joined stays A's: the control for the above.
+#[test]
+fn an_unjoined_full_position_stop_stays_claimed_by_its_placer() {
+    let (mut e, private, _, mut own) = a_places_the_stop();
+    let mut other = OwnPlacements::default();
     fire(&mut e, private, "77", [&mut own, &mut other]);
     assert!(own.placed(SYMBOL, CHILD) && !other.placed(SYMBOL, CHILD));
 }

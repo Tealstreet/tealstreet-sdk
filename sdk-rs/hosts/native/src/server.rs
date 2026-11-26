@@ -926,6 +926,8 @@ struct Account<V: Venue, T: Transport> {
     store_inputs: Arc<std::sync::Mutex<safe_cex_store_frames::Inputs>>,
     store_frames: safe_cex_store_frames::Emitter,
     placements: crate::own_placements::Placements,
+    /// The store's order revision `observe_legs` last looked at.
+    legs_revision: Option<u64>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -944,6 +946,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             books: HashMap::new(),
             candles: HashMap::new(),
             pending: HashMap::new(),
+            legs_revision: None,
             next_command: 0,
             startup_failure: None,
             mirrored: HashMap::new(),
@@ -1135,6 +1138,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.host.execute(&mut |notice| notices.push(notice));
         self.host
             .report_terminal(&mut |notice| notices.push(notice));
+        // Before this turn's completions settle the commands in flight.
+        self.observe_legs(false);
+        let mut completed = false;
         for notice in notices {
             match notice {
                 Notice::CommandDone { command, result } => {
@@ -1142,12 +1148,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     if let Some(pending) = &pending
                         && let Some(symbols) = &pending.own
                     {
-                        crate::own_placements::lock(&self.placements).record_completion(
+                        let mut placements = crate::own_placements::lock(&self.placements);
+                        placements.record_completion(
                             symbols,
                             &pending.legs,
                             &result,
                             &pending.held,
                         );
+                        placements.settle(symbols, Some(&result));
+                        completed = true;
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1173,6 +1182,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         } else if let Some(elements) = &error.elements {
                             placements.record_proven_legs(&pending.sent, &pending.legs, elements);
                         }
+                        if let Some(symbols) = &pending.own {
+                            placements.settle(symbols, None);
+                        }
+                        completed = true;
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1398,6 +1411,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 }
             }
         }
+        // Ids a completion just recorded get their first look at once.
+        self.observe_legs(completed);
         if let Some(error) = self.host.terminal.clone() {
             // A released command may have reached the venue, even when the
             // fatal callback's output was withheld. Settle every owned waiter
@@ -1422,6 +1437,26 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
     /// handed to the host's error sink (`report`).
+    /// AGT-333: note new leg rows on this account's own orders when any order
+    /// row changed (`OwnPlacements::observe_legs`), or when `force`d.
+    fn observe_legs(&mut self, force: bool) {
+        let revision = self.host.engine.store().orders_revision();
+        if !force && self.legs_revision == Some(revision) {
+            return;
+        }
+        self.legs_revision = Some(revision);
+        let in_flight: Vec<&String> = self
+            .pending
+            .values()
+            .filter_map(|pending| pending.own.as_ref())
+            .flatten()
+            .collect();
+        crate::own_placements::lock(&self.placements)
+            .observe_legs(self.host.engine.store().orders(), |symbol| {
+                in_flight.iter().any(|own| *own == symbol)
+            });
+    }
+
     fn note_start_failure(
         &mut self,
         error: &VenueError,

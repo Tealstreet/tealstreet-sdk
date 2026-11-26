@@ -61,6 +61,16 @@ pub struct OwnPlacements {
     /// client id, fill id). Fill keys and claims use them.
     native_ids: HashMap<Key, (String, Instant)>,
     fill_native_ids: HashMap<(String, String, String), (String, Instant)>,
+    /// The leg suffixes (`_sl`, `_tp`) last seen on rows of this account's own
+    /// native orders (`observe_legs`), by (symbol, native id).
+    leg_rows: HashMap<Key, (Vec<String>, Instant)>,
+    /// Own orders that gained a leg while this account's own command on that
+    /// symbol was in flight: theirs or another login's, settled by the command.
+    provisional: HashMap<Key, ((), Instant)>,
+    /// Own orders that gained a leg another client added (AGT-333: another
+    /// login's OKX full-position leg joined this one's algo). Which leg fired
+    /// is unknown, so their triggered children link to nobody.
+    joint: HashMap<Key, ((), Instant)>,
 }
 
 /// A fill's native order id on a client-keyed venue (`OwnPlacements::resolve`).
@@ -350,11 +360,82 @@ impl OwnPlacements {
     }
 
     pub fn link_at(&mut self, symbol: &str, order_id: &str, triggered_by: &[String], now: Instant) {
+        let live = |map: &HashMap<Key, ((), Instant)>, algo: &String| {
+            map.get(&(symbol.to_owned(), algo.clone()))
+                .is_some_and(|(_, expiry)| now < *expiry)
+        };
+        // A joint (or unsettled) algo's child may be another login's leg.
+        if triggered_by
+            .iter()
+            .any(|algo| live(&self.joint, algo) || live(&self.provisional, algo))
+        {
+            return;
+        }
         if triggered_by
             .iter()
             .any(|algo| self.placed_at(symbol, algo, now))
         {
             self.record_at(symbol, order_id, now);
+        }
+    }
+
+    /// Note the leg rows (`{native}_{leg}`) of this account's own orders. A
+    /// leg new since the last look was added by this account only if its own
+    /// command on that symbol was in flight (`in_flight`), which `settle`
+    /// decides; otherwise another client added it and the order is joint.
+    /// The first look at an order only sets what it carries.
+    pub fn observe_legs(
+        &mut self,
+        orders: &[safe_cex_engine::model::Order],
+        in_flight: impl Fn(&str) -> bool,
+    ) {
+        let now = Instant::now();
+        let mut current: HashMap<Key, Vec<String>> = HashMap::new();
+        for order in orders {
+            if let Some((native, leg)) = order.id.split_once('_')
+                && self.placed_at(&order.symbol, native, now)
+            {
+                current
+                    .entry((order.symbol.clone(), native.to_owned()))
+                    .or_default()
+                    .push(leg.to_owned());
+            }
+        }
+        for (key, legs) in current {
+            let grew = self
+                .leg_rows
+                .get(&key)
+                .filter(|(_, expiry)| now < *expiry)
+                .is_some_and(|(seen, _)| legs.iter().any(|leg| !seen.contains(leg)));
+            if grew {
+                let map = if in_flight(&key.0) {
+                    &mut self.provisional
+                } else {
+                    &mut self.joint
+                };
+                insert_bounded(map, key.clone(), (), now);
+            }
+            insert_bounded(&mut self.leg_rows, key, legs, now);
+        }
+    }
+
+    /// This account's own command on `symbols` ended. An order that gained a
+    /// leg while it was in flight is this account's own join only if the
+    /// command completed naming it (`result`); a failed or unnamed one is joint.
+    pub fn settle(&mut self, symbols: &[String], result: Option<&str>) {
+        let named = result.map(result_ids).unwrap_or_default();
+        let settled: Vec<Key> = self
+            .provisional
+            .keys()
+            .filter(|(symbol, _)| symbols.contains(symbol))
+            .cloned()
+            .collect();
+        let now = Instant::now();
+        for key in settled {
+            self.provisional.remove(&key);
+            if !named.contains(&key.1) {
+                insert_bounded(&mut self.joint, key, (), now);
+            }
         }
     }
 
@@ -607,6 +688,97 @@ mod tests {
         );
         placements.record_completion(&[BTC.into()], &one, r#"["7","770"]"#, &held);
         assert!(placements.placed(BTC, "7") && placements.placed(BTC, "770"));
+    }
+
+    fn leg(id: &str) -> safe_cex_engine::model::Order {
+        use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: BTC.into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 36000.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: true,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    /// AGT-333 review: an own algo that gains a leg no own command added is
+    /// joint, and its children link to nobody. The first look only sets what
+    /// it carries; a leg deleted and later re-added by another client is new
+    /// again. Synthetic rows.
+    #[test]
+    fn an_own_algo_that_gains_a_foreign_leg_links_nobody() {
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "77");
+        placements.record(BTC, "88");
+        placements.observe_legs(&[leg("77_sl"), leg("88_sl"), leg("88_tp")], |_| false);
+        placements.link(BTC, "child-88", &["88".into()]);
+        assert!(
+            placements.placed(BTC, "child-88"),
+            "a first look is no growth"
+        );
+        placements.observe_legs(&[leg("77_sl"), leg("77_tp"), leg("88_sl")], |_| false);
+        placements.observe_legs(
+            &[leg("77_sl"), leg("77_tp"), leg("88_sl"), leg("88_tp")],
+            |_| false,
+        );
+        for algo in ["77", "88"] {
+            let child = format!("child-{algo}-2");
+            placements.link(BTC, &child, &[algo.into(), "its-client-id".into()]);
+            assert!(!placements.placed(BTC, &child), "{algo}: joint");
+        }
+        assert!(
+            placements.placed(BTC, "77"),
+            "the algo itself stays recorded"
+        );
+    }
+
+    /// A leg that appears while this account's own command on the symbol is in
+    /// flight is its own only if that command completes naming the algo.
+    #[test]
+    fn a_leg_added_during_an_own_command_is_settled_by_it() {
+        let symbols = [BTC.to_owned()];
+        let mut placements = OwnPlacements::default();
+        for algo in ["1", "2", "3"] {
+            placements.record(BTC, algo);
+        }
+        placements.observe_legs(&[leg("1_sl"), leg("2_sl"), leg("3_sl")], |_| false);
+        let joined = [
+            leg("1_sl"),
+            leg("1_tp"),
+            leg("2_sl"),
+            leg("2_tp"),
+            leg("3_sl"),
+            leg("3_tp"),
+        ];
+        placements.observe_legs(&joined, |symbol| symbol == BTC);
+        placements.link(BTC, "early", &["1".into()]);
+        assert!(!placements.placed(BTC, "early"), "unsettled: nobody");
+        placements.settle(&symbols, Some(r#"["1"]"#));
+        placements.settle(&symbols, None);
+        placements.link(BTC, "c1", &["1".into()]);
+        placements.link(BTC, "c2", &["2".into()]);
+        assert!(
+            placements.placed(BTC, "c1"),
+            "named by its completion: own join"
+        );
+        assert!(!placements.placed(BTC, "c2"), "not named: joint");
+        placements.observe_legs(&joined, |_| false);
+        placements.link(BTC, "c1-again", &["1".into()]);
+        assert!(placements.placed(BTC, "c1-again"), "no growth since");
     }
 
     /// Review B (e6e681d490): Coinbase completes a repeated client id with the

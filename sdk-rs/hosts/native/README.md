@@ -188,11 +188,20 @@ identities its own clients placed, read through `AccountHandle::placements`
 - **Triggered children.** A venue's `Notice::OrderTriggered` adds one (an OKX
   stop's `ordId`, a Binance futures algo's `ALGO_UPDATE.ai`) when the algo it
   names, by id or client id, is already recorded.
-- **Joined orders** (AGT-333). A placement's completion id that names a row
-  already open on its symbol at dispatch, and not this login's, records nothing
-  (`OwnPlacements::held_rows`): OKX completes a full-position leg that joins
-  another login's held algo with that algo's id. A held leg row (`{algoId}_sl`)
-  matches its native id; that prefix match only ever withholds a claim.
+- **Joined orders** (AGT-333). OKX completes a full-position leg that joins a
+  held algo with that algo's id, and the joined `oco` then carries two logins'
+  legs under one `algoId`; a triggered child names only that id, never which leg
+  fired. So neither login claims a cross-login joined algo's children (both are
+  notified):
+  - The joiner: a completion id naming a row already open on its symbol at
+    dispatch, and not this login's, records nothing (`held_rows`). A held leg
+    row (`{algoId}_sl`) matches its native id; that only ever withholds.
+  - The placer: whenever order rows change, `observe_legs` notes the leg rows
+    of this login's own orders. A leg new since the last look, added while no
+    own command on that symbol was in flight, makes the order joint; one added
+    during an own command is settled by it (`settle`: its completion must name
+    the order). A joint order's triggered children link to nobody. A venue
+    that re-keys a row's leg on its own fails open the same way.
 - **OKX TP/SL legs** placed with an order are their own `order-algo` writes,
   never `attachAlgoOrds`, so each leg's `algoId` is in its completion and the
   child its trigger creates links as above (`tests/own_placements_okx.rs`).

@@ -688,8 +688,9 @@ impl Store {
         self.orders.iter().find(|order| order.id == id)
     }
 
-    /// Late-ACK reconciliation only; logical reads use `begin_orders_snapshot`.
-    pub(crate) fn orders_revision(&self) -> u64 {
+    /// Late-ACK reconciliation, and a native host's cheap "did any order row
+    /// change" check; logical reads use `begin_orders_snapshot`.
+    pub fn orders_revision(&self) -> u64 {
         self.orders_revision
     }
 
