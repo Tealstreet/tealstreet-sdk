@@ -8,7 +8,7 @@
 //!   cargo run -p safe-cex-venue-lighter --example builder_exemption -- sign <seed-file> <key-id> <account-index> <days> [mainnet|robinhood]
 //!       Prints an `lbx1.` exemption for one account, valid for <days> (max 400).
 //!   cargo run -p safe-cex-venue-lighter --example builder_exemption -- check <public-key-hex> <key-id> <token> [mainnet|robinhood]
-//!       Verifies a token against a public key and prints its account and expiry.
+//!       Verifies a token against a public key, expiry and lifetime cap, and prints its account and expiry.
 
 use safe_cex_crypto::ed25519;
 use safe_cex_venue_lighter::builder_exemption::{MAX_LIFETIME_S, payload, token, verify};
@@ -35,15 +35,23 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["keygen", path] => {
-            if std::path::Path::new(path).exists() {
-                return Err(format!("{path} already exists; refusing to overwrite a key"));
-            }
             let mut seed = [0u8; 32];
-            use std::io::Read;
+            use std::io::{Read, Write};
             std::fs::File::open("/dev/urandom")
                 .and_then(|mut f| f.read_exact(&mut seed))
                 .map_err(|e| format!("no system randomness: {e}"))?;
-            std::fs::write(path, hex(&seed)).map_err(|e| e.to_string())?;
+            // Exclusive owner-only create: never replace a key or expose the seed.
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            options
+                .open(path)
+                .and_then(|mut file| file.write_all(hex(&seed).as_bytes()))
+                .map_err(|e| match e.kind() {
+                    std::io::ErrorKind::AlreadyExists => format!("{path} already exists; refusing to overwrite a key"),
+                    _ => e.to_string(),
+                })?;
             let public = ed25519::public_key(&seed)?;
             println!("Seed written to {path}. Keep it offline.");
             println!("Public key: {}", hex(&public));
@@ -70,6 +78,14 @@ fn run() -> Result<(), String> {
             let public = unhex::<32>(public)?;
             let key_id: u32 = key_id.parse().map_err(|_| "key id must be a number")?;
             let exemption = verify(tok, network, &[(key_id, public)]).map_err(str::to_owned)?;
+            let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis() as f64;
+            if !exemption.covers(Some(exemption.account_index), now_ms) {
+                return Err(format!(
+                    "signature valid but not in effect: expires {} (unix s), which is past or more than {} days away",
+                    exemption.expires_s,
+                    MAX_LIFETIME_S / 86_400
+                ));
+            }
             println!("valid: account {} on {network}, expires {} (unix s)", exemption.account_index, exemption.expires_s);
             Ok(())
         }

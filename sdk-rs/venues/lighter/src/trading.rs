@@ -893,11 +893,14 @@ impl Lighter {
     }
 
     /// True only for a valid Tealstreet-signed exemption naming this account on
-    /// this network, before its expiry. Testnet carries no builder anyway.
+    /// this network, before its expiry. Never on testnet: no exemption domain names it.
     fn builder_exempt(&self, now_ms: f64) -> bool {
         let Some(token) = self.options.builder_exemption.as_deref() else {
             return false;
         };
+        if self.options.testnet {
+            return false;
+        }
         let network = if self.options.robinhood {
             "robinhood"
         } else {
@@ -1459,27 +1462,29 @@ impl Lighter {
                     && let Ok(approval) = serde_json::from_str::<ApprovalReply>(response.body)
                     && approval.code.as_ref().and_then(Number::integer) == Some(200)
                 {
-                    let builder = self.builder(cx.now).unwrap();
-                    let valid = approval
-                        .accounts
-                        .iter()
-                        .chain(approval.account.iter())
-                        .flat_map(|a| &a.approved_integrators)
-                        .any(|a| {
-                            a.account_index.integer() == Some(builder.account_index)
-                                && a.approval_expiry
-                                    .integer()
-                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
-                                && a.max_perps_maker_fee
-                                    .as_ref()
-                                    .and_then(Number::integer)
-                                    .unwrap_or(0)
-                                    >= u64::from(builder.maker_fee)
-                                && a.max_perps_taker_fee
-                                    .as_ref()
-                                    .and_then(Number::integer)
-                                    .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
-                        });
+                    // An exemption that took effect during the read needs no approval.
+                    let valid = self.builder(cx.now).is_none_or(|builder| {
+                        approval
+                            .accounts
+                            .iter()
+                            .chain(approval.account.iter())
+                            .flat_map(|a| &a.approved_integrators)
+                            .any(|a| {
+                                a.account_index.integer() == Some(builder.account_index)
+                                    && a.approval_expiry
+                                        .integer()
+                                        .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
+                                    && a.max_perps_maker_fee
+                                        .as_ref()
+                                        .and_then(Number::integer)
+                                        .unwrap_or(0)
+                                        >= u64::from(builder.maker_fee)
+                                    && a.max_perps_taker_fee
+                                        .as_ref()
+                                        .and_then(Number::integer)
+                                        .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
+                            })
+                    });
                     if !valid {
                         self.trade_finish(cx, not_sent(APPROVAL_MESSAGE));
                         return;
