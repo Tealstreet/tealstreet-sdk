@@ -372,10 +372,10 @@ pub(super) fn settle_intent(
     settle(receipt, protective_legs, answer, DELEGATED_LEG_ROLES)
 }
 
-/// Whether the box sends each leg's `role` to the router (AGT-214). Off until the live
-/// exchange router accepts it: its strict leg reader (tealstreet-next `legResultsOf`)
-/// drops a whole leg list carrying an unknown key. LOCAL/wasm keeps roles regardless.
-const DELEGATED_LEG_ROLES: bool = false;
+/// Whether the box sends each leg's `role` to the router (AGT-214). On since the router
+/// accepting it (tealstreet-next `legResultsOf`, deployed from `65e67dc9f6`) went live
+/// (AGT-252); an older router drops a whole leg list carrying an unknown key.
+const DELEGATED_LEG_ROLES: bool = true;
 
 struct Receipt<'a> {
     out: &'a Out,
@@ -556,7 +556,7 @@ mod tests {
         frame["d"].clone()
     }
 
-    /// As `settled`, with the box sending roles as it will once the router accepts them.
+    /// As `settled`, with roles forced on whatever `DELEGATED_LEG_ROLES` says.
     async fn settled_with_roles(error: Value) -> Value {
         let (out, mut sent, _) = Out::channel(1);
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
@@ -732,11 +732,11 @@ mod tests {
         );
     }
 
-    // AGT-214 round 3: the live exchange router drops a whole leg list that carries an
-    // unknown key, so by default the box sends each leg without its role.
+    // AGT-252: the live exchange router keeps a known role and drops an unknown one, so
+    // the box sends each leg with its role by default.
     #[tokio::test]
-    async fn the_box_sends_no_leg_roles_until_the_router_accepts_them() {
-        const { assert!(!DELEGATED_LEG_ROLES) };
+    async fn the_box_sends_leg_roles_now_the_router_accepts_them() {
+        const { assert!(DELEGATED_LEG_ROLES) };
         let error = json!({"message":"m","partialOrderIds":["entry"],
             "elements":[
                 {"index":0,"role":"entry","status":"placed","orderIds":["entry"]},
@@ -745,12 +745,10 @@ mod tests {
         assert_eq!(
             by_default["error"]["elements"],
             json!([
-                {"index":0,"status":"placed","orderIds":["entry"]},
-                {"index":1,"status":"notSent","error":{"message":"no"}}])
+                {"index":0,"role":"entry","status":"placed","orderIds":["entry"]},
+                {"index":1,"role":"takeProfit","status":"notSent","error":{"message":"no"}}])
         );
-        let enabled = settled_with_roles(error).await;
-        assert_eq!(enabled["error"]["elements"][0]["role"], "entry");
-        assert_eq!(enabled["error"]["elements"][1]["role"], "takeProfit");
+        assert_eq!(by_default, settled_with_roles(error).await);
     }
 
     #[test]
