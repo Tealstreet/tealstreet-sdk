@@ -392,9 +392,20 @@ impl OwnPlacements {
         let now = Instant::now();
         let mut current: HashMap<Key, Vec<String>> = HashMap::new();
         for order in orders {
-            if let Some((native, leg)) = order.id.split_once('_')
-                && self.placed_at(&order.symbol, native, now)
-            {
+            // By its native id, or the client id or parent a child also links
+            // through (an OKX algo whose ack was lost keeps its receipt's id).
+            let Some((native, leg)) = order.id.split_once('_') else {
+                continue;
+            };
+            let ours = [
+                Some(native),
+                order.client_order_id.as_deref(),
+                order.parent_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|identity| self.placed_at(&order.symbol, identity, now));
+            if ours {
                 current
                     .entry((order.symbol.clone(), native.to_owned()))
                     .or_default()
@@ -744,6 +755,24 @@ mod tests {
             placements.placed(BTC, "77"),
             "the algo itself stays recorded"
         );
+    }
+
+    /// Review A (8e01a745a1): an algo known here only by its client id (the
+    /// ack was lost) is still tracked through its rows' client id, under its
+    /// native id, so a foreign leg makes it joint for both identities.
+    #[test]
+    fn an_algo_known_only_by_its_client_id_still_becomes_joint() {
+        let with_client = |id: &str| {
+            let mut row = leg(id);
+            row.client_order_id = Some("algo-client".into());
+            row
+        };
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "algo-client");
+        placements.observe_legs(&[with_client("77_sl")], |_| false);
+        placements.observe_legs(&[with_client("77_sl"), with_client("77_tp")], |_| false);
+        placements.link(BTC, "child", &["77".into(), "algo-client".into()]);
+        assert!(!placements.placed(BTC, "child"));
     }
 
     /// A leg that appears while this account's own command on the symbol is in

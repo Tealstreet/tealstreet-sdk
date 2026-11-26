@@ -197,7 +197,8 @@ identities its own clients placed, read through `AccountHandle::placements`
     dispatch, and not this login's, records nothing (`held_rows`). A held leg
     row (`{algoId}_sl`) matches its native id; that only ever withholds.
   - The placer: whenever order rows change, `observe_legs` notes the leg rows
-    of this login's own orders. A leg new since the last look, added while no
+    of this login's own orders, known by native id, client id or parent (an
+    OKX algo whose ack was lost is known only by its receipt's `algoClOrdId`). A leg new since the last look, added while no
     own command on that symbol was in flight, makes the order joint; one added
     during an own command is settled by it (`settle`: its completion must name
     the order). A joint order's triggered children link to nobody. A venue

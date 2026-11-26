@@ -28,10 +28,11 @@ const TP_ALGO: &str = "452197707845865001";
 const CHILD: &str = "452197707845865472";
 
 /// OKX's published `orders` push example as a filled stop-market child of
-/// `algo` (`algoId`, `source` 7, `ordType` market), as in the venue tests.
-fn triggered_child(algo: &str) -> String {
+/// `algo` (`algoId` and its `algoClOrdId`, `source` 7, `ordType` market), as
+/// in the venue tests.
+fn triggered_child(algo: &str, client: &str) -> String {
     format!(
-        r#"{{"arg":{{"channel":"orders","instType":"SWAP","instId":"BTC-USDT-SWAP","uid":"614488474791936"}},"data":[{{"accFillSz":"1","algoClOrdId":"","algoId":"{algo}","amendResult":"","amendSource":"","avgPx":"31527.1","cancelSource":"","category":"normal","ccy":"","clOrdId":"","code":"0","cTime":"1654084334977","execType":"T","fee":"-0.02522168","feeCcy":"USDT","fillFee":"-0.02522168","fillFeeCcy":"USDT","fillNotionalUsd":"31.50818374","fillPx":"31527.1","fillSz":"1","fillPnl":"0.01","fillTime":"1654084353263","instId":"BTC-USDT-SWAP","instType":"SWAP","lever":"10","msg":"","notionalUsd":"31.50818374","ordId":"{CHILD}","ordType":"market","pnl":"0","posSide":"net","px":"","rebate":"0","rebateCcy":"USDT","reduceOnly":"true","reqId":"","side":"sell","attachAlgoClOrdId":"","slOrdPx":"","slTriggerPx":"","slTriggerPxType":"last","source":"7","state":"filled","stpId":"","stpMode":"","sz":"1","tag":"","tdMode":"cross","tgtCcy":"","tpOrdPx":"","tpTriggerPx":"","tpTriggerPxType":"last","attachAlgoOrds":[],"tradeId":"242589207","uTime":"1654084353264","isTpLimit":"false","linkedAlgoOrd":{{"algoId":""}}}}]}}"#
+        r#"{{"arg":{{"channel":"orders","instType":"SWAP","instId":"BTC-USDT-SWAP","uid":"614488474791936"}},"data":[{{"accFillSz":"1","algoClOrdId":"{client}","algoId":"{algo}","amendResult":"","amendSource":"","avgPx":"31527.1","cancelSource":"","category":"normal","ccy":"","clOrdId":"","code":"0","cTime":"1654084334977","execType":"T","fee":"-0.02522168","feeCcy":"USDT","fillFee":"-0.02522168","fillFeeCcy":"USDT","fillNotionalUsd":"31.50818374","fillPx":"31527.1","fillSz":"1","fillPnl":"0.01","fillTime":"1654084353263","instId":"BTC-USDT-SWAP","instType":"SWAP","lever":"10","msg":"","notionalUsd":"31.50818374","ordId":"{CHILD}","ordType":"market","pnl":"0","posSide":"net","px":"","rebate":"0","rebateCcy":"USDT","reduceOnly":"true","reqId":"","side":"sell","attachAlgoClOrdId":"","slOrdPx":"","slTriggerPx":"","slTriggerPxType":"last","source":"7","state":"filled","stpId":"","stpMode":"","sz":"1","tag":"","tdMode":"cross","tgtCcy":"","tpOrdPx":"","tpTriggerPx":"","tpTriggerPxType":"last","attachAlgoOrds":[],"tradeId":"242589207","uTime":"1654084353264","isTpLimit":"false","linkedAlgoOrd":{{"algoId":""}}}}]}}"#
     )
 }
 
@@ -144,6 +145,10 @@ fn record(ledger: &mut OwnPlacements, actions: &[Action], held: &[String]) {
                 ledger.record_completion(&symbols, &legs, result, held);
                 ledger.settle(&symbols, Some(result));
             }
+            // Not a definitive refusal: the receipts stay recorded.
+            Action::Notice(Notice::CommandFailed { command: 1, .. }) => {
+                ledger.settle(&symbols, None);
+            }
             _ => {}
         }
     }
@@ -156,8 +161,19 @@ fn fire(
     algo: &str,
     ledgers: [&mut OwnPlacements; 2],
 ) -> Vec<Fill> {
+    fire_named(e, private, algo, "", ledgers)
+}
+
+/// `fire` for a child that also names its algo's `algoClOrdId`.
+fn fire_named(
+    e: &mut Engine<Okx>,
+    private: safe_cex_engine::SocketId,
+    algo: &str,
+    client: &str,
+    ledgers: [&mut OwnPlacements; 2],
+) -> Vec<Fill> {
     e.take_frame(20.0);
-    ws(e, private, &triggered_child(algo));
+    ws(e, private, &triggered_child(algo, client));
     let actions = prepared(e, 20.0);
     let links: Vec<_> = actions
         .iter()
@@ -308,6 +324,85 @@ fn a_joined_algo_is_claimed_by_neither_login() {
     let a_fills = fire(&mut a, a_private, "77", [&mut a_ledger, &mut nobody]);
     let b_fills = fire(&mut b, b_private, "77", [&mut b_ledger, &mut nobody]);
     assert_eq!((a_fills.len(), b_fills.len()), (1, 1));
+    assert!(!a_ledger.placed(SYMBOL, CHILD), "A never claims B's leg");
+    assert!(!b_ledger.placed(SYMBOL, CHILD), "B never claims A's leg");
+}
+
+/// Review A (8e01a745a1): A's full stop times out (Unknown), so `77` is never
+/// recorded, but its receipt's `algoClOrdId` is, and a child names it too.
+/// The rows carry that client id, so A still tracks `77`'s legs; after B's
+/// join, neither login claims the child.
+#[test]
+fn a_joined_algo_whose_ack_was_lost_is_claimed_by_neither_login() {
+    let (mut a, a_private, a_business) = ready();
+    let out = place(&mut a, FULL_SL);
+    let request = write(&out).clone();
+    let Action::Http(sent) = &request else {
+        unreachable!()
+    };
+    let mut actions = out.clone();
+    a.handle(
+        7.0,
+        Event::HttpFailed {
+            request: sent.id,
+            error: "lost response after acceptance",
+        },
+    );
+    actions.extend(prepared(&mut a, 7.0));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. }))),
+        "{actions:?}"
+    );
+    let client = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandProgress {
+                command: 1,
+                receipts,
+            }) => receipts.first().map(|r| r.identity.clone()),
+            _ => None,
+        })
+        .expect("the stop's generated algoClOrdId");
+    let mut a_ledger = OwnPlacements::default();
+    record(&mut a_ledger, &actions, &[]);
+    assert!(!a_ledger.placed(SYMBOL, "77") && a_ledger.placed(SYMBOL, &client));
+    let with_client = |row: &str| {
+        row.replace(
+            r#""algoId":"77","#,
+            &format!(r#""algoId":"77","algoClOrdId":"{client}","#),
+        )
+    };
+    algo_row(&mut a, a_business, &with_client(STOP_ONLY));
+    observe(&mut a_ledger, &a, false);
+    let (mut b, b_private, b_business) = ready();
+    algo_row(&mut b, b_business, &with_client(STOP_ONLY));
+    let mut b_ledger = OwnPlacements::default();
+    let held = b_ledger.held_rows(&[SYMBOL.into()], b.store().orders());
+    let out = place(&mut b, FULL_TP);
+    let joined = acknowledge(&mut b, out, &[("/amend-algos", JOIN_ACK)]);
+    record(&mut b_ledger, &joined, &held);
+    for (e, business) in [(&mut a, a_business), (&mut b, b_business)] {
+        algo_row(e, business, &with_client(JOINED));
+    }
+    observe(&mut a_ledger, &a, false);
+    observe(&mut b_ledger, &b, false);
+    let mut nobody = OwnPlacements::default();
+    fire_named(
+        &mut a,
+        a_private,
+        "77",
+        &client,
+        [&mut a_ledger, &mut nobody],
+    );
+    fire_named(
+        &mut b,
+        b_private,
+        "77",
+        &client,
+        [&mut b_ledger, &mut nobody],
+    );
     assert!(!a_ledger.placed(SYMBOL, CHILD), "A never claims B's leg");
     assert!(!b_ledger.placed(SYMBOL, CHILD), "B never claims A's leg");
 }

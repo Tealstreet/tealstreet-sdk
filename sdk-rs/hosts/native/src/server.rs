@@ -1435,8 +1435,6 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
-    /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
-    /// handed to the host's error sink (`report`).
     /// AGT-333: note new leg rows on this account's own orders when any order
     /// row changed (`OwnPlacements::observe_legs`), or when `force`d.
     fn observe_legs(&mut self, force: bool) {
@@ -1457,6 +1455,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             });
     }
 
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
+    /// handed to the host's error sink (`report`).
     fn note_start_failure(
         &mut self,
         error: &VenueError,
