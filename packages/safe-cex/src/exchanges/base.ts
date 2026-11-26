@@ -1944,7 +1944,9 @@ export class BaseExchange implements Exchange {
           this.applyWorkerFrameBuffer(snapshot.frame, false, true);
         }
       })
-      .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
+      .catch((error) => {
+        if (!this.isDisposed) diagnosticConsole.error('Engine frame recovery failed', error);
+      })
       .finally(() => {
         this.workerFrameRecoveryPending = false;
         if (this.workerFrameRecoveryQueued) {

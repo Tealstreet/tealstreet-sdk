@@ -463,6 +463,12 @@ market-change, signer-status, log, and Grafana listeners. Consumers may retain
 an emitter reference, but a disposed exchange must not keep its store callback
 or notify those listeners after teardown.
 
+Main-thread frame recovery captures its exchange instance. Its rejection handler
+checks that instance's `isDisposed` before logging: retiring account A can reject
+an in-flight snapshot read after account B becomes current in the same realm.
+Drop that stale error instead of reporting it through the realm's current sink;
+live-instance failures still report normally.
+
 ### Reconnect caps are streak-scoped, not lifetime
 
 The `> 100` guards on `BaseWebSocket.onCloseCount` / `reconnectCount` (mirrored
