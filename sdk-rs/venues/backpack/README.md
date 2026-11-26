@@ -37,6 +37,21 @@ native IDs, ambiguous writes remain unknown, and skipped children are not sent.
 The command's terminal error retains the journal and accepted IDs after the
 legacy loop finishes. A failed write is never resent.
 
+Engine-sealed Unknowns use the optional engine telemetry hook, including
+frame-fed and transport-loss completion. Venue-decoded Unknowns use the same
+`order.outcome_unknown` projection once; it replaces `backpack.write.unknown`.
+Transport completion leaves reporting to the hook to avoid duplicates.
+The NX #9262 fields are a bounded `command.<ID>` label, literal `unknown` outcome,
+and comma-separated placedOrderIds and unknownIndices capped at 16 entries each.
+Placed IDs also retain only a prefix of whole entries within the engine’s
+512-byte string-field limit. Order IDs allow 1–32 decimal digits; indices allow
+0–65535. Invalid projected
+lists are omitted, while the complete journal retains every row and identity.
+The hook adds request (`^[0-9]{1,20}$`, only the internal request ID) and optional
+integer HTTP status in 100–599. Absent or invalid status is omitted. No URL,
+endpoint, query, body, signed payload or additional field is projected.
+Hosts supply the venue and account context.
+
 Accepted cancel and leverage effects use `Applied`, with existing cancel targets
 kept separate from newly created IDs. Legacy cancel-replace uses the requested
 total and edited price after cancellation, without a fill or reference veto.

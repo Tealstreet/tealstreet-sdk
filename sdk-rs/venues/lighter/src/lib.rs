@@ -7,6 +7,7 @@ mod identity;
 mod limits;
 pub mod registration;
 pub mod sign;
+mod telemetry;
 mod trading;
 mod venue_state;
 mod wire;
@@ -1030,6 +1031,10 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(telemetry::engine_unknown)
+    }
+
     fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
         match pending {
             Pending::Account { .. } => safe_cex_engine::HttpReadClass::Reconciliation,

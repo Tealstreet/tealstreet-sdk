@@ -7,6 +7,7 @@ pub mod dispatch_signing;
 mod history;
 mod socket_codec;
 mod trading;
+mod unknown_telemetry;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
@@ -515,6 +516,9 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_telemetry::project)
+    }
     fn observe_unproven_http_response(
         &mut self,
         _: f64,

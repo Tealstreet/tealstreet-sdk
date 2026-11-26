@@ -1369,6 +1369,10 @@ pub(crate) const BUILDER_HOLD: safe_cex_engine::setting_holds::SettingKey =
     safe_cex_engine::setting_holds::SettingKey::Venue("builder", String::new());
 
 impl Venue for Hyperliquid {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(trading::engine_unknown_telemetry)
+    }
+
     fn managed_sockets() -> bool {
         true
     }

@@ -4,6 +4,7 @@ mod account;
 mod history;
 mod public_read;
 pub mod sign;
+mod telemetry;
 mod trading;
 mod wire;
 
@@ -765,6 +766,10 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(telemetry::engine_unknown)
+    }
+
     fn http_plans() -> bool {
         false
     }

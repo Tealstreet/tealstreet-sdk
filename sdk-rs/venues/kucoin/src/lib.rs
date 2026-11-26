@@ -10,6 +10,7 @@ pub mod sign;
 #[cfg(feature = "spot")]
 pub mod spot;
 mod trading;
+mod unknown_outcome;
 mod wire;
 
 use safe_cex_engine::Level;
@@ -386,6 +387,10 @@ impl Kucoin {
         }
         let headers = sign::public_headers();
         let body_for_signing = body.clone();
+        let trade_command = match &pending {
+            Pending::Trade(request) => Some(request.command),
+            _ => None,
+        };
         let request = cx.request(
             method,
             format!("{REST}{}", encoded_path(path)),
@@ -393,6 +398,9 @@ impl Kucoin {
             body,
             pending,
         );
+        if let Some(command) = trade_command {
+            self.trading_request_issued(command, request);
+        }
         if let Some((selection, identity)) = selected {
             let recipe = sign::dispatch::Http::new(
                 identity,
@@ -980,6 +988,10 @@ impl Kucoin {
 }
 
 impl Venue for Kucoin {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::telemetry)
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

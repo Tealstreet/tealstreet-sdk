@@ -489,7 +489,7 @@ fn above_max_unknown_create_has_indexed_unknown_and_unissued_outcomes() {
 
 #[test]
 fn above_max_unknown_create_emits_one_attributed_event() {
-    let (actions, client, _) = above_max_unknown_trace(false);
+    let (actions, _, _) = above_max_unknown_trace(false);
     above_max_failure(&actions);
     let events = actions
         .iter()
@@ -506,9 +506,18 @@ fn above_max_unknown_create_emits_one_attributed_event() {
         events[0].message,
         "We couldn’t confirm this change. Check your open orders before trying again."
     );
-    assert!(events[0].fields.contains(&("command", 991_u32.into())));
-    assert!(events[0].fields.contains(&("elementIndex", "0".into())));
-    assert!(events[0].fields.contains(&("clientOrderId", client.into())));
+    // Closed NX #9262 projection: no free-form client identity enters telemetry.
+    assert!(
+        events[0]
+            .fields
+            .contains(&("command", "command.991".into()))
+    );
+    assert!(
+        events[0]
+            .fields
+            .iter()
+            .all(|(key, _)| *key != "clientOrderId")
+    );
 }
 
 #[test]
@@ -3705,3 +3714,6 @@ fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
         ]
     );
 }
+
+#[path = "support/unknown_telemetry.rs"]
+mod unknown_telemetry;

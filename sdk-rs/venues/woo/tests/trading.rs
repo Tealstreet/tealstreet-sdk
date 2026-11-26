@@ -1644,6 +1644,9 @@ fn cancel_all_preserves_rate_limit_kind_code_and_unknown_across_both_legs() {
                     .count(),
                 1
             );
+            assert_eq!(actions.iter().filter(|a| matches!(a,
+                Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+            )).count(), 1, "independent native failures must share one command event");
             assert!(!answer.iter().any(|a| matches!(a, Action::Http(_))));
         }
     }

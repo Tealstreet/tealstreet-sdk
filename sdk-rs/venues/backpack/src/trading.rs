@@ -31,6 +31,11 @@ fn with_unknown_guidance(mut error: VenueError) -> VenueError {
     error
 }
 
+enum UnknownReporter {
+    Venue,
+    Engine,
+}
+
 const BACKPACK: CodeTable = CodeTable {
     rows: &[],
     success: &[],
@@ -1265,14 +1270,26 @@ impl Backpack {
                                 ) {
                                     return;
                                 }
-                                let error = self.plan_failure(cx, &request, error, false);
+                                let error = self.plan_failure(
+                                    cx,
+                                    &request,
+                                    error,
+                                    false,
+                                    UnknownReporter::Venue,
+                                );
                                 let _ = cx.fail_plan(&managed.plan, error);
                                 return;
                             }
                         }
                     }
                     Err(error) => {
-                        let error = self.plan_failure(cx, &request, error.venue_error(), true);
+                        let error = self.plan_failure(
+                            cx,
+                            &request,
+                            error.venue_error(),
+                            true,
+                            UnknownReporter::Venue,
+                        );
                         let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
@@ -1476,7 +1493,13 @@ impl Backpack {
                     if let Err(error) =
                         cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context)
                     {
-                        let error = self.plan_failure(cx, &request, error.venue_error(), false);
+                        let error = self.plan_failure(
+                            cx,
+                            &request,
+                            error.venue_error(),
+                            false,
+                            UnknownReporter::Venue,
+                        );
                         let _ = cx.fail_plan(&managed.plan, error);
                         return;
                     }
@@ -1503,7 +1526,13 @@ impl Backpack {
                             }
                             _ => None,
                         };
-                        let error = self.plan_failure(cx, &request, VenueError::new(e), false);
+                        let error = self.plan_failure(
+                            cx,
+                            &request,
+                            VenueError::new(e),
+                            false,
+                            UnknownReporter::Venue,
+                        );
                         let _ = match &gone {
                             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
                             None => cx.fail_plan(&managed.plan, error),
@@ -1541,7 +1570,13 @@ impl Backpack {
                     let error = match fact {
                         Ok(error) => error,
                         Err(error) => {
-                            let error = self.plan_failure(cx, &request, error.venue_error(), true);
+                            let error = self.plan_failure(
+                                cx,
+                                &request,
+                                error.venue_error(),
+                                true,
+                                UnknownReporter::Venue,
+                            );
                             let _ = cx.fail_plan(&managed.plan, error);
                             return;
                         }
@@ -1716,7 +1751,12 @@ impl Backpack {
         if data {
             let _ = cx.finish_plan_call(&managed.plan, &managed.slot, &managed.context);
         }
-        let _ = cx.fail_plan(&managed.plan, job.write_plan.attach(error));
+        let error = job.write_plan.attach(error);
+        if data && error.outcome == Some(Outcome::Unknown) {
+            let event = crate::unknown_telemetry::event(request.command, &error);
+            cx.event(event.level, event.code, event.message, event.fields);
+        }
+        let _ = cx.fail_plan(&managed.plan, error);
     }
 
     fn proof_response(
@@ -1825,6 +1865,7 @@ impl Backpack {
         request: &Request,
         mut error: VenueError,
         pending: bool,
+        reporter: UnknownReporter,
     ) -> VenueError {
         error = with_unknown_guidance(error);
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
@@ -1840,7 +1881,10 @@ impl Backpack {
                 // outcome gate here is intentional and must not be dropped.
                 let _ = cx.override_plan_failure_message(&managed.plan, &error.message);
             }
-            cx.notice(Level::Warn, "backpack.write.unknown", &error.message);
+            if matches!(reporter, UnknownReporter::Venue) {
+                let event = crate::unknown_telemetry::event(request.command, &error);
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
         }
         error
     }
@@ -1931,7 +1975,12 @@ impl Backpack {
         if self.continue_reported_failure(cx, &request, error.clone(), true, data) {
             return;
         }
-        let error = self.plan_failure(cx, &request, error, true);
+        let reporter = if data {
+            UnknownReporter::Venue
+        } else {
+            UnknownReporter::Engine
+        };
+        let error = self.plan_failure(cx, &request, error, true, reporter);
         let _ = match &gone {
             Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
             None => cx.fail_plan(&managed.plan, error),

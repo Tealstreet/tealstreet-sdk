@@ -21,6 +21,7 @@ miniz_oxide = "0.8"
 rmp-serde = "1.3"
 
 [dev-dependencies]
+regex = "1"
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 alloy-dyn-abi.workspace = true
 

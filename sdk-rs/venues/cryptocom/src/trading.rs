@@ -118,6 +118,34 @@ struct Job {
     best_effort: bool,
     authority: Option<Authority>,
     identity: Option<Identity>,
+    unknown_reporting: UnknownReporting,
+}
+
+// Reporting follows the existing job owner and never controls dispatch or retries.
+#[derive(Default)]
+struct UnknownReporting {
+    attempt_id: Option<safe_cex_engine::RequestId>,
+    issued: usize,
+    native: Option<(safe_cex_engine::RequestId, u16)>,
+    indices: Vec<usize>,
+    engine_owned: bool,
+}
+
+impl UnknownReporting {
+    fn native_event(
+        &self,
+        command: CommandId,
+        ids: &[String],
+    ) -> Option<safe_cex_engine::LogEvent> {
+        let (request, status) = self.native.filter(|_| !self.engine_owned)?;
+        Some(crate::unknown_outcome::event(
+            command,
+            request,
+            Some(status),
+            ids,
+            self.indices.iter().copied(),
+        ))
+    }
 }
 #[derive(Default)]
 pub struct Trading {
@@ -287,6 +315,7 @@ impl Cryptocom {
             best_effort: true,
             authority: None,
             identity: None,
+            unknown_reporting: UnknownReporting::default(),
         })
     }
 
@@ -331,6 +360,7 @@ impl Cryptocom {
                         best_effort: true,
                         authority: None,
                         identity: None,
+                        unknown_reporting: UnknownReporting::default(),
                     }),
                 )
             }
@@ -647,6 +677,7 @@ impl Cryptocom {
         };
         let job = self.trading.jobs.get_mut(&command).unwrap();
         job.steps.pop_front();
+        job.unknown_reporting.issued += 1;
         let identity = job.identity.clone().expect("admitted primary");
         if let Call::Place(Some(receipt)) = &step.call {
             cx.command_progress(command, vec![receipt.clone()]);
@@ -677,7 +708,8 @@ impl Cryptocom {
             request.step.params.clone(),
             &url,
         );
-        if let Err((Pending::Trade(request), error)) = cx.request_signed_managed(
+        let command = request.command;
+        match cx.request_signed_managed(
             request.context().clone(),
             None,
             safe_cex_engine::Method::Post,
@@ -686,7 +718,17 @@ impl Cryptocom {
             Box::new(recipe),
             Pending::Trade(request),
         ) {
-            self.trade_reject(cx, request, error.venue_error());
+            Ok(request) => {
+                if let Some(job) = self.trading.jobs.get_mut(&command) {
+                    job.unknown_reporting.attempt_id = Some(request);
+                }
+            }
+            Err((pending, error)) => {
+                let Pending::Trade(request) = pending else {
+                    unreachable!("a trade request retains its pending value")
+                };
+                self.trade_reject(cx, request, error.venue_error());
+            }
         }
     }
     pub(crate) fn trade_reject(
@@ -696,13 +738,18 @@ impl Cryptocom {
         error: VenueError,
     ) {
         self.account.writes += 1;
-        match &request.physical {
-            Physical::Prerequisite { preflight, .. } => {
-                let _ = cx.fail_preflight(preflight, error);
-            }
-            Physical::Write { plan, .. } => {
-                let _ = cx.fail_plan(plan, error);
-            }
+        let event = self.trading.jobs.get(&request.command).and_then(|job| {
+            job.unknown_reporting
+                .native_event(request.command, &job.ids)
+        });
+        let sealed = match &request.physical {
+            Physical::Prerequisite { preflight, .. } => cx.fail_preflight(preflight, error),
+            Physical::Write { plan, .. } => cx.fail_plan(plan, error),
+        };
+        if sealed.is_ok()
+            && let Some(event) = event
+        {
+            cx.event(event.level, event.code, event.message, event.fields);
         }
     }
     pub(crate) fn trade_failed(
@@ -716,6 +763,9 @@ impl Cryptocom {
             self.trade_reject(cx, request, error);
             return;
         };
+        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            job.unknown_reporting.engine_owned = true;
+        }
         let mut error = error;
         error.message = format!(
             "{}. We couldn’t confirm this change. Check your open orders before trying again.",
@@ -748,7 +798,11 @@ impl Cryptocom {
             return;
         };
         let result = serde_json::to_string(&job.ids).unwrap();
+        let event = job.unknown_reporting.native_event(command, &job.ids);
         if cx.done_plan(&plan, result).is_ok() {
+            if let Some(event) = event {
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
             self.remove_trade(command);
             self.wake_next_trade(cx);
         }
@@ -1011,6 +1065,17 @@ impl Cryptocom {
             Err(_) => return,
         }
         if unknown {
+            let event = self.trading.jobs.get_mut(&request.command).and_then(|job| {
+                let reporting = &mut job.unknown_reporting;
+                if let Some(attempt) = reporting.attempt_id {
+                    reporting.native.get_or_insert((attempt, response.status));
+                    if reporting.indices.len() < crate::unknown_outcome::MAX_ENTRIES {
+                        reporting.indices.push(reporting.issued.saturating_sub(1));
+                    }
+                }
+                job.unknown_reporting
+                    .native_event(request.command, &job.ids)
+            });
             self.report_unknown(cx, &request);
             let mut error = VenueError::new(format!(
                 "{}. We couldn’t confirm this change. Check your open orders before trying again.",
@@ -1018,7 +1083,11 @@ impl Cryptocom {
             ))
             .outcome(Outcome::Unknown);
             error.presents = true;
-            let _ = cx.fail_plan(plan, error);
+            if cx.fail_plan(plan, error).is_ok()
+                && let Some(event) = event
+            {
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
             return;
         }
         if let Some(message) = diagnostic {
@@ -1165,6 +1234,7 @@ fn single(step: Step) -> Job {
         best_effort: false,
         authority: None,
         identity: None,
+        unknown_reporting: UnknownReporting::default(),
     }
 }
 fn not_sent(message: impl Into<String>) -> VenueError {

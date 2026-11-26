@@ -4186,6 +4186,7 @@ fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
                 })
                 .collect();
             assert_eq!(errors.len(), 1, "{leg}/{status}: {actions:?}");
+            assert_unknown_hook(&actions, request.id, Some(status), 1);
             let error = errors[0];
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none(), "{leg}/{status}: {error:?}");
@@ -4213,6 +4214,7 @@ fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
                 },
             );
             let late = drained(&mut e);
+            assert_unknown_hook(&late, request.id, Some(status), 0);
             assert!(
                 !late.iter().any(|a| matches!(
                     a,
@@ -4225,6 +4227,151 @@ fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
                 )),
                 "{leg}/{status}: duplicate failure is inert: {late:?}"
             );
+        }
+    }
+}
+
+fn assert_unknown_hook(
+    actions: &[Action],
+    request: safe_cex_engine::RequestId,
+    status: Option<u16>,
+    count: usize,
+) {
+    let events: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(e)) if e.code == "order.outcome_unknown" => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), count, "{actions:?}");
+    for event in events {
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value)
+        };
+        assert_eq!(field("request"), Some(&request.0.to_string().into()));
+        assert_eq!(field("outcome"), Some(&"unknown".into()));
+        assert_eq!(
+            field("status"),
+            status.map(safe_cex_engine::Value::from).as_ref()
+        );
+        assert_eq!(event.fields.len(), 5 + usize::from(status.is_some()));
+        let request = field("request").unwrap().as_str().unwrap();
+        assert!((1..=20).contains(&request.len()) && request.bytes().all(|b| b.is_ascii_digit()));
+        for (key, value) in &event.fields {
+            let text = format!("{key} {value:?}");
+            for forbidden in [
+                "http",
+                "/api/",
+                "?",
+                "=",
+                "signature",
+                "payload",
+                "never-log",
+                "apiKey",
+            ] {
+                assert!(!text.contains(forbidden), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_native_and_transport_are_exactly_once_in_both_lanes() {
+    for managed in [false, true] {
+        for mode in ["native", "refusal", "transport", "streamed"] {
+            let (mut e, request) = if managed {
+                let (mut e, _, _) = guarded_fixture();
+                let inspect = protective_amend(&mut e, None, 300.);
+                inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+                let request = requests(&mut e).remove(0);
+                (e, request)
+            } else {
+                let mut e = ready();
+                e.handle(
+                    300.,
+                    Event::Command(Command::PlaceOrders {
+                        command: 91,
+                        orders: vec![order()],
+                    }),
+                );
+                let request = requests(&mut e).remove(0);
+                (e, request)
+            };
+            let body = if mode == "refusal" {
+                r#"{"success":false,"code":2006,"message":"never-log"}"#
+            } else {
+                r#"{"success":false,"code":500,"message":"https://never-log.test/api/?signature=payload"}"#
+            };
+            if mode == "transport" {
+                e.handle(
+                    340.,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: body,
+                    },
+                );
+            } else if mode == "streamed" {
+                e.handle(
+                    338.,
+                    Event::HttpStart {
+                        request: request.id,
+                        status: 503,
+                        headers: "",
+                    },
+                );
+                e.handle(
+                    339.,
+                    Event::HttpChunk {
+                        request: request.id,
+                        data: body.as_bytes(),
+                    },
+                );
+                e.handle(
+                    340.,
+                    Event::HttpEnd {
+                        request: request.id,
+                    },
+                );
+            } else {
+                reply(&mut e, &request, 340., body);
+            }
+            let actions = drained(&mut e);
+            let unknown = mode != "refusal";
+            let status = match mode {
+                "transport" => None,
+                "streamed" => Some(503),
+                _ => Some(200),
+            };
+            assert_unknown_hook(&actions, request.id, status, usize::from(unknown));
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a,
+                        Action::Notice(Notice::CommandFailed { command: 91, error })
+                        if (error.outcome == Some(safe_cex_engine::Outcome::Unknown)) == unknown
+                    ))
+                    .count(),
+                1,
+                "managed={managed}/{mode}: {actions:?}"
+            );
+            assert!(
+                !actions.iter().any(|a| match a {
+                    Action::Http(request) => request.method != safe_cex_engine::Method::Get,
+                    Action::ManagedHttp(action) => matches!(&**action,
+                    safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+                    | safe_cex_engine::request_context::HttpAction::Bind { request, .. }
+                    if request.method != safe_cex_engine::Method::Get),
+                    _ => false,
+                }),
+                "{actions:?}"
+            );
+            reply(&mut e, &request, 341., body);
+            assert_unknown_hook(&drained(&mut e), request.id, status, 0);
         }
     }
 }

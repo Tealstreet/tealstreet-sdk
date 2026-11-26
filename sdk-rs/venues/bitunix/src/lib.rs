@@ -10,6 +10,7 @@ mod secondary_tests;
 mod sign;
 mod sockets;
 mod trading;
+mod unknown_outcome;
 mod wire;
 use safe_cex_engine::classify::{self, ReadFailure, ReadRetry, Released};
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
@@ -492,6 +493,9 @@ impl Venue for BitunixFutures {
         })
     }
 
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::engine)
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

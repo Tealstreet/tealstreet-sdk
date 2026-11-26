@@ -9,6 +9,7 @@ mod read;
 pub mod sign;
 mod socket_codec;
 mod trading;
+mod unknown_outcome;
 
 use read::Split;
 use safe_cex_engine::book::Book;
@@ -204,6 +205,10 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::telemetry)
+    }
+
     fn managed_sockets() -> bool {
         true
     }

@@ -16,5 +16,6 @@ zeroize.workspace = true
 workspace = true
 
 [dev-dependencies]
+regex = "1"
 safe-cex-venues = { path = "../../registry", default-features = false, features = ["backpack"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }

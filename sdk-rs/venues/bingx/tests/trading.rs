@@ -49,6 +49,9 @@ struct TestVenue {
 }
 impl Venue for TestVenue {
     type Pending = Pending;
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(trading::engine_unknown_telemetry)
+    }
     // As `Bingx`: its native trigger kind decides and it checks the trigger itself.
     fn judges_protective_amend(
         &self,
@@ -175,7 +178,7 @@ impl Venue for TestVenue {
         match pending {
             Pending::Trade(request) => {
                 self.trading
-                    .on_sign_failed(cx, Some(&self.credentials), request, error)
+                    .on_http_failed(cx, Some(&self.credentials), request, error)
             }
             Pending::ProtectiveReference(read) => read.reject(cx, &error.message),
         }

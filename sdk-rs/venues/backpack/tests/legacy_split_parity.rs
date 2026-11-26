@@ -207,7 +207,7 @@ fn unknown_stop(path: &str) -> Result {
                 }
             ));
         }
-        assert!(out.iter().any(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code=="backpack.write.unknown" && event.message.contains(ENGINE_UNKNOWN_TEXT))));
+        assert!(out.iter().any(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code=="order.outcome_unknown" && event.message.contains(ENGINE_UNKNOWN_TEXT))));
         reply(&mut engine, &request, 200, r#"{"id":"late"}"#);
         assert!(!actions(&mut engine).iter().any(|action| matches!(
             action,

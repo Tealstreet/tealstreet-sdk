@@ -2776,6 +2776,23 @@ impl PhemexPerpetuals {
                 }
             }
             Err(error) => {
+                if !resolved
+                    && let (Some(command), Some(request_id)) =
+                        (request.command, request.released_request)
+                    && let Some(job) = self.trading.jobs.get(&command)
+                {
+                    let reporting = classified_http_error
+                        .clone()
+                        .unwrap_or_else(|| VenueError::new(error.clone()))
+                        .partial_ids(&job.ids);
+                    let event = crate::unknown_outcome::project(
+                        command,
+                        request_id,
+                        Some(response.status),
+                        &reporting,
+                    );
+                    cx.event(event.level, event.code, event.message, event.fields);
+                }
                 if let Some(error) = classified_http_error {
                     self.finish_failed_trade(cx, request, error, true);
                     return;
@@ -3009,15 +3026,7 @@ impl PhemexPerpetuals {
                     "We couldn’t confirm this change. Check your open orders before trying again."
                         .into();
                 error.presents = true;
-                cx.event(
-                    Level::Warn,
-                    "order.outcome_unknown",
-                    &error.message,
-                    vec![
-                        ("command", (command as f64).into()),
-                        ("outcome", "unknown".into()),
-                    ],
-                );
+                // The response decoder reports this once with the closed projection.
             }
             if error.outcome == Some(safe_cex_engine::Outcome::Rejected) {
                 error.presents = true;

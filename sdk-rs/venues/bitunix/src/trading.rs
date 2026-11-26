@@ -271,6 +271,7 @@ struct Live {
     plan: Option<Plan>,
     /// The delivered call the next one continues from.
     current: Option<(Slot, Context)>,
+    telemetry_request: Option<safe_cex_engine::RequestId>,
     job: Job,
     prepare: Option<Prepare>,
     /// The settings scope this job holds (per symbol, or the account's mode).
@@ -589,6 +590,7 @@ impl BitunixFutures {
                 preflight,
                 plan: None,
                 current: None,
+                telemetry_request: None,
                 job: Job::default(),
                 prepare: None,
                 settings: None,
@@ -1795,11 +1797,18 @@ impl BitunixFutures {
             context: context.clone(),
             resent,
         });
-        if let Err((pending, reason)) =
-            cx.request_signed_managed(context, None, method, url, body, Box::new(recipe), pending)
-            && let Pending::Trade(request) = pending
+        match cx.request_signed_managed(context, None, method, url, body, Box::new(recipe), pending)
         {
-            self.trade_error(cx, request, reason.venue_error());
+            Ok(id) => {
+                if let Some(live) = self.trading.live.get_mut(&command) {
+                    live.telemetry_request = Some(id);
+                }
+            }
+            Err((pending, reason)) => {
+                if let Pending::Trade(request) = pending {
+                    self.trade_error(cx, request, reason.venue_error());
+                }
+            }
         }
     }
     /// Restores the job's optimistic rows: Creating removed, Canceling reopened.
@@ -2298,6 +2307,13 @@ impl BitunixFutures {
                 if error.outcome == Some(Outcome::Unknown) {
                     self.report_unknown(cx, &request);
                 }
+                self.native_unknown(
+                    cx,
+                    &request,
+                    response.status,
+                    &error,
+                    error.outcome == Some(Outcome::Unknown),
+                );
                 let continues = error.outcome != Some(Outcome::Unknown)
                     && self.failure_continues(&request, (200..300).contains(&response.status));
                 if let Some(live) = self.trading.live.get_mut(&command) {
@@ -2358,26 +2374,33 @@ impl BitunixFutures {
             )
             .map_err(|_| ())
         };
-        let grant = match classified {
+        let (grant, unknown) = match classified {
             Ok(fact) => {
                 refused = fact.verdict().is_refusal();
-                cx.http_write_fact(
-                    &request.context,
-                    WriteFact::Failed {
-                        fact,
-                        known_effects: false,
-                    },
-                    None,
+                let unknown = fact.error().outcome == Some(Outcome::Unknown);
+                (
+                    cx.http_write_fact(
+                        &request.context,
+                        WriteFact::Failed {
+                            fact,
+                            known_effects: false,
+                        },
+                        None,
+                    ),
+                    unknown,
                 )
             }
-            Err(_) => cx
-                .http_write_unproven(&request.context, error.message.clone())
-                .map(|()| None),
+            Err(_) => (
+                cx.http_write_unproven(&request.context, error.message.clone())
+                    .map(|()| None),
+                true,
+            ),
         };
         let grant = match grant {
             Ok(grant) => grant,
             Err(_) => return,
         };
+        self.native_unknown(cx, &request, response.status, &error, unknown);
         // A proven refusal settles a settings write; a resend re-releases it.
         if refused
             && grant.is_none()
@@ -2489,7 +2512,7 @@ impl BitunixFutures {
             context: context.clone(),
             resent: true,
         });
-        if let Err((pending, reason)) = cx.request_signed_managed(
+        match cx.request_signed_managed(
             context,
             None,
             Method::Post,
@@ -2497,9 +2520,37 @@ impl BitunixFutures {
             body,
             Box::new(recipe),
             pending,
-        ) && let Pending::Trade(request) = pending
+        ) {
+            Ok(id) => {
+                if let Some(live) = self.trading.live.get_mut(&command) {
+                    live.telemetry_request = Some(id);
+                }
+            }
+            Err((pending, reason)) => {
+                if let Pending::Trade(request) = pending {
+                    self.trade_error(cx, request, reason.venue_error());
+                }
+            }
+        }
+    }
+    fn native_unknown(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        status: u16,
+        error: &VenueError,
+        unknown: bool,
+    ) {
+        if (200..300).contains(&status)
+            && unknown
+            && let Some(id) = self
+                .trading
+                .live
+                .get(&request.command)
+                .and_then(|live| live.telemetry_request)
         {
-            self.trade_error(cx, request, reason.venue_error());
+            let event = crate::unknown_outcome::project(request.command, id, Some(status), error);
+            cx.event(event.level, event.code, event.message, event.fields);
         }
     }
     /// Records an accepted or unproven write fact; `Err(None)` means the
@@ -2923,13 +2974,7 @@ impl BitunixFutures {
                             None => UNKNOWN.to_owned(),
                         });
                     }
-                    let command = request.command;
-                    cx.event(
-                        safe_cex_engine::Level::Warn,
-                        "order.outcome_unknown",
-                        UNKNOWN,
-                        vec![("command", command.into())],
-                    );
+                    // `native_unknown` reports this once with the closed NX projection.
                 }
                 Err(Some(error))
             }

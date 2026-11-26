@@ -233,12 +233,12 @@ fn check(path: Path, cases: &[Uncertain]) {
                 error.message
             );
         }
-        // Engine-sealed telemetry awaits the later engine hook; other pins stay.
-        if !engine_sealed {
+        // Both engine-sealed and venue-decoded Unknowns publish once.
+        {
             let events: Vec<_> = h
                 .events
                 .iter()
-                .filter(|event| event.code == "write.unknown")
+                .filter(|event| event.code == "order.outcome_unknown")
                 .collect();
             assert_eq!(events.len(), 1, "{label}: {:?}", h.events);
             assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT), "{label}");
@@ -250,8 +250,42 @@ fn check(path: Path, cases: &[Uncertain]) {
                 "{label}"
             );
             assert!(
-                events[0].fields.iter().any(|(key, value)| *key == "command"
-                    && matches!(value, safe_cex_engine::log::Value::Num(id) if *id == 1.0)),
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "command" && value.as_str() == Some("asterdex.1")),
+                "{label}"
+            );
+            assert!(
+                events[0].fields.iter().any(|(key, value)| *key == "request"
+                    && value.as_str() == Some(unknown_request.0.to_string().as_str())),
+                "{label}"
+            );
+            let expected_ids = error
+                .partial
+                .as_ref()
+                .map(|partial| partial.order_ids.join(","))
+                .unwrap_or_default();
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "placedOrderIds"
+                        && value.as_str() == Some(expected_ids.as_str())),
+                "{label}"
+            );
+            let expected_indices = rows
+                .iter()
+                .filter(|row| matches!(row.result, ElementResult::Unknown { .. }))
+                .map(|row| row.element.index.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "unknownIndices"
+                        && value.as_str() == Some(expected_indices.as_str())),
                 "{label}"
             );
         }
@@ -273,11 +307,11 @@ fn check(path: Path, cases: &[Uncertain]) {
             "{label}: no retry or continuation after late ACK"
         );
         assert_eq!(h.failures.len(), 1, "{label}: one terminal");
-        if !engine_sealed {
+        {
             assert_eq!(
                 h.events
                     .iter()
-                    .filter(|event| event.code == "write.unknown")
+                    .filter(|event| event.code == "order.outcome_unknown")
                     .count(),
                 1,
                 "{label}: one telemetry event"

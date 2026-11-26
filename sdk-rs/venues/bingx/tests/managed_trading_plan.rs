@@ -180,6 +180,421 @@ fn without_physical_signature(mut body: Value) -> Value {
     body
 }
 
+fn telemetry_engine(frame_fed: bool) -> Engine<Bingx> {
+    let mut engine = engine();
+    if frame_fed {
+        engine.set_frame_fed().unwrap();
+        let pending = engine.store_mut().take_pending();
+        let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), START);
+        engine.store().write(&pending, &mut writer);
+        writer.venue_state(&[2, 1, 0, 0, 0, 0]);
+        engine.apply_frame(START, &writer.finish(), true).unwrap();
+    }
+    engine
+}
+
+fn unknown_events(actions: &[Action]) -> Vec<&safe_cex_engine::LogEvent> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_unknown_event(actions: &[Action], request: Option<safe_cex_engine::RequestId>) {
+    let events = unknown_events(actions);
+    assert_eq!(events.len(), 1);
+    let event = events[0];
+    assert_eq!(event.level, safe_cex_engine::Level::Warn);
+    assert_eq!(event.message, safe_cex_engine::UNKNOWN_OUTCOME_TEXT);
+    assert!(
+        event
+            .fields
+            .contains(&("command", format!("bingx-perp-{COMMAND}").into()))
+    );
+    assert!(event.fields.contains(&("outcome", "unknown".into())));
+    let label = event
+        .fields
+        .iter()
+        .find(|(key, _)| *key == "command")
+        .unwrap()
+        .1
+        .as_str()
+        .unwrap();
+    assert!((1..=64).contains(&label.len()) && label.as_bytes()[0].is_ascii_alphabetic());
+    assert!(
+        label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+    );
+    let observed_request = event
+        .fields
+        .iter()
+        .find(|(key, _)| *key == "request")
+        .map(|(_, value)| value.as_str().unwrap());
+    if let Some(value) = observed_request {
+        // Equivalent to ^[0-9]{1,20}$, including u64::MAX without precision loss.
+        assert!((1..=20).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit()));
+    }
+    assert_eq!(
+        observed_request.map(str::to_owned),
+        request.map(|id| id.0.to_string())
+    );
+    for (key, value) in &event.fields {
+        assert!(
+            [
+                "command",
+                "outcome",
+                "placedOrderIds",
+                "unknownIndices",
+                "request",
+                "status"
+            ]
+            .contains(key)
+        );
+        if *key == "status" {
+            let safe_cex_engine::Value::Num(status) = value else {
+                panic!("numeric status required")
+            };
+            assert!(status.fract() == 0. && (100.0..=599.0).contains(status));
+        }
+        if matches!(*key, "placedOrderIds" | "unknownIndices") {
+            let list = value.as_str().unwrap();
+            let entries: Vec<_> = if list.is_empty() {
+                vec![]
+            } else {
+                list.split(',').collect()
+            };
+            assert!(entries.len() <= 16);
+            for entry in entries {
+                assert!(!entry.is_empty() && entry.bytes().all(|b| b.is_ascii_digit()));
+                if *key == "placedOrderIds" {
+                    assert!(entry.len() <= 32);
+                } else {
+                    assert!(entry.len() <= 5 && entry.parse::<u16>().is_ok());
+                }
+            }
+        }
+        let text = format!("{key} {value:?}").to_ascii_lowercase();
+        for forbidden in [
+            "http",
+            "/openapi",
+            "?",
+            "&",
+            "=",
+            "{",
+            "}",
+            "url",
+            "endpoint",
+            "query",
+            "body",
+            "payload",
+            "signature",
+            "apikey",
+            "primary-key",
+            "primary-secret",
+            "hostile",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "forbidden telemetry content: {key}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_nx_schema_caps_lists_and_omits_invalid_status() {
+    use safe_cex_engine::write_plan::{Element, ElementOutcome, ElementOutcomes, ElementResult};
+    let callback = <Bingx as safe_cex_engine::Venue>::unknown_outcome_telemetry().unwrap();
+    let mut error = VenueError::new("hostile https://venue.test?signature=payload body={}")
+        .outcome(Outcome::Unknown);
+    let ids = [
+        "".into(),
+        "https://venue.test?signature=payload".into(),
+        "1".repeat(33),
+        "7".repeat(32),
+    ]
+    .into_iter()
+    .chain((0..20).map(|i| i.to_string()))
+    .collect();
+    error.partial = Some(Box::new(safe_cex_engine::Partial {
+        order_ids: ids,
+        total: None,
+        failed_index: None,
+    }));
+    error.elements = Some(Box::new(ElementOutcomes(
+        [65_536, 65_535]
+            .into_iter()
+            .chain(0..20)
+            .map(|index| ElementOutcome {
+                element: Element {
+                    index,
+                    client_order_id: Some("hostile?signature=payload".into()),
+                    role: None,
+                },
+                result: ElementResult::Unknown {
+                    error: Box::new(VenueError::new("hostile body={}")),
+                },
+            })
+            .collect(),
+    )));
+    for status in [
+        None,
+        Some(0),
+        Some(99),
+        Some(100),
+        Some(599),
+        Some(600),
+        Some(u16::MAX),
+    ] {
+        let event = callback(&safe_cex_engine::EngineUnknownOutcome {
+            now: START,
+            command: COMMAND,
+            request: safe_cex_engine::RequestId(u64::MAX),
+            status,
+            error: &error,
+        });
+        assert_unknown_event(
+            &[Action::Notice(Notice::Event(event.clone()))],
+            Some(safe_cex_engine::RequestId(u64::MAX)),
+        );
+        let field = |name| &event.fields.iter().find(|(key, _)| *key == name).unwrap().1;
+        let indices = field("unknownIndices")
+            .as_str()
+            .unwrap()
+            .split(',')
+            .collect::<Vec<_>>();
+        assert_eq!(indices.len(), 16, "NX list cap");
+        assert_eq!(indices[0], "65535");
+        assert_eq!(indices[15], "14");
+        let ids = field("placedOrderIds")
+            .as_str()
+            .unwrap()
+            .split(',')
+            .collect::<Vec<_>>();
+        assert_eq!(ids.len(), 16, "NX list cap");
+        assert_eq!(ids[0], "7".repeat(32));
+        assert_eq!(ids[15], "14");
+        let observed_status = event
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "status")
+            .map(|(_, value)| value.clone());
+        assert_eq!(
+            observed_status,
+            status
+                .filter(|s| (100..=599).contains(s))
+                .map(|s| u32::from(s).into())
+        );
+    }
+    error.partial.as_mut().unwrap().order_ids = vec!["7".repeat(32); 20];
+    let event = callback(&safe_cex_engine::EngineUnknownOutcome {
+        now: START,
+        command: COMMAND,
+        request: safe_cex_engine::RequestId(1),
+        status: None,
+        error: &error,
+    });
+    let ids = event
+        .fields
+        .iter()
+        .find(|(key, _)| *key == "placedOrderIds")
+        .unwrap()
+        .1
+        .as_str()
+        .unwrap();
+    assert!(ids.len() <= safe_cex_engine::log::MAX_LOG_BYTES);
+    assert_eq!(
+        ids.split(',').count(),
+        15,
+        "full-width IDs must not hit log truncation"
+    );
+    assert_unknown_event(
+        &[Action::Notice(Notice::Event(event))],
+        Some(safe_cex_engine::RequestId(1)),
+    );
+}
+
+#[test]
+fn unknown_hook_accepted_prefix_retains_native_ids_for_both_uncertainty_sources() {
+    for frame_fed in [false, true] {
+        for status in [200, 503] {
+            let mut engine = telemetry_engine(frame_fed);
+            place(&mut engine, 2);
+            let first = packet(&collect(&mut engine, START));
+            let next = acknowledge(&mut engine, &first, START + 1., 901);
+            let second = packet(&next);
+            let actions = respond(
+                &mut engine,
+                &second,
+                START + 2.,
+                status,
+                r#"{"code":80012,"msg":"hostile"}"#,
+            );
+            assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+            assert_unknown_event(&actions, (status == 503).then_some(second.id));
+            assert!(
+                unknown_events(&actions)[0]
+                    .fields
+                    .contains(&("placedOrderIds", "901".into()))
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_engine_sealed_emits_once_in_both_modes_and_delivery_shapes() {
+    for frame_fed in [false, true] {
+        for split in [false, true] {
+            for status in [408, 429, 503] {
+                let mut engine = telemetry_engine(frame_fed);
+                place(&mut engine, 1);
+                let first = packet(&collect(&mut engine, START));
+                assert_eq!(body(&first)["quantity"], 0.01);
+                let actions = if split {
+                    engine.handle(
+                        START + 1.,
+                        Event::HttpStart {
+                            request: first.id,
+                            status,
+                            headers: "",
+                        },
+                    );
+                    engine.handle(
+                        START + 2.,
+                        Event::HttpChunk {
+                            request: first.id,
+                            data: br#"{"code":0,"data":{"orderId":"hostile"}}"#,
+                        },
+                    );
+                    engine.handle(START + 3., Event::HttpEnd { request: first.id });
+                    collect(&mut engine, START + 3.)
+                } else {
+                    respond(
+                        &mut engine,
+                        &first,
+                        START + 3.,
+                        status,
+                        r#"{"code":0,"data":{"orderId":"hostile"}}"#,
+                    )
+                };
+                assert_eq!(failures(&actions).len(), 1);
+                assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+                assert_unknown_event(&actions, Some(first.id));
+                assert!(writes(&actions).is_empty());
+                let late = respond(&mut engine, &first, START + 4., status, "hostile");
+                assert!(unknown_events(&late).is_empty());
+            }
+        }
+        let mut engine = telemetry_engine(frame_fed);
+        place(&mut engine, 1);
+        let first = packet(&collect(&mut engine, START));
+        engine.handle(START + 1., Event::HttpFailed {
+            request: first.id,
+            error: "hostile https://venue.test/openApi?apiKey=primary-key&signature=payload body={}",
+        });
+        let actions = collect(&mut engine, START + 1.);
+        assert_unknown_event(&actions, Some(first.id));
+        assert!(writes(&actions).is_empty());
+        engine.handle(
+            START + 2.,
+            Event::HttpFailed {
+                request: first.id,
+                error: "duplicate",
+            },
+        );
+        assert!(unknown_events(&collect(&mut engine, START + 2.)).is_empty());
+    }
+}
+
+#[test]
+fn unknown_hook_native_unknown_is_once_and_definite_refusal_or_success_is_zero() {
+    for frame_fed in [false, true] {
+        for (body, unknown) in [
+            (
+                r#"{"code":80012,"msg":"hostile https://venue.test?signature=payload"}"#,
+                true,
+            ),
+            ("hostile malformed body", true),
+            (r#"{"code":100400,"msg":"bad parameter"}"#, false),
+            (r#"{"code":0,"data":{"orderId":"accepted"}}"#, false),
+        ] {
+            let mut engine = telemetry_engine(frame_fed);
+            place(&mut engine, 1);
+            let first = packet(&collect(&mut engine, START));
+            let actions = respond(&mut engine, &first, START + 1., 200, body);
+            if unknown {
+                assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+                assert_unknown_event(&actions, None);
+            } else {
+                assert!(unknown_events(&actions).is_empty());
+                if let Some(error) = failures(&actions).first() {
+                    assert_eq!(error.outcome, Some(Outcome::Rejected));
+                }
+            }
+            assert!(writes(&actions).is_empty());
+            assert!(
+                unknown_events(&respond(&mut engine, &first, START + 2., 200, body)).is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_projection_keeps_max_request_decimal_and_discards_untrusted_error_data() {
+    let callback = <Bingx as safe_cex_engine::Venue>::unknown_outcome_telemetry().unwrap();
+    let error = VenueError::new("hostile https://venue.test/openApi?signature=payload body={}")
+        .kind(ErrorKind::Network)
+        .outcome(Outcome::Unknown);
+    for request in [
+        safe_cex_engine::RequestId(0),
+        safe_cex_engine::RequestId(u64::MAX),
+    ] {
+        let event = callback(&safe_cex_engine::EngineUnknownOutcome {
+            now: START,
+            command: COMMAND,
+            request,
+            status: None,
+            error: &error,
+        });
+        assert_unknown_event(&[Action::Notice(Notice::Event(event))], Some(request));
+    }
+}
+
+// A genuine Unknown halts the action, including independent cancels (the README's
+// stop-after-UNKNOWN parity exception), so each source reports once at that halt.
+#[test]
+fn unknown_hook_independent_cancel_halts_and_reports_each_source_once() {
+    for frame_fed in [false, true] {
+        for (status, body) in [(503, "hostile"), (200, r#"{"code":80012,"msg":"hostile"}"#)] {
+            let mut engine = telemetry_engine(frame_fed);
+            engine
+                .store_mut()
+                .set_orders(vec![open_order("old-a"), open_order("old-b")]);
+            engine.handle(
+                START,
+                Event::Command(Command::CancelOrders {
+                    command: COMMAND,
+                    ids: vec!["old-a".into(), "old-b".into()],
+                }),
+            );
+            let first = cancel_packet(&collect(&mut engine, START));
+            let actions = respond(&mut engine, &first, START + 1., status, body);
+            assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+            assert!(
+                writes(&actions).is_empty(),
+                "no independent cancel after Unknown"
+            );
+            assert_unknown_event(&actions, (status == 503).then_some(first.id));
+        }
+    }
+}
+
 #[test]
 fn ordinary_write_requires_managed_preparation_before_physical_http() {
     let mut engine = engine();
@@ -283,6 +698,7 @@ fn released_first_attempt_expires_unknown_without_a_generic_retry() {
     );
     assert_eq!(errors[0].kind, Some(ErrorKind::Timeout));
     assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+    assert_unknown_event(&expired, Some(request.id));
     assert!(writes(&expired).is_empty());
     let late = acknowledge(&mut engine, &request, START + 20_001., 9_000);
     assert!(failures(&late).is_empty());

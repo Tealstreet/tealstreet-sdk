@@ -4286,6 +4286,7 @@ name = "safe-cex-venue-backpack"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "regex",
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venues",
@@ -4398,6 +4399,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-signer",
  "alloy-signer-local",
+ "regex",
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venues",
@@ -4412,6 +4414,7 @@ dependencies = [
  "alloy-dyn-abi",
  "base64 0.22.1",
  "miniz_oxide 0.8.9",
+ "regex",
  "rmp-serde",
  "safe-cex-crypto",
  "safe-cex-engine",
@@ -4448,6 +4451,7 @@ dependencies = [
 name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
@@ -4517,6 +4521,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-primitives",
  "base64 0.22.1",
+ "regex",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",

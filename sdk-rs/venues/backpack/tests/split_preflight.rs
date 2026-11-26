@@ -16,11 +16,20 @@ type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 struct ScriptedTransport {
     requests: Vec<HttpRequest>,
     responses: VecDeque<(u16, String)>,
+    unknown_events: usize,
 }
 
 impl ScriptedTransport {
     fn poll(&mut self, engine: &mut Driver) -> Vec<Action> {
         let out = actions(engine);
+        self.unknown_events += out
+            .iter()
+            .filter(|action| {
+                matches!(action,
+                    Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+                )
+            })
+            .count();
         for action in &out {
             if let Action::Http(request) = action {
                 self.requests.push(request.clone());
@@ -159,6 +168,7 @@ fn protective_refusal_puts_back_only_after_a_clean_proof() -> Result {
                     Some(safe_cex_engine::error::Protection::Restored)
                 );
                 assert_eq!(transport.requests.len(), 4);
+                assert_eq!(transport.unknown_events, 0);
                 assert_eq!(transport.requests[2].method, Method::Get);
                 assert!(transport.requests[2].url.contains("/api/v1/orders?"));
                 let restore = &transport.requests[3];
@@ -203,6 +213,7 @@ fn protective_refusal_puts_back_only_after_a_clean_proof() -> Result {
                 "{}",
                 error.message
             );
+            assert_eq!(transport.unknown_events, 1);
             assert_eq!(error.protection, None);
             assert_eq!(
                 out.iter()

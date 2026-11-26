@@ -7,6 +7,7 @@ mod local_context;
 pub mod sign;
 mod socket_codec;
 mod trading;
+mod unknown_outcome;
 mod wire;
 
 use safe_cex_engine::Level;
@@ -741,6 +742,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::engine_unknown_telemetry)
+    }
+
     fn http_plans() -> bool {
         true
     }

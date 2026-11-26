@@ -7,6 +7,7 @@ mod repair;
 pub mod sign;
 mod socket_codec;
 mod trading;
+mod unknown_telemetry;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -785,6 +786,10 @@ impl Backpack {
 }
 
 impl Venue for Backpack {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_telemetry::engine)
+    }
+
     fn managed_sockets() -> bool {
         true
     }

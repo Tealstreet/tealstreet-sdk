@@ -183,6 +183,57 @@ fn frame_fed_start_reads_only_the_market_catalogue_and_never_polls() {
 }
 
 #[test]
+fn unknown_telemetry_once_in_frame_fed_whole_and_streamed_delivery() {
+    for streamed in [false, true] {
+        for (status, body, expected) in [
+            (408, "unproven", 1),
+            (429, "unproven", 1),
+            (503, "unproven", 1),
+            (200, "not json", 1),
+            (400, r#"{"code":21600,"message":"invalid order"}"#, 0),
+        ] {
+            let (mut e, mut timers) = fed();
+            place(&mut e, 7, vec![limit(90.)]);
+            let actions = seed_nonce(&mut e, &mut timers);
+            let requests = http(&actions);
+            assert_eq!(requests.len(), 1);
+            let r = &requests[0];
+            if streamed {
+                e.handle(
+                    NOW,
+                    Event::HttpStart {
+                        request: r.id,
+                        status,
+                        headers: "",
+                    },
+                );
+                e.handle(
+                    NOW,
+                    Event::HttpChunk {
+                        request: r.id,
+                        data: body.as_bytes(),
+                    },
+                );
+                e.handle(NOW, Event::HttpEnd { request: r.id });
+            } else {
+                reply(&mut e, r, status, body);
+            }
+            let actions = run(&mut e, &mut timers, NOW);
+            assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")).count(), expected, "{status}, streamed={streamed}: {actions:?}");
+            assert!(
+                matches!(terminal(&actions, 7), Some(Notice::CommandFailed { error, .. }) if error.outcome == Some(if expected == 1 { Outcome::Unknown } else { Outcome::Rejected }))
+            );
+            assert!(
+                http(&actions).is_empty(),
+                "telemetry must not send a write or read"
+            );
+            reply(&mut e, r, status, body);
+            assert!(!run(&mut e, &mut timers, NOW).iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown")));
+        }
+    }
+}
+
+#[test]
 fn an_ingested_account_places_with_no_account_tier_or_approval_read() {
     let (mut e, mut timers) = fed();
     place(&mut e, 1, vec![limit(90.0)]);

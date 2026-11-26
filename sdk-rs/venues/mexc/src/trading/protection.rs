@@ -1105,7 +1105,7 @@ mod tests {
                     .entry("BTCUSDT".into())
                     .or_default()
                     .observe(cx.now, cx.protocol_now(), [None, Some(60000.), None]);
-                venue.trading.active=Some(Job{command:1,steps:VecDeque::new(),ids:vec![],gap:0.,total_orders:1,failed_index:None,effective:false,replaces:None,managed:None,protection:Some(Box::new(Edit{observed:order,scope:Scope::Plan,leg:None,price:Some(54000.),amount:Some(2.),native:r#"{"id":"o","symbol":"BTC_USDT","side":4,"orderType":5,"state":1,"vol":1,"triggerPrice":55000,"triggerType":2,"trend":2}"#.into(),replacement:None,restore:None,canceled:false,cancel_proven:false,restoring:false,refusal:None,started:cx.now}))});
+                venue.trading.active=Some(Job{command:1,steps:VecDeque::new(),ids:vec![],gap:0.,total_orders:1,failed_index:None,effective:false,replaces:None,managed:None,telemetry_request:None,telemetry_status:None,telemetry_native_response:false,protection:Some(Box::new(Edit{observed:order,scope:Scope::Plan,leg:None,price:Some(54000.),amount:Some(2.),native:r#"{"id":"o","symbol":"BTC_USDT","side":4,"orderType":5,"state":1,"vol":1,"triggerPrice":55000,"triggerType":2,"trend":2}"#.into(),replacement:None,restore:None,canceled:false,cancel_proven:false,restoring:false,refusal:None,started:cx.now}))});
                 let cancel_request = Request {
                     command: 1,
                     revision: 0,

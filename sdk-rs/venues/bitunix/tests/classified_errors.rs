@@ -397,7 +397,7 @@ fn mixed_cancel_unknown_has_guidance_and_one_independent_diagnostic() {
     assert!(
         diagnostics[0]
             .fields
-            .contains(&("command", 1013_u32.into()))
+            .contains(&("command", "bitunix.1013".into()))
     );
 }
 

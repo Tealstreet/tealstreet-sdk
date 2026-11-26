@@ -8,6 +8,7 @@ mod history;
 mod request;
 pub(crate) use request::command_read_root;
 pub mod sign;
+mod telemetry;
 mod trading;
 mod wire;
 
@@ -959,6 +960,10 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(telemetry::unknown)
+    }
+
     fn http_release_veto(
         &self,
         store: &safe_cex_engine::Store,

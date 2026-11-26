@@ -149,6 +149,7 @@ struct Queued {
 struct Active {
     preflight: Preflight,
     plan: Option<Plan>,
+    telemetry_request: Option<safe_cex_engine::RequestId>,
     job: Job,
 }
 pub struct Request {
@@ -2253,6 +2254,7 @@ impl Blofin {
         let active = Active {
             preflight,
             plan: None,
+            telemetry_request: None,
             job,
         };
         self.drive(cx, active, At::Entry);
@@ -2462,7 +2464,7 @@ impl Blofin {
             effect_write,
         };
         self.trading.active = Some(active);
-        if let Err((pending, reason)) = cx.request_signed_managed(
+        let issued = cx.request_signed_managed(
             context,
             None,
             method,
@@ -2470,9 +2472,17 @@ impl Blofin {
             body,
             Box::new(recipe),
             Pending::Trade(Box::new(request)),
-        ) && let Pending::Trade(request) = pending
-        {
-            self.trade_call_failed(cx, *request, reason.venue_error(), false);
+        );
+        match issued {
+            Ok(request) => {
+                if let Some(active) = &mut self.trading.active {
+                    active.telemetry_request = Some(request);
+                }
+            }
+            Err((Pending::Trade(request), reason)) => {
+                self.trade_call_failed(cx, *request, reason.venue_error(), false);
+            }
+            Err(_) => {}
         }
     }
     /// Restores the job's optimistic rows: Creating removed, Canceling reopened.
@@ -2941,6 +2951,27 @@ impl Blofin {
                 active.job.restoring = true;
                 return self.drive(cx, active, At::Data(&request.slot, &request.context));
             }
+            if error.outcome == Some(Outcome::Unknown)
+                && let Some(request_id) = active.telemetry_request
+            {
+                let mut ids = active.job.ids.clone();
+                ids.extend(
+                    error
+                        .partial
+                        .iter()
+                        .flat_map(|partial| partial.order_ids.iter().cloned()),
+                );
+                let evidence = error.clone().partial_ids(&ids);
+                let event =
+                    crate::unknown_telemetry::project(&safe_cex_engine::EngineUnknownOutcome {
+                        now: cx.now,
+                        command: request.command,
+                        request: request_id,
+                        status: Some(response.status),
+                        error: &evidence,
+                    });
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
             return self.end(cx, active, current, error);
         }
         // Native facts are recorded before the TS dispatch policy permits
@@ -3023,15 +3054,7 @@ impl Blofin {
                 Some(native(&reply.code, &reply.msg)),
                 &mut error,
             );
-            cx.event(
-                Level::Warn,
-                "order.outcome_unknown",
-                UNKNOWN_WRITE,
-                vec![
-                    ("command", job.command.into()),
-                    ("outcome", safe_cex_engine::Value::StaticStr("unknown")),
-                ],
-            );
+            // The terminal Unknown path reports this once with the closed projection.
             return Err(error);
         }
         match &request.step.effect {

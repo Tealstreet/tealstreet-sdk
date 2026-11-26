@@ -168,6 +168,10 @@ impl Coinbase {
         } else {
             format!("https://api.coinbase.com{}", request.path)
         };
+        let trading_command = match &request.pending {
+            Pending::Trading(pending) => Some(pending.command()),
+            _ => None,
+        };
         let id = emit(
             cx,
             request.method,
@@ -176,6 +180,9 @@ impl Coinbase {
             request.body,
             request.pending,
         );
+        if let Some(command) = trading_command {
+            self.trading_dispatched(command, id);
+        }
         if !public && let Some(selection) = selection {
             if let Some(recipe) = recipe {
                 selection.sign(cx, id, Box::new(recipe));

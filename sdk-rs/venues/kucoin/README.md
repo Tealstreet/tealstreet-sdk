@@ -64,6 +64,20 @@ terminals, including native `500000` and transport failures, direct callers to
 Check Open Orders while retaining native diagnostics. An exhausted cancellation
 confirmation read emits its warning after adding the same uncertainty guidance.
 
+## Unknown outcome telemetry
+
+Classic Futures opts into the engine's sealed-Unknown hook. Native-decoded
+Unknowns use the same projection once per completed job; engine-sealed replies
+use only the engine hook. The event does not change dispatch or retry behavior.
+
+`order.outcome_unknown` emits only `command` (`kucoinWrite.<command ID>`), literal
+`unknown` outcome, decimal `request`, `placedOrderIds`, `unknownIndices` and an
+optional HTTP `status` in 100–599. Both lists stop at 16 entries; order IDs also
+stop before the 512-byte log field limit so IDs stay whole. Only decimal native
+IDs of 1–32 digits and indices in 0–65535 enter the lists. Payloads, URLs and
+native error text never enter these fields. NX FIELD_RULES #9262 must be merged
+and shipped before this adoption is published.
+
 ## Futures order size
 
 Futures placement follows the legacy `kucoin.exchange.ts:881-925` formatter:

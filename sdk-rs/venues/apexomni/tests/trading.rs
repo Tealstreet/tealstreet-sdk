@@ -1,5 +1,7 @@
 // Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
+#[path = "trading/unknown_hook.rs"]
+mod unknown_hook;
 use safe_cex_crypto::signer::{
     LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret,
 };

@@ -66,6 +66,15 @@ This is the recorded stop-after-UNKNOWN parity exception. Native confirmed-
 cancel/definite-replacement-refusal restore stays kept pending policy. The
 shared journal only reports facts; it never validates or schedules writes.
 
+Unknown write outcomes emit one `order.outcome_unknown` warning per terminal
+command, including engine-sealed HTTP and transport failures in frame-fed mode.
+Native-decoded uncertainty reports when it halts the action; an engine-owned
+failure uses the engine hook instead. Its bounded `bingx-perp-<id>`
+command label identifies the venue; `outcome` is always `unknown`. The decimal
+order-ID and unknown-index lists contain at most 16 entries. The optional request
+is a decimal ID, and an optional numeric status is restricted to 100–599. No
+other fields, request URLs, bodies or native error text enter this event.
+
 An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
 uses the same satisfied-cancel path as `80016`: the command completes, but its
 symbols remain fenced until a fresh primary-key order snapshot reconciles them.

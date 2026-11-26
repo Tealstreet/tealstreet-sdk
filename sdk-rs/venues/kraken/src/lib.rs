@@ -8,6 +8,7 @@ mod public_context;
 mod public_trades;
 pub mod sign;
 mod trading;
+mod unknown_outcome;
 mod wire;
 use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
@@ -583,6 +584,10 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::telemetry)
+    }
+
     fn unproven_http_evidence(
         &self,
         pending: &Pending,

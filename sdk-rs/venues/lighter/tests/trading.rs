@@ -927,6 +927,98 @@ fn only_uncertain_submissions_report_an_unknown_outcome() {
 }
 
 #[test]
+fn unknown_telemetry_is_once_per_completion_and_absent_for_refusals() {
+    check_unknown_telemetry(&[
+        (503, r#"{"code":503,"message":"unavailable"}"#, 1),
+        (400, r#"{"code":21600,"message":"invalid order"}"#, 0),
+    ]);
+}
+
+#[test]
+fn unknown_telemetry_is_once_for_venue_decoded_uncertainty() {
+    check_unknown_telemetry(&[
+        (200, "not json", 1),
+        (200, r#"{"code":23000,"message":"quota"}"#, 1),
+    ]);
+}
+
+fn check_unknown_telemetry(cases: &[(u16, &str, usize)]) {
+    for &(status, body, expected) in cases {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        reply(&mut e, &r, status, body);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let events: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), expected, "{status} {body}");
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+                .count(),
+            1
+        );
+        // A nonempty Unknown journal reports through `trade_finish`'s journal
+        // event; only an empty journal uses the request-correlated projection.
+        if let Some(event) = events
+            .first()
+            .filter(|event| event.fields.iter().all(|(key, _)| *key != "journal"))
+        {
+            assert!(
+                event
+                    .fields
+                    .contains(&("request", r.id.0.to_string().into()))
+            );
+            assert!(event.fields.contains(&("status", status.into())));
+        }
+        reply(&mut e, &r, status, body);
+        reply(&mut e, &r, 200, r#"{"code":200,"tx_hash":"late"}"#);
+        assert!(
+            !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .iter()
+                .any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"))
+        );
+    }
+}
+
+#[test]
+fn unknown_telemetry_omits_status_for_released_transport_failure() {
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit()]);
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: r.id,
+            error: "synthetic transport loss",
+        },
+    );
+    let events: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert!(
+        events[0]
+            .fields
+            .contains(&("request", r.id.0.to_string().into()))
+    );
+    assert!(!events[0].fields.iter().any(|(key, _)| *key == "status"));
+}
+
+#[test]
 fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
     let (mut e, _) = ready_unattributed();
     place(

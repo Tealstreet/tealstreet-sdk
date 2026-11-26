@@ -474,6 +474,10 @@ impl AsterDex {
     ) -> bool {
         let leg = unsent.read.clone().expect("minted at dequeue");
         let method = unsent.method;
+        let command = match &unsent.pending {
+            Pending::Trade(trade) => Some(trade.command()),
+            _ => None,
+        };
         match cx.request_signed_managed(
             leg,
             None,
@@ -483,7 +487,12 @@ impl AsterDex {
             recipe,
             Pending::Signed(unsent),
         ) {
-            Ok(_) => true,
+            Ok(request) => {
+                if let Some(command) = command {
+                    self.record_trade_request(command, request);
+                }
+                true
+            }
             Err((Pending::Signed(unsent), error)) => {
                 self.on_request_failed(cx, unsent.pending, &error.venue_error().message);
                 false

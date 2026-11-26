@@ -12,6 +12,7 @@ mod session;
 mod sign;
 pub use sign::hosted_signing;
 mod trading;
+mod unknown_outcome;
 pub mod wire;
 
 use safe_cex_engine::Level;
@@ -1385,6 +1386,24 @@ impl Venue for BinanceFutures {
     fn write_failure_text() -> Option<fn(&VenueError) -> String> {
         Some(trading::terminal_failure_text)
     }
+    fn on_signing_receipt(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        _: safe_cex_engine::signing::SignReceipt,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http {
+            request,
+            pending: Pending::Trade(native),
+        } = target
+        {
+            native.telemetry_request = Some(request);
+        }
+    }
+
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::telemetry)
+    }
+
     fn observe_unproven_http_response(
         &mut self,
         now: f64,

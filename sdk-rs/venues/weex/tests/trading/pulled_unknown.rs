@@ -142,8 +142,12 @@ fn native_unknown_emits_one_outcome_event() {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
         assert!(events[0].message.contains(UNKNOWN_OUTCOME_TEXT));
-        assert!(events[0].fields.iter().any(|(key, value)| *key == "command"
-            && matches!(value, safe_cex_engine::log::Value::Num(1.0))));
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "command" && value.as_str() == Some("weex.1"))
+        );
     }
 }
 

@@ -25,6 +25,8 @@ struct Job {
     canceled_ids: Vec<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    telemetry_request: Option<safe_cex_engine::RequestId>,
+    telemetry_status: Option<u16>,
 }
 #[derive(Clone)]
 enum Step {
@@ -288,6 +290,8 @@ impl Kraken {
                         ids: Vec::new(),
                         canceled_ids: Vec::new(),
                         effective: false,
+                        telemetry_request: None,
+                        telemetry_status: None,
                     });
                     self.trading_pump(cx);
                 }
@@ -731,6 +735,12 @@ impl Kraken {
             return;
         }
     }
+    pub(crate) fn note_trading_request(&mut self, request: safe_cex_engine::RequestId) {
+        if let Some(job) = self.trading.active.as_mut() {
+            job.telemetry_request = Some(request);
+            job.telemetry_status = None;
+        }
+    }
     pub(crate) fn trading_http(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -744,6 +754,9 @@ impl Kraken {
             .as_ref()
             .map_or(0, |job| job.ids.len() + job.canceled_ids.len());
         let ok = (200..300).contains(&response.status);
+        if let Some(job) = self.trading.active.as_mut() {
+            job.telemetry_status = Some(response.status);
+        }
         let leverage_read = request.step.is_read();
         let intent = match &request.step {
             Step::Place(_) => Intent::Place,
@@ -1134,6 +1147,15 @@ impl Kraken {
                         cx.placement_resolved(job.command);
                     }
                     let unknown = error.outcome == Some(Outcome::Unknown);
+                    if unknown && let Some(request) = job.telemetry_request {
+                        let event = crate::unknown_outcome::native(
+                            job.command,
+                            request,
+                            job.telemetry_status,
+                            &job.ids,
+                        );
+                        cx.event(event.level, event.code, event.message, event.fields);
+                    }
                     fail_job(cx, &job, error);
                     if unknown {
                         // Admission preceded this uncertainty; never pump those

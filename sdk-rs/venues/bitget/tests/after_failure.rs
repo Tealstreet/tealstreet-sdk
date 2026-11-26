@@ -640,18 +640,16 @@ fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {
     assert_eq!(events.len(), 1, "one journal companion event");
     assert!(events[0].message.contains(ENGINE_UNKNOWN_TEXT));
     assert!(
+        events[0].fields.iter().any(|(key, value)| *key == "outcome"
+            && *value == safe_cex_engine::log::Value::from("unknown"))
+    );
+    // Native request details stay in the command journal, never telemetry fields.
+    assert!(
         events[0]
             .fields
             .iter()
-            .any(|(key, value)| *key == "placedCount"
-                && *value == safe_cex_engine::log::Value::Num(placed.len() as f64))
+            .all(|(key, _)| *key != "unknownRequest")
     );
-    assert!(events[0].fields.iter().any(|(key, value)| {
-        *key == "unknownRequest"
-            && value
-                .as_str()
-                .is_some_and(|value| value.contains(unknown_identity))
-    }));
 }
 
 #[test]

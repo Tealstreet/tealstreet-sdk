@@ -569,6 +569,124 @@ fn a_transport_loss_after_release_is_unknown_and_never_resent() {
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
 }
 
+fn unknown_events(output: &Output) -> Vec<&safe_cex_engine::LogEvent> {
+    output
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn unknown_hook_engine_decoded_and_refusal_are_exactly_once() {
+    for frame_fed in [false, true] {
+        for (status, body, count) in [
+            (408, "timeout", 1),
+            (429, "rate limited", 1),
+            (503, "upstream timeout", 1),
+            (400, r#"{"code":-1007,"msg":"execution timeout"}"#, 1),
+            (400, r#"{"code":-2010,"msg":"insufficient margin"}"#, 0),
+        ] {
+            let mut e = engine();
+            if frame_fed {
+                e.set_frame_fed().unwrap();
+            }
+            let sent = command(&mut e, place());
+            let request = write(&sent, Method::Post, "/order").clone();
+            let result = answer(&mut e, &request, status, body);
+            assert_eq!(
+                unknown_events(&result).len(),
+                count,
+                "status {status}, body {body}"
+            );
+            if count == 1 {
+                let event = unknown_events(&result)[0];
+                assert!(event.fields.iter().any(|(key, value)| *key == "request"
+                    && value.as_str() == Some(request.id.0.to_string().as_str())));
+            }
+            let late = answer(&mut e, &request, 200, r#"{"orderId":99}"#);
+            assert!(unknown_events(&late).is_empty());
+        }
+        let mut e = engine();
+        if frame_fed {
+            e.set_frame_fed().unwrap();
+        }
+        let sent = command(&mut e, place());
+        let request = write(&sent, Method::Post, "/order").clone();
+        let result = lost(&mut e, &request);
+        assert_eq!(unknown_events(&result).len(), 1);
+        assert!(
+            !unknown_events(&result)[0]
+                .fields
+                .iter()
+                .any(|(key, _)| *key == "status")
+        );
+    }
+}
+
+#[test]
+fn unknown_hook_streamed_envelopes_publish_once_in_both_feed_modes() {
+    for frame_fed in [false, true] {
+        for status in [408, 429, 503] {
+            let mut e = engine();
+            if frame_fed {
+                e.set_frame_fed().unwrap();
+            }
+            let sent = command(&mut e, place());
+            let request = write(&sent, Method::Post, "/order").clone();
+            let mut events = Vec::new();
+            for event in [
+                Event::HttpStart {
+                    request: request.id,
+                    status,
+                    headers: "",
+                },
+                Event::HttpChunk {
+                    request: request.id,
+                    data: b"body https://signed.invalid/order?signature=fixture-signature",
+                },
+                Event::HttpEnd {
+                    request: request.id,
+                },
+            ] {
+                e.handle(NOW, event);
+                let output = drain(&mut e, NOW);
+                events.extend(unknown_events(&output).into_iter().cloned());
+            }
+            assert_eq!(events.len(), 1, "frame_fed={frame_fed}, status={status}");
+            assert!(events[0].fields.iter().any(|(key, value)| *key == "request"
+                && value.as_str() == Some(request.id.0.to_string().as_str())));
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_after_clock_resign_identifies_the_resend() {
+    for (status, body) in [(503, "timeout"), (400, r#"{"code":-1007,"msg":"timeout"}"#)] {
+        let mut e = engine();
+        let sent = command(&mut e, place());
+        let first = write(&sent, Method::Post, "/order").clone();
+        let resent = answer(&mut e, &first, 400, TIMESTAMP);
+        assert!(unknown_events(&resent).is_empty());
+        let second = write(&resent, Method::Post, "/order").clone();
+        assert_ne!(first.id, second.id);
+        let result = answer(&mut e, &second, status, body);
+        assert_eq!(unknown_events(&result).len(), 1);
+        assert!(
+            unknown_events(&result)[0]
+                .fields
+                .iter()
+                .any(|(key, value)| *key == "request"
+                    && value.as_str() == Some(second.id.0.to_string().as_str()))
+        );
+    }
+}
+
 #[test]
 fn a_cancel_batch_continues_after_a_failure_through_one_plan() {
     let mut e = engine();

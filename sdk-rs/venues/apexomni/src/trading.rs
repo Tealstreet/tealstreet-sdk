@@ -81,6 +81,7 @@ struct Job {
     protect: Option<Box<StopProtect>>,
     /// The put-back of a refused stop replacement is in flight.
     restoring: bool,
+    telemetry: Option<crate::unknown_outcome::NativeSource>,
 }
 pub struct Request {
     command: CommandId,
@@ -996,6 +997,7 @@ impl ApexOmni {
                 replaces: None,
                 protect: None,
                 restoring: false,
+                telemetry: None,
             });
         } else {
             self.trading.active = Some(Job {
@@ -1009,6 +1011,7 @@ impl ApexOmni {
                 replaces: None,
                 protect: None,
                 restoring: false,
+                telemetry: None,
             });
             self.drive_trading(cx);
         }
@@ -1318,7 +1321,17 @@ impl ApexOmni {
             delivery.contracts.clone(),
         );
         self.trading.waiting = true;
-        if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
+        let command = delivery.command;
+        if let Some(source) = self
+            .trading
+            .active
+            .as_mut()
+            .filter(|job| job.command == command)
+            .and_then(|job| job.telemetry.as_mut())
+        {
+            source.status = None;
+        }
+        match cx.request_signed_managed(
             delivery.context.clone(),
             None,
             delivery.unsigned.method,
@@ -1327,7 +1340,23 @@ impl ApexOmni {
             Box::new(recipe),
             Pending::Trade(delivery),
         ) {
-            self.trading_failed(cx, delivery, error.venue_error());
+            Ok(request_id) => {
+                if let Some(job) = self
+                    .trading
+                    .active
+                    .as_mut()
+                    .filter(|job| job.command == command)
+                {
+                    job.telemetry = Some(crate::unknown_outcome::NativeSource {
+                        request_id,
+                        status: None,
+                    });
+                }
+            }
+            Err((Pending::Trade(delivery), error)) => {
+                self.trading_failed(cx, delivery, error.venue_error());
+            }
+            Err(_) => unreachable!(),
         }
     }
 
@@ -1337,6 +1366,15 @@ impl ApexOmni {
         delivery: Request,
         error: VenueError,
     ) {
+        if let Some(source) = self
+            .trading
+            .active
+            .as_mut()
+            .filter(|job| job.command == delivery.command)
+            .and_then(|job| job.telemetry.as_mut())
+        {
+            source.status = None;
+        }
         if matches!(delivery.accepted, Accepted::ConfirmCancel) {
             return self.confirm_failed(cx, &delivery, false);
         }
@@ -1402,9 +1440,41 @@ impl ApexOmni {
                 gone = None;
             }
         }
+        if unknown {
+            self.emit_native_unknown(cx, delivery, &error, false);
+        }
         match gone {
             Some(gone) => cx.fail_plan_noted(&delivery.plan, error, &gone),
             None => cx.fail_plan(&delivery.plan, error),
+        }
+    }
+
+    fn emit_native_unknown(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        delivery: &Request,
+        error: &VenueError,
+        proof_failure: bool,
+    ) {
+        let Some(job) = self.trading.active.as_ref().filter(|job| {
+            job.command == delivery.command
+                && job
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.owner() == delivery.plan.owner())
+        }) else {
+            return;
+        };
+        if let Some(source) = job
+            .telemetry
+            .filter(|source| proof_failure || source.status.is_some())
+        {
+            source.emit(
+                cx,
+                delivery.command,
+                error,
+                job.ids.iter().map(String::as_str),
+            );
         }
     }
 
@@ -1681,6 +1751,7 @@ impl ApexOmni {
         if data {
             let _ = cx.finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context);
         }
+        self.emit_native_unknown(cx, delivery, &error, true);
         let _ = cx.fail_plan(&delivery.plan, error);
     }
 
@@ -1810,6 +1881,14 @@ impl ApexOmni {
             .is_some_and(|job| job.command == delivery.command)
         {
             return;
+        }
+        if let Some(source) = self
+            .trading
+            .active
+            .as_mut()
+            .and_then(|job| job.telemetry.as_mut())
+        {
+            source.status = Some(response.status);
         }
         if matches!(delivery.accepted, Accepted::ConfirmCancel) {
             return self.confirm_response(cx, delivery, response);

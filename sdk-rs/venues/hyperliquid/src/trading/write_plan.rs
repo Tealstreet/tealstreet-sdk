@@ -182,42 +182,24 @@ impl Journal {
         error
     }
 
-    pub(super) fn report_unknown(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        message: &str,
-    ) {
+    pub(super) fn report_unknown(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let outcomes = self.outcomes();
         let unknown = outcomes
             .iter()
             .filter(|row| matches!(row.result, ElementResult::Unknown { .. }))
-            .map(|row| row.element.index.to_string())
-            .collect::<Vec<_>>();
-        if unknown.is_empty() {
+            .map(|row| row.element.index);
+        if unknown.clone().next().is_none() {
             return;
         }
         let placed = outcomes
             .iter()
-            .filter_map(|row| match &row.result {
-                ElementResult::Placed { order_ids } => Some(order_ids.iter()),
-                _ => None,
+            .flat_map(|row| match &row.result {
+                ElementResult::Placed { order_ids } => order_ids.as_slice(),
+                _ => &[],
             })
-            .flatten()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        cx.event(
-            safe_cex_engine::log::Level::Warn,
-            "order.outcome_unknown",
-            message,
-            vec![
-                ("command", command.to_string().into()),
-                ("commandId", command.into()),
-                ("outcome", "unknown".into()),
-                ("placedOrderIds", placed.join(",").into()),
-                ("unknownIndices", unknown.join(",").into()),
-            ],
-        );
+            .map(String::as_str);
+        let event = super::unknown_telemetry::event(command, placed, unknown);
+        cx.event(event.level, event.code, event.message, event.fields);
     }
 
     pub(super) fn evidence(
