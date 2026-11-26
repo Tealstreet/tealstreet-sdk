@@ -66,13 +66,28 @@ the workspace dependencies with Yarn.
 
 # Shared TWAP outcomes and legacy parity
 
-TWAP releases one scheduled child at a time. Quantity, price and notional rules
-remain delegated to native writes. A definite refusal leaves later distinct
-children scheduled, as in legacy TS. This includes a fully known native partial:
+TWAP releases one scheduled child at a time. Price and notional rules remain
+delegated to native writes. A definite refusal leaves later distinct children
+scheduled, as in legacy TS, until `REFUSALS_BEFORE_PAUSE` (five) definite
+refusals in a row pause the TWAP with a `Log` naming the last reason
+(`TWAP <symbol> paused after 5 refused slices: <reason>`, AGT-286); a
+placed slice resets the count, as does a known partial failure that kept accepted
+orders. A refused slice chaser pauses with the chaser runtime's own reason. Resume
+continues the remaining plan. This includes a fully known native partial:
 a placed prefix plus definitive refusal with no Unknown element. Its native
 journal, IDs and refusal text are retained, even without an aggregate outcome.
 Only actual uncertainty in the aggregate or native journal halts the action.
-There is no new whole-plan admission gate.
+One whole-plan admission gate exists (AGT-286, Sam): a new start whose smallest
+slice (the worst draw randomness allows, floored to the step as `whole_steps` sends
+it, as the web preflight checks) is below the
+larger of the amount step and `limits.amount.min` is refused with `TWAP <symbol>
+rejected: a slice is below the market minimum; use fewer slices or a larger size`.
+The text is static and the step and minimum share one `amount_rules` market read
+because every venue's wasm carries this code; the web preflight names the numbers.
+A 1000-slice plan of sub-step slices used to start and refuse, and toast, every
+slice. The market metadata carries no minimum notional, so notional is still left
+to the venue. Restores and amendments are not gated; their sub-step slices take
+the run-time path below.
 
 A slice is floored to the market's amount step, and the fraction it loses rides
 on the next slice. A slice below one whole step is the exception (AGT-144): it is

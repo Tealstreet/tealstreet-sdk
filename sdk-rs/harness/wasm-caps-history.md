@@ -1789,3 +1789,45 @@ the merge of PR head `fc18ea3212b73b2afdaf139d2889f72b31aeb894` into master
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | hyperliquid | 2448972 | 2448384 | 2459648 |
+
+## 2026-11-26 — #3813 TWAP slice minimum and refusal pause raise 3 family caps
+
+AGT-286: a TWAP whose every slice was below the amount step started and refused,
+and toasted, every slice (~870 refusals in 75 s). The fix adds a start admission
+check (`validate::slice_minimum`) and a pause after five definite slice refusals
+in a row, with the last reason. That code ships in every venue's wasm. The first
+cut grew each family by about 2 KB and failed 25 budget checks. It was trimmed to
+about 0.8 KB: one shared `amount_rules` market read, no float formatting, a static
+admission reason that reuses the start chain's single format, and short notice
+text. What remains is the check, the counter and the pause notice themselves. It
+still exceeds the three families whose headroom on master was under 0.8 KB; every
+other family passes under its current cap. Rule-17 raise per `harness/CLAUDE.md`,
+generated with `update-wasm-caps.mjs` from PR run 45723942763 (sealed source
+`ab83b2549a12a3ee0e0d6be7777b5a3d33a74308`, the merge of PR head
+`1affeac7cae319175d6da91347385c1af9bcf915` into master
+`e6b28a1f0dfc20554f66b64d386d13a2c7d7f6de`), filtered to the families measured
+above their ceiling.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| bitget | 2949761 | 2949120 | 2960384 |
+| okx | 2222371 | 2222080 | 2233344 |
+| phemex | 2273340 | 2273280 | 2284544 |
+
+## 2026-11-26 — #3813 CodeRabbit fixes raise the backpack cap
+
+The three review fixes on #3813 (`eb4c7763`) add about 130 B per family:
+- admission now floors the slice to the step before comparing it with the minimum;
+- a known partial failure that kept orders resets the refusal streak;
+- a refused slice chaser passes its runtime reason to the pause notice.
+
+backpack, the family with the least headroom (59 B at `25f6b1df`), now measures
+70 B over its ceiling. Every other family passes under its current cap. Rule-17
+raise per `harness/CLAUDE.md`, generated with `update-wasm-caps.mjs` from PR run
+45736242856 (sealed source `c1d825d22d6eba5bb3df4ddce7fcd74c69a889bb`, the merge
+of PR head `eb4c7763b77b3856077e4ab9c27db8517f7d3384` into master
+`506c3c3802f1dc6644b39a91472165a4cd76f41d`), filtered to backpack.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| backpack | 2225222 | 2225152 | 2236416 |

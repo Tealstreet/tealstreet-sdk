@@ -72,7 +72,13 @@ pub struct TwapInstance {
     /// How it ended when that was its own doing: every slice handed off, or the user's stop.
     /// None for a halt or a disposal, which report themselves (or must not read as an end).
     end: Option<TwapEnd>,
+    /// Definite slice refusals since the last placed slice; see [`REFUSALS_BEFORE_PAUSE`].
+    consecutive_refusals: u32,
 }
+
+/// Definite refusals in a row that pause a running TWAP (AGT-286): a plan that cannot
+/// place must not refuse, and toast, every remaining slice until it runs out.
+pub const REFUSALS_BEFORE_PAUSE: u32 = 5;
 
 impl TwapInstance {
     pub fn new(
@@ -126,6 +132,7 @@ impl TwapInstance {
             next_element_index: restored_in_flight,
             elements_per_slice,
             end: None,
+            consecutive_refusals: 0,
         }
     }
 
@@ -271,7 +278,8 @@ impl TwapInstance {
     /// riding it on let sub-step slices pile into one last-slice order (AGT-144).
     fn whole_steps(&mut self, size: f64, view: &dyn TwapMarketView) -> SliceSize {
         let Some(step) = view
-            .amount_step(self.options.symbol())
+            .amount_rules(self.options.symbol())
+            .map(|(step, _)| step)
             .filter(|step| step.is_finite() && *step > 0.0)
         else {
             return SliceSize::Whole(size);
@@ -285,6 +293,23 @@ impl TwapInstance {
             *next = add(*next, subtract(size, whole));
         }
         SliceSize::Whole(whole)
+    }
+
+    /// Count a definite slice refusal; pause after [`REFUSALS_BEFORE_PAUSE`] in a row.
+    fn note_refusal(&mut self, reason: &str, effects: &mut Vec<TwapEffect>) {
+        self.consecutive_refusals += 1;
+        if self.consecutive_refusals >= REFUSALS_BEFORE_PAUSE
+            && self.state.status == TwapStatus::Running
+        {
+            self.consecutive_refusals = 0;
+            self.pause();
+            effects.push(TwapEffect::Log {
+                message: format!(
+                    "TWAP {} paused after 5 refused slices: {reason}",
+                    self.options.symbol()
+                ),
+            });
+        }
     }
 
     fn set_status(&mut self, status: TwapStatus) {
@@ -449,6 +474,7 @@ impl TwapInstance {
             effects.push(TwapEffect::Log { message });
             self.finish_slice(executed_before, next_order_at, wait_ms, now);
             self.report_shortfall(effects);
+            self.note_refusal("below the market's amount step", effects);
             return;
         }
         let order_size = order_size.and_then(|size| match size {
@@ -462,7 +488,10 @@ impl TwapInstance {
         };
 
         if self.options.use_chaser_orders {
-            let started = self.start_slice_chaser(order_size, element_index, env, view, effects);
+            let refused = self
+                .start_slice_chaser(order_size, element_index, env, view, effects)
+                .err();
+            let started = refused.is_none();
             self.record(
                 element_index,
                 if started {
@@ -487,6 +516,10 @@ impl TwapInstance {
                 now,
             );
             self.report_shortfall(effects);
+            match refused {
+                None => self.consecutive_refusals = 0,
+                Some(reason) => self.note_refusal(&reason, effects),
+            }
             return;
         }
 
@@ -587,8 +620,10 @@ impl TwapInstance {
             self.state.in_flight = None;
         }
         let mut executed = pending.executed_before + 1;
+        let mut refusal = None;
         match outcome {
             Ok(order_ids) => {
+                self.consecutive_refusals = 0;
                 self.record_success(pending.element_index, &order_ids, effects);
                 if pending.priced_limit && !order_ids.is_empty() {
                     self.tracked_limit_order_ids.extend(order_ids);
@@ -601,7 +636,8 @@ impl TwapInstance {
                     return;
                 }
                 let placed_ids = crate::retained_order_ids(&failure);
-                if placed_ids.is_empty() {
+                let placed_some = !placed_ids.is_empty();
+                if !placed_some {
                     executed = pending.executed_before;
                 }
                 if pending.priced_limit {
@@ -621,6 +657,12 @@ impl TwapInstance {
                         failure.message
                     ),
                 });
+                // A partial failure that placed orders is a placed slice, not a refusal.
+                if placed_some {
+                    self.consecutive_refusals = 0;
+                } else {
+                    refusal = Some(failure);
+                }
             }
         }
         // terminate() may have run while the placement was in flight.
@@ -637,6 +679,9 @@ impl TwapInstance {
         };
         self.finish_slice(executed, next_at, wait_ms, now);
         self.report_shortfall(effects);
+        if let Some(failure) = refusal {
+            self.note_refusal(&failure.message, effects);
+        }
     }
 
     /// `Completed` alone must not read as done: say how few slices were placed.
@@ -666,7 +711,7 @@ impl TwapInstance {
         self.slice_due_at = Some(now + wait_ms);
     }
 
-    /// False when the chaser runtime refused it: nothing runs for this slice.
+    /// The chaser runtime's reason when it refused: nothing runs for this slice.
     fn start_slice_chaser(
         &mut self,
         size: f64,
@@ -674,7 +719,7 @@ impl TwapInstance {
         env: &mut dyn TwapEnv,
         view: &dyn TwapMarketView,
         effects: &mut Vec<TwapEffect>,
-    ) -> bool {
+    ) -> Result<(), String> {
         let chaser_id = env.new_id();
         let request = ChaserRequest {
             id: chaser_id.clone(),
@@ -687,8 +732,10 @@ impl TwapInstance {
             twap_id: self.id.clone(),
         };
         if let Err(message) = view.start_chaser(&request) {
-            effects.push(TwapEffect::Log { message });
-            return false;
+            effects.push(TwapEffect::Log {
+                message: message.clone(),
+            });
+            return Err(message);
         }
         self.tracked_chaser_ids.push(chaser_id.clone());
         self.chaser_elements.push(element_index);
@@ -704,7 +751,7 @@ impl TwapInstance {
                 market_when_settled: false,
             });
         }
-        true
+        Ok(())
     }
 
     fn fire_slice_timeout(

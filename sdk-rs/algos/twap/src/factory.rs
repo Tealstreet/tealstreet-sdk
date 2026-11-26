@@ -596,12 +596,12 @@ impl TwapMarketView for CxView<'_> {
         Ok(())
     }
 
-    fn amount_step(&self, symbol: &str) -> Option<f64> {
+    fn amount_rules(&self, symbol: &str) -> Option<(f64, f64)> {
         let store = self.cx.port.store();
         store
             .markets
             .get(symbol)
-            .map(|market| market.precision.amount)
+            .map(|market| (market.precision.amount, market.limits.amount.min))
     }
 
     /// As the chaser's: only the account's markets, never an order the venue would split.

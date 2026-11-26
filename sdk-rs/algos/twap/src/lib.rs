@@ -67,8 +67,11 @@ pub trait TwapMarketView {
     fn client_order_id(&self, _request: &TwapOrderRequest) -> Option<String> {
         None
     }
-    /// The market's amount step: a slice the venue would round up overfills.
-    fn amount_step(&self, _symbol: &str) -> Option<f64> {
+    /// The market's `(amount step, limits.amount.min)`. Slices are floored to the
+    /// step (a slice the venue would round up overfills), and a start is refused
+    /// when a slice is below the larger of the two (AGT-286). One lookup for both:
+    /// a second market read costs every venue's wasm budget.
+    fn amount_rules(&self, _symbol: &str) -> Option<(f64, f64)> {
         None
     }
 }
@@ -390,6 +393,7 @@ impl TwapBook {
         validate::options(&options)
             .and_then(|()| self.owns_account(&options))
             .and_then(|()| self.has_capacity())
+            .and_then(|()| validate::slice_minimum(&options, view))
             .map_err(|reason| format!("TWAP {} rejected: {reason}", options.symbol()))?;
         let id = env.new_id();
         let instance = TwapInstance::new(id.clone(), options, None, env);
