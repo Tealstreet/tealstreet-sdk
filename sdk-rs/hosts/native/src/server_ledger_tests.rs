@@ -42,6 +42,7 @@ enum AmendShape {
 /// Unknown with its first leg proven placed under a native row index that is
 /// not its batch position. `row:<symbol>:<id>:<client>` is another login's
 /// order arriving on this actor's private stream; `close:<id>` closes a row;
+/// `open:<id>` is a live row under that id (its `NEW` frame);
 /// `drop:<id>` is an open-orders snapshot without it (after a stream gap).
 struct SharedAccount {
     amend: AmendShape,
@@ -88,6 +89,10 @@ impl Venue for SharedAccount {
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
         if let Some(id) = text.strip_prefix("close:") {
             cx.store.set_order_status(id, OrderStatus::Closed);
+            return;
+        }
+        if let Some(id) = text.strip_prefix("open:") {
+            cx.store.upsert_order(resting(id, id));
             return;
         }
         if let Some(id) = text.strip_prefix("drop:") {
@@ -615,4 +620,37 @@ fn a_read_released_before_the_ack_does_not_retire_the_caller_id() {
         !crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
         "a read released after the ack omits it: retired"
     );
+}
+
+fn stream(actor: &mut Account<SharedAccount, NoTransport>, text: &str) {
+    actor.host.engine.handle(
+        1.,
+        Event::WsMessage {
+            socket: SocketId(0),
+            text,
+        },
+    );
+    actor.execute();
+}
+
+/// Review B (10e8ae20c6), synthetic venue: `desk` #1 closed and its row stays
+/// until the next snapshot (as Binance keeps it). `desk` #2's REST ack lands
+/// before its `NEW` frame, so the only `desk` row is #1's closed one: it must
+/// not retire #2. #2's own row, then its close, does.
+#[test]
+fn an_earlier_orders_closed_row_does_not_retire_a_reused_caller_id() {
+    use crate::own_placements::TERMINAL_GRACE;
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.02);
+    stream(&mut a, "close:desk");
+    place_caller(&mut a, 2, 0.025);
+    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
+    let claimed = |a: &Account<SharedAccount, NoTransport>| {
+        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later)
+    };
+    assert!(claimed(&a), "#1's leftover closed row");
+    stream(&mut a, "open:desk");
+    assert!(claimed(&a), "#2 rests");
+    stream(&mut a, "close:desk");
+    assert!(!claimed(&a), "#2 closed");
 }

@@ -126,7 +126,7 @@ never from a snapshot or a rejoin replay:
   venue account, venue, symbol and the venue's own order id: the same on every
   resident of that venue account and on no other, so per-symbol order ids
   (Binance USDⓈ-M) cannot collide across unrelated accounts. Binance spot and
-  portfolio margin key orders by a reusable client id, so there the key uses
+  portfolio margin, and GRVT, key orders by a reusable client id, so there the key uses
   the native id their fill frames carry (`Notice::OrderNativeId`): two orders
   reusing `desk` never share a key. The venue account (`accounts::identity::venue_account`) hashes the
   venue, network, Bybit site, subaccount, vault and API key, never the

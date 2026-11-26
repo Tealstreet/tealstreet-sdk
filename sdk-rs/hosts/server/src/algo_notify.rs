@@ -324,13 +324,15 @@ impl Tap {
             if let Some(identities) = identities(store, &symbol, &order_id) {
                 fill.identities = identities;
             }
-            let placed_here = self.placed_here(&symbol, &order_id, &fill.identities);
-            // A client-keyed venue's order id is a reusable client id: the
-            // claim keys on the venue's own id, so two orders sharing a client
-            // id never share a key (AGT-196).
+            // A client-keyed venue's order id is a reusable client id: the key
+            // is the venue's own id, so two orders sharing a client id never
+            // share a key (AGT-196). Only Binance spot and portfolio margin and
+            // GRVT key orders by client id and send `OrderNativeId`; every
+            // other venue's order id is already native, so it falls back here.
             let key_id = safe_cex_native::own_placements::lock(&self.placements)
                 .native_id(&symbol, &order_id)
                 .map_or_else(|| order_id.clone(), str::to_owned);
+            let placed_here = self.placed_here(&symbol, &order_id, &key_id, &fill.identities);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
             let (verb, natural_key) = match row(store, &symbol, &order_id).or(fill.row) {
@@ -367,11 +369,19 @@ impl Tap {
     }
 
     /// AGT-196: whether this account placed the order on `symbol`, by its id
-    /// (which covers a triggered child its algo linked), client order id or
-    /// parent. False is "not known here", never "foreign".
-    fn placed_here(&self, symbol: &str, order_id: &str, identities: &Identities) -> bool {
+    /// (which covers a triggered child its algo linked), its native id on a
+    /// client-keyed venue (`key_id`), client order id or parent. False is "not
+    /// known here", never "foreign".
+    fn placed_here(
+        &self,
+        symbol: &str,
+        order_id: &str,
+        key_id: &str,
+        identities: &Identities,
+    ) -> bool {
         let placements = safe_cex_native::own_placements::lock(&self.placements);
         placements.placed(symbol, order_id)
+            || placements.placed(symbol, key_id)
             || identities.0.iter().any(|id| placements.placed(symbol, id))
     }
 

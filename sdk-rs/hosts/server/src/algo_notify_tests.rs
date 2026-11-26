@@ -781,6 +781,31 @@ async fn orders_reusing_one_client_id_get_different_fill_keys() {
     );
 }
 
+/// Review B (10e8ae20c6) item 5: a closed caller id claims by its native id,
+/// so this login's late fills of its own `desk` claim and another order
+/// reusing `desk` (another native id) does not.
+#[tokio::test(start_paused = true)]
+async fn a_client_keyed_fill_claims_by_its_native_id() {
+    let placements = Placements::default();
+    placements.lock().unwrap().record("BTCUSDT", "n-1");
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
+    let mut claimed = Vec::new();
+    for native in ["n-1", "n-2"] {
+        placements
+            .lock()
+            .unwrap()
+            .note_native_id("BTCUSDT", "desk", native);
+        tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        claimed.push(
+            sent(&notifier).last().unwrap()["placedHere"]
+                .as_bool()
+                .unwrap(),
+        );
+    }
+    assert_eq!(claimed, [true, false]);
+}
+
 /// One fill's key on a tap for `user` connected to `venue_account`.
 async fn fill_key_on(user: &str, venue_account: &str, fill: Fill) -> Value {
     let notifier = HostNotifier::unstarted();

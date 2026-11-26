@@ -178,8 +178,12 @@ identities its own clients placed, read through `AccountHandle::placements`
   a stream gap after its acknowledgement never has one. A reuse elsewhere is
   then not claimed. An acknowledged caller-id placement fences its symbol
   (`Store::fence_order_reads`), so a read released before the acknowledgement
-  cannot retire it. A client-keyed venue's `Notice::OrderNativeId` records each
-  order's native id (`native_id`), which fill keys use instead of the client id. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
+  cannot retire it. A client-keyed venue's `Notice::OrderNativeId` (Binance
+  spot and portfolio margin, GRVT) records each order's native id (`native_id`),
+  which fill keys use instead of the client id; once known, a closed caller id
+  is replaced by a claim on that native id at once, so a reuse inside
+  `TERMINAL_GRACE` is not claimed. A terminal row already present when an id
+  is (re)recorded is an earlier order's and does not retire it. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
   id with the existing order's id, which may be another login's, so no
   caller-id placement claims there at all (`set_idempotent_client_ids`).
 - **Amends** record their receipts and completion ids (Hyperliquid's
