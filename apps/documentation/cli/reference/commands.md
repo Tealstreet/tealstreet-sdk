@@ -867,6 +867,11 @@ seeded `tsconfig.json` + `types.d.ts`. Full layout in
 
 **Grammar:** `script:<name>` with no space after the colon. `script: foo` is a parse error. `script:` with no name is a parse error. Invoking a name the loader didn't find errors loudly — it does NOT fall through to the regular command dispatcher.
 
+If an account connection is replaced while a script write is pending, the script
+fails with an owner-change error. Its late completion is not logged or captured
+as the replacement account's result. An already-issued order is not retried or
+canceled by this check; inspect the original account before starting a new run.
+
 **Why a prefix?** Eliminates every name-collision case. Filenames like `~/.tealstreet/scripts/buy.ts` are legal; the builtin `buy` keeps working. Future CLI upgrades adding new builtins never silently shadow existing user scripts.
 
 ---

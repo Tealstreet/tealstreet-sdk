@@ -29,8 +29,9 @@ function fixture() {
     await Promise.resolve();
     return ['native-' + orders.length];
   });
+  const exchange = { name: 'binance', store, placeOrder };
   const host: HostBindings = {
-    getExchange: () => ({ name: 'binance', store, placeOrder }), getStore: () => store,
+    getExchange: () => exchange, getStore: () => store,
     readActiveAccount: () => 'main', readActiveSymbol: () => symbol,
     readStreamingAccounts: () => ['main'], readAllAccounts: () => [{ name: 'main', exchange: 'binance' }],
     readOrderbook: () => undefined,

@@ -75,6 +75,7 @@ export const createScriptIoSink = (): ScriptIoSink => ({
  * computes these once per invocation and hands them off.
  */
 export interface BuildApiInputs {
+  readonly assertAccountOwner: (account: string) => void;
   readonly proxy: ApiProxy;
   readonly capabilities: Capabilities;
   /** Host's current active account at invocation time. Used as the
@@ -169,6 +170,7 @@ const buildExchange = (
   resolve: (opts: AccountOpts | undefined) => string,
   accountToExchange: Readonly<Record<string, string>>,
   inheritedRunCommandDepth: number,
+  assertAccountOwner: (account: string) => void,
 ): CoreExchange => {
   const gateAccount = (account: string): string => {
     const exch = accountToExchange[account];
@@ -177,6 +179,7 @@ const buildExchange = (
       // ExchangeName values via `getAccounts()`.
       validateExchangeCapability(exch as Parameters<typeof validateExchangeCapability>[0], capabilities);
     }
+    assertAccountOwner(account);
     return account;
   };
 
@@ -399,7 +402,14 @@ export const buildApi = (inputs: BuildApiInputs): CoreApi => {
       ]);
     },
 
-    exchange: buildExchange(proxy, capabilities, resolve, accountToExchange, inputs.runCommandDepth ?? 0),
+    exchange: buildExchange(
+      proxy,
+      capabilities,
+      resolve,
+      accountToExchange,
+      inputs.runCommandDepth ?? 0,
+      inputs.assertAccountOwner,
+    ),
     io: buildIo(sink, printingHost),
     storage: buildStorage(),
     utils: CORE_UTILS,

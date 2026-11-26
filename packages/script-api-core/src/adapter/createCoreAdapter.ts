@@ -82,6 +82,12 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     return exchange;
   };
 
+  const assertOwner = (account: string, owner: HostExchange | undefined): void => {
+    if (host.getExchange(account) !== owner) {
+      throw new Error(`account '${account}' owner changed; start a new operation`);
+    }
+  };
+
   const requireMethod = <K extends keyof HostExchange>(
     exchange: HostExchange,
     method: K,
@@ -157,12 +163,14 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
    *  body — a wrapper outside it could not see a partial `orderIds` on a
    *  thrown `closePosition`. */
   const observe = (
+    owner: HostExchange,
     method: string,
     account: string,
     summary: string,
     ok: boolean,
     extra: Omit<HostWriteEvent, 'method' | 'account' | 'summary' | 'ok'> = {},
   ): void => {
+    assertOwner(account, owner);
     host.onWrite?.({ method, account, summary, ok, ...extra });
   };
 
@@ -203,6 +211,21 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
   };
 
   return {
+    captureAccountOwners: () => {
+      const names = new Set([
+        ...host.readAllAccounts().map((account) => account.name),
+        ...host.readStreamingAccounts(),
+        host.readActiveAccount(),
+      ]);
+      const owners = new Map([...names].map((account) => [account, host.getExchange(account)]));
+      return (account) => {
+        if (!owners.has(account)) {
+          throw new Error(`account '${account}' owner changed; start a new operation`);
+        }
+        assertOwner(account, owners.get(account));
+      };
+    },
+
     // ── Ambient ──────────────────────────────────────────────────────────
     getActiveAccount: () => host.readActiveAccount(),
     getActiveAccounts: () => host.readStreamingAccounts(),
@@ -285,10 +308,10 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         const order = toSafeCexPlaceOrder(opts, account);
         const ids = await placeOrder(clampReduceOnly(order, account, requireMarket(opts.symbol, account)));
         const orderIds = Object.freeze((ids ?? []).slice());
-        observe('placeOrder', account, summary, true, { orderIds });
+        observe(exchange, 'placeOrder', account, summary, true, { orderIds });
         return { orderIds };
       } catch (error) {
-        observe('placeOrder', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'placeOrder', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -308,11 +331,11 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         );
         const ids = await placeOrders(payload);
         const orderIds = Object.freeze((ids ?? []).slice());
-        observe('placeOrders', account, summary, true, { orderIds });
+        observe(exchange, 'placeOrders', account, summary, true, { orderIds });
         return { orderIds };
       } catch (error) {
         const partial = ScriptBatchOrderError.from(error);
-        observe('placeOrders', account, summary, false, {
+        observe(exchange, 'placeOrders', account, summary, false, {
           error: messageOf(error),
           ...(partial && {
             partialOrderIds: partial.partialOrderIds,
@@ -338,9 +361,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         );
         if (!order) throw new Error(`cancelOrder: no order with id '${orderId}' on account '${account}'`);
         await cancelOrders([order]);
-        observe('cancelOrder', account, summary, true);
+        observe(exchange, 'cancelOrder', account, summary, true);
       } catch (error) {
-        observe('cancelOrder', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'cancelOrder', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -367,10 +390,10 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       if (candidates.length === 0) return { canceled: 0 };
       try {
         await cancelOrders(candidates);
-        observe('cancelOrders', account, summary, true);
+        observe(exchange, 'cancelOrders', account, summary, true);
         return { canceled: candidates.length };
       } catch (error) {
-        observe('cancelOrders', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'cancelOrders', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -411,20 +434,16 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         const options = { ...patch, update: rounded, order } as UpdateOrderOpts;
         if (host.submitOrderAmend) await host.submitOrderAmend(account, options);
         else await updateOrder(options);
-        observe('updateOrder', account, summary, true);
+        observe(exchange, 'updateOrder', account, summary, true);
       } catch (error) {
-        observe('updateOrder', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'updateOrder', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
     closePosition: async (opts: Omit<ClosePositionOpts, 'account'>, account) => {
       const intent = capturePlacementIntent();
       guardWrites();
-      // Fail fast on a disconnected account, but do NOT reuse this handle for
-      // the writes: `closePosition` awaits once per leg, and a reconnect in
-      // that window disposes the exchange and builds a new one under the same
-      // name, so a hedge-mode second leg would be sent to a dead object.
-      requireExchange(account);
+      const exchange = requireExchange(account);
       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
       const orderIds: string[] = [];
       try {
@@ -437,12 +456,12 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         if (candidates.length === 0) return { orderIds: Object.freeze([]) };
         const market = requireMarket(opts.symbol, account);
         for (const position of candidates) {
+          assertOwner(account, exchange);
           // `position.contracts` is BASE and `placeOrder.amount` is NATIVE —
           // they differ by `contractSize`, so the old fallback asked a
           // thousandfold on OKX's `DOGE-USDT-SWAP` and a fraction of the
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
-          const exchange = requireExchange(account);
           const amount =
             opts.percent !== undefined
               ? roundPercentageCloseSize(nativePositionSize(position, market), opts.percent, market, exchange.name)
@@ -470,11 +489,14 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           );
           for (const id of ids ?? []) orderIds.push(id);
         }
-        observe('closePosition', account, summary, true, { orderIds });
+        assertOwner(account, exchange);
+        observe(exchange, 'closePosition', account, summary, true, { orderIds });
         return { orderIds: Object.freeze(orderIds) };
       } catch (error) {
         // Partial ids matter here: some legs may already be live.
-        observe('closePosition', account, summary, false, { orderIds, error: messageOf(error) });
+        if (host.getExchange(account) === exchange) {
+          observe(exchange, 'closePosition', account, summary, false, { orderIds, error: messageOf(error) });
+        }
         throw error;
       }
     },
@@ -485,9 +507,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       const summary = `setLeverage ${symbol} ${leverage}${side ? ` ${side}` : ''}`;
       try {
         await setLeverage(symbol, leverage, side);
-        observe('setLeverage', account, summary, true);
+        observe(exchange, 'setLeverage', account, summary, true);
       } catch (error) {
-        observe('setLeverage', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'setLeverage', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -498,9 +520,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       const summary = `setPositionMode ${String(mode)}`;
       try {
         await change(String(mode) === 'hedged');
-        observe('setPositionMode', account, summary, true);
+        observe(exchange, 'setPositionMode', account, summary, true);
       } catch (error) {
-        observe('setPositionMode', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'setPositionMode', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -514,9 +536,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         // where the boolean is read coerces truthy and sets isolated on every
         // call — which is what this did until the seam stopped using `unknown`.
         await change(String(marginType) === 'isolated', symbol);
-        observe('setMarginType', account, summary, true);
+        observe(exchange, 'setMarginType', account, summary, true);
       } catch (error) {
-        observe('setMarginType', account, summary, false, { error: messageOf(error) });
+        observe(exchange, 'setMarginType', account, summary, false, { error: messageOf(error) });
         throw error;
       }
     },
@@ -541,7 +563,12 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       if (!host.runCommand) {
         throw new Error('runCommand is not available on this host');
       }
-      return host.runCommand(command, opts);
+      const owner = host.getExchange(opts.account);
+      try {
+        return await host.runCommand(command, opts);
+      } finally {
+        assertOwner(opts.account, owner);
+      }
     },
     print: (text: string, kind: PrintKind) => host.print?.(text, kind),
 

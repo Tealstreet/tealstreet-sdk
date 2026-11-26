@@ -81,19 +81,19 @@ carve-out and applies the reduce-only clamp. A CLI script that used to send an
 unrounded size below the lot step is now refused locally instead of by the
 venue.
 
-### `getExchange` is resolved per write, never captured
+### Deferred writes retain the original account owner
 
-`createCoreAdapter` calls `requireExchange(account)` inside each write rather
-than once per method, and `closePosition` re-resolves **per leg** because it
-awaits once per position. On web, `host.getExchange` returns the live
-`Exchange` from `exchangeAccountController`, which DISPOSES and REPLACES that
-object on every reconnect — so a hedge-mode close holding one handle sends its
-second leg to a dead exchange and the short side silently stays open. The
-pre-flight `requireExchange(account)` at the top of `closePosition` exists only
-to fail fast on a disconnected account; it is deliberately not the handle the
-writes use. `createCoreAdapter.test.ts` pins this by handing back a fresh
-`placeOrder` from every `getExchange` call and asserting the two legs used
-different ones.
+`HostBindings.getExchange` returns a stable object for one connection lifetime.
+A replacement under the same account name is a new owner. `runScript` captures
+all known account owners before its first await and checks the selected owner
+before every write; a newly connected or replaced account requires a new run.
+`closePosition` captures its exchange at entry and checks it between legs and
+before publication. Replacement stops the remaining legs instead of transferring
+old positions to the replacement exchange. `runtime/ownerFence.test.ts` pins
+switches during account lookup, transpilation, script bodies and hedge closes.
+Ordinary write completions check the same captured owner before notifying the
+host. A run checks its selected write owners again before printing or returning;
+the CLI repeats that check after awaiting the run and before capture-writeback.
 
 ### Web amend ownership is a host binding
 

@@ -79,6 +79,10 @@ require re-entry instead of silently completing migration.
 
 [`CLAUDE.md`](./CLAUDE.md) has the full source map, the listener subsystem, the
 remote-signing model, the logging taxonomy, and the script-types pipeline.
+Script writes retain their account connection owner through completion. A
+replacement stops stale output and capture-writeback without retrying or
+canceling an already-issued order.
+
 High-level entry points:
 
 - `src/index.ts` — Commander.js entry

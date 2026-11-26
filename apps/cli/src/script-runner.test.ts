@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Capabilities } from '@tealstreet/script-api-core';
 import type { CoreAdapter, ScriptRecord } from '@tealstreet/script-api-core';
+import { createCoreAdapter } from '@tealstreet/script-api-core';
+import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
 import type { PreprocessStore } from '@tealstreet/cli-core';
 
 import { runScriptFromHostWithAdapter } from './script-runner';
@@ -22,6 +24,8 @@ import { runScriptFromHostWithAdapter } from './script-runner';
 const buildStubAdapter = (): CoreAdapter => {
   const printCalls: { text: string; kind: string }[] = [];
   const adapter = {
+    // This test double has one immutable account owner.
+    captureAccountOwners: () => () => undefined,
     getActiveAccount: () => 'mybybit',
     getActiveAccounts: () => ['mybybit'],
     getActiveSymbol: () => 'BTCUSDT',
@@ -127,6 +131,98 @@ const buildRecord = (overrides: Partial<ScriptRecord> = {}): ScriptRecord => ({
   coreApiVersion: '1.0.0',
   capabilities: baseCaps(),
   ...overrides,
+});
+
+it.each([
+  { replace: false, late: false },
+  { replace: true, late: false },
+  { replace: false, late: true },
+  { replace: true, late: true },
+])('does not capture a placement completed by a retired owner (%j)', async ({ replace, late }) => {
+  let entered!: () => void;
+  const started = new Promise<void>((done) => {
+    entered = done;
+  });
+  let reply!: (ids: string[]) => void;
+  const response = new Promise<string[]>((done) => {
+    reply = done;
+  });
+  const aWrite = vi.fn(() => {
+    entered();
+    return response;
+  });
+  const bWrite = vi.fn(async () => ['b-id']);
+  let current = { name: 'binance', placeOrder: aWrite };
+  const writes = vi.fn();
+  const adapter = createCoreAdapter({
+    getExchange: () => current as never,
+    getStore: () =>
+      ({
+        markets: [
+          {
+            symbol: 'BTCUSDT',
+            precision: { amount: 0.1, price: 0.5 },
+            limits: { amount: { min: 0, max: 0 } },
+            isSpot: false,
+          },
+        ],
+        orders: [],
+        positions: [],
+      }) as never,
+    readActiveAccount: () => 'main',
+    readActiveSymbol: () => 'BTCUSDT',
+    readStreamingAccounts: () => ['main'],
+    readAllAccounts: () => [{ name: 'main', exchange: 'binance' }],
+    readOrderbook: () => undefined,
+    onWrite: writes,
+  });
+  const store = buildStubStore();
+  const pending = runScriptFromHostWithAdapter(
+    { adapter, transpile: identityTranspile },
+    {
+      record: buildRecord({
+        capabilities: baseCaps({ accounts: ['main'], writes: ['placeOrder'] }),
+        fn: async (_args, api) => {
+          const result = await api.exchange.placeOrder({
+            symbol: 'BTCUSDT',
+            side: OrderSide.Buy,
+            type: OrderType.Market,
+            amount: 1,
+          });
+          api.io.return(result.orderIds[0]);
+          if (late)
+            return {
+              then: (done: (value: unknown) => void) => {
+                done(undefined);
+                // Replace after core's final check but before the CLI's await resumes.
+                if (replace)
+                  queueMicrotask(() => {
+                    current = { name: 'binance', placeOrder: bWrite };
+                  });
+              },
+            };
+        },
+      }),
+      rawArgs: '',
+      invokedFrom: 'cli',
+      capture: { captureTo: 'owner_result', preprocessStore: store },
+    },
+  );
+  await started;
+  if (replace && !late) current = { name: 'binance', placeOrder: bWrite };
+  reply(['a-completed']);
+  const result = await pending;
+  expect(aWrite).toHaveBeenCalledTimes(1);
+  expect(bWrite).not.toHaveBeenCalled();
+  if (replace) {
+    expect(store.vars.has('owner_result')).toBe(false);
+    expect(store.setVar).not.toHaveBeenCalled();
+    if (!late) expect(writes).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/owner changed/) });
+  } else {
+    expect(store.vars.get('owner_result')).toBe('a-completed');
+    expect(result.ok).toBe(true);
+  }
 });
 
 // ───────────────────────────────────────────────────────────────────────────

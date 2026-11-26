@@ -139,8 +139,18 @@ export const runScriptFromHostWithAdapter = async (
     }
   }
 
+  const selectedOwners = new Map<string, () => void>();
   const ctx: RunContext = {
-    adapter: inner.adapter,
+    adapter: {
+      ...inner.adapter,
+      captureAccountOwners: () => {
+        const checkAccountOwner = inner.adapter.captureAccountOwners();
+        return (account) => {
+          selectedOwners.set(account, () => checkAccountOwner(account));
+          checkAccountOwner(account);
+        };
+      },
+    },
     transpile: inner.transpile,
     runtime: CLI_RUNTIME_DESCRIPTOR,
     invokedFrom,
@@ -149,6 +159,11 @@ export const runScriptFromHostWithAdapter = async (
 
   const result = await runScript(record, rawArgs, ctx);
   ownerSession.assertCurrent();
+  try {
+    for (const checkOwner of selectedOwners.values()) checkOwner();
+  } catch (error) {
+    return { ok: false, output: [], error: error instanceof Error ? error.message : String(error) };
+  }
 
   // 2. Capture-writeback per SPEC §7.4. Only applies when the chain
   //    step opted in via `captureTo: …` and the script returned

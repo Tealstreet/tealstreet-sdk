@@ -20,8 +20,9 @@ const fixture = (side: PositionSide) => {
     orders: [],
     tickers: [],
   };
+  const exchange = { name: 'mexc', placeOrder, store };
   const adapter = createCoreAdapter({
-    getExchange: () => ({ name: 'mexc', placeOrder, store }),
+    getExchange: () => exchange,
     getStore: () => store,
     readActiveAccount: () => 'mexc',
     readStreamingAccounts: () => ['mexc'],
