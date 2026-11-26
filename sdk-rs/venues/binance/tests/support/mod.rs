@@ -117,6 +117,8 @@ pub struct Harness {
     pub triggered: Vec<(String, String, Vec<String>)>,
     /// `Notice::OrderNativeId`: (symbol, client-keyed order id, native id).
     pub native_ids: Vec<(String, String, String)>,
+    /// `Notice::PlacementNativeId`: (command, symbol, client id, native id).
+    pub placement_native_ids: Vec<(u32, String, String, String)>,
 }
 
 impl Harness {
@@ -195,6 +197,7 @@ impl Harness {
             deferred,
             triggered: Vec::new(),
             native_ids: Vec::new(),
+            placement_native_ids: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -321,6 +324,14 @@ impl Harness {
                     order_id,
                     native_id,
                 }) => self.native_ids.push((symbol, order_id, native_id)),
+                Action::Notice(Notice::PlacementNativeId {
+                    command,
+                    symbol,
+                    client_order_id,
+                    native_id,
+                }) => self
+                    .placement_native_ids
+                    .push((command, symbol, client_order_id, native_id)),
                 Action::Notice(Notice::OrderTriggered {
                     symbol,
                     order_id,

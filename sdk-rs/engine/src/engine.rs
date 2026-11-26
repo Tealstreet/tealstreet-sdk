@@ -356,6 +356,18 @@ pub enum Notice {
         order_id: String,
         native_id: String,
     },
+    /// The venue acknowledged `command`'s order placed under the caller's
+    /// `client_order_id` with its own `native_id`. A reusable client id never
+    /// claims an order: the placing host claims this native id instead
+    /// (AGT-196). Sent by venues that key orders by client id, whose
+    /// completions carry the client id. Native hosts only.
+    #[cfg(not(target_arch = "wasm32"))]
+    PlacementNativeId {
+        command: CommandId,
+        symbol: String,
+        client_order_id: String,
+        native_id: String,
+    },
     /// Startup cannot complete without intervention (bad configuration or an
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
@@ -3275,6 +3287,28 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
         self.core().command_progress(command, receipts)
+    }
+
+    /// `Notice::PlacementNativeId`; nothing is sent when an identity is empty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn placement_native_id(
+        &mut self,
+        command: CommandId,
+        symbol: &str,
+        client_order_id: &str,
+        native_id: &str,
+    ) {
+        if !symbol.is_empty() && !client_order_id.is_empty() && !native_id.is_empty() {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::PlacementNativeId {
+                    command,
+                    symbol: symbol.to_owned(),
+                    client_order_id: client_order_id.to_owned(),
+                    native_id: native_id.to_owned(),
+                }));
+        }
     }
 
     /// `Notice::OrderNativeId`: `order_id` (a client id) is the venue's order

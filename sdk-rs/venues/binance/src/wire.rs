@@ -391,6 +391,11 @@ pub struct PlacedOrder {
     pub order_id: Option<Id>,
     #[serde(default)]
     pub algo_id: Option<Id>,
+    /// Native only: spot and portfolio margin claim the order by its native
+    /// id, on this symbol (AGT-196 `Notice::PlacementNativeId`).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(default)]
+    pub symbol: Option<String>,
 }
 
 /// One element of a `batchOrders` response: an order or an error.

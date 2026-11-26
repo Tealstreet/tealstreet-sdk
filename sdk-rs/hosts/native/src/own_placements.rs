@@ -12,13 +12,14 @@
 //! across symbols, so `7` on BTCUSDT never claims `7` on ETHUSDT. Each expires
 //! `RETENTION` after it was last recorded.
 //!
-//! A CALLER-chosen client id (`desk`) can name another login's order: a venue
-//! may report a duplicate as Unknown, and a closed id can be reused. So it is
-//! never claimed from a receipt; only a proven placement's native ids are,
-//! and an id equal to a caller id (Binance portfolio margin and spot key
-//! orders by client id) retires `TERMINAL_GRACE` after its order closes or
-//! leaves the open orders. Coinbase answers a repeated client id with the
-//! EXISTING order's id, so there no caller-id placement claims at all.
+//! A CALLER-chosen client id (`desk`) is never claimed: a venue may report a
+//! duplicate as Unknown, and a closed id can be reused by another order. Only
+//! the venue's own native order id from a proven placement claims. Where the
+//! venue keys orders by client id (Binance spot and portfolio margin, GRVT),
+//! its completion carries the client id, so the ack's native id arrives as
+//! `Notice::PlacementNativeId`; an ack without one records nothing. Coinbase
+//! answers a repeated client id with the EXISTING order's id, so there no
+//! caller-id placement claims at all.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -29,9 +30,8 @@ const CAPACITY: usize = 4096;
 
 /// How long a recorded identity claims fills. Most orders fill or cancel within
 /// hours; a resting TP/SL or far limit can outlive this and is then unclaimed
-/// (both logins notified, the fail-open side). Longer would let a reused client
-/// id, or Binance portfolio margin's client-keyed ids, claim another login's
-/// later order with the same id, withholding it from its placer.
+/// (both logins notified, the fail-open side). Native ids are never reused, so
+/// this only bounds memory and engine-generated client ids.
 pub const RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Shared between the account actor, which records, and its handle's readers.
@@ -43,45 +43,39 @@ pub fn lock(placements: &Placements) -> MutexGuard<'_, OwnPlacements> {
     placements.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// How long a caller-chosen id still claims after its order closed: long
-/// enough for that order's last fills to be reported, short enough that a
-/// reuse of the id elsewhere is not claimed.
-pub const TERMINAL_GRACE: Duration = Duration::from_secs(60);
-
 /// (symbol, order id or client order id).
 pub type Key = (String, String);
 
 /// One leg of a placement: its symbol and the client id its caller chose.
 pub type Leg = (String, Option<String>);
 
-/// A caller id's state when first checked after it was (re)recorded.
-#[derive(Debug, Clone, Copy)]
-struct Baseline {
-    /// Order reads for its symbol committed by then.
-    reads: u64,
-    /// A terminal row under that id was already there: an EARLIER order's
-    /// (Binance keeps a closed row until the next snapshot), which must not
-    /// retire this one. Cleared once a live row replaces it.
-    leftover_terminal: bool,
-}
-
-/// One store row, as `retire_caller_ids` reads it: (symbol, id or client id,
-/// closed or canceled).
-pub type Row<'a> = (&'a str, &'a str, bool);
-
 #[derive(Debug, Default)]
 pub struct OwnPlacements {
     /// Each identity's expiry.
     recorded: HashMap<Key, Instant>,
-    /// Recorded identities equal to a caller-chosen client id, and, from the
-    /// first check after recording, its `Baseline`.
-    caller: HashMap<Key, Option<Baseline>>,
     /// The venue completes a repeated client id with the existing order's id
     /// (Coinbase), so a caller-id placement proves nothing about who placed it.
     idempotent_client_ids: bool,
     /// A client-keyed venue's native id for each order, by (symbol, client
     /// id), with its expiry: fill keys use it (`Notice::OrderNativeId`).
     native_ids: HashMap<Key, (String, Instant)>,
+}
+
+/// Insert into a bounded map of expiring entries, dropping expired then the
+/// soonest-expiring entries when full.
+fn insert_bounded<V>(map: &mut HashMap<Key, (V, Instant)>, key: Key, value: V, now: Instant) {
+    if !map.contains_key(&key) && map.len() >= CAPACITY {
+        map.retain(|_, (_, expiry)| now < *expiry);
+        if map.len() >= CAPACITY
+            && let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, (_, expiry))| *expiry)
+                .map(|(key, _)| key.clone())
+        {
+            map.remove(&oldest);
+        }
+    }
+    map.insert(key, (value, now + RETENTION));
 }
 
 impl OwnPlacements {
@@ -109,8 +103,6 @@ impl OwnPlacements {
             {
                 self.recorded.remove(&oldest);
             }
-            let recorded = &self.recorded;
-            self.caller.retain(|key, _| recorded.contains_key(key));
         }
         self.recorded.insert(key, now + RETENTION);
         fresh
@@ -121,7 +113,6 @@ impl OwnPlacements {
     pub fn forget(&mut self, keys: &[Key]) {
         for key in keys {
             self.recorded.remove(key);
-            self.caller.remove(key);
         }
     }
 
@@ -148,36 +139,6 @@ impl OwnPlacements {
         self.idempotent_client_ids = true;
     }
 
-    /// A client-keyed venue named `native_id` for its order `order_id`, the
-    /// latest such order under that client id. Bounded like the claims.
-    pub fn note_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
-        let now = Instant::now();
-        let key = (symbol.to_owned(), order_id.to_owned());
-        if !self.native_ids.contains_key(&key) && self.native_ids.len() >= CAPACITY {
-            self.native_ids.retain(|_, (_, expiry)| now < *expiry);
-            if self.native_ids.len() >= CAPACITY
-                && let Some(oldest) = self
-                    .native_ids
-                    .iter()
-                    .min_by_key(|(_, (_, expiry))| *expiry)
-                    .map(|(key, _)| key.clone())
-            {
-                self.native_ids.remove(&oldest);
-            }
-        }
-        self.native_ids
-            .insert(key, (native_id.to_owned(), now + RETENTION));
-    }
-
-    /// The venue's own id for `order_id` on `symbol`, when it keys orders by a
-    /// client id; `None` elsewhere, where `order_id` is already native.
-    pub fn native_id(&self, symbol: &str, order_id: &str) -> Option<&str> {
-        self.native_ids
-            .get(&(symbol.to_owned(), order_id.to_owned()))
-            .filter(|(_, expiry)| Instant::now() < *expiry)
-            .map(|(native, _)| native.as_str())
-    }
-
     /// Whether `set_idempotent_client_ids` applies to this account.
     pub fn idempotent_client_ids(&self) -> bool {
         self.idempotent_client_ids
@@ -192,6 +153,9 @@ impl OwnPlacements {
     /// A completed command's ids: every leg was accepted. A result names no
     /// symbol, so only a single-symbol command's ids are recorded, under that
     /// symbol; a multi-symbol batch's cannot be attributed and record nothing.
+    /// An id equal to a caller-chosen client id (a client-keyed venue's
+    /// completion) never claims: that venue's native id comes from
+    /// `record_placement_native_id`.
     pub fn record_completion(&mut self, symbols: &[String], legs: &[Leg], result: &str) {
         let [symbol] = symbols else {
             return;
@@ -200,14 +164,17 @@ impl OwnPlacements {
             return;
         }
         for id in result_ids(result) {
-            self.record_placed(symbol, &id, caller_chosen(legs, &id));
+            if !caller_chosen(legs, &id) {
+                self.record(symbol, &id);
+            }
         }
     }
 
     /// A failed batch's legs the venue proved accepted. A leg is matched by
     /// its client id to the (symbol, client id) its receipt named, never by
-    /// position: venues number native rows (split TP/SL legs) separately.
-    /// Unknown, refused and unmatched legs record nothing.
+    /// position: venues number native rows (split TP/SL legs) separately. A
+    /// client id sent on two symbols matches neither. Unknown, refused and
+    /// unmatched legs, and caller-chosen client ids, record nothing.
     pub fn record_proven_legs(
         &mut self,
         sent: &[Key],
@@ -231,84 +198,50 @@ impl OwnPlacements {
             let (Some((symbol, _)), None) = (named.next(), named.next()) else {
                 continue;
             };
-            let caller = caller_chosen(legs, client);
-            for id in order_ids {
-                self.record_placed(symbol, id, caller && id == client);
+            let symbol = symbol.clone();
+            for id in order_ids.iter().filter(|id| !caller_chosen(legs, id)) {
+                self.record(&symbol, id);
             }
         }
     }
 
-    fn record_placed(&mut self, symbol: &str, id: &str, caller: bool) {
-        self.record(symbol, id);
-        if caller {
-            self.caller.insert((symbol.to_owned(), id.to_owned()), None);
-        }
-    }
-
-    /// Whether any caller-chosen id needs `retire_caller_ids`.
-    pub fn has_caller_ids(&self) -> bool {
-        !self.caller.is_empty()
-    }
-
-    /// The store's order rows, and how many order reads have committed for a
-    /// symbol (`Store::orders_reads`). A caller-chosen id whose order is closed
-    /// or canceled, or that an order read committed after it was recorded does
-    /// not list, stops claiming, so its reuse by another login is not claimed:
-    /// at once when its native id is known (that is claimed instead), else
-    /// after `TERMINAL_GRACE`. A terminal row already there when it was
-    /// recorded belongs to an earlier order with that id and is ignored. A row need never have been seen: on Binance only
-    /// the stream creates it, and an order can fill and close in a stream gap
-    /// between its acknowledgement and its first frame.
-    pub fn retire_caller_ids<'a>(
+    /// The venue acknowledged a leg placed under the caller's `client_order_id`
+    /// on `symbol` with its own `native_id` (`Notice::PlacementNativeId`):
+    /// that native id, never the reusable client id, is this account's.
+    pub fn record_placement_native_id(
         &mut self,
-        rows: impl IntoIterator<Item = Row<'a>>,
-        reads: impl Fn(&str) -> u64,
-        now: Instant,
+        legs: &[Leg],
+        symbol: &str,
+        client_order_id: &str,
+        native_id: &str,
     ) {
-        let mut present: HashMap<Key, bool> = HashMap::new();
-        for (symbol, identity, terminal) in rows {
-            let key = (symbol.to_owned(), identity.to_owned());
-            if self.caller.contains_key(&key) {
-                *present.entry(key).or_default() |= terminal;
-            }
+        let named = legs
+            .iter()
+            .any(|(leg, caller)| leg == symbol && caller.as_deref() == Some(client_order_id));
+        if named && !self.unprovable(legs) {
+            self.record(symbol, native_id);
         }
-        let mut retired = Vec::new();
-        for (key, baseline) in &mut self.caller {
-            let committed = reads(&key.0);
-            let row = present.get(key).copied();
-            let baseline = baseline.get_or_insert(Baseline {
-                reads: committed,
-                leftover_terminal: row == Some(true),
-            });
-            match row {
-                Some(true) if baseline.leftover_terminal => {}
-                Some(true) => retired.push(key.clone()),
-                Some(false) => baseline.leftover_terminal = false,
-                None if committed > baseline.reads => retired.push(key.clone()),
-                None => baseline.leftover_terminal = false,
-            }
-        }
-        for key in retired {
-            self.caller.remove(&key);
-            // Once its order's native id is known, claim that instead: it is
-            // never reused, so the client id can stop claiming at once.
-            let native = self
-                .native_ids
-                .get(&key)
-                .filter(|(_, expiry)| now < *expiry)
-                .map(|(native, _)| native.clone());
-            match native {
-                Some(native) => {
-                    self.recorded.remove(&key);
-                    self.record_at(&key.0, &native, now);
-                }
-                None => {
-                    if let Some(expiry) = self.recorded.get_mut(&key) {
-                        *expiry = (*expiry).min(now + TERMINAL_GRACE);
-                    }
-                }
-            }
-        }
+    }
+
+    /// A client-keyed venue named `native_id` for its order `order_id`, the
+    /// latest such order under that client id. Bounded like the claims.
+    pub fn note_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
+        let key = (symbol.to_owned(), order_id.to_owned());
+        insert_bounded(
+            &mut self.native_ids,
+            key,
+            native_id.to_owned(),
+            Instant::now(),
+        );
+    }
+
+    /// The venue's own id for `order_id` on `symbol`, when it keys orders by a
+    /// client id; `None` elsewhere, where `order_id` is already native.
+    pub fn native_id(&self, symbol: &str, order_id: &str) -> Option<&str> {
+        self.native_ids
+            .get(&(symbol.to_owned(), order_id.to_owned()))
+            .filter(|(_, expiry)| Instant::now() < *expiry)
+            .map(|(native, _)| native.as_str())
     }
 
     /// A venue order an algo's trigger created is this account's when the algo
@@ -542,102 +475,6 @@ mod tests {
         assert!(placements.placed(BTC, "mine"));
     }
 
-    /// Review B (942d22190f, e6e681d490) and review A (5f75821a55): an id equal
-    /// to a caller-chosen client id stops claiming shortly after its order
-    /// closes, or after an order read committed since it was recorded does not
-    /// list it, whether or not its row was ever seen. Without a newer read an
-    /// unlisted id (completion before stream) keeps claiming. A generated id
-    /// keeps its retention. Synthetic rows.
-    #[test]
-    fn a_caller_id_retires_when_its_order_closes_or_a_later_read_omits_it() {
-        let start = Instant::now();
-        let later = start + TERMINAL_GRACE;
-        let mut placements = OwnPlacements::default();
-        for (id, caller) in [
-            ("closed", true),
-            ("gap", true),
-            ("pending", true),
-            ("listed", true),
-            ("9001", false),
-        ] {
-            let caller = caller.then(|| id.to_owned());
-            placements.record_completion(
-                &[BTC.into()],
-                &[(BTC.into(), caller)],
-                &format!(r#"["{id}"]"#),
-            );
-        }
-        // Recorded with 3 reads committed: nothing listed yet.
-        placements.retire_caller_ids([(BTC, "listed", false)], |_| 3, start);
-        assert_eq!(placements.caller.len(), 4, "no read since recording");
-        // A 4th read lists only `listed`; `closed`'s row is terminal.
-        placements.retire_caller_ids(
-            [
-                (BTC, "listed", false),
-                (BTC, "closed", true),
-                (BTC, "9001", true),
-            ],
-            |symbol| if symbol == BTC { 4 } else { 0 },
-            start,
-        );
-        let soon = later - Duration::from_secs(1);
-        for id in ["closed", "gap", "pending"] {
-            assert!(
-                placements.placed_at(BTC, id, soon),
-                "{id}: its own last fills"
-            );
-            assert!(!placements.placed_at(BTC, id, later), "{id}: a later reuse");
-        }
-        assert!(placements.placed_at(BTC, "listed", later));
-        assert!(placements.placed_at(BTC, "9001", later));
-    }
-
-    /// Review B (10e8ae20c6): an earlier order's closed row under the same
-    /// client id, still in the store when the new order's ack lands before its
-    /// first frame, must not retire the new order. Once the new order's own row
-    /// replaces it, its close retires the id. Synthetic rows.
-    #[test]
-    fn a_leftover_terminal_row_does_not_retire_a_new_order_under_its_id() {
-        let start = Instant::now();
-        let later = start + TERMINAL_GRACE;
-        let mut placements = OwnPlacements::default();
-        let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
-        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#);
-        placements.retire_caller_ids([(BTC, "desk", true)], |_| 0, start);
-        assert!(
-            placements.placed_at(BTC, "desk", later),
-            "the earlier order's row"
-        );
-        placements.retire_caller_ids([(BTC, "desk", false)], |_| 0, start);
-        assert!(placements.placed_at(BTC, "desk", later), "its own live row");
-        placements.retire_caller_ids([(BTC, "desk", true)], |_| 0, start);
-        assert!(!placements.placed_at(BTC, "desk", later), "its own close");
-    }
-
-    /// Review B (10e8ae20c6) item 5: once its native id is known, a closed
-    /// caller id stops claiming at once and its native id claims instead, so
-    /// a reuse of `desk` inside `TERMINAL_GRACE` (a different native id) is
-    /// not claimed, while its own late fills (its native id) still are.
-    #[test]
-    fn a_closed_caller_id_claims_by_native_id_once_known() {
-        let start = Instant::now();
-        let mut placements = OwnPlacements::default();
-        let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
-        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#);
-        placements.note_native_id(BTC, "desk", "n-1");
-        placements.retire_caller_ids([(BTC, "desk", false)], |_| 0, start);
-        placements.retire_caller_ids([(BTC, "desk", true)], |_| 0, start);
-        assert!(
-            !placements.placed_at(BTC, "desk", start),
-            "no client-id claim"
-        );
-        assert!(
-            placements.placed_at(BTC, "n-1", start + TERMINAL_GRACE),
-            "its own late fills"
-        );
-        assert!(!placements.placed_at(BTC, "n-2", start), "a reuse");
-    }
-
     /// A caller-reused client id, or a portfolio-margin client-keyed id, ages
     /// out: an old `desk` must not claim a much later `desk` placed elsewhere.
     #[test]
@@ -741,5 +578,22 @@ mod tests {
         assert!(result_ids(r#"{"partial":{"orderIds":["7"]}}"#).is_empty());
         assert!(result_ids("[7]").is_empty());
         assert!(result_ids("null").is_empty());
+    }
+
+    /// Review A and B (b515532bfa): a caller-chosen client id never claims,
+    /// whatever its completion says; only the ack's native id does, for this
+    /// command's own leg. An ack without a native id records nothing.
+    #[test]
+    fn only_an_acked_native_id_claims_a_caller_id_placement() {
+        let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
+        let mut placements = OwnPlacements::default();
+        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#);
+        assert!(!placements.placed(BTC, "desk"), "a client-keyed completion");
+        placements.record_placement_native_id(&desk, BTC, "other", "n-other");
+        placements.record_placement_native_id(&desk, "ETHUSDT", "desk", "n-eth");
+        assert!(!placements.placed(BTC, "n-other") && !placements.placed("ETHUSDT", "n-eth"));
+        placements.record_placement_native_id(&desk, BTC, "desk", "n-1");
+        assert!(placements.placed(BTC, "n-1"));
+        assert!(!placements.placed(BTC, "desk"), "still never the client id");
     }
 }

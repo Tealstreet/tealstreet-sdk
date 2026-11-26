@@ -125,7 +125,8 @@ impl Harness {
                 Action::Notice(
                     Notice::AccountAuth { .. }
                     | Notice::OrderTriggered { .. }
-                    | Notice::OrderNativeId { .. },
+                    | Notice::OrderNativeId { .. }
+                    | Notice::PlacementNativeId { .. },
                 ) => {}
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
                     self.progress.push((command, receipts))

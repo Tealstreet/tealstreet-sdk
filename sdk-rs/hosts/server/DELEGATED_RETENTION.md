@@ -136,8 +136,8 @@ never from a snapshot or a rejoin replay:
   its fills fail open. `placedHere` is true when the native host's per-actor
   ledger (`safe_cex_native::own_placements`: engine-generated dispatch receipts
   and completion ids of this actor's placements, proven legs of a failed batch,
-  and amends only of orders it already holds; a caller-chosen client id only
-  through a proven placement, retired a minute after its order closes or a later order read omits it) names exactly the order id, or the row's client order id or
+  and amends only of orders it already holds; never a caller-chosen client id,
+  only the native id a proven placement's ack names) names exactly the order id, or the row's client order id or
   parent, on the fill's symbol. A triggered child is linked at fill time from
   the venue's frame (`Notice::OrderTriggered`), so it is claimed even when it
   filled before any row was stored: OKX by `algoId` or `algoClOrdId`; Binance

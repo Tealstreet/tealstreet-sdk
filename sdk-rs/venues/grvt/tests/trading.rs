@@ -667,6 +667,55 @@ fn seed(e: &mut Engine<Grvt>) {
 const OPEN: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}}"#;
 const OPEN_ORDERS: &str = r#"{"r":[{"sa":"9007199254740993","oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}]}"#;
 const CANCELED: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"CANCELLED","ts":["0.2"],"ut":"1700000000001000000"}}}"#;
+/// AGT-196: GRVT keys the order by the caller's client id and completes with
+/// it, so its ack names the native id (`oi`) for the placer to claim instead.
+/// An ack whose `oi` is zero names none. Ack shape as the tests below.
+#[test]
+fn a_create_ack_names_its_native_id_for_the_placer() {
+    for (oi, named) in [("0x1235", true), ("0x00", false)] {
+        let mut e = boot();
+        let r = http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+        let actions = reply(&mut e, &r, 200, &format!(r#"{{"r":{{"oi":"{oi}"}}}}"#));
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::PlacementNativeId {
+                    command,
+                    symbol,
+                    client_order_id,
+                    native_id,
+                }) => Some((
+                    *command,
+                    symbol.clone(),
+                    client_order_id.clone(),
+                    native_id.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<(u32, String, String, String)> = if named {
+            vec![(
+                1,
+                "BTC_USDT_PERP".into(),
+                "9223372036854775807".into(),
+                oi.into(),
+            )]
+        } else {
+            vec![]
+        };
+        assert_eq!(notices, expected, "{oi}");
+    }
+}
+
 #[test]
 fn signed_lite_order_preserves_large_native_account_and_caller_identity() {
     let mut e = boot();

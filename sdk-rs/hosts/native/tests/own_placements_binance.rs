@@ -222,41 +222,45 @@ fn pm_ready() -> Harness {
     h
 }
 
-/// What the actor's `retire_closed_caller_ids` reads: every store row by id
-/// and client id, with whether it is closed or canceled.
-fn retire(h: &Harness, ledger: &mut OwnPlacements, now: std::time::Instant) {
-    use safe_cex_engine::model::OrderStatus;
-    let rows: Vec<(String, String, bool)> = h
-        .engine
-        .store()
-        .orders()
+/// A caller-id placement as the actor records it: its receipts, then, once
+/// the ack has come, each `PlacementNativeId` for its command and its
+/// completion.
+fn record_caller_ack(
+    h: &Harness,
+    ledger: &mut OwnPlacements,
+    command: u32,
+    legs: &[(String, Option<String>)],
+) {
+    for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == command) {
+        assert!(
+            ledger
+                .record_receipts(&[SYMBOL.into()], legs, receipts)
+                .is_empty(),
+            "a caller id is never claimed from its receipt"
+        );
+    }
+    for (_, symbol, client, native) in h
+        .placement_native_ids
         .iter()
-        .flat_map(|order| {
-            let terminal = matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
-            std::iter::once(order.id.clone())
-                .chain(order.client_order_id.clone())
-                .map(move |identity| (order.symbol.clone(), identity, terminal))
-        })
-        .collect();
-    let store = h.engine.store();
-    ledger.retire_caller_ids(
-        rows.iter()
-            .map(|(symbol, identity, terminal)| (symbol.as_str(), identity.as_str(), *terminal)),
-        |symbol| store.orders_reads(symbol),
-        now,
-    );
+        .filter(|(id, ..)| *id == command)
+    {
+        ledger.record_placement_native_id(legs, symbol, client, native);
+    }
+    let result = h
+        .result(command)
+        .cloned()
+        .expect("completed")
+        .expect("placed");
+    ledger.record_completion(&[SYMBOL.into()], legs, &result);
 }
 
-/// Review B (e6e681d490) and review A (5f75821a55) through real Binance
-/// portfolio-margin frame shapes: PM keys orders by client id and allows reuse
-/// after close. A caller's `desk` claims once the venue acks it. Only the
-/// stream creates its row, and the stream drops between the ack and the NEW
-/// frame: the order fills and closes in the gap, and the reconnect's
-/// open-orders read omits it. The id stops claiming after `TERMINAL_GRACE`
-/// instead of 24 h, though no row was ever seen.
+/// Review A and B (b515532bfa) through real Binance portfolio-margin frame
+/// shapes: PM keys orders by a reusable client id. A marketable `desk` fills
+/// and closes on the stream BEFORE its REST ack. The ack's `orderId` claims;
+/// `desk` never does, so a later order reusing `desk` (another `i`) is not
+/// claimed however its rows linger.
 #[test]
-fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
-    use safe_cex_native::own_placements::TERMINAL_GRACE;
+fn a_pm_caller_id_placement_claims_its_acked_native_id_when_frames_come_first() {
     let mut h = pm_ready();
     let mut ledger = OwnPlacements::default();
     let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_value(serde_json::json!({
@@ -269,79 +273,35 @@ fn a_pm_caller_id_retires_when_the_reconnect_snapshot_drops_its_order() {
         command: 1,
         orders: vec![order],
     }));
-    for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == 1) {
-        assert!(
-            ledger
-                .record_receipts(&[SYMBOL.into()], &legs, receipts)
-                .is_empty(),
-            "a caller id is never claimed from its receipt"
-        );
-    }
     let sent = h.take("/papi/v1/um/order");
     assert_eq!(query(&sent.url, "newClientOrderId"), "desk");
+    let frame = |native: u64, status: &str, filled: &str, trade: u64| {
+        format!(
+            r#"{{"fs":"UM","e":"ORDER_TRADE_UPDATE","T":1,"E":1,"o":{{"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","q":"0.002","p":"91000","ap":"91000","sp":"0","x":"{x}","X":"{status}","i":{native},"l":"{filled}","z":"{filled}","L":"91000","T":1,"t":{trade},"b":"0","a":"0","m":false,"R":false,"ps":"BOTH","rp":"0"}}}}"#,
+            x = if status == "NEW" { "NEW" } else { "TRADE" }
+        )
+    };
+    h.message("/pm/ws", &frame(8886774, "NEW", "0", 0));
+    h.message("/pm/ws", &frame(8886774, "FILLED", "0.002", 1));
     h.reply(
         sent.id,
         200,
         "",
-        r#"{"clientOrderId":"desk","cumQty":"0","cumQuote":"0","executedQty":"0","orderId":8886774,"avgPrice":"0.00000","origQty":"0.002","price":"91000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"LIMIT","origType":"LIMIT","updateTime":1566818724722}"#,
+        r#"{"clientOrderId":"desk","cumQty":"0.002","cumQuote":"182","executedQty":"0.002","orderId":8886774,"avgPrice":"91000","origQty":"0.002","price":"91000","reduceOnly":false,"side":"BUY","positionSide":"BOTH","status":"FILLED","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"LIMIT","origType":"LIMIT","updateTime":1566818724722}"#,
     );
-    let result = h.result(1).cloned().expect("completed").expect("placed");
-    ledger.record_completion(&[SYMBOL.into()], &legs, &result);
-    assert!(
-        ledger.placed(SYMBOL, "desk"),
-        "acked: PM's order id is `desk`"
-    );
+    record_caller_ack(&h, &mut ledger, 1, &legs);
+    assert!(ledger.placed(SYMBOL, "8886774"), "the acked native id");
+    assert!(!ledger.placed(SYMBOL, "desk"), "never the client id");
 
-    assert!(
-        h.engine.store().order("desk").is_none(),
-        "the REST ack stores no row"
-    );
-    let now = std::time::Instant::now();
-    retire(&h, &mut ledger, now);
-    let later = now + TERMINAL_GRACE;
-    assert!(
-        ledger.placed_at(SYMBOL, "desk", later),
-        "no read since the ack: still claimed"
-    );
-
-    // The stream drops before `desk`'s NEW frame; it fills and closes unseen;
-    // the reconnect re-reads.
-    let old = h.socket("/pm/ws").unwrap();
-    h.event(Event::WsClosed {
-        socket: old,
-        code: 1006,
-    });
-    h.advance(500.0);
-    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey2"}"#);
-    let fresh = h.socket("/pm/ws").unwrap();
-    assert_ne!(old, fresh);
-    h.event(Event::WsOpened { socket: fresh });
-    // Answer the reconnect's account re-read, whatever order it asks in.
-    // Binance re-reads open orders on a timer after the reconnect.
-    for _ in 0..8 {
-        h.advance(5_000.0);
-        for (path, body) in [
-            ("/papi/v1/um/positionRisk", PM_POSITION_RISK),
-            ("/papi/v1/um/symbolConfig", PM_SYMBOL_CONFIG),
-            ("/papi/v1/balance", PM_BALANCE),
-            ("/papi/v1/um/algo/openAlgoOrders", "[]"),
-            ("/papi/v1/um/openOrders", PM_OPEN_ORDERS),
-        ] {
-            if h.has_request(path) {
-                h.respond(path, 200, body);
-            }
-        }
-    }
-    assert!(
-        h.engine.store().order("desk").is_none(),
-        "the snapshot omits it"
-    );
-    retire(&h, &mut ledger, now);
-    assert!(ledger.placed_at(SYMBOL, "desk", now), "its own last fills");
-    assert!(
-        !ledger.placed_at(SYMBOL, "desk", later),
-        "a later reuse of `desk`"
-    );
+    // Another login's later order reuses `desk`; its frames name another `i`.
+    h.message("/pm/ws", &frame(8886775, "NEW", "0", 0));
+    h.message("/pm/ws", &frame(8886775, "FILLED", "0.002", 2));
+    let reuse = h
+        .native_ids
+        .last()
+        .expect("the reuse's fill names its native id");
+    assert_eq!(reuse.2, "8886775");
+    assert!(!ledger.placed(SYMBOL, &reuse.2), "the reuse is not ours");
 }
 
 /// Binance spot's documented startup payloads (`venues/binance/tests/
@@ -358,18 +318,14 @@ fn spot_ready() -> Harness {
     h.respond("/api/v3/ticker/24hr", 200, r#"[{"symbol":"BTCUSDT","lastPrice":"10000","bidPrice":"9999","askPrice":"10001","priceChangePercent":"0","volume":"1","quoteVolume":"10000"}]"#);
     let socket = h.socket("ws-api/v3").unwrap();
     h.event(Event::WsOpened { socket });
-    spot_reads(&mut h, 0.0);
+    spot_reads(&mut h);
     h
 }
 
 /// Answer the spot user stream's subscribe and its account and open-orders
-/// reads (none open), however many rounds the engine asks for, advancing
-/// `step_ms` before each round (a reconnect re-reads on a timer).
-fn spot_reads(h: &mut Harness, step_ms: f64) {
+/// reads (none open), however many rounds the engine asks for.
+fn spot_reads(h: &mut Harness) {
     for _ in 0..8 {
-        if step_ms > 0.0 {
-            h.advance(step_ms);
-        }
         for path in ["/api/v3/account", "/api/v3/openOrders"] {
             if h.has_request(path) {
                 let body = if path.ends_with("account") {
@@ -393,14 +349,12 @@ fn spot_reads(h: &mut Harness, step_ms: f64) {
     }
 }
 
-/// Review A (5f75821a55) through real Binance spot frame shapes: spot keys
-/// orders by client id and allows reuse after close. A caller's `desk` claims
-/// once acked; the user stream drops before its `executionReport`, the order
-/// fills and closes in the gap, and the reconnect's open-orders read omits it.
-/// The id stops claiming after `TERMINAL_GRACE`.
+/// Review A and B (b515532bfa) through real Binance spot frame shapes: spot
+/// keys orders by a reusable client id. The ack lands first, naming its
+/// `orderId`, which claims; the order's frames and close change nothing, and
+/// `desk` itself never claims.
 #[test]
-fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
-    use safe_cex_native::own_placements::TERMINAL_GRACE;
+fn a_spot_caller_id_placement_claims_its_acked_native_id_when_the_ack_comes_first() {
     let mut h = spot_ready();
     let mut ledger = OwnPlacements::default();
     let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_value(serde_json::json!({
@@ -413,13 +367,6 @@ fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
         command: 1,
         orders: vec![order],
     }));
-    for (_, receipts) in h.progress.iter().filter(|(id, _)| *id == 1) {
-        assert!(
-            ledger
-                .record_receipts(&[SYMBOL.into()], &legs, receipts)
-                .is_empty()
-        );
-    }
     let sent = h.take("/api/v3/order");
     assert_eq!(query(&sent.url, "newClientOrderId"), "desk");
     h.reply(
@@ -428,50 +375,19 @@ fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
         "",
         r#"{"symbol":"BTCUSDT","orderId":28,"orderListId":-1,"clientOrderId":"desk","transactTime":1507725176595,"price":"9000.00000000","origQty":"1.00000000","executedQty":"0.00000000","cummulativeQuoteQty":"0.00000000","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"BUY","workingTime":1507725176595,"selfTradePreventionMode":"NONE"}"#,
     );
-    let result = h.result(1).cloned().expect("completed").expect("placed");
-    ledger.record_completion(&[SYMBOL.into()], &legs, &result);
-    assert!(
-        ledger.placed(SYMBOL, "desk"),
-        "acked: spot's order id is `desk`"
-    );
-    assert!(
-        h.engine.store().order("desk").is_none(),
-        "the REST ack stores no row"
-    );
-    let now = std::time::Instant::now();
-    let later = now + TERMINAL_GRACE;
-    retire(&h, &mut ledger, now);
-    assert!(
-        ledger.placed_at(SYMBOL, "desk", later),
-        "no read since the ack"
-    );
-
-    let old = h.socket("ws-api/v3").unwrap();
-    h.event(Event::WsClosed {
-        socket: old,
-        code: 1006,
-    });
-    // The reconnect backs off before it dials again.
-    for _ in 0..60 {
-        if h.socket("ws-api/v3") != Some(old) {
-            break;
-        }
-        h.advance(1_000.0);
+    record_caller_ack(&h, &mut ledger, 1, &legs);
+    assert!(ledger.placed(SYMBOL, "28"), "the acked native id");
+    assert!(!ledger.placed(SYMBOL, "desk"), "never the client id");
+    for (status, execution) in [("NEW", "NEW"), ("FILLED", "TRADE")] {
+        h.message(
+            "ws-api/v3",
+            &format!(
+                r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":28,"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","X":"{status}","x":"{execution}","p":"9000","L":"9000","q":"1","z":"1","l":"1","t":101}}}}"#
+            ),
+        );
     }
-    let fresh = h.socket("ws-api/v3").unwrap();
-    assert_ne!(old, fresh, "the user stream reconnected");
-    h.event(Event::WsOpened { socket: fresh });
-    spot_reads(&mut h, 5_000.0);
-    assert!(
-        h.engine.store().order("desk").is_none(),
-        "the read omits it"
-    );
-    retire(&h, &mut ledger, now);
-    assert!(ledger.placed_at(SYMBOL, "desk", now), "its own last fills");
-    assert!(
-        !ledger.placed_at(SYMBOL, "desk", later),
-        "a later reuse of `desk`"
-    );
+    assert!(ledger.placed(SYMBOL, "28"), "its own fills after its close");
+    assert!(!ledger.placed(SYMBOL, "desk"));
 }
 
 /// Review B (1acdf351b7) through real Binance frame shapes: portfolio margin

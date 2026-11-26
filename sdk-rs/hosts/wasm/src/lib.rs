@@ -555,7 +555,11 @@ fn encode(actions: &[Action]) -> String {
     let actions = actions.filter(|action| {
         !matches!(
             action,
-            Action::Notice(Notice::OrderTriggered { .. } | Notice::OrderNativeId { .. })
+            Action::Notice(
+                Notice::OrderTriggered { .. }
+                    | Notice::OrderNativeId { .. }
+                    | Notice::PlacementNativeId { .. }
+            )
         )
     });
     let out: Vec<ActionOut<'_>> = actions
@@ -654,9 +658,11 @@ fn encode(actions: &[Action]) -> String {
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Action::Notice(Notice::OrderTriggered { .. } | Notice::OrderNativeId { .. }) => {
-                unreachable!("filtered above")
-            }
+            Action::Notice(
+                Notice::OrderTriggered { .. }
+                | Notice::OrderNativeId { .. }
+                | Notice::PlacementNativeId { .. },
+            ) => unreachable!("filtered above"),
         })
         .collect();
     #[cfg(not(target_arch = "wasm32"))]

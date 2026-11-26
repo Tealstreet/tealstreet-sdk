@@ -34,8 +34,9 @@ enum AmendShape {
 /// as `<n>` with a generated client id `cl-<n>`. Its amount picks an outcome:
 /// - with a caller-chosen client id: 0.001 rejected; 0.01 Unknown (as Bybit,
 ///   BingX and BloFin classify a duplicate id); 0.02 placed under that id, as
-///   Binance portfolio margin keys orders by client id; 0.025 acked the same
-///   way but with no row yet (on Binance only the stream creates it);
+///   Binance portfolio margin keys orders by client id, its ack naming native
+///   id `n-<n>`; 0.025 acked under that id with no native id; 0.03 acked only
+///   on `ack`, after whatever frames the test streams first;
 /// - without one: 0.03 rejected and 0.04 Unknown, after its receipt.
 ///
 /// A two-order batch reports both legs' generated client ids, then fails
@@ -48,6 +49,9 @@ struct SharedAccount {
     amend: AmendShape,
     prefix: &'static str,
     next: u32,
+    /// A caller-id placement whose ack waits for `ack`: (command, symbol,
+    /// client id, native id).
+    deferred: Option<(u32, String, String, String)>,
 }
 
 fn resting(id: &str, client: &str) -> Order {
@@ -87,6 +91,12 @@ impl Venue for SharedAccount {
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+        if text == "ack" {
+            let (command, symbol, caller, native) = self.deferred.take().expect("a deferred ack");
+            cx.placement_native_id(command, &symbol, &caller, &native);
+            cx.done(command, format!(r#"["{caller}"]"#));
+            return;
+        }
         if let Some(id) = text.strip_prefix("close:") {
             cx.store.set_order_status(id, OrderStatus::Closed);
             return;
@@ -168,10 +178,14 @@ impl Venue for SharedAccount {
                 let symbol = orders[0].symbol.clone();
                 if let Some(caller) = orders[0].client_order_id.clone() {
                     cx.command_progress(command, receipt(&symbol, &caller));
-                    if amount > 0.015 {
-                        if amount < 0.022 {
-                            cx.store.upsert_order(resting(&caller, &caller));
-                        }
+                    let native = format!("n-{fresh}");
+                    if amount > 0.027 {
+                        self.deferred = Some((command, symbol, caller, native));
+                    } else if amount > 0.022 {
+                        cx.done(command, format!(r#"["{caller}"]"#));
+                    } else if amount > 0.015 {
+                        cx.store.upsert_order(resting(&caller, &caller));
+                        cx.placement_native_id(command, &symbol, &caller, &native);
                         cx.done(command, format!(r#"["{caller}"]"#));
                     } else {
                         let outcome = if amount > 0.005 {
@@ -242,6 +256,7 @@ fn login(amend: AmendShape, prefix: &'static str) -> Account<SharedAccount, NoTr
         amend,
         prefix,
         next: 0,
+        deferred: None,
     };
     let mut actor = Account::new(
         Host::new(
@@ -416,21 +431,28 @@ fn a_generated_id_is_forgotten_on_refusal_and_kept_on_unknown() {
     assert!(claims(&a, "cl-a2"), "unknown: kept");
 }
 
-/// Review B (942d22190f), synthetic venue: a caller-chosen id is claimed only
-/// once a placement under it is proven. Bybit reports a duplicate `orderLinkId` as Unknown, and
-/// the duplicate is login B's resting `desk`: A must not claim it.
+/// Review B (942d22190f), synthetic venue: a caller-chosen id never claims;
+/// only a proven placement's native id from its ack does. Bybit reports a
+/// duplicate `orderLinkId` as Unknown, and the duplicate is login B's resting
+/// `desk`: A claims nothing.
 #[test]
-fn a_caller_id_is_claimed_only_once_proven() {
+fn a_caller_id_placement_claims_only_its_acked_native_id() {
     let mut a = login(AmendShape::Okx, "a");
     place_caller(&mut a, 1, 0.01);
-    assert!(!claims(&a, "desk"), "Unknown (a Bybit duplicate id)");
     place_caller(&mut a, 2, 0.001);
-    assert!(!claims(&a, "desk"), "rejected");
+    assert!(!claims(&a, "desk") && !claims(&a, "n-a1") && !claims(&a, "n-a2"));
     place_caller(&mut a, 3, 0.02);
-    assert!(
-        claims(&a, "desk"),
-        "placed: the venue acked it under that id"
-    );
+    assert!(claims(&a, "n-a3"), "acked: its native id");
+    assert!(!claims(&a, "desk"), "never the client id");
+}
+
+/// Review A and B (b515532bfa), synthetic venue: an ack that names no native
+/// id records nothing; it never falls back to the client id.
+#[test]
+fn an_ack_without_a_native_id_records_nothing() {
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.025);
+    assert!(!claims(&a, "desk") && !claims(&a, "n-a1"));
 }
 
 /// Review B (942d22190f, e6e681d490), synthetic venue: a batch claims only the
@@ -457,29 +479,6 @@ fn a_batch_claims_only_its_proven_legs() {
     assert!(!claims(&a, "a1-1"), "the Unknown leg");
 }
 
-/// Review B (942d22190f), synthetic venue: once a caller-chosen id's order closes, the id stops
-/// claiming after `TERMINAL_GRACE`, so B reusing `desk` (Binance allows it
-/// after close) is not claimed by A. A's own late fills inside the grace are.
-#[test]
-fn a_reused_caller_id_is_not_claimed_after_its_order_closed() {
-    use crate::own_placements::TERMINAL_GRACE;
-    let mut a = login(AmendShape::Okx, "a");
-    place_caller(&mut a, 1, 0.02);
-    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
-    assert!(crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later));
-    a.host.engine.handle(
-        1.,
-        Event::WsMessage {
-            socket: SocketId(0),
-            text: "close:desk",
-        },
-    );
-    a.execute();
-    let placements = crate::own_placements::lock(&a.placements);
-    assert!(placements.placed(BTC, "desk"), "its own last fills");
-    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
-}
-
 /// Review B (e49c33ac90): an id-only amend whose id names rows on two symbols
 /// cannot say which it edits, so it records nothing, even though the BTCUSDT
 /// row is this login's.
@@ -494,134 +493,6 @@ fn an_id_only_amend_of_an_id_on_two_symbols_records_nothing() {
     }
 }
 
-/// Review B (e6e681d490), synthetic venue: an order that closed during a
-/// stream gap is simply absent from the reconnect's open-orders snapshot. Its
-/// caller id retires then too, not after 24 h.
-#[test]
-fn a_caller_id_retires_when_a_snapshot_drops_its_order() {
-    use crate::own_placements::TERMINAL_GRACE;
-    let mut a = login(AmendShape::Okx, "a");
-    place_caller(&mut a, 1, 0.02);
-    sees(&mut a, "unrelated", "x");
-    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
-    assert!(crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later));
-    a.host.engine.handle(
-        1.,
-        Event::WsMessage {
-            socket: SocketId(0),
-            text: "drop:desk",
-        },
-    );
-    a.execute();
-    let placements = crate::own_placements::lock(&a.placements);
-    assert!(placements.placed(BTC, "desk"), "its own last fills");
-    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
-}
-
-/// Review A (5f75821a55), synthetic venue: the stream drops between the ack
-/// and the order's first frame, so no row is ever stored; the order fills and
-/// closes in the gap and the reconnect snapshot omits it. The caller id still
-/// retires on that first read after it was recorded, not after 24 h.
-#[test]
-fn a_caller_id_with_no_row_retires_when_the_next_snapshot_omits_it() {
-    use crate::own_placements::TERMINAL_GRACE;
-    let mut a = login(AmendShape::Okx, "a");
-    place_caller(&mut a, 1, 0.025);
-    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
-    assert!(
-        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
-        "no read since the ack: still claimed"
-    );
-    a.host.engine.handle(
-        1.,
-        Event::WsMessage {
-            socket: SocketId(0),
-            text: "drop:desk",
-        },
-    );
-    a.execute();
-    let placements = crate::own_placements::lock(&a.placements);
-    assert!(placements.placed(BTC, "desk"), "its own last fills");
-    assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
-}
-
-fn btc_market() -> safe_cex_engine::model::Market {
-    use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-    Market {
-        id: BTC.into(),
-        symbol: BTC.into(),
-        pretty_symbol: None,
-        base: "BTC".into(),
-        quote: "USDT".into(),
-        active: true,
-        precision: Precision {
-            amount: 0.001,
-            price: 0.1,
-        },
-        limits: Limits {
-            amount: MinMax {
-                min: 0.001,
-                max: 1000.,
-            },
-            leverage: MinMax { min: 1., max: 100. },
-            price: None,
-        },
-        contract_size: None,
-        is_expiring: None,
-        is_inverse: None,
-        is_spot: None,
-        is_perpetual: Some(true),
-        is_read_only: None,
-        taker_fee: None,
-        maker_fee: None,
-    }
-}
-
-/// An empty account-wide open-orders read released at `seq`, committed now.
-fn commit_empty_read(actor: &mut Account<SharedAccount, NoTransport>, seq: u64) {
-    use safe_cex_engine::order_read_cover::{OrderReadMark, OrderReadScope};
-    let read = OrderReadMark {
-        seq,
-        sent: 0.,
-        epoch: 0,
-    };
-    let scope = OrderReadScope::Account {
-        key: "orders",
-        account: &["orders"],
-    };
-    actor
-        .host
-        .engine
-        .store_mut()
-        .commit_orders_read(read, scope, |_| true, Vec::new(), &[]);
-    actor.execute();
-}
-
-/// Review B (1acdf351b7), synthetic venue: an open-orders read released BEFORE
-/// a caller-id placement, committed after its REST ack (which writes no row),
-/// must not retire the id: the ack fences such reads for its symbol. A read
-/// released after the ack that omits the order still retires it.
-#[test]
-fn a_read_released_before_the_ack_does_not_retire_the_caller_id() {
-    use crate::own_placements::TERMINAL_GRACE;
-    let mut a = login(AmendShape::Okx, "a");
-    a.host.engine.store_mut().set_markets(vec![btc_market()]);
-    let stale = a.host.engine.store().order_read_sequence();
-    place_caller(&mut a, 1, 0.025);
-    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
-    commit_empty_read(&mut a, stale);
-    assert!(
-        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
-        "a stale read speaks for no order the ack placed"
-    );
-    let fresh = a.host.engine.store().order_read_sequence();
-    commit_empty_read(&mut a, fresh);
-    assert!(
-        !crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
-        "a read released after the ack omits it: retired"
-    );
-}
-
 fn stream(actor: &mut Account<SharedAccount, NoTransport>, text: &str) {
     actor.host.engine.handle(
         1.,
@@ -633,24 +504,46 @@ fn stream(actor: &mut Account<SharedAccount, NoTransport>, text: &str) {
     actor.execute();
 }
 
-/// Review B (10e8ae20c6), synthetic venue: `desk` #1 closed and its row stays
-/// until the next snapshot (as Binance keeps it). `desk` #2's REST ack lands
-/// before its `NEW` frame, so the only `desk` row is #1's closed one: it must
-/// not retire #2. #2's own row, then its close, does.
+/// Review A and B (b515532bfa), synthetic venue: a marketable order's `NEW`
+/// and close frames land before its REST ack. Whatever rows the frames left,
+/// the ack's native id claims and the client id never does, so `desk`'s own
+/// close changes nothing and a later order reusing `desk` (another native id)
+/// is not claimed.
 #[test]
-fn an_earlier_orders_closed_row_does_not_retire_a_reused_caller_id() {
-    use crate::own_placements::TERMINAL_GRACE;
+fn frames_before_the_ack_still_claim_only_the_acked_native_id() {
+    let mut a = login(AmendShape::Okx, "a");
+    place_caller(&mut a, 1, 0.03);
+    stream(&mut a, "open:desk");
+    stream(&mut a, "close:desk");
+    assert!(!claims(&a, "n-a1"), "not acked yet");
+    stream(&mut a, "ack");
+    assert!(claims(&a, "n-a1"), "its own fills");
+    assert!(!claims(&a, "desk"));
+    assert!(!claims(&a, "n-a2"), "a later order reusing `desk`");
+}
+
+/// Review A and B (b515532bfa), synthetic venue: the ack lands first, then the
+/// order's frames: the native id claims throughout, the client id never.
+#[test]
+fn an_ack_before_the_frames_claims_only_the_acked_native_id() {
     let mut a = login(AmendShape::Okx, "a");
     place_caller(&mut a, 1, 0.02);
+    assert!(claims(&a, "n-a1"));
     stream(&mut a, "close:desk");
-    place_caller(&mut a, 2, 0.025);
-    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
-    let claimed = |a: &Account<SharedAccount, NoTransport>| {
-        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later)
-    };
-    assert!(claimed(&a), "#1's leftover closed row");
-    stream(&mut a, "open:desk");
-    assert!(claimed(&a), "#2 rests");
+    assert!(claims(&a, "n-a1"), "its own late fills");
+    assert!(!claims(&a, "desk"));
+}
+
+/// Review A and B (b515532bfa), synthetic venue: login B reuses `desk` within
+/// the gateway's 10-minute window. A's ledger holds only A's native id, so B's
+/// order (another native id) is never A's, and B claims only its own.
+#[test]
+fn another_login_reusing_a_client_id_is_never_claimed() {
+    let mut a = login(AmendShape::Okx, "a");
+    let mut b = login(AmendShape::Okx, "b");
+    place_caller(&mut a, 1, 0.02);
     stream(&mut a, "close:desk");
-    assert!(!claimed(&a), "#2 closed");
+    place_caller(&mut b, 1, 0.02);
+    assert!(claims(&a, "n-a1") && !claims(&a, "n-b1") && !claims(&a, "desk"));
+    assert!(claims(&b, "n-b1") && !claims(&b, "n-a1") && !claims(&b, "desk"));
 }
