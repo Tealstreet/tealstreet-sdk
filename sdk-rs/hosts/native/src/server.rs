@@ -847,6 +847,9 @@ struct Pending {
     /// Every (symbol, client id) its receipts named, to match a batch's
     /// proven legs by identity.
     sent: Vec<crate::own_placements::Key>,
+    /// A placement's `OwnPlacements::held_rows` at dispatch: rows it may join
+    /// (an OKX full-position TP/SL) but never claims.
+    held: Vec<String>,
 }
 
 struct StartupFailure {
@@ -1143,6 +1146,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             symbols,
                             &pending.legs,
                             &result,
+                            &pending.held,
                         );
                     }
                     if let Some(pending) = pending
@@ -1893,6 +1897,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 .collect(),
             _ => Vec::new(),
         };
+        let held = match (&command, &own) {
+            (Command::PlaceOrders { .. }, Some(symbols)) => {
+                crate::own_placements::lock(&self.placements)
+                    .held_rows(symbols, self.host.engine.store().orders())
+            }
+            _ => Vec::new(),
+        };
         self.pending.insert(
             internal,
             Pending {
@@ -1902,6 +1913,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 recorded: Vec::new(),
                 legs,
                 sent: Vec::new(),
+                held,
             },
         );
         self.handle(command);

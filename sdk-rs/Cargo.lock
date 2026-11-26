@@ -4172,6 +4172,7 @@ dependencies = [
  "safe-cex-engine",
  "safe-cex-store-frames",
  "safe-cex-venue-binance",
+ "safe-cex-venue-okx",
  "safe-cex-venues",
  "serde",
  "serde_json",

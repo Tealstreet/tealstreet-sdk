@@ -175,7 +175,19 @@ impl OwnPlacements {
     /// An id equal to a caller-chosen client id (a client-keyed venue's
     /// completion) never claims: that venue's native id comes from
     /// `record_placement_native_id`.
-    pub fn record_completion(&mut self, symbols: &[String], legs: &[Leg], result: &str) {
+    ///
+    /// `held` lists the rows already open on the symbol when the command was
+    /// dispatched that are not this account's (`held_rows`). A completion id
+    /// naming one of them is an order the command joined, not one it placed
+    /// (OKX completes a full-position join with the held algo's id, AGT-333),
+    /// so it records nothing.
+    pub fn record_completion(
+        &mut self,
+        symbols: &[String],
+        legs: &[Leg],
+        result: &str,
+        held: &[String],
+    ) {
         let [symbol] = symbols else {
             return;
         };
@@ -183,10 +195,38 @@ impl OwnPlacements {
             return;
         }
         for id in result_ids(result) {
-            if !caller_chosen(legs, &id) {
+            if !caller_chosen(legs, &id) && !names_held(held, &id) {
                 self.record(symbol, &id);
             }
         }
+    }
+
+    /// The ids and parent ids of `orders` on `symbols` that this account did
+    /// not place: what a placement dispatched now may join but never claims.
+    pub fn held_rows(
+        &self,
+        symbols: &[String],
+        orders: &[safe_cex_engine::model::Order],
+    ) -> Vec<String> {
+        let now = Instant::now();
+        // A leg row (`{algoId}_sl`) is this account's when its native order is.
+        let ours = |order: &safe_cex_engine::model::Order| {
+            [
+                Some(order.id.as_str()),
+                order.id.split_once('_').map(|(native, _)| native),
+                order.parent_id.as_deref(),
+                order.client_order_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|identity| self.placed_at(&order.symbol, identity, now))
+        };
+        orders
+            .iter()
+            .filter(|order| symbols.contains(&order.symbol) && !ours(order))
+            .flat_map(|order| [Some(order.id.clone()), order.parent_id.clone()])
+            .flatten()
+            .collect()
     }
 
     /// A failed batch's legs the venue proved accepted. A leg is matched by
@@ -330,6 +370,14 @@ impl OwnPlacements {
             .get(&(symbol.to_owned(), identity.to_owned()))
             .is_some_and(|expiry| now < *expiry)
     }
+}
+
+/// Whether `id` is a held row, or the native order a held row is a leg of
+/// (OKX stores an algo's legs as `{algoId}_sl`/`_tp`). Matching a leg by its
+/// prefix only ever withholds a claim, the fail-open side.
+fn names_held(held: &[String], id: &str) -> bool {
+    held.iter()
+        .any(|row| row == id || row.strip_prefix(id).is_some_and(|leg| leg.starts_with('_')))
 }
 
 fn caller_chosen(legs: &[Leg], identity: &str) -> bool {
@@ -508,10 +556,57 @@ mod tests {
     fn a_completion_records_ids_only_under_its_one_symbol() {
         let mut placements = OwnPlacements::default();
         let legs: Vec<Leg> = vec![(BTC.into(), None), ("ETHUSDT".into(), None)];
-        placements.record_completion(&[BTC.into(), "ETHUSDT".into()], &legs, r#"["1","2"]"#);
+        placements.record_completion(&[BTC.into(), "ETHUSDT".into()], &legs, r#"["1","2"]"#, &[]);
         assert!(!placements.placed(BTC, "1") && !placements.placed("ETHUSDT", "2"));
-        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["3"]"#);
+        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["3"]"#, &[]);
         assert!(placements.placed(BTC, "3") && !placements.placed("ETHUSDT", "3"));
+    }
+
+    /// AGT-333: OKX completes a full-position join with the HELD algo's id.
+    /// Another login's held algo (stored as its `_sl` leg) is never claimed by
+    /// the login that joined it; this login's own held algo still is, and a
+    /// fresh id beside it records as before. Synthetic rows.
+    #[test]
+    fn a_completion_never_claims_an_order_it_joined() {
+        use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+        let row = |id: &str, symbol: &str| Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: symbol.into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 36000.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: true,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "88");
+        let orders = [
+            row("77_sl", BTC),
+            row("88_sl", BTC),
+            row("99_sl", "ETHUSDT"),
+        ];
+        let held = placements.held_rows(&[BTC.into()], &orders);
+        assert_eq!(held, ["77_sl"], "only another login's rows on this symbol");
+        let one = [(BTC.to_owned(), None)];
+        placements.record_completion(&[BTC.into()], &one, r#"["77"]"#, &held);
+        assert!(
+            !placements.placed(BTC, "77"),
+            "a joined algo is not placed here"
+        );
+        placements.record_completion(&[BTC.into()], &one, r#"["7","770"]"#, &held);
+        assert!(placements.placed(BTC, "7") && placements.placed(BTC, "770"));
     }
 
     /// Review B (e6e681d490): Coinbase completes a repeated client id with the
@@ -522,14 +617,14 @@ mod tests {
         let mut placements = OwnPlacements::default();
         placements.set_idempotent_client_ids();
         let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
-        placements.record_completion(&[BTC.into()], &desk, r#"["their-order"]"#);
+        placements.record_completion(&[BTC.into()], &desk, r#"["their-order"]"#, &[]);
         placements.record_proven_legs(
             &[(BTC.into(), "desk".into())],
             &desk,
             &[placed_leg(0, Some("desk"), &["their-order"])],
         );
         assert!(!placements.placed(BTC, "their-order"));
-        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["mine"]"#);
+        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["mine"]"#, &[]);
         assert!(placements.placed(BTC, "mine"));
     }
 
@@ -645,7 +740,7 @@ mod tests {
     fn only_an_acked_native_id_claims_a_caller_id_placement() {
         let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
         let mut placements = OwnPlacements::default();
-        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#);
+        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#, &[]);
         assert!(!placements.placed(BTC, "desk"), "a client-keyed completion");
         placements.record_placement_native_id(&desk, BTC, "other", "n-other");
         placements.record_placement_native_id(&desk, "ETHUSDT", "desk", "n-eth");

@@ -188,6 +188,14 @@ identities its own clients placed, read through `AccountHandle::placements`
 - **Triggered children.** A venue's `Notice::OrderTriggered` adds one (an OKX
   stop's `ordId`, a Binance futures algo's `ALGO_UPDATE.ai`) when the algo it
   names, by id or client id, is already recorded.
+- **Joined orders** (AGT-333). A placement's completion id that names a row
+  already open on its symbol at dispatch, and not this login's, records nothing
+  (`OwnPlacements::held_rows`): OKX completes a full-position leg that joins
+  another login's held algo with that algo's id. A held leg row (`{algoId}_sl`)
+  matches its native id; that prefix match only ever withholds a claim.
+- **OKX TP/SL legs** placed with an order are their own `order-algo` writes,
+  never `attachAlgoOrds`, so each leg's `algoId` is in its completion and the
+  child its trigger creates links as above (`tests/own_placements_okx.rs`).
 
 Every identity is keyed by its symbol (venue ids repeat across symbols) and
 expires 24 hours after it was last recorded (`own_placements::RETENTION`); a
