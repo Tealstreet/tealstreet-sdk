@@ -10,6 +10,9 @@ use std::rc::Rc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::LocalSet;
 
+#[path = "support/two_owner_deferral.rs"]
+mod two_owner_deferral;
+
 #[derive(Default)]
 struct Port {
     store: RefCell<AlgoStore>,
