@@ -176,7 +176,10 @@ identities its own clients placed, read through `AccountHandle::placements`
   without listing it (`Store::orders_reads`), whether or not a row was ever
   seen: on Binance only the stream creates the row, so an order that fills in
   a stream gap after its acknowledgement never has one. A reuse elsewhere is
-  then not claimed. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
+  then not claimed. An acknowledged caller-id placement fences its symbol
+  (`Store::fence_order_reads`), so a read released before the acknowledgement
+  cannot retire it. A client-keyed venue's `Notice::OrderNativeId` records each
+  order's native id (`native_id`), which fill keys use instead of the client id. **Coinbase** (`coinbase`, `coinbasespot`) answers a repeated client
   id with the existing order's id, which may be another login's, so no
   caller-id placement claims there at all (`set_idempotent_client_ids`).
 - **Amends** record their receipts and completion ids (Hyperliquid's

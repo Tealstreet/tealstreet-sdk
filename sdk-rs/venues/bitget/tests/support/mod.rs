@@ -122,7 +122,11 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::AccountAuth { .. } | Notice::OrderTriggered { .. }) => {}
+                Action::Notice(
+                    Notice::AccountAuth { .. }
+                    | Notice::OrderTriggered { .. }
+                    | Notice::OrderNativeId { .. },
+                ) => {}
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
                     self.progress.push((command, receipts))
                 }

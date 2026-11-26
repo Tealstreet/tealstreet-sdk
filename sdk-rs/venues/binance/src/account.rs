@@ -2476,6 +2476,10 @@ impl BinanceFutures {
                 price,
                 amount: last_quantity,
             });
+            // Portfolio margin keys the order by a reusable client id; its
+            // claim keys on the native id (AGT-196). Native only.
+            #[cfg(not(target_arch = "wasm32"))]
+            cx.order_native_id(&o.s, &id, &o.i.to_string());
         }
         let is_terminal = matches!(
             status,
@@ -3493,6 +3497,10 @@ impl BinanceFutures {
                 price: last_price.expect("validated execution price"),
                 amount: last_quantity.expect("validated execution quantity"),
             });
+            // Spot keys the order by a reusable client id; its claim keys on
+            // the native id (AGT-196). Native only.
+            #[cfg(not(target_arch = "wasm32"))]
+            cx.order_native_id(&event.s, &id, &native.to_string());
         }
         let (previous, was_terminal) = self
             .account

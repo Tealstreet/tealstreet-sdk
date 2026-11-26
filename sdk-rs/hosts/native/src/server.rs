@@ -1144,6 +1144,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             &pending.legs,
                             &result,
                         );
+                        self.fence_caller_reads(&pending.legs);
                     }
                     if let Some(pending) = pending
                         && let Some(client) = pending.client
@@ -1168,6 +1169,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
                             placements.forget(&pending.recorded);
                         } else if let Some(elements) = &error.elements {
                             placements.record_proven_legs(&pending.sent, &pending.legs, elements);
+                            drop(placements);
+                            self.fence_caller_reads(&pending.legs);
                         }
                     }
                     if let Some(pending) = pending
@@ -1210,6 +1213,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 // Not sent to clients: it only labels this account's own fills.
+                Notice::OrderNativeId {
+                    symbol,
+                    order_id,
+                    native_id,
+                } => {
+                    crate::own_placements::lock(&self.placements)
+                        .note_native_id(&symbol, &order_id, &native_id);
+                }
                 Notice::OrderTriggered {
                     symbol,
                     order_id,
@@ -1874,6 +1885,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
             },
         );
         self.handle(command);
+    }
+
+    /// AGT-196: an acknowledged placement under a caller-chosen id may have no
+    /// row yet (Binance's REST ack writes none). A read released before the
+    /// ack could commit after it and omit the order, retiring a live id, so
+    /// such reads stop speaking for its symbol.
+    fn fence_caller_reads(&mut self, legs: &[crate::own_placements::Leg]) {
+        let store = self.host.engine.store_mut();
+        for (symbol, _) in legs.iter().filter(|(_, caller)| caller.is_some()) {
+            store.fence_order_reads(symbol);
+        }
     }
 
     /// AGT-196: a caller-chosen id whose order is now closed or canceled, or

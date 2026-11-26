@@ -123,10 +123,12 @@ never from a snapshot or a rejoin replay:
   connect the same venue account; each gets its own resident and both private
   streams carry every fill on it. The box reports every fill, as before, plus
   `fillKey` and `placedHere`. `fillKey` is a domain-separated hash of the
-  venue account, venue, symbol and order id: the same on every resident of
-  that venue account and on no other, so per-symbol order ids (Binance USDⓈ-M)
-  and caller-chosen ids (portfolio margin) cannot collide across unrelated
-  accounts. The venue account (`accounts::identity::venue_account`) hashes the
+  venue account, venue, symbol and the venue's own order id: the same on every
+  resident of that venue account and on no other, so per-symbol order ids
+  (Binance USDⓈ-M) cannot collide across unrelated accounts. Binance spot and
+  portfolio margin key orders by a reusable client id, so there the key uses
+  the native id their fill frames carry (`Notice::OrderNativeId`): two orders
+  reusing `desk` never share a key. The venue account (`accounts::identity::venue_account`) hashes the
   venue, network, Bybit site, subaccount, vault and API key, never the
   Tealstreet user; a second API key on the same venue account is another
   digest, so its fills stay unclaimed there. No id or key leaves the box. A key the venue-account hash cannot read

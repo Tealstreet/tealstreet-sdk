@@ -345,6 +345,17 @@ pub enum Notice {
         order_id: String,
         by: Vec<String>,
     },
+    /// A client-keyed venue's order and the venue's own id for it, sent with
+    /// its fills. Binance spot and portfolio margin key orders by the caller's
+    /// client id, which a later order may reuse; a fill's claim keys on the
+    /// native id so two orders sharing one client id never share a claim
+    /// (AGT-196). Native hosts only, like `OrderTriggered`.
+    #[cfg(not(target_arch = "wasm32"))]
+    OrderNativeId {
+        symbol: String,
+        order_id: String,
+        native_id: String,
+    },
     /// Startup cannot complete without intervention (bad configuration or an
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
@@ -3264,6 +3275,26 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
         self.core().command_progress(command, receipts)
+    }
+
+    /// `Notice::OrderNativeId`: `order_id` (a client id) is the venue's order
+    /// `native_id`. Nothing is sent when they are equal or either is empty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn order_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
+        if !symbol.is_empty()
+            && !order_id.is_empty()
+            && !native_id.is_empty()
+            && order_id != native_id
+        {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::OrderNativeId {
+                    symbol: symbol.to_owned(),
+                    order_id: order_id.to_owned(),
+                    native_id: native_id.to_owned(),
+                }));
+        }
     }
 
     /// `Notice::OrderTriggered`; empty identities are dropped, and nothing is

@@ -934,6 +934,14 @@ impl Store {
         self.set_loaded(|loaded| loaded.orders = true);
     }
 
+    /// A host learned of an order write on `symbol` that no row shows yet (a
+    /// REST acknowledgement): reads released before now no longer speak for
+    /// its rows, exactly as if they had changed. Native hosts only (AGT-196).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn fence_order_reads(&mut self, symbol: &str) {
+        self.read_covers.mutated(symbol);
+    }
+
     /// How many order reads that speak for `symbol` have committed: snapshots
     /// of every order, and reads covering that symbol. It only grows.
     #[cfg(not(target_arch = "wasm32"))]

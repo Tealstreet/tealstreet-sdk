@@ -68,6 +68,9 @@ pub struct OwnPlacements {
     /// The venue completes a repeated client id with the existing order's id
     /// (Coinbase), so a caller-id placement proves nothing about who placed it.
     idempotent_client_ids: bool,
+    /// A client-keyed venue's native id for each order, by (symbol, client
+    /// id), with its expiry: fill keys use it (`Notice::OrderNativeId`).
+    native_ids: HashMap<Key, (String, Instant)>,
 }
 
 impl OwnPlacements {
@@ -132,6 +135,36 @@ impl OwnPlacements {
     /// Coinbase: a repeated client id completes with the existing order's id.
     pub fn set_idempotent_client_ids(&mut self) {
         self.idempotent_client_ids = true;
+    }
+
+    /// A client-keyed venue named `native_id` for its order `order_id`, the
+    /// latest such order under that client id. Bounded like the claims.
+    pub fn note_native_id(&mut self, symbol: &str, order_id: &str, native_id: &str) {
+        let now = Instant::now();
+        let key = (symbol.to_owned(), order_id.to_owned());
+        if !self.native_ids.contains_key(&key) && self.native_ids.len() >= CAPACITY {
+            self.native_ids.retain(|_, (_, expiry)| now < *expiry);
+            if self.native_ids.len() >= CAPACITY
+                && let Some(oldest) = self
+                    .native_ids
+                    .iter()
+                    .min_by_key(|(_, (_, expiry))| *expiry)
+                    .map(|(key, _)| key.clone())
+            {
+                self.native_ids.remove(&oldest);
+            }
+        }
+        self.native_ids
+            .insert(key, (native_id.to_owned(), now + RETENTION));
+    }
+
+    /// The venue's own id for `order_id` on `symbol`, when it keys orders by a
+    /// client id; `None` elsewhere, where `order_id` is already native.
+    pub fn native_id(&self, symbol: &str, order_id: &str) -> Option<&str> {
+        self.native_ids
+            .get(&(symbol.to_owned(), order_id.to_owned()))
+            .filter(|(_, expiry)| Instant::now() < *expiry)
+            .map(|(native, _)| native.as_str())
     }
 
     /// Whether `set_idempotent_client_ids` applies to this account.

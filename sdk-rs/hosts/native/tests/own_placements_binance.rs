@@ -358,15 +358,18 @@ fn spot_ready() -> Harness {
     h.respond("/api/v3/ticker/24hr", 200, r#"[{"symbol":"BTCUSDT","lastPrice":"10000","bidPrice":"9999","askPrice":"10001","priceChangePercent":"0","volume":"1","quoteVolume":"10000"}]"#);
     let socket = h.socket("ws-api/v3").unwrap();
     h.event(Event::WsOpened { socket });
-    spot_reads(&mut h);
+    spot_reads(&mut h, 0.0);
     h
 }
 
 /// Answer the spot user stream's subscribe and its account and open-orders
-/// reads (none open), however many rounds the engine asks for.
-fn spot_reads(h: &mut Harness) {
+/// reads (none open), however many rounds the engine asks for, advancing
+/// `step_ms` before each round (a reconnect re-reads on a timer).
+fn spot_reads(h: &mut Harness, step_ms: f64) {
     for _ in 0..8 {
-        h.advance(5_000.0);
+        if step_ms > 0.0 {
+            h.advance(step_ms);
+        }
         for path in ["/api/v3/account", "/api/v3/openOrders"] {
             if h.has_request(path) {
                 let body = if path.ends_with("account") {
@@ -458,7 +461,7 @@ fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
     let fresh = h.socket("ws-api/v3").unwrap();
     assert_ne!(old, fresh, "the user stream reconnected");
     h.event(Event::WsOpened { socket: fresh });
-    spot_reads(&mut h);
+    spot_reads(&mut h, 5_000.0);
     assert!(
         h.engine.store().order("desk").is_none(),
         "the read omits it"
@@ -468,5 +471,59 @@ fn a_spot_caller_id_retires_when_the_reconnect_read_omits_its_order() {
     assert!(
         !ledger.placed_at(SYMBOL, "desk", later),
         "a later reuse of `desk`"
+    );
+}
+
+/// Review B (1acdf351b7) through real Binance frame shapes: portfolio margin
+/// and spot fills of two orders reusing the client id `desk` each carry their
+/// own native order id (`i`), which the fill claim keys on.
+#[test]
+fn client_keyed_fills_name_each_orders_native_id() {
+    let mut pm = pm_ready();
+    for (native, trade) in [(8886774, 1), (8886775, 2)] {
+        pm.message(
+            "/pm/ws",
+            &format!(
+                r#"{{"fs":"UM","e":"ORDER_TRADE_UPDATE","T":1,"E":1,"o":{{"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","q":"0.002","p":"91000","ap":"91000","sp":"0","x":"TRADE","X":"FILLED","i":{native},"l":"0.002","z":"0.002","L":"91000","T":1,"t":{trade},"b":"0","a":"0","m":false,"R":false,"ps":"BOTH","rp":"0"}}}}"#
+            ),
+        );
+    }
+    assert_eq!(
+        pm.native_ids,
+        [
+            (
+                "BTCUSDT".to_owned(),
+                "desk".to_owned(),
+                "8886774".to_owned()
+            ),
+            (
+                "BTCUSDT".to_owned(),
+                "desk".to_owned(),
+                "8886775".to_owned()
+            ),
+        ]
+    );
+
+    let mut spot = spot_ready();
+    for (native, trade) in [(28, 101), (29, 102)] {
+        spot.message(
+            "ws-api/v3",
+            &format!(
+                r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":{native},"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","X":"NEW","x":"NEW","p":"9000","L":"0","q":"1","z":"0","l":"0"}}}}"#
+            ),
+        );
+        spot.message(
+            "ws-api/v3",
+            &format!(
+                r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":{native},"s":"BTCUSDT","c":"desk","S":"BUY","o":"LIMIT","f":"GTC","X":"FILLED","x":"TRADE","p":"9000","L":"9000","q":"1","z":"1","l":"1","t":{trade}}}}}"#
+            ),
+        );
+    }
+    assert_eq!(
+        spot.native_ids,
+        [
+            ("BTCUSDT".to_owned(), "desk".to_owned(), "28".to_owned()),
+            ("BTCUSDT".to_owned(), "desk".to_owned(), "29".to_owned()),
+        ]
     );
 }

@@ -1800,7 +1800,8 @@ async fn routed_signed_network_notices(
             Notice::CommandProgress { .. }
             | Notice::Deactivate
             | Notice::AccountAuth { .. }
-            | Notice::OrderTriggered { .. } => String::new(),
+            | Notice::OrderTriggered { .. }
+            | Notice::OrderNativeId { .. } => String::new(),
         };
         for forbidden in [
             NOTICE_API_KEY,

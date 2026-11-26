@@ -115,6 +115,8 @@ pub struct Harness {
     pub deferred: Option<Deferred>,
     /// `Notice::OrderTriggered`: (symbol, order id, its algo's identities).
     pub triggered: Vec<(String, String, Vec<String>)>,
+    /// `Notice::OrderNativeId`: (symbol, client-keyed order id, native id).
+    pub native_ids: Vec<(String, String, String)>,
 }
 
 impl Harness {
@@ -192,6 +194,7 @@ impl Harness {
             progress_at_request: Vec::new(),
             deferred,
             triggered: Vec::new(),
+            native_ids: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -313,6 +316,11 @@ impl Harness {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::Notice(Notice::AccountAuth { .. }) => {}
+                Action::Notice(Notice::OrderNativeId {
+                    symbol,
+                    order_id,
+                    native_id,
+                }) => self.native_ids.push((symbol, order_id, native_id)),
                 Action::Notice(Notice::OrderTriggered {
                     symbol,
                     order_id,

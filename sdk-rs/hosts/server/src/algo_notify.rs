@@ -78,9 +78,10 @@ impl AlgoNotify {
 
     /// A fill carries its claim: the user-independent order key and whether
     /// this account placed the order (AGT-196, decided by the gateway).
-    fn emit_fill(&self, draft: Draft, symbol: &str, order_id: &str, placed_here: bool) {
+    /// `key_id` is the venue's own order id.
+    fn emit_fill(&self, draft: Draft, symbol: &str, key_id: &str, placed_here: bool) {
         let mut notification = self.build(draft);
-        notification.fill_key = Some(crate::host_notify::fill_key(&self.scope, symbol, order_id));
+        notification.fill_key = Some(crate::host_notify::fill_key(&self.scope, symbol, key_id));
         notification.placed_here = Some(placed_here);
         self.notifier.push(notification);
     }
@@ -324,6 +325,12 @@ impl Tap {
                 fill.identities = identities;
             }
             let placed_here = self.placed_here(&symbol, &order_id, &fill.identities);
+            // A client-keyed venue's order id is a reusable client id: the
+            // claim keys on the venue's own id, so two orders sharing a client
+            // id never share a key (AGT-196).
+            let key_id = safe_cex_native::own_placements::lock(&self.placements)
+                .native_id(&symbol, &order_id)
+                .map_or_else(|| order_id.clone(), str::to_owned);
             // `filled` only on proof: an IOC/capped market order whose remainder
             // was cancelled in the fill's own batch must not read as filled.
             let (verb, natural_key) = match row(store, &symbol, &order_id).or(fill.row) {
@@ -353,7 +360,7 @@ impl Tap {
                     )),
                 },
                 &fill.symbol,
-                &order_id,
+                &key_id,
                 placed_here,
             );
         }

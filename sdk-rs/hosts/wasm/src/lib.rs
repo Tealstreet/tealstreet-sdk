@@ -549,11 +549,15 @@ fn encode(actions: &[Action]) -> String {
         return String::new();
     }
     let actions = actions.iter();
-    // Native builds of this crate (its tests) also see the host-only
-    // `OrderTriggered` notice (AGT-196); a page never gets it.
+    // Native builds of this crate (its tests) also see the host-only fill
+    // claim notices (AGT-196); a page never gets them.
     #[cfg(not(target_arch = "wasm32"))]
-    let actions =
-        actions.filter(|action| !matches!(action, Action::Notice(Notice::OrderTriggered { .. })));
+    let actions = actions.filter(|action| {
+        !matches!(
+            action,
+            Action::Notice(Notice::OrderTriggered { .. } | Notice::OrderNativeId { .. })
+        )
+    });
     let out: Vec<ActionOut<'_>> = actions
         .map(|action| match action {
             #[cfg(feature = "address-nonce")]
@@ -650,7 +654,9 @@ fn encode(actions: &[Action]) -> String {
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Action::Notice(Notice::OrderTriggered { .. }) => unreachable!("filtered above"),
+            Action::Notice(Notice::OrderTriggered { .. } | Notice::OrderNativeId { .. }) => {
+                unreachable!("filtered above")
+            }
         })
         .collect();
     #[cfg(not(target_arch = "wasm32"))]

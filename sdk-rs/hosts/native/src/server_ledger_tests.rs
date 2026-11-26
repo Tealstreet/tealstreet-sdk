@@ -539,3 +539,80 @@ fn a_caller_id_with_no_row_retires_when_the_next_snapshot_omits_it() {
     assert!(placements.placed(BTC, "desk"), "its own last fills");
     assert!(!placements.placed_at(BTC, "desk", later), "a later reuse");
 }
+
+fn btc_market() -> safe_cex_engine::model::Market {
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
+    Market {
+        id: BTC.into(),
+        symbol: BTC.into(),
+        pretty_symbol: None,
+        base: "BTC".into(),
+        quote: "USDT".into(),
+        active: true,
+        precision: Precision {
+            amount: 0.001,
+            price: 0.1,
+        },
+        limits: Limits {
+            amount: MinMax {
+                min: 0.001,
+                max: 1000.,
+            },
+            leverage: MinMax { min: 1., max: 100. },
+            price: None,
+        },
+        contract_size: None,
+        is_expiring: None,
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: Some(true),
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }
+}
+
+/// An empty account-wide open-orders read released at `seq`, committed now.
+fn commit_empty_read(actor: &mut Account<SharedAccount, NoTransport>, seq: u64) {
+    use safe_cex_engine::order_read_cover::{OrderReadMark, OrderReadScope};
+    let read = OrderReadMark {
+        seq,
+        sent: 0.,
+        epoch: 0,
+    };
+    let scope = OrderReadScope::Account {
+        key: "orders",
+        account: &["orders"],
+    };
+    actor
+        .host
+        .engine
+        .store_mut()
+        .commit_orders_read(read, scope, |_| true, Vec::new(), &[]);
+    actor.execute();
+}
+
+/// Review B (1acdf351b7), synthetic venue: an open-orders read released BEFORE
+/// a caller-id placement, committed after its REST ack (which writes no row),
+/// must not retire the id: the ack fences such reads for its symbol. A read
+/// released after the ack that omits the order still retires it.
+#[test]
+fn a_read_released_before_the_ack_does_not_retire_the_caller_id() {
+    use crate::own_placements::TERMINAL_GRACE;
+    let mut a = login(AmendShape::Okx, "a");
+    a.host.engine.store_mut().set_markets(vec![btc_market()]);
+    let stale = a.host.engine.store().order_read_sequence();
+    place_caller(&mut a, 1, 0.025);
+    let later = std::time::Instant::now() + TERMINAL_GRACE + Duration::from_secs(1);
+    commit_empty_read(&mut a, stale);
+    assert!(
+        crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
+        "a stale read speaks for no order the ack placed"
+    );
+    let fresh = a.host.engine.store().order_read_sequence();
+    commit_empty_read(&mut a, fresh);
+    assert!(
+        !crate::own_placements::lock(&a.placements).placed_at(BTC, "desk", later),
+        "a read released after the ack omits it: retired"
+    );
+}

@@ -752,6 +752,35 @@ async fn a_claim_never_crosses_symbols() {
     assert_eq!(claimed, [true, false, false]);
 }
 
+/// Review B (1acdf351b7): Binance spot and portfolio margin key orders by a
+/// client id a later order may reuse. Two orders reusing `desk` on one symbol
+/// must not share a key, or a claim on the first withholds the second; the key
+/// is the venue's own order id from the fill's frame.
+#[tokio::test(start_paused = true)]
+async fn orders_reusing_one_client_id_get_different_fill_keys() {
+    let placements = Placements::default();
+    let (tap, notifier) = tap_for("auth0|u1", true, false, placements.clone());
+    let scope = Scope::new("auth0|u1", "bybit", "synthetic-main", "venue-account");
+    let mut keys = Vec::new();
+    for native in ["111", "222"] {
+        placements
+            .lock()
+            .unwrap()
+            .note_native_id("BTCUSDT", "desk", native);
+        tap.record_fills(&[fill("desk", 1.0)], &store(Vec::new()));
+        tap.flush_fills(&store(Vec::new()), true);
+        let sent = sent(&notifier);
+        let key = sent.last().unwrap()["fillKey"].as_str().unwrap().to_owned();
+        assert_eq!(key, crate::host_notify::fill_key(&scope, "BTCUSDT", native));
+        keys.push(key);
+    }
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(
+        keys[0],
+        crate::host_notify::fill_key(&scope, "BTCUSDT", "desk")
+    );
+}
+
 /// One fill's key on a tap for `user` connected to `venue_account`.
 async fn fill_key_on(user: &str, venue_account: &str, fill: Fill) -> Value {
     let notifier = HostNotifier::unstarted();
