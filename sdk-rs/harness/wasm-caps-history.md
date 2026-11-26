@@ -1831,3 +1831,19 @@ of PR head `eb4c7763b77b3856077e4ab9c27db8517f7d3384` into master
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | backpack | 2225222 | 2225152 | 2236416 |
+
+## 2026-11-26 — #3665 signed builder-fee exemptions raise the lighter cap
+
+#3665 verifies Tealstreet-signed Lighter builder-fee exemptions with strict
+Ed25519 (`safe_cex_crypto::ed25519::verify` in `venues/lighter/src/builder_exemption.rs`),
+which links the curve arithmetic into the lighter family for the first time. The
+module measures 19673 B over its ceiling and about 30 KB above master's last
+reserved size. Rule-17 raise per `harness/CLAUDE.md`, generated with
+`update-wasm-caps.mjs` from PR run 45827867019 (sealed source
+`f7f6bc49b4ba4d9e1fa3e95641f66c3719832c72`, the merge of PR head
+`d493637153d8d623a1425f01e53a301863438d05` into master
+`4fb0eb81ac8eac8b43a92f540d407b554487593f`), filtered to lighter.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| lighter | 2432217 | 2412544 | 2443264 |
