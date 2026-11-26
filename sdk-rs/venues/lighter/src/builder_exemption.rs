@@ -21,6 +21,16 @@ pub const DOMAIN: &str = "tealstreet/lighter-builder-exemption/v1";
 /// list requires owner review; `keys_fingerprint` is pinned by a test.
 pub const KEYS: &[(u32, [u8; 32])] = &[];
 
+/// Test-only signing seed and key id, accepted beside [`KEYS`] only with the
+/// `builder-exemption-test-key` feature, which only this crate's tests enable.
+#[cfg(feature = "builder-exemption-test-key")]
+pub const TEST_SEED: [u8; 32] = [0x5e; 32];
+#[cfg(feature = "builder-exemption-test-key")]
+pub const TEST_KEY_ID: u32 = 999_999_999;
+
+#[cfg(all(feature = "builder-exemption-test-key", target_arch = "wasm32"))]
+compile_error!("builder-exemption-test-key must never reach a shipped WASM build");
+
 /// The longest validity accepted, even for a correctly signed token.
 pub const MAX_LIFETIME_S: u64 = 400 * 86_400;
 
@@ -118,6 +128,22 @@ pub fn verify(
         }),
         _ => Err("invalid exemption signature"),
     }
+}
+
+/// [`verify`] against the keys this build accepts: [`KEYS`], plus the test key
+/// in test builds.
+pub fn verify_accepted(token: &str, network: &str) -> Result<Exemption, &'static str> {
+    #[cfg(feature = "builder-exemption-test-key")]
+    {
+        let mut keys = KEYS.to_vec();
+        keys.push((
+            TEST_KEY_ID,
+            ed25519::public_key(&TEST_SEED).map_err(|_| "unknown exemption key")?,
+        ));
+        verify(token, network, &keys)
+    }
+    #[cfg(not(feature = "builder-exemption-test-key"))]
+    verify(token, network, KEYS)
 }
 
 /// A short, stable fingerprint of [`KEYS`] (FNV-1a over ids and keys), pinned by

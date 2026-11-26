@@ -2201,3 +2201,140 @@ fn an_exemption_signed_by_an_unlisted_key_keeps_the_builder_fee() {
         json!({"1":158385,"2":250,"3":0})
     );
 }
+
+const EXEMPT_ACCOUNT: u64 = 718_895;
+
+fn test_exemption(network: &str, account: u64, expires: u64) -> String {
+    use safe_cex_venue_lighter::builder_exemption::{TEST_KEY_ID, TEST_SEED, payload, token};
+    let signed = payload(network, account, expires, TEST_KEY_ID);
+    let sig = safe_cex_crypto::ed25519::sign(signed.as_bytes(), &TEST_SEED).unwrap();
+    token(account, expires, TEST_KEY_ID, &sig)
+}
+
+fn exempt_options(robinhood: bool, token: String) -> Options {
+    let mut opts = options();
+    opts.robinhood = robinhood;
+    opts.builder_exemption = Some(token);
+    opts
+}
+
+#[test]
+fn a_valid_exemption_skips_the_tier_and_approval_reads_and_signs_without_attributes() {
+    let expires = NOW as u64 / 1000 + 86_400;
+    for (robinhood, network) in [(false, "mainnet"), (true, "robinhood")] {
+        let token = test_exemption(network, EXEMPT_ACCOUNT, expires);
+        let (mut e, _) = ready_with(exempt_options(robinhood, token));
+        place(&mut e, vec![limit()]);
+        let nonce = http(&mut e, "nextNonce");
+        assert!(
+            !nonce.url.contains("accountLimits") && !nonce.url.contains("/account?"),
+            "{network}"
+        );
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let r = http(&mut e, "sendTx");
+        assert!(wire(&r).get("L2TxAttributes").is_none(), "{network}");
+    }
+}
+
+#[test]
+fn an_exemption_for_another_network_or_account_keeps_the_builder_fee() {
+    let expires = NOW as u64 / 1000 + 86_400;
+    for (robinhood, network, account) in [
+        (true, "mainnet", EXEMPT_ACCOUNT),
+        (false, "robinhood", EXEMPT_ACCOUNT),
+        (false, "mainnet", EXEMPT_ACCOUNT + 1),
+        (true, "robinhood", EXEMPT_ACCOUNT + 1),
+    ] {
+        let token = test_exemption(network, account, expires);
+        let (mut e, _) = ready_with(exempt_options(robinhood, token));
+        place(&mut e, vec![limit()]);
+        let builder = if robinhood { 47_296 } else { 158_385 };
+        let tier = http(&mut e, "accountLimits");
+        reply(
+            &mut e,
+            &tier,
+            200,
+            r#"{"code":200,"user_tier_name":"plus"}"#,
+        );
+        let approval = http(&mut e, "/account?");
+        reply(
+            &mut e,
+            &approval,
+            200,
+            &format!(
+                r#"{{"code":200,"accounts":[{{"approved_integrators":[{{"account_index":{builder},"approval_expiry":{},"max_perps_taker_fee":300,"max_perps_maker_fee":0}}]}}]}}"#,
+                NOW as u64 + 100_000
+            ),
+        );
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let r = http(&mut e, "sendTx");
+        assert_eq!(
+            wire(&r)["L2TxAttributes"],
+            json!({"1":builder,"2":250,"3":0}),
+            "{network} {account} robinhood={robinhood}"
+        );
+    }
+}
+
+#[test]
+fn an_exemption_expiring_mid_job_keeps_the_decision_made_at_the_fee_gate() {
+    // Valid when the job reaches the gate, expired by the time the nonce returns:
+    // the order is still signed as the gate decided, never with an unchecked fee.
+    let expires = NOW as u64 / 1000 + 1;
+    let token = test_exemption("mainnet", EXEMPT_ACCOUNT, expires);
+    let (mut e, _) = ready_with(exempt_options(false, token));
+    place(&mut e, vec![limit()]);
+    let nonce = http(&mut e, "nextNonce");
+    let later = (expires + 5) as f64 * 1000.0;
+    reply_at(&mut e, later, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, later);
+    let mut sent = out.iter().filter_map(|a| match a {
+        Action::Http(r) => Some(r),
+        _ => None,
+    });
+    let r = sent.next().expect("one request after the nonce");
+    assert!(r.url.contains("sendTx"), "{out:?}");
+    assert!(sent.next().is_none(), "{out:?}");
+    assert!(wire(r).get("L2TxAttributes").is_none());
+}
+
+#[test]
+fn an_exemption_taking_effect_during_the_approval_read_still_requires_approval() {
+    // Over the lifetime cap at the gate, inside it when the approval returns: the
+    // job keeps the fee it decided on, so an unapproved builder is still refused.
+    let max = safe_cex_venue_lighter::builder_exemption::MAX_LIFETIME_S;
+    let expires = NOW as u64 / 1000 + max + 1;
+    let token = test_exemption("mainnet", EXEMPT_ACCOUNT, expires);
+    let (mut e, _) = ready_with(exempt_options(false, token));
+    place(&mut e, vec![limit()]);
+    let tier = http(&mut e, "accountLimits");
+    reply(
+        &mut e,
+        &tier,
+        200,
+        r#"{"code":200,"user_tier_name":"plus"}"#,
+    );
+    let approval = http(&mut e, "/account?");
+    let later = NOW + 5_000.0;
+    reply_at(
+        &mut e,
+        later,
+        &approval,
+        200,
+        r#"{"code":200,"accounts":[{"approved_integrators":[]}]}"#,
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, later);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{out:?}"
+    );
+    assert!(
+        out.iter().any(
+            |a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+        if error.outcome == Some(Outcome::NotSent) && error.message.contains("Approve Builder Fee"))
+        ),
+        "{out:?}"
+    );
+}
