@@ -16,6 +16,24 @@ describe('WsDirectFallback', () => {
     expect(f.resolveUrl(DIRECT, ATHENA)).toBe(ATHENA); // sticky
   });
 
+  it('a connect abandoned before it opened advances at once', () => {
+    const f = new WsDirectFallback();
+    expect(f.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(DIRECT);
+    f.abandonedBeforeOpen();
+    expect(f.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(RELAY);
+    f.abandonedBeforeOpen();
+    expect(f.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(ATHENA);
+    f.abandonedBeforeOpen();
+    expect(f.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(ATHENA); // last: sticky
+  });
+
+  it('an abandoned connect without a fallback stays on the primary', () => {
+    const f = new WsDirectFallback();
+    f.resolveUrl(DIRECT);
+    f.abandonedBeforeOpen();
+    expect(f.resolveUrl(DIRECT)).toBe(DIRECT);
+  });
+
   it('any message on a connection resets the silent streak', () => {
     const f = new WsDirectFallback();
     f.resolveUrl(DIRECT, ATHENA); // connect 1: silent
