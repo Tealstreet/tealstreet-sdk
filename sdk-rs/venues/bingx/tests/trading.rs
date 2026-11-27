@@ -2908,13 +2908,20 @@ fn proven_standalone_stops_use_native_cancel_replace_and_preserve_the_closing_fl
 /// Live cancelReplace nests the cancelled order under cancelResponse (ccxt's
 /// captured payload; the legacy TS native-amend fixture uses the same shape).
 fn live_cancel_replace(cancel_response: serde_json::Value) -> String {
-    serde_json::json!({"code":0,"msg":"","data":{
+    live_cancel_replace_with(cancel_response, |_| {})
+}
+fn live_cancel_replace_with(
+    cancel_response: serde_json::Value,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> String {
+    let mut reply = serde_json::json!({"code":0,"msg":"","data":{
         "cancelResult":"true","cancelMsg":"","cancelResponse":cancel_response,
         "replaceResult":"true","replaceMsg":"",
         "newOrderResponse":{"orderId":"555","symbol":"BTC-USDT","positionSide":"BOTH","side":"SELL",
             "type":"STOP_MARKET","price":"0","quantity":"1","stopPrice":"91","workingType":"MARK_PRICE",
-            "clientOrderID":"","timeInForce":"GTC","reduceOnly":true}}})
-    .to_string()
+            "clientOrderID":"","timeInForce":"GTC","reduceOnly":true}}});
+    edit(&mut reply["data"]["newOrderResponse"]);
+    reply.to_string()
 }
 fn live_cancelled_stop(executed: &str) -> serde_json::Value {
     serde_json::json!({"cancelClientOrderId":"","cancelOrderId":order().id,"symbol":"BTC-USDT",
@@ -2937,6 +2944,42 @@ fn live_cancel_replace_proves_its_nested_cancellation() {
         h.done
     );
     assert!(h.failures.is_empty(), "{:?}", h.failures);
+}
+
+#[test]
+fn live_cancel_replace_ignores_only_a_blank_order_id_alias_on_the_replacement() {
+    // bingx.native-amend.test.ts's capture carries `orderID: ""` beside the real id.
+    let mut h = guarded_stop(true);
+    edit_stop(&mut h);
+    h.reply(&live_cancel_replace_with(
+        live_cancelled_stop("0"),
+        |order| {
+            order["orderID"] = "".into();
+        },
+    ));
+    assert!(
+        h.done[0].as_ref().is_ok_and(|ids| ids.contains("555")),
+        "{:?}",
+        h.done
+    );
+    // A blank primary id, or a blank alias alone, still names no fresh order.
+    for edit in [
+        (|order: &mut serde_json::Value| order["orderId"] = "".into())
+            as fn(&mut serde_json::Value),
+        |order| {
+            order.as_object_mut().unwrap().remove("orderId");
+            order["orderID"] = "".into();
+        },
+    ] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        h.reply(&live_cancel_replace_with(live_cancelled_stop("0"), edit));
+        assert!(h.done[0].is_err(), "{:?}", h.done);
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+    }
 }
 
 #[test]

@@ -312,10 +312,13 @@ impl Data<'_> {
 
     fn id(&self) -> Result<Option<String>, String> {
         let nested = self.order.as_ref().map(|o| o.id()).transpose()?.flatten();
+        // The legacy capture sends a blank `orderID` alias beside the real
+        // `orderId`; a blank alias names nothing, but a blank `orderId` still fails.
         matching_id(
             self.order_id_text
                 .as_ref()
                 .map(Id::text)
+                .filter(|id| !id.trim().is_empty())
                 .into_iter()
                 .chain(self.order_id.as_ref().map(Id::text))
                 .chain(nested),
