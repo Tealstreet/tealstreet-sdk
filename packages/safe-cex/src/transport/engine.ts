@@ -534,6 +534,14 @@ export interface TunnelProxyFallbackNotice {
   skipped?: 'no_proxy_route' | 'proxy_not_allowlisted';
 }
 
+/** Fetch rejects only with a TypeError for a network failure: CORS, DNS, a blocked region or an extension. */
+const isFetchNetworkFailure = (error: unknown): boolean => error instanceof TypeError;
+
+const directUnreachable = (exchange: ExchangeName, proxy: boolean) =>
+  proxy
+    ? `[${exchange}] The venue could not be reached directly or through the Tealstreet proxy (network error on both routes); public data keeps retrying with backoff`
+    : `[${exchange}] The venue could not be reached directly (network error) and this account has no proxy route to fall back to; public data keeps retrying with backoff`;
+
 const relayFailed = (exchange: ExchangeName, error: Error) =>
   `[${exchange}] The connection to the Tealstreet relay failed (${stripDiagnosticUrlQueries(error.message)}); this account's requests through it fail and keep retrying until it reconnects`;
 
@@ -608,6 +616,20 @@ const httpTransport = (
     }
     return skipped ? undefined : route;
   };
+  // A direct account's browser that cannot fetch the venue (TS-#3827's REST counterpart):
+  // unsigned public GETs take the HTTP proxy for this transport's lifetime, so the engine's
+  // own backoff retries there instead of re-failing direct until startup times out. Signed
+  // requests keep the route the user chose; their egress IP may be what the key vouches for.
+  let directFailed = false;
+  let directProxyRouting: ResolvedRouting | undefined;
+  const directFailoverEligible = (request: Request, intent?: CredentialIntent): boolean =>
+    !adapter && publicPrefix === undefined && intent === 'public' && isGet(request.method);
+  const directProxyRoute = (request: Request, intent?: CredentialIntent): RestTransport | undefined => {
+    if (!directFailed || !directFailoverEligible(request, intent)) return undefined;
+    directProxyRouting ??= resolved(exchange, proxyOptions, provider).restRouting;
+    const route = restRoute(provider, exchange, proxyOptions, directProxyRouting, request, transport.serverHeaders, intent);
+    return route.proxied && proxyFleetForwards(request.url) ? route : undefined;
+  };
   // Multi-tenant hosts bind proxy tokens to the account's async context. Engine
   // requests start from timers, sockets and shared public feeds, so keep the
   // provider of the context that created this account's transport.
@@ -644,6 +666,12 @@ const httpTransport = (
       proxyRoute = undefined;
     }
     const tunnelAdapter = proxyRoute ? undefined : adapter;
+    let failoverRoute: RestTransport | undefined;
+    try {
+      failoverRoute = proxyRoute ? undefined : directProxyRoute(request, intent);
+    } catch {
+      failoverRoute = undefined;
+    }
     const controller = new AbortController();
     pending.add(controller);
     const signal = AbortSignal.any(
@@ -777,6 +805,7 @@ const httpTransport = (
       const route =
         publicPrefix === undefined
           ? (proxyRoute ??
+            failoverRoute ??
             restRoute(provider, exchange, restOptions, restRouting, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
@@ -1200,11 +1229,24 @@ const httpTransport = (
                   .then((value) => wrap(observeBybitPublicRateLimit(packet, value, onBybitPublicRateLimit)))
                   .catch((error) => {
                     const report = (): never => {
+                      const calledOff = disposed || request.signal?.aborted || packet.signal?.aborted;
                       // No answer through the relay, and nobody called it off: the relay is down.
-                      if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                      if (tunnelAdapter && !calledOff)
                         proxyAuthorization?.failed(
                           relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
                         );
+                      if (!calledOff && isFetchNetworkFailure(error) && directFailoverEligible(request, intent)) {
+                        if (failoverRoute) proxyAuthorization?.failed(directUnreachable(exchange, true));
+                        else if (!route.proxied && target === request.url && !directFailed) {
+                          directFailed = true;
+                          try {
+                            if (!directProxyRoute(request, intent))
+                              proxyAuthorization?.failed(directUnreachable(exchange, false));
+                          } catch {
+                            proxyAuthorization?.failed(directUnreachable(exchange, false));
+                          }
+                        }
+                      }
                       cancel();
                       throw error;
                     };
