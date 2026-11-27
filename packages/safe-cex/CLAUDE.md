@@ -2645,12 +2645,18 @@ have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
 owner's original managed deadline. Followers never bypass an active lease or
 cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
 honoring Retry-After up to five minutes before followers can elect again.
-**A strict (Binance) coordinator never refuses because storage failed.** Any failed
-open/transaction (closed connection, 250 ms stall, quota, private mode) continues
-coordination in the realm's memory, seeded with the last lease/cooldown storage
-showed, so an observed peer lease is honored until it expires and the 5 s TTL and
-failure cooldowns still bound sends per tab. Refusing instead left users without
-markets for every 30 s pause (Sentry TEALSTREET-NEXT-E5G); do not reinstate it.
+**A strict (Binance) coordinator never refuses because storage failed.** Once storage
+has worked in a realm, any failed open/transaction (closed connection, 250 ms stall,
+quota) continues coordination in memory, seeded with the last lease/cooldown storage
+showed, so an observed peer lease is honored until it expires. Memory edits run under
+a per-key Web Lock and replicate over a `BroadcastChannel` named after the database,
+so realms that lose storage together (every account worker after an abnormal close)
+still elect ONE leader and share its cooldown and catalogue bytes; per-realm memory
+alone burst one send per realm onto a venue that had just answered 503. Storage
+unavailable from the start (Node, private mode) still reads unshared, so a module
+singleton never serves one engine's catalogue to the next. Refusing instead left
+users without markets for every 30 s pause (Sentry TEALSTREET-NEXT-E5G); do not
+reinstate it.
 Leaders hold a per-owner Web Lock named in their lease row; a waiter that finds that
 lock released (closed tab or worker) reclaims the lease at once. Rows without a lock
 (older builds, no Web Locks) still expire by deadline plus grace. Non-strict

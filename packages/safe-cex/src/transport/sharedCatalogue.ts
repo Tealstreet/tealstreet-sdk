@@ -30,9 +30,9 @@ export interface CataloguePolicy {
   valid(key: string, bytes: Uint8Array): boolean;
   failureDelay?(failures: number, headers: string, now: number): number;
 }
-/** The subset of the Web Locks API (`navigator.locks`) used to detect a dead lease owner. */
+/** The subset of the Web Locks API (`navigator.locks`) used for dead owners and memory edits. */
 export interface CatalogueLocks {
-  request(name: string, callback: () => Promise<void>): Promise<unknown>;
+  request(name: string, callback: () => Promise<unknown>): Promise<unknown>;
   query(): Promise<{ held?: Array<{ name?: string }> }>;
 }
 export interface CatalogueRead {
@@ -79,6 +79,7 @@ export class SharedCatalogue {
   private retryAt = 0;
   private coordinated = false;
   private readonly memory = new Map<string, Entry>();
+  private channel?: BroadcastChannel | null;
   constructor(
     private readonly policy: CataloguePolicy,
     private readonly factory?: IDBFactory,
@@ -225,6 +226,7 @@ export class SharedCatalogue {
             settled = true;
             clearTimeout(timer);
             this.coordinated = true;
+            this.listen();
             resolve(value);
           }
         };
@@ -248,15 +250,69 @@ export class SharedCatalogue {
     }
   }
 
-  private editMemory<T>(key: string, change: (entry?: Entry) => Decision<T>): T {
-    const current = this.memory.get(key);
-    const decision = change(current);
-    if (decision.write === null) this.memory.delete(key);
-    else if (decision.write) {
-      if (!current) for (const [name, entry] of this.memory) if (!this.live(entry)) this.memory.delete(name);
-      if (current || this.memory.size < this.policy.maxEntries) this.memory.set(key, decision.write);
+  /** Replicates memory writes to the other realms (tabs, account workers) of this coordinator. */
+  private listen() {
+    if (this.channel !== undefined) return;
+    try {
+      const channel = new BroadcastChannel(this.policy.database);
+      (channel as { unref?(): void }).unref?.();
+      channel.onmessage = ({ data }: MessageEvent) => this.receive(data);
+      this.channel = channel;
+    } catch {
+      this.channel = null;
     }
-    return decision.value;
+  }
+
+  private receive(data: unknown) {
+    const { key, entry, owner } = (data ?? {}) as { key?: unknown; entry?: Entry | null; owner?: unknown };
+    if (typeof key !== 'string') return;
+    const current = this.memory.get(key);
+    if (entry === null) {
+      if (current && current.owner === owner) this.memory.delete(key);
+      return;
+    }
+    if (
+      !entry ||
+      typeof entry.owner !== 'string' ||
+      !Number.isFinite(entry.at) ||
+      (entry.bytes !== undefined && !(entry.bytes instanceof Uint8Array))
+    )
+      return;
+    if (!current || current.owner === entry.owner || entry.at >= current.at) this.memory.set(key, entry);
+  }
+
+  /**
+   * Edits the replicated memory map under a per-key Web Lock, so realms that lost storage
+   * together still elect one leader and share its cooldown and catalogue bytes.
+   */
+  private async editMemory<T>(key: string, change: (entry?: Entry) => Decision<T>): Promise<T> {
+    const apply = () => {
+      const current = this.memory.get(key);
+      const decision = change(current);
+      if (decision.write === null) {
+        this.memory.delete(key);
+        this.channel?.postMessage({ key, entry: null, owner: current?.owner });
+      } else if (decision.write) {
+        if (!current) for (const [name, entry] of this.memory) if (!this.live(entry)) this.memory.delete(name);
+        if (current || this.memory.size < this.policy.maxEntries) {
+          this.memory.set(key, decision.write);
+          this.channel?.postMessage({ key, entry: decision.write });
+        }
+      }
+      return decision.value;
+    };
+    const locks = this.locks;
+    if (!locks) return apply();
+    let ran = false;
+    try {
+      return (await locks.request(`${this.policy.database}|${key}`, async () => {
+        ran = true;
+        return apply();
+      })) as T;
+    } catch (error) {
+      if (ran) throw error;
+      return apply();
+    }
   }
 
   private mirror(key: string, entry?: Entry) {

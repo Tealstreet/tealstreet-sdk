@@ -241,7 +241,7 @@ it('storage failure during a shared lease cannot stampede after the original dea
   expect(r.stores.every((store) => !store.loaded.markets)).toBe(true);
 });
 
-it('the first native retry after a closed-database pause physically dispatches before the startup watchdog', async () => {
+it('realms that all lose storage after a 503 elect one replacement after the shared cooldown', async () => {
   let release!: (value: HttpResponse) => void;
   const pending = new Promise<HttpResponse>((resolve) => {
     release = resolve;
@@ -252,18 +252,17 @@ it('the first native retry after a closed-database pause physically dispatches b
   expect(r.databases.size).toBe(6);
   r.databases.forEach((db) => closeDatabase(db));
   release(response(503));
-  await r.advance(29_000);
+  const failedAt = Date.now() - 1_000_000;
+  // The leader's 503 cooldown reaches every realm through memory replication, not storage.
+  await r.advance(900);
   expect(r.sends).toHaveLength(1);
-  expect(r.stores.every((store) => !store.loaded.markets)).toBe(true);
-  for (let elapsed = 29_500; elapsed < 58_500 && r.sends.length === 1; elapsed += 100) await r.advance(100);
+  await r.advance(15_000);
   expect(r.sends).toHaveLength(2);
-  expect(r.sends[1].at).toBeGreaterThanOrEqual(30_500);
-  expect(r.sends[1].at).toBeLessThan(60_000);
-  const firstRetry = r.preparations.find((attempt) => attempt.at >= 30_500)!;
-  expect(firstRetry).toBeDefined();
-  expect(r.sends[1].account).toBe(firstRetry.account);
-  expect(r.sends[1].at - firstRetry.at).toBeLessThanOrEqual(100);
-  await r.advance(58_500 - r.sends[1].at);
+  expect(r.sends[1].at - failedAt).toBeGreaterThanOrEqual(1000);
+  // Refusing until the 30 s storage pause ended left every engine without markets (E5G).
+  expect(r.sends[1].at).toBeLessThan(30_000);
+  r.loaded();
+  await r.advance(30_000);
   for (let i = 2; i < r.sends.length; i++) expect(r.sends[i].at - r.sends[i - 1].at).toBeGreaterThanOrEqual(5000);
   r.loaded();
 });

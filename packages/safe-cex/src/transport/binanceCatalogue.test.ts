@@ -271,6 +271,31 @@ it('storage lost after observing a peer lease honors it until it expires, then l
   await flush();
 });
 
+it('realms that lose storage together share the leader cooldown and catalogue through memory', async () => {
+  const a = client();
+  const b = client();
+  await (await prepare(a))!.complete(response());
+  expect((await prepare(b))?.cached).toBeDefined();
+  await advance(5001);
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+    throw new DOMException('storage lost', 'InvalidStateError');
+  });
+  const leader = await prepare(a);
+  expect(leader?.cached).toBeUndefined();
+  await leader!.complete(response(503));
+  await flush();
+  // b never saw this failure in storage; replication alone must stop it electing a second send.
+  const waiting = Promise.allSettled([prepare(b, undefined, Date.now() + 500)]);
+  await advance(500);
+  expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
+  await advance(600);
+  const replacement = await prepare(b);
+  expect(replacement?.cached).toBeUndefined();
+  await replacement!.complete(response());
+  await flush();
+  expect((await prepare(a))?.cached?.body).toEqual(bytes);
+});
+
 const fakeLocks = () => {
   const held = new Set<string>();
   const locks: CatalogueLocks = {
