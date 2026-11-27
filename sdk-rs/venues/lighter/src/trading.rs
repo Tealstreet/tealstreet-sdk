@@ -872,7 +872,10 @@ impl Lighter {
             .any(|job| job.group_legs.iter().any(|leg| leg == id))
     }
 
-    fn builder(&self) -> Option<sign::Builder> {
+    fn builder(&self, now_ms: f64) -> Option<sign::Builder> {
+        if self.builder_exempt(now_ms) {
+            return None;
+        }
         self.options
             .integrator_account_index
             .or(if self.options.robinhood {
@@ -887,6 +890,24 @@ impl Lighter {
                 maker_fee: 0,
                 taker_fee: 250,
             })
+    }
+
+    /// True only for a valid Tealstreet-signed exemption naming this account on
+    /// this network, before its expiry. Never on testnet: no exemption domain names it.
+    fn builder_exempt(&self, now_ms: f64) -> bool {
+        let Some(token) = self.options.builder_exemption.as_deref() else {
+            return false;
+        };
+        if self.options.testnet {
+            return false;
+        }
+        let network = if self.options.robinhood {
+            "robinhood"
+        } else {
+            "mainnet"
+        };
+        crate::builder_exemption::verify(token, network, crate::builder_exemption::KEYS)
+            .is_ok_and(|exemption| exemption.covers(self.account.account_index, now_ms))
     }
 
     pub(crate) fn invalidate_protective_account(&mut self) {
@@ -1117,7 +1138,7 @@ impl Lighter {
             self.trade_finish(cx, not_sent("Lighter account is not loaded yet"));
             return;
         }
-        if self.builder().is_some()
+        if self.builder(cx.now).is_some()
             && job
                 .steps
                 .iter()
@@ -1284,7 +1305,7 @@ impl Lighter {
         match self.trading.active.as_ref().unwrap().steps.front().unwrap() {
             Step::Position { .. } | Step::CancelProof | Step::RestoreProof => unreachable!(),
             Step::Place(orders) => {
-                let builder = self.builder();
+                let builder = self.builder(cx.now);
                 Ok((
                     orders
                         .iter()
@@ -1300,7 +1321,7 @@ impl Lighter {
                 vec![sign::Transaction::Grouped {
                     grouping: *grouping,
                     orders: orders.iter().map(|p| p.native.clone()).collect(),
-                    builder: self.builder(),
+                    builder: self.builder(cx.now),
                 }],
                 Effect::Place,
             )),
@@ -1441,27 +1462,29 @@ impl Lighter {
                     && let Ok(approval) = serde_json::from_str::<ApprovalReply>(response.body)
                     && approval.code.as_ref().and_then(Number::integer) == Some(200)
                 {
-                    let builder = self.builder().unwrap();
-                    let valid = approval
-                        .accounts
-                        .iter()
-                        .chain(approval.account.iter())
-                        .flat_map(|a| &a.approved_integrators)
-                        .any(|a| {
-                            a.account_index.integer() == Some(builder.account_index)
-                                && a.approval_expiry
-                                    .integer()
-                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
-                                && a.max_perps_maker_fee
-                                    .as_ref()
-                                    .and_then(Number::integer)
-                                    .unwrap_or(0)
-                                    >= u64::from(builder.maker_fee)
-                                && a.max_perps_taker_fee
-                                    .as_ref()
-                                    .and_then(Number::integer)
-                                    .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
-                        });
+                    // An exemption that took effect during the read needs no approval.
+                    let valid = self.builder(cx.now).is_none_or(|builder| {
+                        approval
+                            .accounts
+                            .iter()
+                            .chain(approval.account.iter())
+                            .flat_map(|a| &a.approved_integrators)
+                            .any(|a| {
+                                a.account_index.integer() == Some(builder.account_index)
+                                    && a.approval_expiry
+                                        .integer()
+                                        .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
+                                    && a.max_perps_maker_fee
+                                        .as_ref()
+                                        .and_then(Number::integer)
+                                        .unwrap_or(0)
+                                        >= u64::from(builder.maker_fee)
+                                    && a.max_perps_taker_fee
+                                        .as_ref()
+                                        .and_then(Number::integer)
+                                        .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
+                            })
+                    });
                     if !valid {
                         self.trade_finish(cx, not_sent(APPROVAL_MESSAGE));
                         return;

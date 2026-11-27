@@ -29,6 +29,8 @@ pub(crate) use admission::ProbePermit;
 pub(crate) mod identity;
 
 #[cfg(test)]
+mod fill_claim_tests;
+#[cfg(test)]
 mod identity_tests;
 
 /// The unauthenticated public pseudo-account, as in NX `server.ts`.
@@ -87,6 +89,8 @@ pub struct Account {
     pub name: String,
     identity: Option<String>,
     pub venue: String,
+    /// `identity::venue_account`: shared by every user on this venue account.
+    venue_account: String,
     pub handle: AccountHandle,
     /// Explicit construction mode, independent of a remote signer link.
     public_only: bool,
@@ -460,7 +464,12 @@ impl Account {
     }
 
     pub(crate) fn notify_scope(&self) -> crate::host_notify::Scope {
-        crate::host_notify::Scope::new(&self.user, &self.venue, self.registry_name())
+        crate::host_notify::Scope::new(
+            &self.user,
+            &self.venue,
+            self.registry_name(),
+            &self.venue_account,
+        )
     }
 
     pub fn is_public(&self) -> bool {
@@ -2163,6 +2172,7 @@ impl Registry {
             identity::digest(user, init)?
         };
         let registry_name = identity.as_deref().unwrap_or(&init.account_name);
+        let venue_account = shared_venue_account(user, &venue, registry_name, init);
         self.user_drains
             .track(user, registry_name, &running, std::sync::Weak::new());
         if let Some(lease) = &authority.lease {
@@ -2180,7 +2190,7 @@ impl Registry {
                 let signing = Arc::downgrade(&signing);
                 crate::algo_notify::AlgoNotify::new(
                     notifier,
-                    crate::host_notify::Scope::new(user, &venue, registry_name),
+                    crate::host_notify::Scope::new(user, &venue, registry_name, &venue_account),
                     Arc::new(move || {
                         signing
                             .upgrade()
@@ -2283,6 +2293,7 @@ impl Registry {
             name: init.account_name.clone(),
             identity,
             venue: init.exchange_name.clone(),
+            venue_account,
             handle,
             link,
             public_only,
@@ -3352,6 +3363,31 @@ pub fn resume_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// AGT-196: the venue account `init` connects to, the same for every login
+/// holding its key, so their fills share one `fillKey`. A key this cannot read
+/// falls back to this user's own account, which no other login shares: its
+/// fills match no other login's claim and fail open, so it is logged.
+pub(crate) fn shared_venue_account(
+    user: &str,
+    venue: &str,
+    registry_name: &str,
+    init: &InitPayload,
+) -> String {
+    identity::venue_account(init).unwrap_or_else(|_| {
+        // Closed fields only: the venue name, never the key or the user.
+        Log::warn(&format!(
+            "fill claims: venue account unavailable (cause=unreadable_key venue={}); \
+             its fills stay unclaimed",
+            if safe_cex_venues::supported(venue) {
+                venue
+            } else {
+                "unknown"
+            }
+        ));
+        crate::host_notify::Scope::new(user, venue, registry_name, "").account_digest
+    })
+}
+
 /// Test accounts on a test venue, for this crate's tests and the two-box harness
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
@@ -3526,10 +3562,27 @@ pub mod testing {
     /// and the inbox its algo host would read.
     pub fn account_on<V: safe_cex_engine::Venue + 'static>(
         venue: V,
+        names: (&str, &str, &str),
+        link: Option<Arc<SignerLink>>,
+        fingerprint: String,
+        running: Arc<crate::algos::Running>,
+    ) -> (
+        Arc<Account>,
+        mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+    ) {
+        // Tests name one venue account by its label, whoever connects it.
+        let venue_account = names.1.to_owned();
+        account_sharing(venue, names, link, fingerprint, running, venue_account)
+    }
+
+    /// `account_on`, connected to `venue_account` (`shared_venue_account`).
+    pub fn account_sharing<V: safe_cex_engine::Venue + 'static>(
+        venue: V,
         (user, name, venue_name): (&str, &str, &str),
         link: Option<Arc<SignerLink>>,
         fingerprint: String,
         running: Arc<crate::algos::Running>,
+        venue_account: String,
     ) -> (
         Arc<Account>,
         mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
@@ -3546,6 +3599,7 @@ pub mod testing {
             name: name.into(),
             identity: None,
             venue: venue_name.into(),
+            venue_account,
             handle,
             public_only: link.is_none(),
             signing: AccountSigner::new(None, Default::default(), link.clone(), None),

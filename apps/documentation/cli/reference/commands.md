@@ -700,6 +700,11 @@ used by web. Exchange-specific fields include `--passphrase`,
 `--grvt-signer-address`, `--grvt-trading-account-id`, `--vault`,
 `--tealstreet-tunnel`, and `--tealstreet-ws-route`.
 
+`tealstreet account list` shows the first and last four characters of each
+API key. Paradex and Polymarket store a private key there, so for them it shows
+the account's public address when it has one, and `******` otherwise — never
+any part of the key.
+
 Source: `AccountsCommand.ts`.
 
 ### `exchanges` &nbsp; _(alias `ex`)_

@@ -2170,6 +2170,8 @@ impl Okx {
         };
         if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
             entry.insert(cx.now);
+            #[cfg(not(target_arch = "wasm32"))]
+            let symbol = m.symbol.clone();
             cx.fill(Fill {
                 id: (!row.trade_id.is_empty() && row.trade_id != "0")
                     .then(|| row.trade_id.to_owned()),
@@ -2179,6 +2181,10 @@ impl Okx {
                 price,
                 amount,
             });
+            // A triggered child may fill in its first frame, before any row is
+            // stored: its fill names the algo itself (AGT-196). Native only.
+            #[cfg(not(target_arch = "wasm32"))]
+            cx.order_triggered(&symbol, row.ord_id, [row.algo_id, row.algo_cl_ord_id]);
         }
     }
 

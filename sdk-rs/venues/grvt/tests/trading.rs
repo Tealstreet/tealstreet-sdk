@@ -667,6 +667,55 @@ fn seed(e: &mut Engine<Grvt>) {
 const OPEN: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}}"#;
 const OPEN_ORDERS: &str = r#"{"r":[{"sa":"9007199254740993","oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}]}"#;
 const CANCELED: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"CANCELLED","ts":["0.2"],"ut":"1700000000001000000"}}}"#;
+/// AGT-196: GRVT keys the order by the caller's client id and completes with
+/// it, so its ack names the native id (`oi`) for the placer to claim instead.
+/// An ack whose `oi` is zero names none. Ack shape as the tests below.
+#[test]
+fn a_create_ack_names_its_native_id_for_the_placer() {
+    for (oi, named) in [("0x1235", true), ("0x00", false)] {
+        let mut e = boot();
+        let r = http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+        let actions = reply(&mut e, &r, 200, &format!(r#"{{"r":{{"oi":"{oi}"}}}}"#));
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::PlacementNativeId {
+                    command,
+                    symbol,
+                    client_order_id,
+                    native_id,
+                }) => Some((
+                    *command,
+                    symbol.clone(),
+                    client_order_id.clone(),
+                    native_id.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<(u32, String, String, String)> = if named {
+            vec![(
+                1,
+                "BTC_USDT_PERP".into(),
+                "9223372036854775807".into(),
+                oi.into(),
+            )]
+        } else {
+            vec![]
+        };
+        assert_eq!(notices, expected, "{oi}");
+    }
+}
+
 #[test]
 fn signed_lite_order_preserves_large_native_account_and_caller_identity() {
     let mut e = boot();
@@ -3564,4 +3613,95 @@ fn ambiguous_read_native_errors_keep_the_existing_outcome() {
             )));
         }
     }
+}
+// AGT-214: an entry with a stop-loss and a take-profit whose take-profit is refused.
+// Each row names its leg, so the app can say "Entry and stop-loss placed. Take-profit not sent".
+#[test]
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
+    let mut e = boot();
+    let mut o = opts();
+    o.client_order_id = None;
+    o.stop_loss = Some(90.);
+    o.take_profit = Some(120.);
+    let entry = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 5,
+                orders: vec![o],
+            },
+        ),
+        "create_order",
+    );
+    let sl = http(
+        reply(&mut e, &entry, 200, r#"{"r":{"oi":"0x00"}}"#),
+        "create_order",
+    );
+    let tp = http(
+        reply(&mut e, &sl, 200, r#"{"r":{"oi":"0x01"}}"#),
+        "create_order",
+    );
+    let actions = reply(&mut e, &tp, 400, r#"{"c":2001,"m":"rejected"}"#);
+    let rows = serde_json::to_value(failure(&actions).elements.as_ref().unwrap()).unwrap();
+    let roles: Vec<_> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["role"].clone())
+        .collect();
+    assert_eq!(roles, ["entry", "stopLoss", "takeProfit"]);
+    assert_eq!(rows[0]["status"], "placed");
+    assert_eq!(rows[1]["status"], "placed");
+    assert_eq!(rows[2]["status"], "notSent");
+    assert_eq!(rows[2]["error"]["outcome"], "rejected");
+}
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and children are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    let mut e = boot();
+    let mut bracket = opts();
+    bracket.client_order_id = None;
+    bracket.stop_loss = Some(90.);
+    bracket.take_profit = Some(120.);
+    let mut close = opts();
+    close.client_order_id = None;
+    close.side = OrderSide::Sell;
+    close.price = Some(130.);
+    close.reduce_only = Some(true);
+    let entry = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 5,
+                orders: vec![bracket, close],
+            },
+        ),
+        "create_order",
+    );
+    let sl = http(
+        reply(&mut e, &entry, 200, r#"{"r":{"oi":"0x00"}}"#),
+        "create_order",
+    );
+    let tp = http(
+        reply(&mut e, &sl, 200, r#"{"r":{"oi":"0x01"}}"#),
+        "create_order",
+    );
+    let actions = reply(&mut e, &tp, 400, r#"{"c":2001,"m":"rejected"}"#);
+    let rows = serde_json::to_value(failure(&actions).elements.as_ref().unwrap()).unwrap();
+    let roles: Vec<_> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row.get("role").cloned())
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            Some("entry".into()),
+            Some("stopLoss".into()),
+            Some("takeProfit".into()),
+            None
+        ]
+    );
 }

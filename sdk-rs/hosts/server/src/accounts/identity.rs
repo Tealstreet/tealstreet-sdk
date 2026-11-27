@@ -126,6 +126,40 @@ pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, S
     ))
 }
 
+/// The venue account a private init connects to, without the Tealstreet user:
+/// every login holding the same key on the same venue scope gets the same
+/// digest (AGT-196 `fill_key`). Another key on that account is another digest,
+/// so its fills stay unclaimed there and fail open at the gateway.
+pub(crate) fn venue_account(init: &InitPayload) -> Result<String, String> {
+    let network = if init.testnet == Some(true) {
+        "testnet"
+    } else {
+        "mainnet"
+    };
+    let mut input = b"tealstreet/venue-account/v1".to_vec();
+    for component in [
+        init.exchange_name.as_str(),
+        network,
+        init.bybit_site_id.as_deref().unwrap_or_default(),
+        init.subaccount.as_deref().unwrap_or_default(),
+        // Only Hyperliquid trades through a vault (`engine_options` drops it
+        // elsewhere): a stray one must not split one venue account in two.
+        if super::HYPERLIQUID_VENUES.contains(&init.exchange_name.as_str()) {
+            init.vault.as_deref().unwrap_or_default()
+        } else {
+            ""
+        },
+        key_id(init)?,
+    ] {
+        input.extend_from_slice(&(component.len() as u64).to_be_bytes());
+        input.extend_from_slice(component.as_bytes());
+    }
+    Ok(safe_cex_crypto::sha256(&input)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 pub(super) fn registry_name(user: &str, init: &InitPayload) -> Result<String, String> {
     Ok(digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
 }

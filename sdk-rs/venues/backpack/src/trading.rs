@@ -14,7 +14,7 @@ use safe_cex_engine::request_context::{
     PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
     plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound},
 };
-use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
+use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -138,6 +138,8 @@ pub enum Step {
     Place {
         order: Box<NativeOrder>,
         optional: bool,
+        /// Reporting only: this placement's part in a split bracket (AGT-214).
+        role: Option<LegRole>,
     },
     Pair(Vec<NativeOrder>),
     Cancel {
@@ -182,10 +184,10 @@ fn write_plan(steps: &[Step]) -> (WritePlan, Vec<Vec<usize>>) {
             if matches!(step, Step::OpenOrders { .. }) {
                 return vec![];
             }
-            let orders: &[NativeOrder] = match step {
-                Step::Place { order, .. } => std::slice::from_ref(order.as_ref()),
-                Step::Pair(orders) => orders,
-                _ => &[],
+            let (orders, role): (&[NativeOrder], _) = match step {
+                Step::Place { order, role, .. } => (std::slice::from_ref(order.as_ref()), *role),
+                Step::Pair(orders) => (orders, None),
+                _ => (&[], None),
             };
             let mut elements: Vec<_> = orders
                 .iter()
@@ -193,6 +195,7 @@ fn write_plan(steps: &[Step]) -> (WritePlan, Vec<Vec<usize>>) {
                     let element = Element {
                         index,
                         client_order_id: order.client_id.map(|id| id.to_string()),
+                        role,
                     };
                     index += 1;
                     element
@@ -202,6 +205,7 @@ fn write_plan(steps: &[Step]) -> (WritePlan, Vec<Vec<usize>>) {
                 elements.push(Element {
                     index,
                     client_order_id: None,
+                    role: None,
                 });
                 index += 1;
             }
@@ -487,12 +491,13 @@ impl Backpack {
         let mut steps = vec![Step::Place {
             order: Box::new(main.clone()),
             optional: false,
+            role: None,
         }];
         if o.kind == OrderType::Limit {
             let m = cx.store.market(&o.symbol).unwrap();
-            for (price, kind) in [
-                (o.take_profit, o.tp_trigger_type),
-                (o.stop_loss, o.sl_trigger_type),
+            for (price, kind, role) in [
+                (o.take_profit, o.tp_trigger_type, LegRole::TakeProfit),
+                (o.stop_loss, o.sl_trigger_type, LegRole::StopLoss),
             ] {
                 if let Some(price) = price {
                     let mut order = main.clone();
@@ -514,8 +519,12 @@ impl Backpack {
                     steps.push(Step::Place {
                         order: Box::new(order),
                         optional: true,
+                        role: Some(role),
                     });
                 }
+            }
+            if let [Step::Place { role, .. }, _, ..] = steps.as_mut_slice() {
+                *role = Some(LegRole::Entry);
             }
         }
         Ok(steps)
@@ -1765,6 +1774,7 @@ impl Backpack {
         let restore = Step::Place {
             order: protect.restore.clone(),
             optional: false,
+            role: None,
         };
         // A 408 or 5xx on the put-back is sealed before this venue sees it:
         // say what is unknown rather than repeat the replacement's refusal.

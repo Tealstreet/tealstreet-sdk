@@ -146,7 +146,9 @@ Hyperliquid `/info` quota admission tags a proven pre-send deadline refusal with
 closed cause `info_admission` and fixed title `HTTP admission deadline expired`.
 It retains Timeout/NotSent and the original deadline, budget, retry and delivery.
 Generic relay readiness failures and errors after handoff keep their existing paths;
-`phase=preparing` alone does not prove an admission failure.
+`phase=preparing` alone does not prove an admission failure. The host copies only
+allowlisted `info_*` admission facts (bounded counts and milliseconds, closed class,
+stage and storage labels) from the refusal into its `http.request_failed` fields.
 
 ## Startup discovery deadlines
 

@@ -29,6 +29,7 @@ fn elements(step: &Step, start: usize) -> Vec<Element> {
             } else {
                 client.clone()
             },
+            role: step.role,
         })
         .collect()
 }

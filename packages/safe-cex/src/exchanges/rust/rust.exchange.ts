@@ -63,6 +63,7 @@ import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
+import type { PageCandleLease } from './pageCandleSources';
 import type { FailedPrivateReadKind } from './startupDiagnostics';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
@@ -144,6 +145,12 @@ import { mapHyperliquidSignerSetup } from './hyperliquidSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
 import { mapMEXCSignerSetup } from './mexcSignerSetup';
+import {
+  pageCandleSourceKey,
+  pageCandleSourceOptions,
+  PageCandleSourceRecovering,
+  PageCandleSources,
+} from './pageCandleSources';
 import { mapParadexSignerSetup } from './paradexSignerSetup';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
@@ -471,9 +478,10 @@ const PAGE_CANDLE_MARKETS_WAIT_MS = 10_000;
 /** A source still without markets this long after construction is stuck, not slow: rebuild it. */
 const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
 const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 20_000;
-/** Rebuilding a broken page candle source backs off from 2 s, doubling to a minute. */
-const PAGE_CANDLE_REBUILD_MIN_MS = 2_000;
-const PAGE_CANDLE_REBUILD_MAX_MS = 60_000;
+/** One page candle source per realm and venue configuration, shared by every mirror (AGT-299). */
+const pageCandleSources = new PageCandleSources<RustEngineExchange>();
+/** Disposes the realm's shared page candle sources at once, including lingering ones. */
+export const disposePageCandleSources = (): void => pageCandleSources.dispose();
 const LOADED_SECTIONS = [
   [LOADED_FLAG.MARKETS, 'markets'],
   [LOADED_FLAG.TICKERS, 'tickers'],
@@ -3844,10 +3852,8 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  private candleSource?: RustEngineExchange;
+  private candleSourceLease?: PageCandleLease<RustEngineExchange>;
   private readonly constructedAt = Date.now();
-  private candleSourceRebuilds = 0;
-  private candleSourceRebuildAt = 0;
 
   /**
    * A source that failed to start or died cannot serve a later read; one whose markets are only
@@ -3864,40 +3870,29 @@ export class RustEngineExchange extends BaseExchange {
 
   private fetchPageCandles = async (opts: OHLCVOptions) => {
     if (this.isDisposed) throw new Error('Exchange disposed before candle read');
-    if (!this.candleSource) {
+    // Frame-fed engines execute only writes; candles use the realm's credential-free public source.
+    const options = pageCandleSourceOptions(this.engineOptions);
+    this.candleSourceLease ??= pageCandleSources.hold(pageCandleSourceKey(this.name, options), this);
+    const lease = this.candleSourceLease;
+    let source: RustEngineExchange;
+    try {
+      source = lease.source(() => {
+        const built = new RustEngineExchange(this.name, options, new FrameStore());
+        built.pageCandleSource = true;
+        return built;
+      });
+    } catch (error) {
       // A persistently failing venue is rebuilt on a backoff, never spun; meanwhile the
       // chart sees a visible failure and retries.
-      if (Date.now() < this.candleSourceRebuildAt) throw new Error(`${this.name} candle source is recovering`);
-      // Frame-fed engines execute only writes; candles always own a credential-free public source.
-      const source = new RustEngineExchange(
-        this.name,
-        {
-          ...withoutDelegatedSigning(this.engineOptions),
-          workerMirror: false,
-          publicDataOnly: true,
-          privateOnly: false,
-          publicFeed: undefined,
-          externalPublicData: undefined,
-        },
-        new FrameStore(),
-      );
-      source.pageCandleSource = true;
-      this.candleSource = source;
+      if (error instanceof PageCandleSourceRecovering) throw new Error(`${this.name} candle source is recovering`);
+      throw error;
     }
-    const source = this.candleSource;
     try {
       const candles = await source.fetchOHLCV(opts);
-      this.candleSourceRebuilds = 0;
+      lease.succeeded();
       return candles;
     } catch (error) {
-      if (this.candleSource === source && source.candleSourceBroken) {
-        this.candleSource = undefined;
-        source.dispose();
-        this.candleSourceRebuildAt =
-          Date.now() +
-          Math.min(PAGE_CANDLE_REBUILD_MIN_MS * 2 ** this.candleSourceRebuilds, PAGE_CANDLE_REBUILD_MAX_MS);
-        this.candleSourceRebuilds += 1;
-      }
+      lease.failed(source, source.candleSourceBroken);
       throw error;
     }
   };
@@ -4320,8 +4315,8 @@ export class RustEngineExchange extends BaseExchange {
     this.sourceOrdersTimer = undefined;
     this.sourceOrdersAsk = undefined;
     this.settleSourceOrders();
-    this.candleSource?.dispose();
-    this.candleSource = undefined;
+    this.candleSourceLease?.release();
+    this.candleSourceLease = undefined;
     this.algoControlWatch?.dispose();
     this.signerSetup?.dispose();
     this.stopWorkerCapabilitySync?.();

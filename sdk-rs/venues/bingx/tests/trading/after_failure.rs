@@ -356,3 +356,79 @@ fn definite_refusal_then_unknown_keeps_every_fact() {
         );
     }
 }
+
+// AGT-214: an entry with a stop-loss and a take-profit whose take-profit is refused.
+// Each row names its leg, so the app can say "Entry and stop-loss placed. Take-profit not sent".
+#[test]
+fn a_split_bracket_names_each_leg_when_its_take_profit_is_refused() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = placement(Path::Children);
+    accept_parity_payload(&mut h, "sl");
+    h.reply(r#"{"code":100400,"msg":"scripted take-profit refusal"}"#);
+    assert!(h.requests.is_empty());
+    let rows = h.failures[0].elements.as_ref().expect("each leg's result");
+    let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit)
+        ]
+    );
+    assert!(
+        matches!(&rows[0].result, ElementResult::Placed { order_ids } if order_ids == &["prefix"])
+    );
+    assert!(matches!(&rows[1].result, ElementResult::Placed { order_ids } if order_ids == &["sl"]));
+    assert!(matches!(
+        &rows[2].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    // A split entry without legs names none: no row is a bracket leg.
+    let h = {
+        let mut h = placement(Path::Lots);
+        h.reply(r#"{"code":100400,"msg":"scripted definite refusal"}"#);
+        accept_parity_payload(&mut h, "later");
+        accept_parity_payload(&mut h, "tail");
+        h
+    };
+    let rows = h.failures[0].elements.as_ref().expect("each lot's result");
+    assert!(rows.iter().all(|row| row.element.role.is_none()));
+}
+
+// AGT-214 review: a reduce-only order placed beside a bracket is not one of its legs,
+// so only the bracketed order's own entry and legs are named.
+#[test]
+fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
+    use safe_cex_engine::write_plan::LegRole;
+    let mut h = Harness::new(None);
+    h.place(vec![
+        PlaceOrderOpts {
+            stop_loss: Some(0.1),
+            take_profit: Some(110.),
+            ..opts()
+        },
+        PlaceOrderOpts {
+            side: OrderSide::Sell,
+            price: Some(120.),
+            reduce_only: Some(true),
+            ..opts()
+        },
+    ]);
+    accept_parity_payload(&mut h, "entry");
+    accept_parity_payload(&mut h, "sl");
+    h.reply(r#"{"code":100400,"msg":"scripted take-profit refusal"}"#);
+    accept_parity_payload(&mut h, "close");
+    assert!(h.requests.is_empty());
+    let rows = h.failures[0].elements.as_ref().expect("each row's result");
+    let roles: Vec<_> = rows.iter().map(|row| row.element.role).collect();
+    assert_eq!(
+        roles,
+        [
+            Some(LegRole::Entry),
+            Some(LegRole::StopLoss),
+            Some(LegRole::TakeProfit),
+            None
+        ]
+    );
+}

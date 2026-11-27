@@ -167,3 +167,7 @@ e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-r
 33cb8041b37e0d9a7d627a7d9eddcaa982e68110:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:7
 eca6d2b298b82cc8d67908f8021b791b7818072d:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:30
 e58c09fb7eb25c7fe1fee848d0ece2bdef59e52c:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:57
+
+# AGT-321 CLI key-display test: a synthetic repeated-hex private key, never an account.
+# The current fixture assembles it at runtime; exact historical hit only.
+c44e61aed8c8bda84ea78e03d9356e9dc5562b2d:apps/cli/src/account-key-display.test.ts:generic-api-key:8

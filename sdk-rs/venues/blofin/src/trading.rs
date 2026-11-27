@@ -620,6 +620,7 @@ impl Job {
                         .placement
                         .as_ref()
                         .map(|write| write.payloads[offset].client_order_id.clone()),
+                    role: None,
                 });
             }
         }

@@ -210,6 +210,7 @@ fn partial(unknown: bool, outer: Outcome) -> VenueError {
             .map(|index| Element {
                 index,
                 client_order_id: None,
+                role: None,
             })
             .collect(),
     );

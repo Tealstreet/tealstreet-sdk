@@ -77,6 +77,7 @@ impl Cancellations {
                     .map(|index| Element {
                         index: *index,
                         client_order_id: None,
+                        role: None,
                     })
                     .collect(),
             ),
