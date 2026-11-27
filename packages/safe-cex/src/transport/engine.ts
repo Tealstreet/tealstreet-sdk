@@ -1618,6 +1618,10 @@ export const createEngineTransport = (
       );
       diagnostic.dial(target);
       let locallyClosed = false;
+      let opened = false;
+      const abandonIfUnopened = () => {
+        if (!opened) fallback?.abandonedBeforeOpen();
+      };
       const recordClose = (code?: number) => {
         diagnostics[channel] = diagnostic.closed(
           locallyClosed ? 'local' : code === undefined || code === 1006 ? 'unknown' : 'remote',
@@ -1630,6 +1634,7 @@ export const createEngineTransport = (
           onMessage: receive,
           onBinary: receiveBinary,
           onOpen: () => {
+            opened = true;
             diagnostic.opened();
             handlers.onOpen();
           },
@@ -1642,6 +1647,7 @@ export const createEngineTransport = (
           send: (text) => native.send(text),
           close: () => {
             locallyClosed = true;
+            abandonIfUnopened();
             recordClose();
             native.close();
           },
@@ -1650,7 +1656,6 @@ export const createEngineTransport = (
       let socket: { send(text: string): void; close(): void } | undefined;
       let relayDiagnostics: ConnectionDiagnostics | undefined;
       let closed = false;
-      let opened = false;
       const pending: string[] = [];
       void import('@tealstreet/http-over-websocket/src/RelayWebSocket')
         .then(({ RelayWebSocket }) => {
@@ -1729,6 +1734,7 @@ export const createEngineTransport = (
         },
         close: () => {
           locallyClosed = true;
+          abandonIfUnopened();
           diagnostics[channel] = (relayDiagnostics ?? diagnostic).closed('local');
           closed = true;
           pending.length = 0;
