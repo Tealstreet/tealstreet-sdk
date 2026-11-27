@@ -61,6 +61,14 @@ The native Sentry allowlist and captured authentication-subject contract live in
 journal labels and never supplies account or IO authority. Only the trusted
 report capture supplies identity; event extras and SDK scopes are untrusted.
 
+## Transport failure grouping
+
+Native transport reports group in Sentry by kind + route mode (or socket host) +
+closed `cause`, never by venue host, URL or error text; see DESIGN.md under native
+error capture. A new transport error wording falls into `other` until
+`safe_cex_native::transport::{request_cause, open_cause}` names it: add a class
+there, never error text to the fingerprint. Only `proxy_auth` is an error level.
+
 ## Router lease-fence diagnostics
 
 Router lease fences snapshot `Running::jobs()` before disposal. The journal

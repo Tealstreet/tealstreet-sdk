@@ -477,7 +477,11 @@ const WORKER_BRIDGE_POLL_MS = 25;
 const PAGE_CANDLE_MARKETS_WAIT_MS = 10_000;
 /** A source still without markets this long after construction is stuck, not slow: rebuild it. */
 const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
-const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 20_000;
+/**
+ * Outlasts the engine's 20 s candle request budget, which starts at issuance: an equal wait always
+ * fired first and replaced the engine's timeout, naming the request stage, with a bare one (ED8).
+ */
+const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 25_000;
 /** One page candle source per realm and venue configuration, shared by every mirror (AGT-299). */
 const pageCandleSources = new PageCandleSources<RustEngineExchange>();
 /** Disposes the realm's shared page candle sources at once, including lingering ones. */

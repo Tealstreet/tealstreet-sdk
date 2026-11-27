@@ -2956,6 +2956,13 @@ pub(crate) const BINANCE: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::AuthInvalid),
             only: None,
         },
+        // INACTIVE_ACCOUNT: the futures account is not activated. A read refused
+        // with it ends the start instead of polling the same refusal forever.
+        Row {
+            key: Key::Int(-4109),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
         Row {
             key: Key::Int(-1002),
             verdict: Verdict::Refused(ErrorKind::AuthPermission),
