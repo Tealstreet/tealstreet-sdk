@@ -766,10 +766,10 @@ impl History {
             params = params.num("pageIndex", f64::from(fills.page));
         }
         if let Some(from) = from {
-            params = params.num(start, from);
+            params = params.time(start, from);
         }
         if let Some(to) = to {
-            params = params.num(end, to);
+            params = params.time(end, to);
         }
         let at = match read.native.kind {
             Kind::Fills => {

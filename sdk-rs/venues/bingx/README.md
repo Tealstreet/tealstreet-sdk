@@ -26,6 +26,11 @@ REST non-POST requests use `application/json; charset=utf-8`; POST retains
 `application/json`. The same valid media type applies to Spot and API-key-only
 listen-key renewal; header normalization does not change signing or query/body bytes.
 
+Time-range fields (`startTime`/`endTime`, `startTs`/`endTs`) go out through
+`Params::time`, which floors to integer milliseconds. BingX answers 109400 ("The
+request you constructed does not meet the requirements") to a fractional value,
+and calibrated `protocol_now()` and caller-supplied bounds can both carry one.
+
 Writes are sequenced and never retried after transport failures. A refusal
 BingX makes before processing, a bad signature (100001) or a stale timestamp
 (109400 naming it), is re-signed and resent once on the initial write; later
