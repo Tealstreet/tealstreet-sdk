@@ -1,4 +1,5 @@
 import type { HttpPacket, HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { CatalogueLocks } from './sharedCatalogue';
 
 import { setImmediate } from 'node:timers';
 
@@ -6,8 +7,6 @@ import { forceCloseDatabase, IDBDatabase, IDBFactory, IDBObjectStore } from 'fak
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { binanceCataloguePolicy } from './binanceCatalogue';
-import type { CatalogueLocks } from './sharedCatalogue';
-
 import { SharedCatalogue } from './sharedCatalogue';
 
 // fake-indexeddb declares a constructor parameter, but its runtime takes a database instance.
@@ -405,25 +404,24 @@ it('reopening after a storage pause still honors an exact-route peer cooldown', 
   vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
     throw new DOMException('closed connection', 'InvalidStateError');
   });
-  await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+  const fallback = await prepare(a);
+  expect(fallback).toBeDefined();
+  expect(fallback!.cached).toBeUndefined();
+  fallback!.cancel();
   const peer = await prepare(client());
   await peer!.complete(response(429, 'retry-after: 60'));
-  for (const ms of [1000, 2000, 4000, 8000]) {
-    await advance(ms);
-    await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-  }
-  await advance(16_000);
+  await advance(30_000);
   const waiting = Promise.allSettled([prepare(a, undefined, Date.now() + 1000)]);
   await advance(1000);
   expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
-  await advance(28_000);
+  await advance(29_100);
   const replacement = await prepare(a);
   expect(replacement!.cached).toBeUndefined();
   replacement!.cancel();
 });
 
 it.each(['abort', 'dispose'])(
-  'a participant %s cannot renew the storage pause or retire a surviving engine',
+  'a participant %s cannot retire a surviving engine that lost shared storage',
   async (mode) => {
     vi.stubGlobal('indexedDB', factory);
     vi.resetModules();
@@ -450,7 +448,10 @@ it.each(['abort', 'dispose'])(
       vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
         throw new DOMException('closed connection', 'InvalidStateError');
       });
-      await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+      const survivor = attempt(b);
+      await advance(300);
+      await expect(survivor).resolves.toMatchObject({ status: 200 });
+      expect(send).toHaveBeenCalledTimes(2);
       const stop = new AbortController();
       stop.abort(new Error('participant cancelled'));
       if (mode === 'dispose') a.dispose?.();
@@ -459,12 +460,13 @@ it.each(['abort', 'dispose'])(
         await expect(attempt(a, mode === 'abort' ? stop.signal : undefined)).rejects.toThrow(
           mode === 'abort' ? 'participant cancelled' : 'Engine transport disposed',
         );
-        await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-        expect(send).toHaveBeenCalledTimes(1);
+        await expect(attempt(b)).resolves.toMatchObject({ status: 200 });
       }
+      // In memory the five-second success TTL still bounds sends: fresh at 7 s and 15 s only.
+      expect(send).toHaveBeenCalledTimes(4);
       await advance(16_000);
       await expect(attempt(b)).resolves.toMatchObject({ status: 200 });
-      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenCalledTimes(5);
     } finally {
       a.dispose?.();
       b.dispose?.();

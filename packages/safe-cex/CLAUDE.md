@@ -2639,17 +2639,24 @@ have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
 owner's original managed deadline. Followers never bypass an active lease or
 cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
 honoring Retry-After up to five minutes before followers can elect again.
-Unavailable storage from startup preserves independent native discovery/backoff.
-After a successful coordination transaction, storage loss refuses preparation
-instead of bypassing an unknown lease. Storage/owner failures and deadlines while
-waiting for peer coordination retain their original network/timedOut and notSent
-settlement. They report local catalogue coordination with closed
+**A strict (Binance) coordinator never refuses because storage failed.** Any failed
+open/transaction (closed connection, 250 ms stall, quota, private mode) continues
+coordination in the realm's memory, seeded with the last lease/cooldown storage
+showed, so an observed peer lease is honored until it expires and the 5 s TTL and
+failure cooldowns still bound sends per tab. Refusing instead left users without
+markets for every 30 s pause (Sentry TEALSTREET-NEXT-E5G); do not reinstate it.
+Leaders hold a per-owner Web Lock named in their lease row; a waiter that finds that
+lock released (closed tab or worker) reclaims the lease at once. Rows without a lock
+(older builds, no Web Locks) still expire by deadline plus grace. Non-strict
+(Hyperliquid) policies still bypass the cache on storage failure. Deadlines while
+waiting for peer coordination retain their timedOut and notSent settlement and
+report local catalogue coordination with closed
 `http_preparation_source=catalogue_coordination`, bound to the failed catalogue await.
 HOW still waits for connection, clock and authentication within its original budget.
 Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
 The 30 s storage recovery pause starts only on an actual failed storage attempt.
-Retries refused during that pause cannot extend it; after expiry the coordinator
+Attempts during that pause coordinate in memory and cannot extend it; after expiry the coordinator
 reopens storage and rechecks the existing route-scoped lease before sending.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership
