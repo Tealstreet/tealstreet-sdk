@@ -90,6 +90,15 @@ describe('errorPatterns', () => {
         );
         expect(matches).toBe(true);
       });
+
+      it('should match an inactive venue account (Binance -4109, Bybit)', () => {
+        const message =
+          'Binance user data stream unavailable: [binance] POST /fapi/v1/listenKey failed with 400 : This account is inactive, please activate the account first.';
+        const matches = permissionsPattern.patterns.some((p) =>
+          typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message),
+        );
+        expect(matches).toBe(true);
+      });
     });
   });
 

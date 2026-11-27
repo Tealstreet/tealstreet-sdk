@@ -1980,6 +1980,10 @@ fn a_refusal_ends_the_start_however_it_arrives() {
             r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
         ),
         (401, r#"{"code":-2014,"msg":"API-key format invalid."}"#),
+        (
+            400,
+            r#"{"code":-4109,"msg":"This account is inactive, please activate the account first."}"#,
+        ),
     ] {
         let mut h = Harness::started(credentials());
         h.expect_startup_failure = true;
