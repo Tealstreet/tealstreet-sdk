@@ -521,22 +521,32 @@ fn a_replacement_vetoed_at_release_puts_the_old_stop_back() {
     );
 }
 
-/// A stale reference fails both guards: nothing is asked of the venue and the
-/// outcome says plainly that the position has no stop.
+/// A reference gone stale after the landed cancel no longer refuses: this test asserted
+/// the opposite until TEALSTREET-NEXT-EGG (2026-11-27), when that path left an inverse
+/// BTCUSD long with no stop. Bybit judges the trigger; see `validate_after_cancel`.
 #[test]
-fn a_stale_reference_ends_explicitly_unprotected_without_asking_the_venue() {
+fn a_stale_reference_after_the_landed_cancel_still_sends_the_replacement() {
     let mut h = ready(PROFILES[0]);
     let preparation = replacement_held_in_preparation(&mut h);
     h.advance(10_000.0);
     release(&mut h, preparation);
-    assert!(stop_writes(&h).is_empty(), "{:?}", h.result(91));
-    let error = failure(&h, 91);
-    assert_eq!(
-        error.protection,
-        Some(safe_cex_engine::error::Protection::Unprotected),
-        "{error:?}"
-    );
-    assert!(error.message.contains("re-place"), "{error:?}");
+    let writes = stop_writes(&h);
+    assert_eq!(writes.len(), 1, "{:?}", h.result(91));
+    assert_eq!(writes[0]["stopLoss"], "95");
+}
+
+/// The last known price, stale or not, still vetoes a replacement it would fire at once;
+/// the old stop goes back instead.
+#[test]
+fn a_stale_reference_through_the_replacement_puts_the_old_stop_back() {
+    let mut h = ready(PROFILES[0]);
+    let preparation = replacement_held_in_preparation(&mut h);
+    set_reference_prices(&mut h, 94.0, 94.0);
+    h.advance(10_000.0);
+    release(&mut h, preparation);
+    let writes = stop_writes(&h);
+    assert_eq!(writes.len(), 1, "{:?}", h.result(91));
+    assert_eq!(writes[0]["stopLoss"], "90");
 }
 
 fn assert_not_doubled(h: &mut Harness, said: &str) {

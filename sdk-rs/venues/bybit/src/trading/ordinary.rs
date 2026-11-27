@@ -1770,7 +1770,7 @@ impl BybitLinear {
                     .front()
                     .is_some_and(|leg| matches!(leg.planned.call, Call::PartialStop { .. }))
             })
-            .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+            .and_then(|flow| flow.replacement_refusal(cx.store))
         else {
             return;
         };
@@ -1797,7 +1797,7 @@ impl BybitLinear {
             return false;
         };
         if self.trading.gone_before_cancel.contains(replaced)
-            || flow.validate(cx.store, cx.now, true).is_err()
+            || flow.validate(cx.store, true).is_err()
         {
             return false;
         }
@@ -2086,7 +2086,7 @@ impl BybitLinear {
             let refusal = run
                 .partial
                 .as_ref()
-                .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+                .and_then(|flow| flow.replacement_refusal(cx.store))
                 .unwrap_or_else(|| error.message.clone());
             let swapped = self.swap_replacement_for_put_back(cx, request.command, run, refusal);
             self.trading.gone_before_cancel.remove(&replaced);
@@ -2222,10 +2222,8 @@ impl BybitLinear {
         }
         if let Some(flow) = &run.partial {
             match active.leg.planned.call {
-                Call::PartialStop { .. } => flow.validate(store, release.time.raw_ms, false)?,
-                Call::RestorePartialStop { .. } => {
-                    flow.validate(store, release.time.raw_ms, true)?
-                }
+                Call::PartialStop { .. } => flow.validate(store, false)?,
+                Call::RestorePartialStop { .. } => flow.validate(store, true)?,
                 _ => {}
             }
         }
