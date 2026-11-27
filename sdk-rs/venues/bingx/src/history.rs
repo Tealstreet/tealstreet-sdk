@@ -626,6 +626,10 @@ impl History {
                 read.from = read.to.map(|to| to - WEEK);
             }
         }
+        // Store the same floored bounds `Params::time` encodes, so paging and the
+        // returned-window check judge the window BingX actually served.
+        read.from = read.from.map(safe_cex_engine::time::wire_stamp_ms);
+        read.to = read.to.map(safe_cex_engine::time::wire_stamp_ms);
         if let (Some(from), Some(to)) = (read.from, read.to) {
             if !from.is_finite() || !to.is_finite() || from > to {
                 local_result(cx, Err("invalid history time range"));
@@ -766,10 +770,10 @@ impl History {
             params = params.num("pageIndex", f64::from(fills.page));
         }
         if let Some(from) = from {
-            params = params.num(start, from);
+            params = params.time(start, from);
         }
         if let Some(to) = to {
-            params = params.num(end, to);
+            params = params.time(end, to);
         }
         let at = match read.native.kind {
             Kind::Fills => {
