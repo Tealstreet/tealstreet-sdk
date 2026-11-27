@@ -82,6 +82,15 @@ export class WsDirectFallback {
     return true;
   };
 
+  /**
+   * The engine gave up on THIS connect before it opened (its connect timeout).
+   * A hung dial is a route failure, not a quiet one, so the next `resolveUrl`
+   * advances: two of them took 20 s, as long as the public-feed notice waits.
+   */
+  abandonedBeforeOpen = (): void => {
+    if (this.messages === 0) this.silentConnects = Math.max(this.silentConnects, this.maxSilentConnects - 1);
+  };
+
   /** Call from the socket's message handler. */
   onMessage = (): void => {
     this.messages++;

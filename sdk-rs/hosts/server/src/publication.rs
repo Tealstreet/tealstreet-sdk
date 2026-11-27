@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 
+mod financial_tickers;
+
 pub const MIN_INTERVAL_MS: u16 = 50;
 pub const MAX_INTERVAL_MS: u16 = 5000;
 
@@ -316,6 +318,10 @@ struct PublicState {
     /// Latest observation per source row, for rows a new selection starts sending.
     observed: BTreeMap<u32, [f64; 4]>,
     filter: Option<TickerFilter>,
+    selection: TickerSelection,
+    financial: BTreeSet<String>,
+    published_financial: BTreeSet<String>,
+    financial_unreadable: bool,
     /// A cleared selection owes the client the full table once.
     replace_tickers: bool,
     loaded: Option<u32>,
@@ -349,6 +355,7 @@ impl PublicState {
             strings: frame.strings,
         };
         ingest::apply(&mut self.store, &mut self.source, &selected, false)?;
+        let financial_changed = self.observe_financial(&frame)?;
         if let Some(filter) = &mut self.filter {
             if replaced {
                 filter.rebuild(self.store.tickers());
@@ -359,6 +366,9 @@ impl PublicState {
             {
                 filter.refresh(self.store.tickers());
             }
+        }
+        if financial_changed {
+            self.sync_financial_filter();
         }
         if frame.sections.iter().any(|s| s.kind == section::MARKETS) {
             let symbols: HashSet<_> = self
@@ -437,15 +447,13 @@ impl PublicState {
         }
         Ok(barrier)
     }
-    fn select_tickers(&mut self, selection: TickerSelection) {
-        match selection {
-            Some(symbols) => {
-                self.filter = Some(TickerFilter::new(symbols, self.store.tickers()));
-                self.replace_tickers = false;
-            }
-            None => self.replace_tickers |= self.filter.take().is_some(),
+    fn select_tickers(&mut self, selection: TickerSelection) -> Result<(), IngestError> {
+        if selection.is_some() && self.financial_unreadable {
+            return Err(IngestError("financial ticker baseline unavailable"));
         }
-        self.observations = self.observed.clone();
+        self.selection = selection;
+        self.sync_financial_filter();
+        Ok(())
     }
     fn take_ticker_pending(&mut self) -> Pending {
         let source = self.store.take_pending();
@@ -636,8 +644,8 @@ impl Publisher {
             .state
             .as_mut()
             .ok_or(IngestError("publication baseline unavailable"))?;
-        self.tickers = selection.clone();
-        state.select_tickers(selection);
+        state.select_tickers(selection.clone())?;
+        self.tickers = selection;
         if !self.started {
             return Ok(Vec::new());
         }
@@ -647,6 +655,26 @@ impl Publisher {
         Ok(frames)
     }
     pub fn receive(
+        &mut self,
+        bytes: Arc<[u8]>,
+        initial: bool,
+    ) -> Result<Vec<Arc<[u8]>>, IngestError> {
+        let frames = self.receive_source(bytes, initial)?;
+        let frames = match self.state.as_mut() {
+            Some(state) => state.project_financial(frames, self.limit, initial)?,
+            None => frames,
+        };
+        if self.state.is_some()
+            && frames
+                .iter()
+                .any(|bytes| wire::sections(bytes).any(|(kind, _)| ticker_section(kind)))
+        {
+            self.selected_table = self.tickers.is_some();
+            self.last_publication = Instant::now();
+        }
+        Ok(frames)
+    }
+    fn receive_source(
         &mut self,
         bytes: Arc<[u8]>,
         initial: bool,

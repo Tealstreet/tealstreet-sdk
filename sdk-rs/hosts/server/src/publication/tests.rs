@@ -583,3 +583,5 @@ fn an_unreadable_frame_resnapshots_a_selected_unpaced_client_instead_of_forwardi
         assert!(Arc::ptr_eq(&output[0], &malformed));
     }
 }
+
+mod financial_tickers;

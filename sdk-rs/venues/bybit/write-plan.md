@@ -78,8 +78,13 @@ backoff, the outcome is explicitly Unprotected. A definitive replacement refusal
 always puts the old stop back. So does a replacement the guard would refuse,
 checked before sending and again at release. A replacement refused before release
 (veto, signing, pacing) sent nothing, so the engine lets the plan follow it with
-the put-back. If both guards refuse (for example, a stale reference), the outcome
-is explicitly Unprotected without a venue call. Lineage and the peer census only
+the put-back. After the landed cancel the guards no longer require a fresh
+reference: a quiet price outlived the 5 s window during the proof and both were
+refused, leaving an inverse BTCUSD long with no stop (TEALSTREET-NEXT-EGG,
+2026-11-27). Bybit judges the trigger, so only a last known price that would fire
+the stop at once refuses. If both guards refuse (the price is through both stops,
+or the position or order changed), the outcome is explicitly Unprotected without
+a venue call. Lineage and the peer census only
 word the put-back (standalone when unproven). An already-gone cancel still never
 puts back, and an Unknown cancel, replacement or put-back still never resends. The
 post-cancel order check forgives only what our own cancel changes: Bybit's terminal

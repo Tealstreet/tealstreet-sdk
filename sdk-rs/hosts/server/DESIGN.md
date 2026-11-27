@@ -1473,3 +1473,20 @@ restored job or create persistence. Client-held TWAPs retain the existing paused
 restore/explicit-resume gate; lost chases and absent schedules cannot be rebuilt.
 See [restart recovery](../../../docs/plans/callers/delegated-restart-recovery.md)
 for the wire contract, scope and measured recovery limits.
+
+### Financial references in a selected ticker table
+
+The server independently unions the requested selection with non-flat positions
+and nonterminal orders. Initial snapshot chunks retain private-first ordering
+for historical-fill handling; the union arrives before readiness. Zero contracts
+alone do not prove flatness: notional must
+also be zero. A changed live reference set publishes a complete public catalogue and
+ticker baseline before the private rows, retains the old/new union until those
+rows pass, then emits the reduced baseline. This also covers private-only updates
+while the public timer is waiting. Catalogue publication avoids references to a
+public catalogue still queued by pacing. Such structural changes are infrequent;
+ordinary quantity changes retain existing pacing. Legacy full-table bytes pass
+unchanged. All private section payloads/string references and their relative order
+remain original; source ticker observations are remapped, never replaced with a
+receipt timestamp. Unreadable financial state uses the existing resnapshot path
+instead of guessing which ticker rows can be removed. No wire or input limit changes.
