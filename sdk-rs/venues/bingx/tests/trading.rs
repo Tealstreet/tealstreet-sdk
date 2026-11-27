@@ -2946,7 +2946,16 @@ fn live_cancel_replace_without_a_consistent_unfilled_target_stays_unproven() {
     other["cancelOrderId"] = "another-order".into();
     let mut contradictory = live_cancelled_stop("0");
     contradictory["orderId"] = "another-order".into();
-    for cancel_response in [other, contradictory, live_cancelled_stop("0.25")] {
+    // The nested row's own orderId/orderID disagree: no id is taken from it,
+    // so its matching cancelOrderId must not prove the cancel by itself.
+    let mut contradictory_aliases = live_cancelled_stop("0");
+    contradictory_aliases["orderID"] = "another-order".into();
+    for cancel_response in [
+        other,
+        contradictory,
+        contradictory_aliases,
+        live_cancelled_stop("0.25"),
+    ] {
         let mut h = guarded_stop(true);
         edit_stop(&mut h);
         h.reply(&live_cancel_replace(cancel_response));

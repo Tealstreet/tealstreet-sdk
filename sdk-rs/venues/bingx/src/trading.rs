@@ -336,19 +336,19 @@ impl Data<'_> {
     /// The order a cancelReplace says it cancelled, from either shape; any
     /// contradiction or empty id proves nothing.
     fn replaced_cancel_id(&self) -> Option<String> {
-        let nested = self.cancel_response.as_ref().map(|c| {
-            c.cancel_order_id
-                .as_ref()
-                .map(Id::text)
-                .into_iter()
-                .chain(c.id().ok().flatten())
-        });
+        let nested = match &self.cancel_response {
+            // A contradictory nested row proves nothing, even beside a cancelOrderId.
+            Some(c) => Some((c.cancel_order_id.as_ref().map(Id::text), c.id().ok()?)),
+            None => None,
+        };
+        let (nested_cancel, nested_order) = nested.unwrap_or_default();
         matching_id(
             self.cancel_order_id
                 .as_ref()
                 .map(Id::text)
                 .into_iter()
-                .chain(nested.into_iter().flatten()),
+                .chain(nested_cancel)
+                .chain(nested_order),
         )
         .ok()
         .flatten()
