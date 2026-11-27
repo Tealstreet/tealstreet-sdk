@@ -1847,3 +1847,17 @@ reserved size. Rule-17 raise per `harness/CLAUDE.md`, generated with
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | lighter | 2432217 | 2412544 | 2443264 |
+
+## 2026-11-27 — #3828 nested cancelReplace proof raises the bingx cap
+
+#3828 decodes BingX's live cancelReplace `cancelResponse` row (a third nested
+`Data`, its symbol/evidence/id checks and the guarded proof that reads it), which
+puts the bingx family 563 B over its ceiling. Rule-17 raise per `harness/CLAUDE.md`,
+generated with `update-wasm-caps.mjs` from PR run 46064789854 (sealed source
+`3ba842fbf2d425f0396f24854833bc29f248073f`, the merge of PR head
+`d36626abb9c4159bada89c4ffd1c1108ee8ba20d` into master
+`cba454176ee269d2c52683e4a360c0b6dd3ad622`), filtered to bingx.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| bingx | 2326067 | 2325504 | 2336768 |
