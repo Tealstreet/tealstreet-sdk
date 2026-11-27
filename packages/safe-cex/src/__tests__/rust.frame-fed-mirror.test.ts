@@ -9,7 +9,12 @@ import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWo
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import {
+  PAGE_MARKETS_LOADING,
+  PAGE_MARKETS_MISSING,
+  RustEngineExchange,
+  setWasmEngineLoader,
+} from '../exchanges/rust/rust.exchange';
 import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { CallMethodHandler } from '../webworker/handlers/CallMethodHandler';
@@ -28,19 +33,21 @@ type Fake = {
   /** The next placement leaves an uncertain write, held as its engine names it. */
   holdOrders?: { symbols: string; liftAfterMs: number };
   offsets: Array<number | undefined>;
+  /** Whether the page engine's own instrument catalogue has loaded, as its frames report. */
+  marketsLoaded: boolean;
 };
 
 let lastModule: WasmEngineModule | undefined;
 
 const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as ExchangeName } = {}): Fake => {
-  const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0, offsets: [] };
+  const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0, offsets: [], marketsLoaded: true };
   const idle = () => '[]';
   const frame = () =>
     new Uint8Array(
       consumerFrame({
         markets: [],
         tickers: [],
-        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        loaded: { markets: fake.marketsLoaded, tickers: true, balance: true, orders: true, positions: true },
       }),
     );
   const engine = {
@@ -238,6 +245,71 @@ describe('frame-fed main-thread mirror', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    describe('when the page engine catalogue is late (TEALSTREET-NEXT-EGH)', () => {
+      const lateMirror = () => {
+        const fake = fakeEngine();
+        fake.marketsLoaded = false;
+        const mirror = mirrorWith(fake);
+        exchange = mirror.exchange;
+        const errors: string[] = [];
+        const logs: string[] = [];
+        mirror.exchange.on('error', (message: string) => errors.push(message));
+        mirror.exchange.on('log', (message: string) => logs.push(message));
+        const placements = () => fake.commands.filter(({ op }) => op === 'placeOrders');
+        return { fake, mirror, errors, logs, placements };
+      };
+
+      it('refuses the waiting write, then sends the next one once markets arrive, without a reload', async () => {
+        vi.useFakeTimers();
+        try {
+          const { fake, mirror, errors, logs, placements } = lateMirror();
+          const placed = mirror.exchange.placeOrder(order);
+          const refused = expect(placed).rejects.toMatchObject({
+            message: PAGE_MARKETS_LOADING,
+            kind: 'timeout',
+            outcome: 'notSent',
+          });
+          await vi.advanceTimersByTimeAsync(30_000);
+          await refused;
+          expect(placements()).toEqual([]);
+
+          fake.marketsLoaded = true;
+          await vi.advanceTimersByTimeAsync(1_000);
+          expect(logs.filter((line) => line.includes('market details loaded'))).toHaveLength(1);
+          // The refused write never goes out late.
+          expect(placements()).toEqual([]);
+
+          await expect(mirror.exchange.placeOrder(order)).resolves.toEqual(['placed-1']);
+          expect(placements()).toHaveLength(1);
+
+          await vi.advanceTimersByTimeAsync(180_000);
+          expect(errors.filter((message) => message.includes(PAGE_MARKETS_MISSING))).toEqual([]);
+          expect(mirror.calls).not.toContain('placeOrder');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('reports markets that never arrive once, however many writes were refused', async () => {
+        vi.useFakeTimers();
+        try {
+          const { mirror, errors, logs, placements } = lateMirror();
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const refused = expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+            await vi.advanceTimersByTimeAsync(30_000);
+            await refused;
+          }
+          await vi.advanceTimersByTimeAsync(300_000);
+          expect(errors.filter((message) => message.includes(PAGE_MARKETS_MISSING))).toHaveLength(1);
+          expect(errors.filter((message) => message.includes(PAGE_MARKETS_LOADING))).toHaveLength(3);
+          expect(logs.filter((line) => line.includes('market details loaded'))).toEqual([]);
+          expect(placements()).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
 
     // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed's
