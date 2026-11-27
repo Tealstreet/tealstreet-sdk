@@ -1800,8 +1800,8 @@ impl Venue for Bingx {
                 let params = Params::new()
                     .str("symbol", &market.id)
                     .str("interval", interval.as_str())
-                    .num("startTime", start)
-                    .num("endTime", end);
+                    .time("startTime", start)
+                    .time("endTime", end);
                 let pending = Pending::Candles {
                     command,
                     rows: Vec::new(),

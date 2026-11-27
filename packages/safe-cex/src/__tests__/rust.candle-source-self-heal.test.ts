@@ -16,9 +16,14 @@ const candles = [{ timestamp: 1_700_000_000, open: 1, high: 2, low: 1, close: 2,
 
 /**
  * A mirror whose page candle sources are fake engines: `health` decides, per construction,
- * whether the source loads its markets, never does, or fails to start.
+ * whether the source loads its markets, never does, or fails to start. `candleRead: 'venueTimeout'`
+ * issues the candle request one dispatch hop after receipt and fails it when the engine's own
+ * 20 s request budget runs out, as a venue that never answers does.
  */
-const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
+const fixture = (
+  health: Array<'ok' | 'late' | 'stuck' | 'fails'>,
+  candleRead: 'answers' | 'venueTimeout' = 'answers',
+) => {
   const built: Array<{ commands: Array<Record<string, unknown>>; freed: ReturnType<typeof vi.fn> }> = [];
   const Constructor = Object.assign(
     function (_venue: string, json: string) {
@@ -38,6 +43,8 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
           }),
         );
       const idle = () => '[]';
+      const pendingReads = new Map<number, { command: number; stage: 'issue' | 'deadline' }>();
+      let timers = 100;
       return {
         construction: () => JSON.stringify({ frameFed: false, publicDataOnly: page }),
         syncHostTime: () => true,
@@ -46,9 +53,21 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
           if (state === 'fails') throw new Error('instrument read refused');
           return state === 'late' ? JSON.stringify([{ op: 'setTimer', timer: 1, at: Date.now() + 15_000 }]) : '[]';
         },
-        timer: () => {
-          landed = true;
-          return '[]';
+        timer: (timer: number) => {
+          const read = pendingReads.get(timer);
+          if (!read) {
+            landed = true;
+            return '[]';
+          }
+          pendingReads.delete(timer);
+          if (read.stage === 'issue') {
+            pendingReads.set(++timers, { command: read.command, stage: 'deadline' });
+            return JSON.stringify([{ op: 'setTimer', timer: timers, at: Date.now() + 20_000 }]);
+          }
+          const message = 'HTTP request timed out (class=read budget=20000ms elapsed=20000ms)';
+          return JSON.stringify([
+            { op: 'done', command: read.command, error: message, detail: { message, kind: 'timeout' } },
+          ]);
         },
         wsOpen: idle,
         wsMessage: idle,
@@ -65,6 +84,10 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
         command: (json: string) => {
           const command = JSON.parse(json);
           record.commands.push(command);
+          if (candleRead === 'venueTimeout' && command.op === 'fetchCandles') {
+            pendingReads.set(++timers, { command: command.command, stage: 'issue' });
+            return JSON.stringify([{ op: 'setTimer', timer: timers, at: Date.now() + 1 }]);
+          }
           return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(candles) }]);
         },
       } satisfies WasmEngineLike;
@@ -108,7 +131,20 @@ it('a page candle read is bounded: a short markets wait and a candle command dea
   const result = await settle(exchange.fetchOHLCV(opts));
   expect(result).toEqual({ value: candles });
   expect(built).toHaveLength(1);
-  expect(built[0].commands.find((command) => command.op === 'fetchCandles')).toMatchObject({ timeoutMs: 20_000 });
+  expect(built[0].commands.find((command) => command.op === 'fetchCandles')).toMatchObject({ timeoutMs: 25_000 });
+});
+
+// TEALSTREET-NEXT-ED8/E74: the read's own 20 s deadline matched the engine's 20 s candle request
+// budget, which starts at issuance, so the host's generic "This action timed out after 20000 ms"
+// always won and discarded the engine's account of where the request was stuck.
+it('a venue that never answers a page candle read fails with the engine timeout, not a bare deadline', async () => {
+  vi.useFakeTimers();
+  const { exchange } = fixture(['ok'], 'venueTimeout');
+  const result = await settle(exchange.fetchOHLCV(opts), 26_000);
+  expect(result).toMatchObject({
+    error: expect.objectContaining({ message: expect.stringMatching(/^HTTP request timed out \(class=read/) }),
+  });
+  expect((result as { error: Error }).error.name).not.toBe('CommandTimeoutError');
 });
 
 // #3095 review: a slow catalogue was torn down at every 10 s read and never converged.
