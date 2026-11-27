@@ -470,6 +470,12 @@ const COLD_START_READS = /^(fetch|find|refresh)/;
 const STARTUP_WRITE_WAIT_MS = 30_000;
 /** How long a worker read may wait while the account loads, matching the write refusal. */
 const STARTUP_READ_WAIT_MS = 30_000;
+/** Static texts: web Sentry grouping keys on them, one issue per venue (TEALSTREET-NEXT-EGH). */
+export const PAGE_MARKETS_LOADING = 'Not sent: market details are still loading. Try again in a moment.';
+export const PAGE_MARKETS_MISSING =
+  "Market details did not load, so orders can't be sent. Reconnect the account to try again.";
+/** After a write is refused for them, how long page markets may still arrive before that is an error. */
+const PAGE_MARKETS_GIVE_UP_MS = 120_000;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
@@ -751,6 +757,8 @@ export class RustEngineExchange extends BaseExchange {
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
   private pageMarketsLoaded = false;
+  /** When a write was first refused for missing page markets; cleared once they arrive. */
+  private pageMarketsLateSince?: number;
   private frameFedSettled = false;
   private pageWriteSupported?: boolean;
   private frameFedEngine = false;
@@ -2203,21 +2211,44 @@ export class RustEngineExchange extends BaseExchange {
         if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during page market load'));
         else if (this.pageMarketsLoaded) finish();
       };
-      const message = 'Market details timed out while loading';
-      const timeout = setTimeout(
-        () =>
-          finish(
-            new ExchangeError(message, {
-              message,
-              kind: 'timeout',
-              outcome: 'notSent',
-            }),
-          ),
-        this.startupWriteWaitMs,
-      );
+      const message = PAGE_MARKETS_LOADING;
+      const timeout = setTimeout(() => {
+        this.watchLatePageMarkets();
+        finish(new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' }));
+      }, this.startupWriteWaitMs);
       this.startupWaiters.add(wake);
       wake();
     });
+
+  /**
+   * The refused write is never resent; this only tells the user when trading works again.
+   * Markets still missing after the give-up bound are reported once as an error.
+   */
+  private watchLatePageMarkets = () => {
+    if (this.pageMarketsLateSince !== undefined) return;
+    const since = Date.now();
+    this.pageMarketsLateSince = since;
+    const stop = () => {
+      clearTimeout(giveUp);
+      this.startupWaiters.delete(wake);
+      this.pageMarketsLateSince = undefined;
+    };
+    const wake = () => {
+      // An engine failure or disposal already reports itself.
+      if (this.isDisposed || this.engineFailure || this.startupFailure) stop();
+      else if (this.pageMarketsLoaded) {
+        stop();
+        const seconds = Math.round((Date.now() - since) / 1000);
+        this.log(`${this.name} market details loaded ${seconds}s late; orders can be sent again.`, LogSeverity.Info);
+      }
+    };
+    // Fires at most once: the watch stays open until the markets arrive.
+    const giveUp = setTimeout(() => {
+      const message = PAGE_MARKETS_MISSING;
+      this.reportCommandError(new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' }));
+    }, PAGE_MARKETS_GIVE_UP_MS);
+    this.startupWaiters.add(wake);
+  };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
