@@ -208,6 +208,32 @@ impl PartialStopGuard {
                 self.symbol
             ))));
         };
+        self.refuse_if_fires(current, label)
+    }
+
+    /// Once the old stop's cancel has landed, a reference gone stale during the proof must
+    /// not leave the position with no stop (TEALSTREET-NEXT-EGG). Bybit judges the trigger
+    /// itself, so only the last known price, when it would fire this stop at once, refuses.
+    fn validate_after_cancel(&self, store: &safe_cex_engine::Store) -> Result<(), VenueError> {
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::LastPrice => "last",
+            StopTriggerType::IndexPrice => "index",
+        };
+        let last_known = store
+            .ticker(&self.symbol)
+            .map(|ticker| match self.reference {
+                StopTriggerType::MarkPrice => ticker.mark,
+                StopTriggerType::LastPrice => ticker.last,
+                StopTriggerType::IndexPrice => ticker.index,
+            });
+        match last_known.filter(|price| price.is_finite() && *price > 0.0) {
+            Some(current) => self.refuse_if_fires(current, label),
+            None => Ok(()),
+        }
+    }
+
+    fn refuse_if_fires(&self, current: f64, label: &str) -> Result<(), VenueError> {
         let fires = match (self.side, self.kind) {
             (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
                 self.price >= current

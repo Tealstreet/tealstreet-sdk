@@ -15,6 +15,9 @@ mod never_unprotected;
 #[path = "partial_stops/post_cancel_change.rs"]
 mod post_cancel_change;
 
+#[path = "partial_stops/stale_reference.rs"]
+mod stale_reference;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};

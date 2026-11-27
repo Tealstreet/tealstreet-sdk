@@ -662,23 +662,18 @@ impl Flow {
     }
 
     /// Why the replacement would be refused at release; checked before it is sent.
-    pub(super) fn replacement_refusal(&self, store: &Store, now: f64) -> Option<String> {
-        self.validate(store, now, false).err()?;
+    pub(super) fn replacement_refusal(&self, store: &Store) -> Option<String> {
+        self.validate(store, false).err()?;
         let raw = self
             .validate_order(store)
-            .and_then(|()| self.guard.validate(store, now));
+            .and_then(|()| self.guard.validate_after_cancel(store));
         Some(raw.err().map_or_else(
             || "the replacement could not be placed".to_owned(),
             |error| error.message,
         ))
     }
 
-    pub(super) fn validate(
-        &self,
-        store: &Store,
-        now: f64,
-        restoring: bool,
-    ) -> Result<(), VenueError> {
+    pub(super) fn validate(&self, store: &Store, restoring: bool) -> Result<(), VenueError> {
         // AGT-34: lineage no longer gates the put-back; a cancelled stop always goes back.
         if !self.unproven && (self.terminal.is_none() || !self.history_done) {
             return Err(VenueError::new("The old stop’s cancellation hasn’t been confirmed. Check your open orders before adding protection.").outcome(Outcome::NotSent));
@@ -692,9 +687,9 @@ impl Flow {
                     .original
                     .trigger_type
                     .expect("native proof required reference");
-                guard.validate(store, now)
+                guard.validate_after_cancel(store)
             } else {
-                self.guard.validate(store, now)
+                self.guard.validate_after_cancel(store)
             }
         });
         validation.map_err(|mut error| {
