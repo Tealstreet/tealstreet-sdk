@@ -138,6 +138,10 @@ refuse the whole history read; this read-only mapping conveys no write authority
 Protective edits retain native closing authority and use a final managed-Claim
 veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
 use native cancelReplace; explicit partial refusal permits one exact put-back.
+The live reply nests the cancelled order under `cancelResponse` (its
+`cancelOrderId`/`orderId`, a pre-cancel status and `executedQty`); the
+documented flat `cancelOrderId` is also accepted. Either must name the target,
+agree with every other id and show nothing filled, or the edit stays Unknown.
 Ambiguous replies and guarded rate limits are Unknown, with no resend or restore.
 A missing or stale requested receipt triggers one unsigned Daily (Last) or
 Premium (Mark) preflight read, bounded to 20 s with no retry, before destructive

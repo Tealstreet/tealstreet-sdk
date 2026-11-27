@@ -261,6 +261,10 @@ struct Data<'a> {
     cancel_result: Cow<'a, str>,
     #[serde(default, borrow)]
     cancel_order_id: Option<Id<'a>>,
+    /// Live cancelReplace nests the cancelled order here, carrying its
+    /// cancelOrderId/orderId; only the documented flat shape puts it top-level.
+    #[serde(default, borrow, deserialize_with = "object_order")]
+    cancel_response: Option<Box<Data<'a>>>,
     #[serde(default, borrow)]
     new_order_result: Cow<'a, str>,
     #[serde(default, borrow)]
@@ -271,6 +275,7 @@ struct Data<'a> {
 impl Data<'_> {
     fn has_order_claim(&self) -> bool {
         self.cancel_order_id.is_some()
+            || self.cancel_response.is_some()
             || self.order_id.is_some()
             || self.order_id_text.is_some()
             || self.new_order_id.is_some()
@@ -295,7 +300,12 @@ impl Data<'_> {
                 ids.push(id);
             }
         }
-        for nested in self.order.iter().chain(self.new_order_response.iter()) {
+        for nested in self
+            .order
+            .iter()
+            .chain(self.new_order_response.iter())
+            .chain(self.cancel_response.iter())
+        {
             nested.evidence_ids(ids);
         }
     }
@@ -318,6 +328,30 @@ impl Data<'_> {
                 .new_order_response
                 .as_ref()
                 .is_none_or(|o| o.matches_symbol(symbol))
+            && self
+                .cancel_response
+                .as_ref()
+                .is_none_or(|o| o.matches_symbol(symbol))
+    }
+    /// The order a cancelReplace says it cancelled, from either shape; any
+    /// contradiction or empty id proves nothing.
+    fn replaced_cancel_id(&self) -> Option<String> {
+        let nested = self.cancel_response.as_ref().map(|c| {
+            c.cancel_order_id
+                .as_ref()
+                .map(Id::text)
+                .into_iter()
+                .chain(c.id().ok().flatten())
+        });
+        matching_id(
+            self.cancel_order_id
+                .as_ref()
+                .map(Id::text)
+                .into_iter()
+                .chain(nested.into_iter().flatten()),
+        )
+        .ok()
+        .flatten()
     }
     fn proves_cancel(&self, ids: &[String]) -> bool {
         ids.len() == 1
@@ -1008,9 +1042,10 @@ impl Trading {
             && current_unfilled
             && match call {
                 Call::Replace { old_id } => data.is_some_and(|d| {
-                    d.cancel_order_id.as_ref().map(Id::text).as_deref() == Some(old_id)
+                    d.replaced_cancel_id().as_deref() == Some(old_id)
                         && matches!(d.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
                         && d.unfilled()
+                        && d.cancel_response.as_ref().is_none_or(|c| c.unfilled())
                         && d.failed.as_ref().is_none_or(Vec::is_empty)
                 }),
                 Call::Cancel { ids, .. } => data.is_some_and(|d| d.proves_cancel(ids)),
