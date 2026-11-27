@@ -361,6 +361,32 @@ fn fill_paging_uses_native_pages_and_preserves_distinct_executions() {
 }
 
 #[test]
+fn fractional_fill_bounds_accept_executions_on_the_encoded_integer_window() {
+    // startTs/endTs go out floored; the stored window must be the same one,
+    // or a fill exactly at the floored start would be judged out of window.
+    let mut h = Harness::new(true);
+    h.query(fills(1000.75, 3000.5));
+    assert!(
+        h.requests[0].url.contains("startTs=1000&"),
+        "{}",
+        h.requests[0].url
+    );
+    assert!(
+        h.requests[0].url.contains("endTs=3000&"),
+        "{}",
+        h.requests[0].url
+    );
+    h.reply(r#"{"code":0,"data":{"fill_orders":[{"tradeId":"end","orderId":"o","side":"BUY","price":"1","qty":"1","time":3000},{"tradeId":"start","orderId":"o","side":"BUY","price":"1","qty":"1","time":1000}]}}"#);
+    h.tick();
+    h.reply(r#"{"code":0,"data":{"fill_orders":[]}}"#);
+    let rows: Vec<Execution> = h.result();
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["end", "start"]
+    );
+}
+
+#[test]
 fn failed_page_reports_error_without_a_partial_success() {
     let mut h = Harness::new(true);
     h.query(fills(1000.0, 3000.0));

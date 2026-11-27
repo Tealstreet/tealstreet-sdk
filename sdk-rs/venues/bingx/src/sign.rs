@@ -107,6 +107,17 @@ impl Params {
         self.0.insert(name.into(), Param::Boolean(value));
         self
     }
+    /// A millisecond time field. BingX answers 109400 to a fractional one, and
+    /// calibrated protocol time carries a fraction, so floor it once here.
+    pub fn time(self, name: &str, ms: f64) -> Self {
+        self.num(name, safe_cex_engine::time::wire_stamp_ms(ms))
+    }
+    pub fn opt_time(self, name: &str, ms: Option<f64>) -> Self {
+        match ms {
+            Some(ms) => self.time(name, ms),
+            None => self,
+        }
+    }
     pub fn opt_num(self, name: &str, value: Option<f64>) -> Self {
         match value {
             Some(value) => self.num(name, value),
