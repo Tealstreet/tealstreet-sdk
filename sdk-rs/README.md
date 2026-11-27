@@ -60,8 +60,8 @@ a retired generation is never reinstated on that binding.
 Bound restores refuse pre-release-8 untagged rows with a visible error; see the
 [TWAP ownership contract](algos/twap/README.md) for the exact messages.
 
-| Crate | Purpose |
-| --- | --- |
+| Crate             | Purpose                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |
 
 EIP-712 venues encode their fixed domain and message words locally. Shared crypto
@@ -187,7 +187,12 @@ from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
 labels non-GET methods `orderWrite` regardless of hints while honoring the
 explicit remaining engine deadline. Labels grant no send or retry authority.
 Timeouts name class, budget and elapsed milliseconds, including host diagnostics
-when engine expiry wins the timer race. HOW readiness remains capped at 30 s
+when engine expiry wins the timer race. A read's expiry also gives the venue's
+`request.failed` report `kind=timeout` when the venue attached none, so hosts
+handle it as a transient read failure instead of an unclassified error; write
+expiries stay unclassified and visible. Note `class=orderRead` covers every
+credentialed background read and command reads such as candles, not only open
+orders. HOW readiness remains capped at 30 s
 inside the same original deadline. Legacy GET paths use exact catalogue/history/
 order components; unknown paths use the 20 s read default and non-GET requests
 conservatively use the short write default. Explicit transport deadlines win.
@@ -266,6 +271,7 @@ package is about a tenth of the combined engine's bytes and cold-load CPU
 `--venue hyperliquid` (or any venue name) builds that venue's family in place
 of the combined bindings, for replay gates. CI applies the 1.2 MB budget to
 every family package.
+
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape
@@ -352,7 +358,6 @@ events report net realized PnL (`closedPnl - fee`) and the execution fee; openin
 fills omit both. MEXC and WEEX retain their live realized-PnL fields and absolute
 fees. This does not change the separate gross realized-PnL convention used by
 historical execution queries.
-
 
 Private account-read dispatchers may call `Cx::tag_account_read` after selecting
 the signer. The pure `Venue::account_auth_outcome` hook returns only definitive
