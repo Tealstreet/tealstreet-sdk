@@ -65,6 +65,12 @@ pub struct ErrorReport<'a> {
     /// venue refused a bootstrap read over the key.
     pub startup_unloaded: Option<&'static str>,
     pub startup_refused: Option<bool>,
+    /// For a transport failure: how a request went (`direct`, `proxy` or
+    /// `tunnel`), its engine request class, and a closed cause class. Fixed
+    /// vocabulary, never error text, so a fingerprint built from them is stable.
+    pub route: Option<&'static str>,
+    pub endpoint_class: Option<&'static str>,
+    pub cause: Option<&'static str>,
 }
 
 static SINK: OnceLock<fn(&ErrorReport<'_>)> = OnceLock::new();
