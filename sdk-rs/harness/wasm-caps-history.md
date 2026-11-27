@@ -1847,3 +1847,19 @@ reserved size. Rule-17 raise per `harness/CLAUDE.md`, generated with
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | lighter | 2432217 | 2412544 | 2443264 |
+
+## 2026-11-27 — #3832 read-timeout kind raises the binance cap
+
+#3832 makes `expire_http_timer` add `kind=timeout` to a read's `request.failed`
+report when the venue attached none, so hosts handle an expired read as a
+transient failure. The engine change measures 63 B over the binance ceiling;
+every other family passes under its current cap. Rule-17 raise per
+`harness/CLAUDE.md`, computed as ceil((measured + reserve) / 1024) KiB from PR
+run 46063758660 (sealed source `c64a334a6f6a92eb10dc198347e9161fdd12fd4a`, the
+merge of PR head `e59edfd2fc6b5103649464ba9a82134ee67add8a` into master
+`cba454176ee269d2c52683e4a360c0b6dd3ad622`), filtered to binance. #3829 raises
+binance to the same value; whichever merges second drops or reconciles its raise.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| binance | 2434111 | 2434048 | 2445312 |
