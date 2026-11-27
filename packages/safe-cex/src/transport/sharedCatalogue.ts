@@ -77,6 +77,7 @@ const ownerId = () => {
 export class SharedCatalogue {
   private database?: Promise<IDBDatabase>;
   private retryAt = 0;
+  private coordinated = false;
   private readonly memory = new Map<string, Entry>();
   constructor(
     private readonly policy: CataloguePolicy,
@@ -223,6 +224,7 @@ export class SharedCatalogue {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
+            this.coordinated = true;
             resolve(value);
           }
         };
@@ -301,8 +303,9 @@ export class SharedCatalogue {
         };
       });
     } catch (error) {
-      // A non-strict policy already reads unshared on failure; only a strict one would refuse.
-      if (!this.policy.strict) throw error;
+      // Storage that never worked here reads unshared, as does a non-strict policy; only a
+      // strict coordinator that has seen shared state must keep honoring it in memory.
+      if (!this.policy.strict || !this.coordinated) throw error;
       return this.editMemory(key, change);
     }
     this.mirror(key, state);

@@ -178,16 +178,14 @@ it('a follower abort does not erase its peer cooldown', async () => {
   expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
 });
 
-it('unavailable storage from the start preserves discovery, coordinated in memory', async () => {
+it('unavailable storage from the start preserves independent discovery without a shared memory cache', async () => {
   vi.spyOn(factory, 'open').mockImplementation(() => {
     throw new DOMException('unavailable', 'SecurityError');
   });
   const cache = client();
-  const read = await prepare(cache);
-  expect(read).toBeDefined();
-  expect(read!.cached).toBeUndefined();
-  await read!.complete(response());
-  expect((await prepare(cache))?.cached?.body).toEqual(bytes);
+  expect(await prepare(cache)).toBeUndefined();
+  // A realm-wide singleton must not serve one engine's catalogue to the next (Node has no IndexedDB).
+  expect(await prepare(cache)).toBeUndefined();
 });
 
 it('a storage transaction that never settles falls back to one in-memory leader', async () => {
