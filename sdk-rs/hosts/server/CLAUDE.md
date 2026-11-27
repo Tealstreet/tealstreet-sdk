@@ -47,6 +47,13 @@ The optional `activeTickerSymbols` init field and `set-active-ticker-symbols` op
 Connection-local ticker selection. A selected table renumbers rows, so every
 selection change must re-send a full `TICKERS`, never deltas against old rows.
 
+Selections also retain every non-flat position and nonterminal order on the
+server, independently of the client's list. A changed live financial reference set
+publishes its catalogue and old/new ticker union before private rows, then drops
+old references afterward. Private sections keep their source bytes and order;
+ordinary financial changes with the same references keep public pacing. Unknown
+financial revisions cannot prove a selection and use existing snapshot recovery.
+
 ## Sentry owner identity
 
 The native Sentry allowlist and captured authentication-subject contract live in
