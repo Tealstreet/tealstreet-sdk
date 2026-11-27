@@ -2905,6 +2905,59 @@ fn proven_standalone_stops_use_native_cancel_replace_and_preserve_the_closing_fl
     assert!(h.done[0].is_ok(), "{:?}", h.done);
 }
 
+/// Live cancelReplace nests the cancelled order under cancelResponse (ccxt's
+/// captured payload; the legacy TS native-amend fixture uses the same shape).
+fn live_cancel_replace(cancel_response: serde_json::Value) -> String {
+    serde_json::json!({"code":0,"msg":"","data":{
+        "cancelResult":"true","cancelMsg":"","cancelResponse":cancel_response,
+        "replaceResult":"true","replaceMsg":"",
+        "newOrderResponse":{"orderId":"555","symbol":"BTC-USDT","positionSide":"BOTH","side":"SELL",
+            "type":"STOP_MARKET","price":"0","quantity":"1","stopPrice":"91","workingType":"MARK_PRICE",
+            "clientOrderID":"","timeInForce":"GTC","reduceOnly":true}}})
+    .to_string()
+}
+fn live_cancelled_stop(executed: &str) -> serde_json::Value {
+    serde_json::json!({"cancelClientOrderId":"","cancelOrderId":order().id,"symbol":"BTC-USDT",
+        "orderId":order().id,"side":"SELL","positionSide":"BOTH","type":"STOP_MARKET","origQty":"1",
+        "price":"0","executedQty":executed,"avgPrice":"0","cumQuote":"0","stopPrice":"90","profit":"0",
+        "commission":"0","status":"PENDING","time":"1707339747860","updateTime":"1707339747860",
+        "clientOrderId":"","leverage":"20X","workingType":"MARK_PRICE","onlyOnePosition":false,
+        "reduceOnly":true})
+}
+
+#[test]
+fn live_cancel_replace_proves_its_nested_cancellation() {
+    let mut h = guarded_stop(true);
+    edit_stop(&mut h);
+    assert!(h.requests[0].url.ends_with("/trade/cancelReplace"));
+    h.reply(&live_cancel_replace(live_cancelled_stop("0")));
+    assert!(
+        h.done[0].as_ref().is_ok_and(|ids| ids.contains("555")),
+        "{:?}",
+        h.done
+    );
+    assert!(h.failures.is_empty(), "{:?}", h.failures);
+}
+
+#[test]
+fn live_cancel_replace_without_a_consistent_unfilled_target_stays_unproven() {
+    let mut other = live_cancelled_stop("0");
+    other["orderId"] = "another-order".into();
+    other["cancelOrderId"] = "another-order".into();
+    let mut contradictory = live_cancelled_stop("0");
+    contradictory["orderId"] = "another-order".into();
+    for cancel_response in [other, contradictory, live_cancelled_stop("0.25")] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        h.reply(&live_cancel_replace(cancel_response));
+        assert!(h.done[0].is_err(), "{:?}", h.done);
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+    }
+}
+
 #[test]
 fn native_partial_refusal_puts_back_the_exact_original_once_with_typed_protection() {
     use safe_cex_engine::error::Protection;
