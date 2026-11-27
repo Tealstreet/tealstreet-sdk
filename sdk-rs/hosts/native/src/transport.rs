@@ -416,23 +416,71 @@ fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
 }
 
 /// A transport failure the journal just logged, for the host's error sink.
-fn report_failure(
+struct Failure<'a> {
     kind: crate::report::ErrorKind,
-    target: &str,
+    target: &'a str,
+    route: Option<&'static str>,
+    endpoint_class: Option<&'static str>,
+    cause: &'static str,
+}
+
+fn report_failure(
+    failure: Failure<'_>,
     venue: Option<&str>,
     user: Option<&crate::report::ReportUser>,
 ) {
     crate::report::report(&crate::report::ErrorReport {
-        kind,
+        kind: failure.kind,
         user,
         label: None,
-        target: Some(target),
+        target: Some(failure.target),
         error_kind: None,
         venue_code: None,
         venue,
         startup_unloaded: None,
         startup_refused: None,
+        route: failure.route,
+        endpoint_class: failure.endpoint_class,
+        cause: Some(failure.cause),
     });
+}
+
+/// A failed request's cause as a closed class, from the transport's own
+/// error wording. Order matters: a tunnel's upstream error quotes reqwest's.
+pub(crate) fn request_cause(error: &str) -> &'static str {
+    [
+        ("Tealstreet proxy refused", "proxy_auth"),
+        ("account IO authority expired", "io_expired"),
+        ("tunnel request failed", "tunnel_upstream"),
+        ("HTTP tunnel handoff failed", "tunnel_handoff"),
+        ("HTTP tunnel connection failed", "tunnel_open"),
+        ("tunnel closed", "tunnel_closed"),
+        ("timed out", "timeout"),
+        ("error sending request", "send_failed"),
+        ("body", "body_read"),
+    ]
+    .into_iter()
+    .find_map(|(needle, cause)| error.contains(needle).then_some(cause))
+    .unwrap_or("other")
+}
+
+/// A failed socket open's cause as a closed class.
+pub(crate) fn open_cause(error: &str) -> &'static str {
+    if let Some(status) = error.split("HTTP error: ").nth(1) {
+        return match status.as_bytes().first() {
+            Some(b'5') => "http_5xx",
+            Some(b'4') => "http_4xx",
+            _ => "http_other",
+        };
+    }
+    [
+        ("relay refused", "relay_refused"),
+        ("timed out", "timeout"),
+        ("IO error", "io"),
+    ]
+    .into_iter()
+    .find_map(|(needle, cause)| error.contains(needle).then_some(cause))
+    .unwrap_or("other")
 }
 
 /// A URL's host alone: a relay URL's query names its upstream and may carry a token.
@@ -451,17 +499,25 @@ pub(crate) fn log_open_failure(
 ) {
     if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
         report_failure(
-            crate::report::ErrorKind::SocketOpenFailed,
-            &host_of(url),
+            Failure {
+                kind: crate::report::ErrorKind::SocketOpenFailed,
+                target: &host_of(url),
+                route: None,
+                endpoint_class: None,
+                cause: open_cause(error),
+            },
             venue,
             user,
         );
     }
 }
 
-/// A venue request that failed in transport (a timeout, a refused connection), by route.
+/// A venue request that failed in transport (a timeout, a refused connection),
+/// by route label, route mode (`direct`, `proxy`, `tunnel`) and request class.
 pub(crate) fn log_request_failure(
     route: &str,
+    mode: &'static str,
+    endpoint_class: &'static str,
     error: &str,
     elapsed: Duration,
     venue: Option<&str>,
@@ -470,7 +526,17 @@ pub(crate) fn log_request_failure(
     if log_failure(|failures| {
         failures.note_request(route, error, elapsed, std::time::Instant::now())
     }) {
-        report_failure(crate::report::ErrorKind::RequestFailed, route, venue, user);
+        report_failure(
+            Failure {
+                kind: crate::report::ErrorKind::RequestFailed,
+                target: route,
+                route: Some(mode),
+                endpoint_class: Some(endpoint_class),
+                cause: request_cause(error),
+            },
+            venue,
+            user,
+        );
     }
 }
 
@@ -1008,7 +1074,13 @@ mod security_tests {
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
     }
 
-    type Reported = (&'static str, String, Option<String>, Option<String>);
+    type Reported = (
+        &'static str,
+        String,
+        Option<String>,
+        Option<String>,
+        [Option<&'static str>; 3],
+    );
     static REPORTED: std::sync::Mutex<Vec<Reported>> = std::sync::Mutex::new(Vec::new());
 
     fn record(report: &crate::report::ErrorReport<'_>) {
@@ -1017,6 +1089,7 @@ mod security_tests {
             report.target.unwrap_or_default().to_owned(),
             report.venue.map(str::to_owned),
             report.user.map(|user| user.as_str().to_owned()),
+            [report.route, report.endpoint_class, report.cause],
         ));
     }
 
@@ -1027,11 +1100,13 @@ mod security_tests {
     async fn a_logged_failure_reaches_the_error_sink_once_per_window_with_its_venue() {
         assert!(crate::report::set_error_sink(record));
         let url = "wss://sink-test.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=t";
-        log_open_failure(url, "refused", Some("bybitdemo"), None);
-        log_open_failure(url, "refused", Some("bybitdemo"), None);
+        log_open_failure(url, "tunnel relay refused", Some("bybitdemo"), None);
+        log_open_failure(url, "tunnel relay refused", Some("bybitdemo"), None);
         log_request_failure(
             "sink-test.example via HTTP tunnel",
-            "reset",
+            "tunnel",
+            "orderRead",
+            "HTTP tunnel closed: IO error: Connection reset by peer (os error 104)",
             Duration::ZERO,
             None,
             None,
@@ -1064,7 +1139,7 @@ mod security_tests {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, target, _, _)| {
+            .filter(|(_, target, ..)| {
                 target.starts_with("sink-test.example") || target.starts_with("localhost")
             })
             .cloned()
@@ -1076,22 +1151,75 @@ mod security_tests {
                     "transport.socket_open_failed",
                     "sink-test.example".to_owned(),
                     Some("bybitdemo".to_owned()),
-                    None
+                    None,
+                    [None, None, Some("relay_refused")]
                 ),
                 (
                     "transport.request_failed",
                     "sink-test.example via HTTP tunnel".to_owned(),
                     None,
-                    None
+                    None,
+                    [Some("tunnel"), Some("orderRead"), Some("tunnel_closed")]
                 ),
                 (
                     "transport.request_failed",
                     "localhost direct".to_owned(),
                     Some("okx".to_owned()),
-                    Some("auth0|captured-owner".to_owned())
+                    Some("auth0|captured-owner".to_owned()),
+                    [Some("direct"), Some("orderRead"), Some("send_failed")]
                 ),
             ]
         );
+    }
+
+    /// Every wording the boxes' journals logged in 14 days maps to one closed
+    /// class, so a Sentry fingerprint never carries error text.
+    #[test]
+    fn transport_failures_map_to_closed_cause_classes() {
+        for (error, cause) in [
+            (
+                "HTTP tunnel closed: WebSocket protocol error: Connection reset without closing handshake (class=orderRead budget=20000ms elapsed=3ms)",
+                "tunnel_closed",
+            ),
+            (
+                "HTTP tunnel closed: IO error: Connection reset by peer (os error 104)",
+                "tunnel_closed",
+            ),
+            ("HTTP tunnel closed: tunnel closed", "tunnel_closed"),
+            (
+                "HTTP tunnel handoff failed (class=history)",
+                "tunnel_handoff",
+            ),
+            ("HTTP tunnel connection failed: timed out", "tunnel_open"),
+            (
+                "tunnel request failed: HTTP request error: error sending request for url (https://proxies.tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com/x?signature=82",
+                "tunnel_upstream",
+            ),
+            (
+                "HTTP request timed out (class=read budget=20000ms elapsed=20000ms)",
+                "timeout",
+            ),
+            ("error sending request (class=orderRead)", "send_failed"),
+            ("error decoding response body", "body_read"),
+            (
+                "Tealstreet proxy refused our proxy authorization (HTTP 401: Invalid JWT)",
+                "proxy_auth",
+            ),
+            ("account IO authority expired", "io_expired"),
+            ("something new", "other"),
+        ] {
+            assert_eq!(request_cause(error), cause, "{error}");
+        }
+        for (error, cause) in [
+            ("HTTP error: 502 Bad Gateway", "http_5xx"),
+            ("HTTP error: 403 Forbidden", "http_4xx"),
+            ("tunnel relay refused", "relay_refused"),
+            ("timed out after 15s", "timeout"),
+            ("IO error: Network is unreachable (os error 101)", "io"),
+            ("something new", "other"),
+        ] {
+            assert_eq!(open_cause(error), cause, "{error}");
+        }
     }
 
     #[test]

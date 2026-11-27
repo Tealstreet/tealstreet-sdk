@@ -91,13 +91,15 @@ struct Bound {
     proxied: bool,
     /// Venue host and the way it went, for a transport failure's log line; never a URL.
     route: String,
+    route_mode: &'static str,
     guard: Option<super::IoGuard>,
     venue: Option<std::sync::Arc<str>>,
     report_user: Option<crate::report::ReportUser>,
 }
 
-/// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
-fn route_label(origin: &str, packet: &Packet) -> String {
+/// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`,
+/// with its mode (`direct`, `proxy` or `tunnel`) for a stable Sentry fingerprint.
+fn route_label(origin: &str, packet: &Packet) -> (String, &'static str) {
     let host = |url: &str| {
         reqwest::Url::parse(url)
             .ok()
@@ -106,10 +108,10 @@ fn route_label(origin: &str, packet: &Packet) -> String {
     };
     let venue = host(origin);
     match packet {
-        Packet::How(..) => format!("{venue} via HTTP tunnel"),
+        Packet::How(..) => (format!("{venue} via HTTP tunnel"), "tunnel"),
         Packet::Direct(_, request) => match request.url().host_str() {
-            Some(sent) if sent != venue => format!("{venue} via {sent}"),
-            _ => format!("{venue} direct"),
+            Some(sent) if sent != venue => (format!("{venue} via {sent}"), "proxy"),
+            _ => (format!("{venue} direct"), "direct"),
         },
     }
 }
@@ -349,7 +351,7 @@ impl PreparedHttp for Prepared {
                 ),
             )
         };
-        let route = route_label(&self.origin, &packet);
+        let (route, route_mode) = route_label(&self.origin, &packet);
         Ok(Box::new(Bound {
             started: self.started,
             class: self.class,
@@ -359,6 +361,7 @@ impl PreparedHttp for Prepared {
             packet,
             proxied,
             route,
+            route_mode,
             guard: self.guard.clone(),
             venue: self.venue.clone(),
             report_user: self.report_user.clone(),
@@ -381,6 +384,7 @@ impl BoundHttp for Bound {
             packet,
             proxied,
             route,
+            route_mode,
             guard,
             venue,
             report_user,
@@ -420,6 +424,8 @@ impl BoundHttp for Bound {
             };
             super::log_request_failure(
                 &route,
+                route_mode,
+                class.as_str(),
                 &format!(
                     "{error} ({})",
                     class.diagnostic(budget_ms, request_started.elapsed().as_millis())
@@ -525,7 +531,7 @@ mod tests {
                 "https://api.bitget.com",
                 &Packet::Direct(client.clone(), Box::new(direct.unwrap()))
             ),
-            "api.bitget.com direct"
+            ("api.bitget.com direct".to_owned(), "direct")
         );
         let proxied = client
             .get("https://proxy-jp.example/https://api.bitget.com/api/v2/mix/market/contracts?token=t")
@@ -536,7 +542,7 @@ mod tests {
                 "https://api.bitget.com",
                 &Packet::Direct(client, Box::new(proxied))
             ),
-            "api.bitget.com via proxy-jp.example"
+            ("api.bitget.com via proxy-jp.example".to_owned(), "proxy")
         );
     }
     use std::sync::Arc;
