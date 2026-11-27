@@ -2540,6 +2540,10 @@ mirror for a replacement; its rebuild backoff is shared. Each tab is its own rea
 Frame-fed account engines execute only writes; candle reads
 never run on them. The real-WASM candle-routing test pins this boundary.
 Candle reads do not wait for private reconciliation or lift an order fence.
+The source waits 25 s for `fetchCandles`, longer than the engine's 20 s candle request
+budget, so a venue that never answers fails with the engine's timeout naming the request
+stage. An equal 20 s wait always won the race with a bare `CommandTimeoutError`
+(TEALSTREET-NEXT-ED8, formerly E74).
 
 A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
 read interruption; uncertain writes retain their existing code, reconciliation
