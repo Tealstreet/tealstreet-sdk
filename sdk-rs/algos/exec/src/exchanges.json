@@ -32,6 +32,14 @@
     ]
   },
   {
+    "name": "hyrotrader",
+    "displayName": "HyroTrader",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
     "name": "bybitspot",
     "displayName": "Bybit Spot",
     "requiredFields": [
@@ -167,6 +175,16 @@
   {
     "name": "lighter",
     "displayName": "Lighter",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId",
+      "apiKeyIndex"
+    ]
+  },
+  {
+    "name": "lighter-robinhood",
+    "displayName": "Lighter Robinhood",
     "requiredFields": [
       "apiKey",
       "apiSecret",

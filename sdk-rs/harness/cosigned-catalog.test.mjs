@@ -162,18 +162,18 @@ test('every declared remoteSigning venue has an exact proof or a reason', () => 
   accounted(declared, ready, excluded);
 });
 
-test('production cohort reproduces the 41 / 40 / 33 census without hiding disabled venues', () => {
+test('production cohort reproduces the 41 / 40 / 35 census without hiding disabled venues', () => {
   assert.equal(declared.size, 41);
   // NX #9737 removed the origin gate after SDK #3567/#3570 supplied origins.
-  // Retain all seven disabled metadata entries in the declared accounting.
+  // Retain all five disabled metadata entries in the declared accounting.
   assert.equal(helperEligible.size, 40);
-  assert.equal(productionOffered.size, 33);
-  for (const venue of ['hyrotrader', 'binanceoptions']) {
-    assert(helperEligible.has(venue), `${venue}: live origin must remain in review`);
-    assert(!productionOffered.has(venue), `${venue}: disabled metadata must remain disabled`);
-  }
+  assert.equal(productionOffered.size, 35);
+  assert(helperEligible.has('binanceoptions'), 'binanceoptions: live origin must remain in review');
+  assert(!productionOffered.has('binanceoptions'), 'binanceoptions: disabled metadata must remain disabled');
+  // AGT-240 (2026-11-25) enabled HyroTrader and Lighter Robinhood in production.
+  for (const venue of ['hyrotrader', 'lighter-robinhood']) assert(productionOffered.has(venue), `${venue}: must be offered in production`);
   assert.deepEqual([...helperEligible].filter(name => !productionOffered.has(name)).sort(),
-    ['binanceoptions', 'bingxspot', 'bitgetinverse', 'bitrue', 'hyrotrader', 'lighter-robinhood', 'txflow']);
+    ['binanceoptions', 'bingxspot', 'bitgetinverse', 'bitrue', 'txflow']);
   for (const name of ready) assert(declared.has(name), `${name}: catalog has no remoteSigning declaration`);
   accounted(productionOffered, ready, new Map([...excluded].filter(([name]) => productionOffered.has(name))));
 });
