@@ -933,7 +933,13 @@ Both routes retain the initiating owner and bridge admission across readiness
 waits; #3513's
 page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
-expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
+expiry returns `notSent` and cannot send when startup later finishes.
+A write refused for the page engine's own MARKETS uses the static
+`PAGE_MARKETS_LOADING` text (web Sentry groups it per venue as a warning). The
+first such refusal opens a watch: markets arriving later log one Info line and
+the next write sends normally; the refused write is never resent. Markets still
+missing `PAGE_MARKETS_GIVE_UP_MS` (2 min) after that refusal report once as
+`PAGE_MARKETS_MISSING`, an error. Keep both texts static. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
 delta before the first snapshot is dropped, so it asks the source for one) and
 the engine's own frames fill the UI store. Books, candles and fills still come
