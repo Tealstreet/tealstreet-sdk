@@ -1450,6 +1450,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
             venue: None,
             startup_unloaded: unloaded,
             startup_refused: Some(refused),
+            route: None,
+            endpoint_class: None,
+            cause: None,
         });
     }
 

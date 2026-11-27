@@ -136,16 +136,28 @@ What it captures:
   transport failures, through `safe_cex_native::report`. Each account's
   transport is built `with_venue`, so its failures carry `venue` beside `kind`
   and `target` (host and route, never a URL). The shared HTTP-tunnel socket
-  pool serves many venues and reports none.
+  pool serves many venues and reports none. A transport failure also carries
+  closed `cause` (from the transport's own wording, e.g. `tunnel_closed`,
+  `timeout`, `http_5xx`) and, for a request, `route` (`direct`, `proxy`,
+  `tunnel`) and `endpoint_class` (the engine request class). It groups by
+  kind + route + cause for a request and kind + host + cause for a socket open:
+  venue and request class are tags, so one tunnel condition is one issue whose
+  venue split shows in its tags. The throttle key still includes `target`, so
+  each venue host and route sends its own sample. Transport failures are sent
+  at warning level (the engine retries them) except `proxy_auth`, our own proxy
+  refusing our authorization, which stays an error. Until this grouping, the
+  fingerprint was kind + target, so one tunnel condition became one issue per
+  venue host (EXCHANGE-SERVER-A7, AA, AD, AC, B2, AX and AP).
 
-Warnings are not sent.
+Other warnings are not sent.
 
 Every event is rebuilt from an allowlist:
-- a fixed summary per condition, never error text or a venue payload;
+- a fixed summary per condition, never error text or a venue payload; a
+  transport failure's summary appends its closed cause and route or host;
 - a scrubbed fingerprint and exception type;
 - stack frames' function, module, file, line and column only;
-- tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
-  `target`;
+- tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue`,
+  `target`, `route`, `endpoint_class` and `cause`;
 - `user.id` and tag `user_id` from the account's captured, verified proxy-token
   `userId`, identical to the web Sentry authentication subject. This explicit
   identity is never an account label, key digest, credential or token. Only the

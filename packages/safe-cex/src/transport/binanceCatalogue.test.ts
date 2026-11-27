@@ -1,8 +1,9 @@
 import type { HttpPacket, HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { CatalogueLocks } from './sharedCatalogue';
 
 import { setImmediate } from 'node:timers';
 
-import { forceCloseDatabase, IDBDatabase, IDBFactory } from 'fake-indexeddb';
+import { forceCloseDatabase, IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { binanceCataloguePolicy } from './binanceCatalogue';
@@ -177,11 +178,55 @@ it('a follower abort does not erase its peer cooldown', async () => {
   expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
 });
 
-it('unavailable storage from the start preserves independent discovery', async () => {
+it('unavailable storage from the start preserves independent discovery without a shared memory cache', async () => {
   vi.spyOn(factory, 'open').mockImplementation(() => {
     throw new DOMException('unavailable', 'SecurityError');
   });
-  expect(await prepare(client())).toBeUndefined();
+  const cache = client();
+  expect(await prepare(cache)).toBeUndefined();
+  // A realm-wide singleton must not serve one engine's catalogue to the next (Node has no IndexedDB).
+  expect(await prepare(cache)).toBeUndefined();
+});
+
+it('a storage transaction that never settles falls back to one in-memory leader', async () => {
+  const cache = client();
+  await (await prepare(cache))!.complete(response());
+  await advance(5001);
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(
+    () =>
+      ({
+        objectStore: () => ({ get: () => ({}) }),
+        abort() {},
+      }) as unknown as IDBTransaction,
+  );
+  const first = prepare(cache);
+  const second = prepare(cache);
+  await advance(300);
+  const leader = await first;
+  expect(leader).toBeDefined();
+  expect(leader!.cached).toBeUndefined();
+  let follower: Awaited<ReturnType<typeof prepare>>;
+  void second.then((read) => {
+    follower = read;
+  });
+  await advance(200);
+  expect(follower).toBeUndefined();
+  await leader!.complete(response());
+  await advance(200);
+  expect(follower?.cached?.body).toEqual(bytes);
+});
+
+it('a quota error writing the lease still leads rather than refusing', async () => {
+  const cache = client();
+  await (await prepare(cache))!.complete(response());
+  await advance(5001);
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+    throw new DOMException('quota', 'QuotaExceededError');
+  });
+  const read = await prepare(cache);
+  expect(read).toBeDefined();
+  expect(read!.cached).toBeUndefined();
+  read!.cancel();
 });
 
 it('copies cache bytes, keeps exact invalid response bytes and rejects rollback/expired successes', async () => {
@@ -203,21 +248,101 @@ it('copies cache bytes, keeps exact invalid response bytes and rejects rollback/
   expect((await prepare(client()))?.cached).toBeUndefined();
 });
 
-it('storage lost after observing a peer lease refuses rather than bypassing it', async () => {
+it('storage lost after observing a peer lease honors it until it expires, then leads', async () => {
   const leader = await prepare(client());
   const follower = client();
-  const waiting = Promise.allSettled([prepare(follower)]);
+  let read: Awaited<ReturnType<typeof prepare>>;
+  const waiting = prepare(follower, undefined, Date.now() + 30_000).then((value) => {
+    read = value;
+  });
   await flush();
   vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
     throw new DOMException('storage lost', 'InvalidStateError');
   });
-  await advance(100);
-  expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_NETWORK' } });
+  await advance(20_000);
+  expect(read).toBeUndefined();
+  await advance(1_100);
+  await waiting;
+  expect(read).toBeDefined();
+  expect(read!.cached).toBeUndefined();
+  read!.cancel();
   vi.restoreAllMocks();
-  await leader!.complete(response());
+  leader!.cancel();
+  await flush();
 });
 
-it('a formerly working engine recovers after an abnormal database close despite native retry waves', async () => {
+it('realms that lose storage together share the leader cooldown and catalogue through memory', async () => {
+  const a = client();
+  const b = client();
+  await (await prepare(a))!.complete(response());
+  expect((await prepare(b))?.cached).toBeDefined();
+  await advance(5001);
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+    throw new DOMException('storage lost', 'InvalidStateError');
+  });
+  const leader = await prepare(a);
+  expect(leader?.cached).toBeUndefined();
+  await leader!.complete(response(503));
+  await flush();
+  // b never saw this failure in storage; replication alone must stop it electing a second send.
+  const waiting = Promise.allSettled([prepare(b, undefined, Date.now() + 500)]);
+  await advance(500);
+  expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
+  await advance(600);
+  const replacement = await prepare(b);
+  expect(replacement?.cached).toBeUndefined();
+  await replacement!.complete(response());
+  await flush();
+  expect((await prepare(a))?.cached?.body).toEqual(bytes);
+});
+
+const fakeLocks = () => {
+  const held = new Set<string>();
+  const locks: CatalogueLocks = {
+    request: (name, callback) => {
+      held.add(name);
+      return callback().finally(() => held.delete(name));
+    },
+    query: async () => ({ held: [...held].map((name) => ({ name })) }),
+  };
+  return { held, locks };
+};
+
+it('reclaims a peer lease at once when its owner tab has closed', async () => {
+  const { held, locks } = fakeLocks();
+  const dead = new SharedCatalogue(binanceCataloguePolicy, factory, locks);
+  expect(await prepare(dead)).toBeDefined();
+  // The browser releases a closed tab's locks; its lease row stays behind in storage.
+  const [deadLock] = held;
+  held.delete(deadLock);
+  let read: Awaited<ReturnType<typeof prepare>>;
+  const waiting = prepare(new SharedCatalogue(binanceCataloguePolicy, factory, locks)).then((value) => {
+    read = value;
+  });
+  await advance(300);
+  await waiting;
+  expect(read).toBeDefined();
+  expect(read!.cached).toBeUndefined();
+  read!.cancel();
+  await flush();
+});
+
+it('keeps waiting on a peer lease whose owner tab still holds its lock', async () => {
+  const { locks } = fakeLocks();
+  const live = await prepare(new SharedCatalogue(binanceCataloguePolicy, factory, locks));
+  let read: Awaited<ReturnType<typeof prepare>>;
+  const waiting = prepare(new SharedCatalogue(binanceCataloguePolicy, factory, locks)).then((value) => {
+    read = value;
+  });
+  await advance(1000);
+  expect(read).toBeUndefined();
+  await live!.complete(response());
+  await advance(200);
+  await waiting;
+  expect(read?.cached?.body).toEqual(bytes);
+});
+
+it('a formerly working engine keeps loading after an abnormal database close, bounded by the success TTL', async () => {
   vi.stubGlobal('indexedDB', factory);
   vi.resetModules();
   let database: IDBDatabase | undefined;
@@ -262,15 +387,16 @@ it('a formerly working engine recovers after an abnormal database close despite 
     expect(database).toBeDefined();
     closeDatabase(database!);
     await flush();
-    await expect(attempt()).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-    for (const ms of [1000, 2000, 4000, 8000]) {
-      await advance(ms);
-      await expect(attempt()).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-      expect(send).toHaveBeenCalledTimes(1);
-    }
-    await advance(16_000);
+    // Losing storage falls back to in-memory coordination at once instead of refusing.
+    await advance(5001);
     await expect(attempt()).resolves.toMatchObject({ status: 200 });
     expect(send).toHaveBeenCalledTimes(2);
+    // A native retry wave inside the success TTL is served from memory, not the venue.
+    for (let i = 0; i < 4; i++) await expect(attempt()).resolves.toMatchObject({ status: 200 });
+    expect(send).toHaveBeenCalledTimes(2);
+    await advance(31_000);
+    await expect(attempt()).resolves.toMatchObject({ status: 200 });
+    expect(send).toHaveBeenCalledTimes(3);
   } finally {
     transport.dispose?.();
     await flush();
@@ -301,25 +427,24 @@ it('reopening after a storage pause still honors an exact-route peer cooldown', 
   vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
     throw new DOMException('closed connection', 'InvalidStateError');
   });
-  await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+  const fallback = await prepare(a);
+  expect(fallback).toBeDefined();
+  expect(fallback!.cached).toBeUndefined();
+  fallback!.cancel();
   const peer = await prepare(client());
   await peer!.complete(response(429, 'retry-after: 60'));
-  for (const ms of [1000, 2000, 4000, 8000]) {
-    await advance(ms);
-    await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-  }
-  await advance(16_000);
+  await advance(30_000);
   const waiting = Promise.allSettled([prepare(a, undefined, Date.now() + 1000)]);
   await advance(1000);
   expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
-  await advance(28_000);
+  await advance(29_100);
   const replacement = await prepare(a);
   expect(replacement!.cached).toBeUndefined();
   replacement!.cancel();
 });
 
 it.each(['abort', 'dispose'])(
-  'a participant %s cannot renew the storage pause or retire a surviving engine',
+  'a participant %s cannot retire a surviving engine that lost shared storage',
   async (mode) => {
     vi.stubGlobal('indexedDB', factory);
     vi.resetModules();
@@ -346,7 +471,10 @@ it.each(['abort', 'dispose'])(
       vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
         throw new DOMException('closed connection', 'InvalidStateError');
       });
-      await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+      const survivor = attempt(b);
+      await advance(300);
+      await expect(survivor).resolves.toMatchObject({ status: 200 });
+      expect(send).toHaveBeenCalledTimes(2);
       const stop = new AbortController();
       stop.abort(new Error('participant cancelled'));
       if (mode === 'dispose') a.dispose?.();
@@ -355,12 +483,13 @@ it.each(['abort', 'dispose'])(
         await expect(attempt(a, mode === 'abort' ? stop.signal : undefined)).rejects.toThrow(
           mode === 'abort' ? 'participant cancelled' : 'Engine transport disposed',
         );
-        await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-        expect(send).toHaveBeenCalledTimes(1);
+        await expect(attempt(b)).resolves.toMatchObject({ status: 200 });
       }
+      // In memory the five-second success TTL still bounds sends: fresh at 7 s and 15 s only.
+      expect(send).toHaveBeenCalledTimes(4);
       await advance(16_000);
       await expect(attempt(b)).resolves.toMatchObject({ status: 200 });
-      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenCalledTimes(5);
     } finally {
       a.dispose?.();
       b.dispose?.();

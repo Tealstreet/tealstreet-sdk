@@ -135,7 +135,7 @@ afterEach(() => {
 });
 
 it.each(['storage', 'owner'] as const)(
-  'reports coordinated %s failure as local, before HOW preparation, without leaking the cause',
+  'a %s failure after coordination worked still prepares the catalogue request, without a local refusal',
   async (failure) => {
     const { sharedBinanceCatalogue } = await import('./binanceCatalogue');
     const seed = await sharedBinanceCatalogue.prepare(packet(), new AbortController().signal, Date.now() + 20_000, {
@@ -153,25 +153,13 @@ it.each(['storage', 'owner'] as const)(
         throw new Error('private-owner-canary');
       });
     const { engine, reports, native, prepares } = await setup();
-    // The real engine selected a tunnel, but a catalogue refusal must precede its readiness work.
-    const observed = Promise.allSettled([engine.prepareHttp!(packet())]);
-    await flush();
-    const [result] = await observed;
-    expect(reports.mock.calls).toEqual([
-      [
-        '[binance] Local catalogue coordination failed; the public catalogue request was not sent',
-        'catalogue_coordination',
-      ],
-    ]);
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: { code: 'HTTP_PREPARATION_NETWORK', preparationSource: 'catalogue_coordination' },
-    });
-    expect(prepares()).toBe(0);
-    expect(socket.frames).toEqual([]);
+    const request = { ...packet(), request: 1 };
+    const prepared = await engine.prepareHttp!(request);
+    expect(reports).not.toHaveBeenCalled();
+    expect(prepares()).toBe(1);
+    expect(await prepared.bind(request).dispatch()).toMatchObject({ status: 200 });
+    expect(socket.frames).toEqual([expect.objectContaining({ type: 'rpc.http' })]);
     expect(native.request).not.toHaveBeenCalled();
-    await expect(engine.prepareHttp!(packet())).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
-    expect(reports).toHaveBeenCalledTimes(1);
   },
 );
 
