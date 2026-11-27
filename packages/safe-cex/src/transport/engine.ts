@@ -1619,8 +1619,10 @@ export const createEngineTransport = (
       diagnostic.dial(target);
       let locallyClosed = false;
       let opened = false;
+      // Public only: that is where the 20 s ws.public_unavailable race lives, and the
+      // fallback is sticky, so a private socket keeps the two-strike rule.
       const abandonIfUnopened = () => {
-        if (!opened) fallback?.abandonedBeforeOpen();
+        if (!opened && channel === 'public') fallback?.abandonedBeforeOpen();
       };
       const recordClose = (code?: number) => {
         diagnostics[channel] = diagnostic.closed(

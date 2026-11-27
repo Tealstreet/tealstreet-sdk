@@ -767,6 +767,15 @@ describe('engine socket routing at the raw transport boundary', () => {
     ]);
   });
 
+  it('a private connect abandoned before it opens keeps the two-silent-connect rule', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
+    const url = 'wss://stream.bybit.com/v5/private';
+    routed.connect(url, handlers('private')).close();
+    routed.connect(url, handlers('private'));
+    expect(raw.connect.mock.lastCall?.[0]).toBe(url);
+  });
+
   it('a local close after the socket opened keeps the two-silent-connect rule', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
