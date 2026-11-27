@@ -88,6 +88,11 @@ Not in `vercel.json`. Set in Vercel **Project Settings → Functions**:
   against infra.
 
 - **CLI section ships from `apps/cli/CLAUDE.md`'s doc-sync table.** When CLI behavior changes, the matching `apps/documentation/cli/**` doc updates in the same commit. The table lives in `apps/cli/CLAUDE.md` — that's the source of truth for which doc pairs with which code surface, do not duplicate it here.
+- **Mobile app pages quote the app's own labels and error text.** `docs/trade/mobile/**` is written against
+  tealstreet-mobile's English strings (`src/mobile/locales/en/trade.json`, plus synced web keys). Re-check those
+  strings before editing a step or a troubleshooting heading: the troubleshooting anchors are the error text itself.
+  Outstanding screenshots are listed in `docs/trade/mobile/TODO.md` (excluded from the build), and every shot must
+  avoid real API keys, secrets and revealed account QR codes.
 - **Don't author from root `docs/**`\*\* — that tree is for internal design/agent notes only.
 - **Don't create barrel-style index pages** that aggregate content from siblings via build hooks (see above re: ignore filter).
 - Keep MD/MDX edits localized — the lint step does not run prettier on MD/MDX to avoid known formatting churn (per `lint:format` scope in `package.json`).

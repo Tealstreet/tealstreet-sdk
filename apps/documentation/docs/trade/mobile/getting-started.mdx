@@ -1,0 +1,147 @@
+---
+title: Getting Started
+description: Request early access, install the Tealstreet app on iOS or Android, sign in, and keep it up to date
+sidebar_position: 1
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+This page takes you from "I'd like the app" to signed in. When you're done, continue with
+[Connecting your exchange accounts](./connect-accounts).
+
+## 1. Request an invite
+
+The app is invite-only during early access. Request an invite from the Tealstreet web app:
+
+1. Open Tealstreet on your computer and sign in.
+2. Open **Updates** in the header and switch to the **Mobile** tab.
+3. Under **Mobile early access**, click **Request invite**.
+4. Pick your **Platform**:
+    - **iOS**: enter your **Apple ID Email**. TestFlight sends the invite to your Apple ID, which may not be the
+      email you use for Tealstreet.
+    - **Android**: enter the **Email** that should get the invite.
+5. Click **Send request**.
+
+The team adds each invite by hand, so the invite can take a little while to arrive. If you have already been
+invited directly (for example by the team in Discord or by email), skip this step.
+
+:::info Screenshot needed
+**SCREENSHOT PLACEHOLDER: `web-request-invite`**: the web app's Updates panel on the **Mobile** tab, showing the
+**Mobile early access** row and the request form with **Platform** (iOS / Android) and **Send request**.
+:::
+
+## 2. Install the app
+
+### iPhone and iPad (TestFlight)
+
+iOS invites come in **two emails from Apple**, and you need both:
+
+1. **An App Store Connect invitation.** Accept it first. It adds you to Tealstreet's testing team. Apple drops an
+   unaccepted invitation after about three days, so don't leave it in your inbox. If it expires, ask us for a new one.
+2. **A TestFlight invitation**, which arrives after you accept the first one.
+
+Then:
+
+1. Install **TestFlight** from the App Store.
+2. Open the TestFlight invitation email on your iPhone and tap the link. Or open TestFlight and redeem the code from
+   the email.
+3. Tap **Install** next to **Tealstreet**.
+
+TestFlight installs new builds as they come out. Keep automatic updates on in TestFlight, or open TestFlight now
+and then to update.
+
+:::tip Check your spam folder
+Apple's invitation emails often end up in spam or promotions. Search your inbox for "TestFlight" and
+"App Store Connect".
+:::
+
+### Android (Firebase App Distribution)
+
+Android builds come through Firebase App Distribution, not the Play Store:
+
+1. Open the invitation email from **Firebase App Distribution** on your Android phone and accept it.
+2. Follow the email's link to install **Firebase App Tester**. App Tester isn't in the Play Store, so Android asks
+   you to allow installs from this source. Allow it for the browser or app you're installing from.
+3. Open App Tester, find **Tealstreet**, and tap **Download**, then install it.
+
+App Tester tells you when a new build is available. Each Firebase build expires about 150 days after release, so
+install the newer build when App Tester offers one.
+
+## 3. Sign in
+
+The app opens on the **Trade** tab even before you sign in, with live public market data. Your accounts, balances
+and orders need you to sign in with your Tealstreet account. Use the same login as the web app.
+
+1. Tap the **sign-in icon** at the **top-right** of the screen. It's a small arrow-into-a-box icon.
+2. Tealstreet's sign-in page opens. Choose **Google**, or sign in with your **email** and password. Use the same
+   method you use on the web.
+3. When the sign-in page closes, you're back in the app. The top-right icon becomes a circle. Once you've connected
+   an exchange account, it shows that exchange's logo. Until then it's empty, and the Trade screen shows
+   **No exchange account** with an **Add an API key** button.
+
+:::info Screenshot needed
+**SCREENSHOT PLACEHOLDER: `signin-top-right-icon`**: Trade tab while signed out, with the top-right sign-in icon
+circled.
+:::
+
+:::info Screenshot needed
+**SCREENSHOT PLACEHOLDER: `signed-in-no-account`**: Trade tab after signing in with no exchange account yet: the
+empty top-right circle and the Trade screen's **No exchange account** / **Add an API key** prompt.
+:::
+
+### Signing out, and signing back in
+
+- **Sign out:** tap the **Tealstreet logo** at the **top-left** to open the side panel, then tap **Log Out** (the
+  red item at the bottom). The app restarts, signed out.
+- **Sign back in:** tap the **sign-in icon** at the **top-right** again.
+
+If the app ever says **"Your session has expired. Please log out and log in again."**, tap **Log Out**, wait for the
+app to restart, then tap the top-right sign-in icon.
+
+:::info Screenshot needed
+**SCREENSHOT PLACEHOLDER: `side-panel`**: the side panel opened from the top-left Tealstreet logo, showing
+**Settings**, **API keys**, **Price alerts**, **Order history**, **Cloud jobs**, **Check for Updates** and
+**Log Out**. Use the team test account so no personal email is visible.
+:::
+
+## 4. App updates
+
+There are two kinds of update:
+
+- **New builds** (a new TestFlight or Firebase build). Install these through TestFlight or App Tester as above.
+- **In-app updates.** Most fixes are delivered straight to the app, without a new build.
+
+The app checks for in-app updates when you open it and when you come back to it (at most every 15 minutes). A check
+only looks: nothing is downloaded until you choose to. When an update is available, the app shows a full-screen
+**Update available** message:
+
+- **Update now** downloads the update and restarts Tealstreet straight away.
+- **Later · 3 remaining** postpones it, before anything is downloaded. The app asks again when you come back after
+  four hours. You can postpone the same update three times. After that it's required the next time you open the app.
+
+You can also check yourself at any time with **Check for Updates** in the side panel.
+
+### When an update loads on the next open
+
+Sometimes **Update now** can't finish in one go. If the download is slow, the app lets you carry on rather than
+keeping you waiting. If the download completes without the restart, you'll see **"The update is downloaded. Restart
+now, or it will apply the next time you reopen Tealstreet."** Choose **Restart now**, or **Continue to app** and
+keep trading.
+
+A downloaded update loads the **next time the app starts fresh**: fully close Tealstreet (swipe it away in the app
+switcher) and open it again. Switching to another app and back isn't enough.
+
+So if we tell you a fix is out and you don't see it, tap **Check for Updates** in the side panel and choose
+**Update now**. If you've already downloaded it, fully close and reopen the app.
+
+:::info Screenshot needed
+**SCREENSHOT PLACEHOLDER: `update-available`**: the full-screen **Update available** prompt with **Update now** and
+**Later · 3 remaining**.
+:::
+
+## Next
+
+[Connect your exchange accounts →](./connect-accounts)

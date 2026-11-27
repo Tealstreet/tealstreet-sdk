@@ -1,0 +1,8 @@
+{
+  "label": "Mobile App",
+  "position": 4,
+  "link": {
+    "type": "doc",
+    "id": "trade/mobile/index"
+  }
+}

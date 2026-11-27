@@ -1,0 +1,47 @@
+---
+title: Mobile App
+description: Trade with the native Tealstreet app for iOS and Android
+sidebar_position: 4
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import MobileAddToHomeScreen from '/img/trading/mobile/mobile-addtohomescreen.png';
+
+Tealstreet has a native app for iPhone, iPad and Android. It uses the same Tealstreet account as the web app, and you
+bring your exchange API keys across from the web in a few taps. Your positions and orders are on the exchange, so
+you see the same ones on every device.
+
+The app is in **early access**. iOS builds come through Apple's **TestFlight**, and Android builds come through
+**Firebase App Distribution**. Neither is in the App Store or Play Store yet.
+
+## Start here
+
+1. [Getting started](./getting-started): request an invite, install the app, sign in, and how app updates arrive.
+2. [Connecting your exchange accounts](./connect-accounts): bring your API keys over from the web app by QR code,
+   clipboard or file, or type a key in by hand.
+3. [Placing your first trade](./first-trade): market and limit orders, stops, positions, orders and the chart.
+4. [Feature tour](./feature-tour): what each screen is for.
+5. [FAQ and support](./faq): common questions and how to report a problem.
+
+## How the app runs your accounts
+
+On mobile, your exchange accounts run on Tealstreet's servers (Tealstreet calls this **DELEGATED mode**). As
+**Settings → Accounts** puts it: _"Your accounts run on Tealstreet's servers. If an account can't connect, it stays
+offline until it can."_
+
+In practice this means the app does not have to stay open for your chasers and other algos to keep working. See
+[Cloud jobs](./feature-tour#cloud-jobs) for what keeps running, and for how to stop it.
+
+## Using Tealstreet in your phone's browser
+
+You can still open the Tealstreet web app in your phone's browser. It is the full desktop layout scaled down, so
+the native app is the better experience on a phone. If you do use the browser, the **Add to Home Screen** option
+hides the browser's own toolbars and gives the page more room.
+
+<div class="text--center">
+    <img src={MobileAddToHomeScreen} alt="Add to Home Screen in the mobile browser" style={{ width: 250 }} />
+</div>
