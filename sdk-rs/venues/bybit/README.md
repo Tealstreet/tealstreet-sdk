@@ -46,13 +46,15 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   existing wire representation.
 - Public subscribe/unsubscribe frames contain at most 10 topics per request.
 - One public connection holds at most 32 topics: the simulator refuses the
-  subscribe that crosses it, and every one after it, with `at most 32 topics
-per connection` (live 2026-11-28, TEAL-20). The desired set is capped at 32:
+  subscribe that crosses it, and every one after it (live 2026-11-28,
+  TEAL-20): `at most 32 topics per connection`. The desired set is capped at 32:
   books, klines and trades newest-opened first, each book or kline with its own
   symbol's ticker beside it, so opening one more evicts the oldest stream and
-  never the one just opened. Tickers for other symbols in use (position or
-  order), then idle markets, fill the rest. What is left out is reported once
-  as an Info notice rather than a warning.
+  never the one just opened. A book resubscribing after a sequence gap keeps
+  its ticker and its held slot, so the gap sends only that book's unsubscribe
+  and subscribe. Tickers for other symbols in use (position or order), then
+  idle markets, fill the rest. What is left out is reported once as an Info
+  notice rather than a warning.
 - Flat position clears can omit side/leverage. Live positions still require a
   valid side and positive leverage, and accept `entryPrice` when `avgPrice` is
   absent/empty. Flat rows with missing, empty or nonpositive leverage retain the

@@ -750,3 +750,71 @@ fn hyro_book_opened_beside_31_others_streams_with_its_ticker() {
     assert!(has_book(&live, "M39USDT"), "{live:?}");
     assert!(live.contains("tickers.M39USDT"), "{live:?}");
 }
+
+/// Every (op, topic) the public socket was sent, in order.
+fn public_ops(h: &Harness) -> Vec<(String, String)> {
+    let mut ops = Vec::new();
+    for text in h.sent_on("/v5/public/linear") {
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if let (Some(op), Some(args)) = (frame["op"].as_str(), frame["args"].as_array()) {
+            for arg in args {
+                ops.push((op.to_owned(), arg.as_str().unwrap().to_owned()));
+            }
+        }
+    }
+    ops
+}
+
+/// A sequence gap takes the book out of the set only for its fresh snapshot.
+/// At the cap its ticker stays and its slot is held, so the gap sends the
+/// book's own unsubscribe and subscribe and nothing else (review of #3837: the
+/// slot went to the oldest evicted book and ticker, eight frames per gap).
+#[test]
+fn hyro_sequence_gap_at_the_cap_churns_only_the_gapped_book() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..36 {
+        h.command(Command::SubscribeOrderBook {
+            symbol: format!("M{i}USDT"),
+        });
+        h.advance(500.0);
+    }
+    let (live, _) = live_public_topics(&h);
+    let book = live
+        .iter()
+        .find(|t| t.starts_with("orderbook.") && t.ends_with(".M35USDT"))
+        .expect("the newest book is live")
+        .clone();
+    h.message(
+        "/v5/public/linear",
+        &format!(
+            r#"{{"topic":"{book}","type":"snapshot","ts":1,"data":{{"s":"M35USDT","b":[["1.00","1"]],"a":[["1.01","1"]],"u":10,"seq":1}},"cts":1}}"#
+        ),
+    );
+    let before = public_ops(&h).len();
+    h.message(
+        "/v5/public/linear",
+        &format!(
+            r#"{{"topic":"{book}","type":"delta","ts":2,"data":{{"s":"M35USDT","b":[],"a":[],"u":13,"seq":2}},"cts":2}}"#
+        ),
+    );
+    h.advance(50.0);
+    let (during, _) = live_public_topics(&h);
+    assert!(
+        !during.contains(&book),
+        "the gapped book awaits its snapshot"
+    );
+    assert!(during.contains("tickers.M35USDT"), "{during:?}");
+    assert!(!has_book(&during, "M19USDT") && !during.contains("tickers.M19USDT"));
+    h.advance(500.0);
+    let (after, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert_eq!(after, live);
+    assert_eq!(
+        public_ops(&h)[before..],
+        [
+            ("unsubscribe".to_owned(), book.clone()),
+            ("subscribe".to_owned(), book),
+        ]
+    );
+}

@@ -1436,17 +1436,20 @@ impl BybitLinear {
     /// Hyro holds 32 topics per connection. The newest books, klines and trades
     /// keep their slots, each book or kline with its own symbol's ticker beside
     /// it; tickers for other symbols in use, then idle markets, fill the rest.
-    /// The bool reports that something was left out.
+    /// A book resubscribing after a sequence gap is out of the set only for its
+    /// fresh snapshot, so its slot is held and its ticker kept: the gap costs
+    /// the book's own unsubscribe and subscribe, nothing else. The bool
+    /// reports that something was left out.
     fn hyro_public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
-        let mut streams: Vec<(u64, String, Option<&str>)> = Vec::new();
+        // (opened, topic, symbol whose ticker rides beside it, slot held empty)
+        let mut streams: Vec<(u64, String, Option<&str>, bool)> = Vec::new();
         for (symbol, state) in &self.books {
-            if Category::for_symbol(symbol) == self.category
-                && !matches!(state.sync, Sync::Resubscribing(_))
-            {
+            if Category::for_symbol(symbol) == self.category {
                 streams.push((
                     self.stream_order.opened(&book_stream(symbol)),
                     Self::book_topic(self.paths.book_depth, symbol),
                     Some(symbol),
+                    matches!(state.sync, Sync::Resubscribing(_)),
                 ));
             }
         }
@@ -1458,6 +1461,7 @@ impl BybitLinear {
                     self.stream_order.opened(&kline_stream(symbol, *interval)),
                     topic,
                     Some(symbol),
+                    false,
                 ));
             }
         }
@@ -1467,29 +1471,36 @@ impl BybitLinear {
                     self.stream_order.opened(&trade_stream(symbol)),
                     format!("publicTrade.{symbol}"),
                     None,
+                    false,
                 ));
             }
         }
         streams.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         let mut topics: Vec<String> = Vec::new();
+        let mut held = 0;
         let mut capped = false;
-        for (_, topic, symbol) in streams {
+        for (_, topic, symbol, resubscribing) in streams {
             let ticker = symbol
                 .map(|symbol| format!("tickers.{symbol}"))
                 .filter(|ticker| !topics.contains(ticker));
             // An older stream never displaces a newer one, nor its ticker.
-            if topics.len() + 1 + usize::from(ticker.is_some()) > HYRO_TOPICS_PER_CONNECTION {
+            if topics.len() + held + 1 + usize::from(ticker.is_some()) > HYRO_TOPICS_PER_CONNECTION
+            {
                 capped = true;
                 break;
             }
-            topics.push(topic);
+            if resubscribing {
+                held += 1;
+            } else {
+                topics.push(topic);
+            }
             topics.extend(ticker);
         }
         for ticker in self.ticker_topics(cx) {
             if topics.contains(&ticker) {
                 continue;
             }
-            if topics.len() == HYRO_TOPICS_PER_CONNECTION {
+            if topics.len() + held == HYRO_TOPICS_PER_CONNECTION {
                 capped = true;
                 break;
             }
