@@ -1,7 +1,7 @@
 //! Hyro's retained placement intents. Each lot keeps its link across lost
 //! acknowledgements and caller retries and is created at most twice (R1(a));
 //! only complete realtime and history status axes permit the second create.
-use crate::account::{map_order, valid_hyro_order};
+use crate::account::{map_order, valid_hyro_mapped, valid_hyro_order};
 use crate::sign::{Body, Query};
 use crate::trading::acknowledgement::{self as ack, Answer};
 use crate::trading::ordinary::Ordinary;
@@ -590,11 +590,7 @@ impl BybitLinear {
         let Some(mapped) = map_order(row, cx.store, cx.now) else {
             return Found::Incomplete("matched order cannot be mapped");
         };
-        if mapped.orders.iter().any(|o| {
-            [o.price, o.amount, o.filled, o.remaining]
-                .iter()
-                .any(|n| !n.is_finite() || *n < 0.0)
-        }) {
+        if mapped.orders.iter().any(|o| !valid_hyro_mapped(o)) {
             return Found::Incomplete("matched order has invalid numeric fields");
         }
         let terminal = matches!(

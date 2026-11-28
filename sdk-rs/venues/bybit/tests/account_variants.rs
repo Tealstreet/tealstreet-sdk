@@ -1584,3 +1584,48 @@ fn hyro_garbage_order_price_still_refuses_the_snapshot() {
     assert!(h.engine.store().orders().is_empty());
     assert!(!h.closed.is_empty());
 }
+
+/// An empty price is admitted only beside a positive trigger. A zero-priced
+/// stop would be "restored" as `stopLoss:"0"` by a refused protective edit,
+/// clearing the position's protection (TEAL-21 review).
+#[test]
+fn hyro_stop_with_empty_price_and_zero_trigger_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row =
+        hyro_partial_stop_loss().replace(r#""triggerPrice":"45000""#, r#""triggerPrice":"0""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+/// A zero trigger is refused even when the price is a literal "0".
+#[test]
+fn hyro_stop_priced_at_zero_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = hyro_partial_stop_loss()
+        .replace(r#""price":"""#, r#""price":"0""#)
+        .replace(r#""triggerPrice":"45000""#, r#""triggerPrice":"0""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+#[test]
+fn hyro_stop_with_empty_price_and_zero_trigger_on_the_stream_is_refused() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP.replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}

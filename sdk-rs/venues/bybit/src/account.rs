@@ -374,6 +374,16 @@ fn valid_order(order: &Order) -> bool {
         .all(|v| v.is_finite() && v >= 0.0)
 }
 
+/// A Hyro trigger order priced at zero would be restored as `stopLoss:"0"` by
+/// a refused protective edit, clearing the position's protection (TEAL-21).
+pub(crate) fn valid_hyro_mapped(order: &Order) -> bool {
+    valid_order(order)
+        && !(matches!(
+            order.kind,
+            OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+        ) && order.price <= 0.0)
+}
+
 fn optional_numeric(value: &Option<Str<'_>>) -> bool {
     present(value).is_none_or(|value| float(value).is_finite())
 }
@@ -391,8 +401,9 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         && order_status(&row.order_status).is_some()
         && float_of(&row.qty).is_finite()
         // Hyro reports `"price":""` on untriggered stops and position stops,
-        // where Bybit sends "0"; their price is the trigger (TEAL-21).
+        // where Bybit sends "0"; their price is then a positive trigger (TEAL-21).
         && optional_numeric(&row.price)
+        && (present(&row.price).is_some() || float_of(&row.trigger_price) > 0.0)
         && [
             &row.cum_exec_qty,
             &row.cum_exec_value,
@@ -2253,7 +2264,7 @@ impl BybitLinear {
                         && frame.data.iter().any(|row| {
                             !valid_hyro_order(row)
                                 || map_order(row, cx.store, cx.now).is_none_or(|mapped| {
-                                    mapped.orders.iter().any(|order| !valid_order(order))
+                                    mapped.orders.iter().any(|order| !valid_hyro_mapped(order))
                                 })
                         })
                     {
@@ -2762,8 +2773,13 @@ impl BybitLinear {
                     unsupported.push((row.order_id.to_string(), unsupported_detail(&row)));
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
-                        mapped.orders.iter().any(|order| !valid_order(order))
-                            || (self.variant.is_hyro() && mapped.fill_cursor.is_none())
+                        mapped.orders.iter().any(|order| {
+                            if self.variant.is_hyro() {
+                                !valid_hyro_mapped(order)
+                            } else {
+                                !valid_order(order)
+                            }
+                        }) || (self.variant.is_hyro() && mapped.fill_cursor.is_none())
                     })
                 {
                     if self.variant.is_hyro() {

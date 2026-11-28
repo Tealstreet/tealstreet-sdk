@@ -55,8 +55,11 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   leverage requests remain local. Supplied non-finite numbers still refuse.
 - Untriggered stops and position stops report `"price":""` (Bybit sends
   `"0"`), without `triggerDirection`, `closeOnTrigger` or `cumExecValue`. An
-  empty or absent price is admitted and the trigger prices the order; a present
-  non-numeric price still refuses the snapshot. Before this, one such row made
+  empty or absent price is admitted only beside a positive trigger, which prices
+  the order; a present non-numeric price still refuses the snapshot. A Hyro
+  stop, take-profit or conditional mapped at price zero is refused too: a
+  refused protective edit puts the stop back at that price, and `stopLoss:"0"`
+  would clear the position's protection. Before this, one such row made
   the whole orders snapshot malformed and froze every write (TEAL-21).
 - A native `110001` cancel answer satisfies the cancellation intent without a
   resend. Existing fresh-read, fill-retention and unknown-outcome protections
@@ -170,7 +173,6 @@ Frequent reads while an authenticated engine exists can collect those terminal
 rows before expiry. This does not recover expired rows or provide durable capture
 while no engine is running; deeper backfill cannot close that retention gap.
 
-
 ## Later-page history failure diagnostics
 
 Closed-PnL and query history capture their closed native operation when binding
@@ -189,6 +191,7 @@ from an auxiliary order-history failure without treating a retained prefix as
 complete coverage. An earlier missing-coverage reason remains authoritative;
 first-page failures and serialization failures still reject. These diagnostics
 do not change requests, deadlines, retry policy, pacing or writes.
+
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and
