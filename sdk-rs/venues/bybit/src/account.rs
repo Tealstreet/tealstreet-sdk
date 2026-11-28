@@ -731,10 +731,14 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         }
     });
     let price_text = if is_stop {
-        trigger_price.or(o.price.as_deref())
+        trigger_price.or(present(&o.price))
     } else {
-        o.price.as_deref()
+        present(&o.price)
     };
+    let terminal = matches!(
+        o.order_status.as_ref(),
+        "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
+    );
     let wire_type = from_create_type.or(spot_tpsl_kind).or(if is_stop {
         stop_order_type
     } else {
@@ -804,7 +808,13 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         symbol: o.symbol.to_string(),
         kind,
         side,
-        price: price_text.map_or(f64::NAN, float),
+        // Hyro can end a stop with price and trigger both empty (CodeRabbit on
+        // #3838); a finished row keeps its known price rather than freezing.
+        price: match price_text {
+            Some(text) => float(text),
+            None if terminal => store.order(&o.order_id).map_or(0.0, |known| known.price),
+            None => f64::NAN,
+        },
         amount,
         filled,
         remaining: if inverse {
@@ -868,10 +878,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         position_bound,
         trailing_profit: wire_type == "TrailingProfit",
         unpriced_tpsl,
-        terminal: matches!(
-            o.order_status.as_ref(),
-            "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
-        ),
+        terminal,
         fill_cursor: Cursor::seed_with_average(
             filled,
             finite(float_of(&o.cum_exec_value)),
