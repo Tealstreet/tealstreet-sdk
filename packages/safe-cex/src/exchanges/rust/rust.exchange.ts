@@ -488,6 +488,11 @@ const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
  * fired first and replaced the engine's timeout, naming the request stage, with a bare one (ED8).
  */
 const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 25_000;
+/**
+ * Consecutive candle read timeouts after which a source with markets is wedged, not slow: one is a
+ * slow venue; a run of them kept one shared source failing every read for hours (ECB/ED8).
+ */
+const PAGE_CANDLE_WEDGED_TIMEOUTS = 2;
 /** One page candle source per realm and venue configuration, shared by every mirror (AGT-299). */
 const pageCandleSources = new PageCandleSources<RustEngineExchange>();
 /** Disposes the realm's shared page candle sources at once, including lingering ones. */
@@ -3889,16 +3894,18 @@ export class RustEngineExchange extends BaseExchange {
 
   private candleSourceLease?: PageCandleLease<RustEngineExchange>;
   private readonly constructedAt = Date.now();
+  private candleReadTimeouts = 0;
 
   /**
-   * A source that failed to start or died cannot serve a later read; one whose markets are only
-   * slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading for the next read.
+   * A source that failed to start, died or keeps timing out cannot serve a later read; one whose
+   * markets are only slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading.
    */
   private get candleSourceBroken(): boolean {
     return Boolean(
       this.isDisposed ||
       this.engineFailure ||
       this.startupFailure ||
+      this.candleReadTimeouts >= PAGE_CANDLE_WEDGED_TIMEOUTS ||
       (!(this.nativeLoaded & LOADED_FLAG.MARKETS) && Date.now() - this.constructedAt >= PAGE_CANDLE_MARKETS_STUCK_MS),
     );
   }
@@ -3924,9 +3931,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       const candles = await source.fetchOHLCV(opts);
+      source.candleReadTimeouts = 0;
       lease.succeeded();
       return candles;
     } catch (error) {
+      const { kind, code } = (error ?? {}) as { kind?: unknown; code?: unknown };
+      if (kind === 'timeout' || code === 'COMMAND_TIMEOUT') source.candleReadTimeouts += 1;
       lease.failed(source, source.candleSourceBroken);
       throw error;
     }

@@ -2557,6 +2557,9 @@ The source waits 25 s for `fetchCandles`, longer than the engine's 20 s candle r
 budget, so a venue that never answers fails with the engine's timeout naming the request
 stage. An equal 20 s wait always won the race with a bare `CommandTimeoutError`
 (TEALSTREET-NEXT-ED8, formerly E74).
+Two consecutive candle-read timeouts mark a source broken even with markets loaded, and it
+is rebuilt on the shared backoff; an answered read clears the run. Without this, a wedged
+source failed every read at 20 s for hours and outlived account reloads (ECB/ED8).
 
 A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
 read interruption; uncertain writes retain their existing code, reconciliation
