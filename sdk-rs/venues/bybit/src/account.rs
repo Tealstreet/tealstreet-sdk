@@ -389,9 +389,10 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         && present(&row.category).is_none_or(|category| category == "linear")
         && !row.order_id.is_empty()
         && order_status(&row.order_status).is_some()
-        && [&row.qty, &row.price]
-            .into_iter()
-            .all(|value| float_of(value).is_finite())
+        && float_of(&row.qty).is_finite()
+        // Hyro reports `"price":""` on untriggered stops and position stops,
+        // where Bybit sends "0"; their price is the trigger (TEAL-21).
+        && optional_numeric(&row.price)
         && [
             &row.cum_exec_qty,
             &row.cum_exec_value,

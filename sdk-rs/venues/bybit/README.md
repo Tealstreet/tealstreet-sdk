@@ -53,6 +53,11 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   absent/empty. Flat rows with missing, empty or nonpositive leverage retain the
   known position/setting leverage, defaulting to 1 when unknown, so unchanged
   leverage requests remain local. Supplied non-finite numbers still refuse.
+- Untriggered stops and position stops report `"price":""` (Bybit sends
+  `"0"`), without `triggerDirection`, `closeOnTrigger` or `cumExecValue`. An
+  empty or absent price is admitted and the trigger prices the order; a present
+  non-numeric price still refuses the snapshot. Before this, one such row made
+  the whole orders snapshot malformed and froze every write (TEAL-21).
 - A native `110001` cancel answer satisfies the cancellation intent without a
   resend. Existing fresh-read, fill-retention and unknown-outcome protections
   remain authoritative; it does not invent a cancellation or fill event.
