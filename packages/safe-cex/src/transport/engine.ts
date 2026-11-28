@@ -626,6 +626,11 @@ const httpTransport = (
     !adapter && publicPrefix === undefined && intent === 'public' && isGet(request.method);
   const directProxyRoute = (request: Request, intent?: CredentialIntent): RestTransport | undefined => {
     if (!directFailed || !directFailoverEligible(request, intent)) return undefined;
+    // The public proxy needs no proxy token, which a signed-out visitor cannot get (EH5),
+    // and keeps public weight off the trading fleet's IPs; other hosts keep the exchange proxy.
+    const publicProxy = provider.publicCorsProxy();
+    if (publicProxy && readsViaPublicProxy(exchange, request.url))
+      return { baseURL: `${publicProxy}/${request.url}`, proxied: false };
     directProxyRouting ??= resolved(exchange, proxyOptions, provider).restRouting;
     const route = restRoute(provider, exchange, proxyOptions, directProxyRouting, request, transport.serverHeaders, intent);
     return route.proxied && proxyFleetForwards(request.url) ? route : undefined;

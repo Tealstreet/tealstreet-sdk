@@ -4,6 +4,7 @@ import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { bindProxyTokenLookup } from '../accessToken';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 
@@ -12,13 +13,15 @@ vi.mock('../accessToken', () => ({
   isTokenExpired: () => false,
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
-  bindProxyTokenLookup: () => async () => 'proxy-fixture',
+  bindProxyTokenLookup: vi.fn(() => async () => 'proxy-fixture'),
   ProxyTokenUnavailableError: class extends Error {},
   refreshProxyToken: vi.fn(async () => undefined),
 }));
 
 const PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/';
+const PUBLIC_PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/';
 const TICKERS = 'https://api.bybit.com/v5/market/tickers?category=linear';
+const BYBIT_DEMO_TICKERS = 'https://api-demo.bybit.com/v5/market/tickers?category=linear';
 const ok: HttpResponse = { status: 200, headers: '', body: new TextEncoder().encode('{"retCode":0}') };
 
 /** The browser's fetch: rejects every venue-direct URL, answers anything else. */
@@ -26,7 +29,7 @@ const browser = (directError: () => unknown = () => new TypeError('Failed to fet
   const dispatched: string[] = [];
   const send = async (url: string): Promise<HttpResponse> => {
     dispatched.push(url);
-    if (url.startsWith('https://api.bybit.com/')) throw directError();
+    if (!url.startsWith('https://fsjnpy143pbz-tyo.tealstreet.io/')) throw directError();
     if (proxyReply) throw proxyReply();
     return ok;
   };
@@ -63,7 +66,7 @@ const read = (route: ReturnType<typeof createEngineTransport>, request: number, 
 };
 
 describe('REST when the browser cannot reach the venue directly', () => {
-  it('moves the startup ticker read to the HTTP proxy on the next attempt, without waiting', async () => {
+  it('moves the startup ticker read to the public proxy on the next attempt, without waiting', async () => {
     const { raw, dispatched } = browser();
     const route = bybitDirect(raw);
     try {
@@ -72,10 +75,48 @@ describe('REST when the browser cannot reach the venue directly', () => {
       const reply = await read(route, 2);
       expect(reply.status).toBe(200);
       expect(performance.now() - started).toBeLessThan(1_000);
-      expect(dispatched).toEqual([TICKERS, `${PROXY}${TICKERS}`]);
+      expect(dispatched).toEqual([TICKERS, `${PUBLIC_PROXY}${TICKERS}`]);
       // Sticky for the account's transport: no direct retry per read, so no failure loop.
       await read(route, 3);
-      expect(dispatched.slice(2)).toEqual([`${PROXY}${TICKERS}`]);
+      expect(dispatched.slice(2)).toEqual([`${PUBLIC_PROXY}${TICKERS}`]);
+    } finally {
+      route.dispose!();
+    }
+  });
+
+  // TEALSTREET-NEXT-EH5: the signed-out `default-demo` account has no session, so
+  // /api/proxykey answers 401 and the exchange proxy's token never arrives.
+  it('needs no proxy token, so a signed-out keyless account reads at once', async () => {
+    vi.mocked(bindProxyTokenLookup).mockImplementation(() => async () => '');
+    const { raw, dispatched } = browser();
+    const failures: string[] = [];
+    const route = createEngineTransport(
+      'bybit',
+      { key: '', secret: '', publicDataOnly: true, transport: tealstreetTransport },
+      raw,
+      undefined,
+      (message) => failures.push(message),
+    );
+    try {
+      await expect(read(route, 1)).rejects.toThrow(TypeError);
+      const started = performance.now();
+      expect((await read(route, 2)).status).toBe(200);
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(dispatched).toEqual([TICKERS, `${PUBLIC_PROXY}${TICKERS}`]);
+      expect(failures).toEqual([]);
+    } finally {
+      route.dispose!();
+      vi.mocked(bindProxyTokenLookup).mockImplementation(() => async () => 'proxy-fixture');
+    }
+  });
+
+  it('keeps the exchange proxy for a host the public proxy does not forward', async () => {
+    const { raw, dispatched } = browser();
+    const route = bybitDirect(raw);
+    try {
+      await expect(read(route, 1, BYBIT_DEMO_TICKERS)).rejects.toThrow(TypeError);
+      expect((await read(route, 2, BYBIT_DEMO_TICKERS)).status).toBe(200);
+      expect(dispatched).toEqual([BYBIT_DEMO_TICKERS, `${PROXY}${BYBIT_DEMO_TICKERS}`]);
     } finally {
       route.dispose!();
     }
