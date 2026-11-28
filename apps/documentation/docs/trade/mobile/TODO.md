@@ -22,22 +22,17 @@ The #245 and #246 "older versions" fallbacks were dropped from `connect-accounts
 
 - Use the team test login `sam+tester1@tealstreet.io`. Never use a personal account.
 - **Never show a real API key, secret, passphrase, wallet key or a revealed account QR code.** Forms are captured
-  empty, and the web QR modal is captured before **Show QR code** is pressed.
+  empty.
 - Use small positions and orders on the test account. Crop out the status bar's carrier name and notifications.
 - iPhone shots come from the iOS simulator or TestFlight build 43 or later. Use the same device frame throughout.
 
-## Shot list (19)
+## Shot list (14)
 
 | id                      | Page             | Screen and state                                                                                        |
 | ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- |
-| `web-request-invite`    | getting-started  | Web app: **Updates** panel, **Mobile** tab, request form open (Platform iOS/Android, **Send request**). |
 | `signin-top-right-icon` | getting-started  | Trade tab, signed out. Top-right sign-in icon circled.                                                  |
-| `signed-in-no-account`  | getting-started  | Trade tab, signed in, no account: empty top-right circle and the **No exchange account** prompt. |
 | `side-panel`            | getting-started  | Side panel open from the top-left logo: Settings … Log Out. Test-account email only.                    |
-| `update-available`      | getting-started  | Full-screen **Update available** with **Update now** / **Later · 3 remaining**.                         |
 | `setup-your-account`    | connect-accounts | **Set Up Your Account** sheet with all four options.                                                    |
-| `web-qr-modal`          | connect-accounts | Web **QR Code Sync** modal BEFORE **Show QR code** (instruction and warning visible, no code).          |
-| `qr-scanner`            | connect-accounts | Phone **QR Scanner** screen pointed at a blank surface.                                                 |
 | `manual-key-form`       | connect-accounts | **Set Up _Exchange_** form, all fields empty.                                                           |
 | `order-form-limit`      | first-trade      | Trade tab, **Limit**: Buy/Sell pills, Price, Size, $ buttons, Post/Reduce, order button and info card. |
 | `positions-tab`         | first-trade      | **Positions** tab, one small test position swiped left: Actions / BE / Close. |
