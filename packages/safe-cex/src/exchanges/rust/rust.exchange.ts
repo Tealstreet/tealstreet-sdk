@@ -469,7 +469,7 @@ const COLD_START_READS = /^(fetch|find|refresh)/;
 /** How long a write may queue for startup; it must not outlive its caller's wait. */
 // Same text as the native V1_ROUTE_RETIRED refusal: Aster serves no V1 order routes.
 const ASTER_V1_RETIRED =
-  'Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account';
+  'Aster no longer serves V1 API key order routes: create an Aster V3 API wallet key and update this account';
 const STARTUP_WRITE_WAIT_MS = 30_000;
 /** How long a worker read may wait while the account loads, matching the write refusal. */
 const STARTUP_READ_WAIT_MS = 30_000;

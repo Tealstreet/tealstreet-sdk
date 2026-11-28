@@ -95,7 +95,7 @@ enum ModeLoad {
 }
 
 const SIGNATURE_REJECTED: &str = "Aster API key signature rejected: re-create the key (V3)";
-pub(crate) const V1_ROUTE_RETIRED: &str = "Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account";
+pub(crate) const V1_ROUTE_RETIRED: &str = "Aster no longer serves V1 API key order routes: create an Aster V3 API wallet key and update this account";
 
 fn signature_rejected(code: i64, message: &str) -> bool {
     code == -1022
@@ -146,6 +146,11 @@ pub enum Request {
         version: u64,
         rows: SnapshotBuilder<String, Order>,
     },
+}
+impl Request {
+    fn is_orders(&self) -> bool {
+        matches!(self, Self::Orders { .. })
+    }
 }
 
 #[derive(Deserialize)]
@@ -907,25 +912,25 @@ impl AsterDex {
                         // Aster removed only its V1 order routes (HTML 404, no envelope): the
                         // orders read can never load, so end startup with the cause. V1 balance,
                         // position and settings routes still serve, so their 404s keep retrying.
-                        if code == 0
+                        let retired = code == 0
                             && r.status == 404
                             && self.version == crate::sign::Version::V1
-                            && matches!(request, Request::Orders { .. })
-                        {
-                            cx.startup_read_refused(
-                                &safe_cex_engine::VenueError::new(V1_ROUTE_RETIRED)
-                                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
-                            );
-                        } else if matches!(code, -2014 | -2015)
+                            && request.is_orders();
+                        // Aster's whitelist refusal does not always carry a key code; its words do.
+                        if retired
+                            || matches!(code, -2014 | -2015)
                             || safe_cex_engine::error::ip_whitelist_text(&m, None)
                                 .is_some_and(|(_, named)| named)
                         {
-                            cx.startup_read_refused(
-                                &safe_cex_engine::VenueError::new(m.clone())
+                            cx.startup_read_refused(&if retired {
+                                safe_cex_engine::VenueError::new(V1_ROUTE_RETIRED)
+                                    .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                            } else {
+                                safe_cex_engine::VenueError::new(m.clone())
                                     .kind(safe_cex_engine::ErrorKind::AuthInvalid)
                                     .venue_code(code.to_string())
-                                    .venue_message(m.clone()),
-                            );
+                                    .venue_message(m.clone())
+                            });
                         }
                         Some(m)
                     }
