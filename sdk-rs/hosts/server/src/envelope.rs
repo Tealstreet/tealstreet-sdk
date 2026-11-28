@@ -489,6 +489,28 @@ impl ModeTransitionRefusal {
     }
 }
 
+/// A registration whose DELEGATED account a verified explicit Cosigned choice released.
+/// Permanent: an automatic re-init from it must not quietly upgrade the account again.
+pub fn delegated_released(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Cosigned was chosen for this account on another device, so Delegated stopped here. Choose Delegated again to switch back.",
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": "admission",
+                "reason": "mode_released",
+                "transient": false,
+                "requestedMode": AccountSigningMode::Delegated,
+                "residentMode": AccountSigningMode::Cosigned,
+                "attached": false,
+            }
+        ]),
+    )
+}
+
 /// Resident mode describes the account, not authority granted to this candidate.
 pub fn init_mode_transition_refused(
     account_name: &str,

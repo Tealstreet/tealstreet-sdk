@@ -695,6 +695,13 @@ impl Session {
             self.handovers
                 .refusal_context(&init.account_name, &init.exchange_name)
         });
+        if delegated && self.registry.registration_released(self.user(), &init) {
+            self.handovers.forget(&init.account_name);
+            self.drop_early(&init.account_name, "delegated registration was released");
+            self.handover_out(&init.account_name)
+                .send(envelope::delegated_released(&init.account_name));
+            return;
+        }
         let mut signing_mode_reason = None;
         let refusal_kind = if !self.admission_token_valid() {
             Some(RefusalStage::Authentication)
@@ -1634,7 +1641,9 @@ impl Session {
         // #3535: passphrase normalization is safe only because this snapshot path
         // reuses the proved account/provider and never installs or forwards init credentials.
         let snapshot_only = self.joined.get(&init.account_name).is_some_and(|joined| {
-            joined.admitted_mode == requested_mode
+            // An explicit release must prove possession and reach `release_delegated`.
+            !(init.release_delegated == Some(true) && joined.account.delegated().is_some())
+                && joined.admitted_mode == requested_mode
                 && joined.account.matches_init(self.user(), &init)
                 && (joined.account.fingerprint == fingerprint
                     || joined.account.delegated().is_some()

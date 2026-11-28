@@ -867,6 +867,9 @@ pub struct Registry {
     pending_inits: PendingInits,
     proof_queues: proof_queue::ProofQueues,
     parked: Mutex<HashMap<String, Parked>>,
+    /// Client registrations whose DELEGATED account an explicit Cosigned choice released,
+    /// newest last and capped per account: only a new registration may upgrade it again.
+    released_registrations: Mutex<HashMap<(String, String), std::collections::VecDeque<Arc<str>>>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
     /// the server has not seen yet (no close frame) takes it over.
     open: Mutex<HashMap<String, OpenSession>>,
@@ -1277,6 +1280,7 @@ impl Registry {
             pending_inits: Arc::default(),
             proof_queues: Default::default(),
             parked: Mutex::default(),
+            released_registrations: Mutex::default(),
             open: Mutex::default(),
             threads,
             ids: AtomicU64::new(1),
@@ -1852,7 +1856,7 @@ impl Registry {
                         && account.delegated().is_some()
                     {
                         attempt.authority.check_admission()?;
-                        self.release_delegated(&account, outbox.clone());
+                        self.release_delegated(&account, holder, outbox.clone())?;
                         break 'existing;
                     }
                     if delegated && account.delegated().is_none() {
@@ -2739,16 +2743,91 @@ impl Registry {
     /// The newest explicit mode choice wins (Sam, 2026-11-15): a verified COSIGNED join
     /// erases the DELEGATED resident's key and stops its algos, telling the joining page.
     /// Resting venue orders stay; the caller then builds the account as COSIGNED.
-    fn release_delegated(&self, account: &Arc<Account>, outbox: Outbox) {
-        if let Some(resident) = &account.delegated() {
-            resident.revoke();
+    /// `stop` revokes the key unless a successor already holds the same resident. Every live
+    /// holder hears the algo finals; every other confirmed registration is told it was released.
+    fn release_delegated(
+        &self,
+        account: &Arc<Account>,
+        holder: u64,
+        outbox: Outbox,
+    ) -> Result<(), String> {
+        const CHANGED: &str = "The account registration changed; account not attached";
+        const KEPT: usize = 64;
+        let key = (account.user.clone(), account.registry_name().to_owned());
+        let current = |accounts: &AccountEntries| {
+            accounts
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, account))
+        };
+        if !current(&self.accounts.lock().unwrap()) {
+            return Err(CHANGED.into());
+        }
+        let others: Vec<(String, Outbox, Option<Arc<str>>)> = account
+            .holders
+            .lock()
+            .unwrap()
+            .confirmed
+            .iter()
+            .filter(|((id, _), _)| *id != holder)
+            .map(|((_, label), (_, out, instance))| (label.clone(), out.clone(), instance.clone()))
+            .collect();
+        {
+            let mut released = self.released_registrations.lock().unwrap();
+            let kept = released.entry(key.clone()).or_default();
+            for instance in others
+                .iter()
+                .filter_map(|(_, _, instance)| instance.clone())
+            {
+                kept.retain(|known| *known != instance);
+                kept.push_back(instance);
+                if kept.len() > KEPT {
+                    kept.pop_front();
+                }
+            }
+        }
+        let mut told = account.live_outboxes();
+        let same = |a: &Outbox, b: &Outbox| std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b));
+        if !told.iter().any(|live| same(live, &outbox)) {
+            told.push(outbox);
         }
         self.dispose_for(
             account,
             Disposal::ModeReleased,
             "Cosigned was selected",
-            Some(tell_through(account, vec![outbox])),
+            Some(tell_through(account, told)),
         );
+        for (label, out, _) in &others {
+            out(crate::envelope::delegated_released(label));
+        }
+        // A successor published meanwhile keeps its resident; this join must not replace it.
+        if self.accounts.lock().unwrap().contains_key(&key) {
+            return Err(CHANGED.into());
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn note_released_for_test(&self, user: &str, init: &InitPayload) {
+        let name = identity::registry_name(user, init).unwrap();
+        self.released_registrations
+            .lock()
+            .unwrap()
+            .entry((user.to_owned(), name))
+            .or_default()
+            .push_back(init.instance_id.clone().unwrap().into());
+    }
+
+    /// A DELEGATED init from a registration an explicit Cosigned choice released.
+    pub(crate) fn registration_released(&self, user: &str, init: &InitPayload) -> bool {
+        let (Some(instance), Ok(name)) = (&init.instance_id, identity::registry_name(user, init))
+        else {
+            return false;
+        };
+        self.released_registrations
+            .lock()
+            .unwrap()
+            .get(&(user.to_owned(), name))
+            .is_some_and(|kept| kept.iter().any(|known| **known == **instance))
     }
 
     /// Reset only the live admitted holder's current account; retire older joins.

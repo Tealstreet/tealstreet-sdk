@@ -305,3 +305,43 @@ async fn admitted_cosigned_changed_settings_and_identity_still_require_proof() {
     }
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn admitted_cosigned_repeat_with_release_on_delegated_resident_requires_a_new_proof() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let f = fixture_with_auth(true).await;
+            let account = delegated_resident(&f);
+            let (mut session, mut sent) = candidate(&f, "alice");
+            let mut done = session.take_verified();
+            session.init(init(Some("admitted"))).await.unwrap();
+            let completion = complete(
+                &mut session,
+                &mut sent,
+                &mut done,
+                &mut Device::default(),
+                Answer::Correct,
+                Some("admitted"),
+            )
+            .await;
+            session.verification_completed(completion).await.unwrap();
+            assert!(Arc::ptr_eq(&session.joined["acct"].account, &account));
+            let verification = session.next_verification;
+            let mut release = init(Some("release"));
+            release.release_delegated = Some(true);
+            session.init(release).await.unwrap();
+            assert!(
+                session.pending_verifications.contains_key("acct"),
+                "an explicit release proves possession instead of only resnapshotting"
+            );
+            assert!(session.next_verification > verification);
+            assert!(
+                account.delegated().is_some(),
+                "nothing is released before the proof"
+            );
+            session.close();
+            f.registry
+                .dispose(&account, crate::accounts::Disposal::PageDisposed);
+        })
+        .await;
+}

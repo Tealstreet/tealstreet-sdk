@@ -596,3 +596,26 @@ fn private_read_metadata(code: i64) -> envelope::InitRefusalMetadata {
         stage: Some(RefusalStage::PrivateRead),
     }
 }
+
+#[tokio::test]
+async fn a_released_registration_cannot_quietly_upgrade_again_but_a_fresh_one_can() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let stale = payload(&mut session, Some("released-registration"));
+    f.registry.note_released_for_test("alice", &stale);
+    session.init(stale).await.unwrap();
+    assert!(
+        !session.pending_verifications.contains_key("acct"),
+        "no proof, no handover"
+    );
+    let refused = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|text| serde_json::from_str::<Value>(&text).unwrap())
+        .any(|frame| frame["d"]["data"][1]["reason"] == "mode_released");
+    assert!(refused, "the stale registration is told why");
+    let fresh = payload(&mut session, Some("fresh-registration"));
+    session.init(fresh).await.unwrap();
+    assert!(
+        session.pending_verifications.contains_key("acct"),
+        "a new registration still proves and joins"
+    );
+}
