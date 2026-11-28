@@ -75,7 +75,11 @@ settings routes still answer. An envelope-less 404 on the V1 `openOrders`
 startup read therefore reports `AuthInvalid` at once, naming the V3 API wallet
 key as the replacement, instead of retrying until the host's start deadline
 (Sentry TEALSTREET-NEXT-C0W/EGX). A 404 on any other V1 read, whose route
-still serves, and every V3 404 keep their ordinary retry.
+still serves, and every V3 404 keep their ordinary retry. A V1 order write
+(place, cancel, cancel-all) answered by that 404 never reached an order handler,
+so it is a refusal carrying the same text, never Unknown and never resent; its
+V1 leverage, margin and mode writes keep their classification. Adding a V1 key
+is refused by `validateAccount` before any engine starts.
 Known signature refusals (`-1022`, or `-1000` with `Signature check failed`)
 report `Aster API key signature rejected: re-create the key (V3)`. Position-mode
 refusal is terminal for that account configuration: no retry timer is armed,

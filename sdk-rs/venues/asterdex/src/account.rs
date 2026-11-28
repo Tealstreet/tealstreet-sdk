@@ -95,7 +95,7 @@ enum ModeLoad {
 }
 
 const SIGNATURE_REJECTED: &str = "Aster API key signature rejected: re-create the key (V3)";
-const V1_ROUTE_RETIRED: &str = "Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account";
+pub(crate) const V1_ROUTE_RETIRED: &str = "Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account";
 
 fn signature_rejected(code: i64, message: &str) -> bool {
     code == -1022
