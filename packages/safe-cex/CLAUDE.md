@@ -2007,6 +2007,11 @@ declares a separate `privateUta` channel, resolved as the optional
 
 **One set of hosts since AWS_EXIT step 4: the browser build's, which the hosted exchange server shares.** Master (the Rust bundle) sends every tunnel, relay, private-pool and per-venue socket to the Vultr host `fsjnpy143pbz-tyo` — Tokyo for every region, so `PRIVATE_PROXY_JP/ASIA/GRVT_TINY` and `TOKYO/SINGAPORE_HOW_EGRESS` are each one value, and okx/okxeu/bitget/blofin/coinbase private sockets are relay urls (`BROWSER_WS_HOSTS` in `routingTable.ts`). The public CORS proxy (`PUBLIC_CORS_PROXY`) is the same Vultr host's `/api/public_proxy`: the edge Worker serves it without a JWT, from the tunnel hosts' own IPs and never the whitelisted fleet, even when a caller attaches its proxy token (Binance public reads do), so public-data weight stays off the IPs users trade through (`infra/tofu/CLAUDE.md` → trade tunnel). **The rust lanes must not be released until `public_cors_enabled` is on and both tunnel hosts carry the public CORS container**, or every public read 403s. `services/exchange-server` pinned the old AWS hosts at boot (`pinTealstreetEgressHosts`); the pin was deleted on master 2026-10-29 (the running containers keep it until the cutover deploy, AWS_EXIT step 4) so a hosted account egresses exactly like a browser one, and `services/exchange-server/src/egress.test.ts` fails if the server sets a host of its own again. **Read hosts at call time** — `tunnelEgressUrl`, `getPrivateProxyHost`, `getPublicCorsProxy`, `getRoutingTable` — because tests substitute them (`setTunnelEgressUrls`, `setRoutingWsHosts`) after modules load. **`WS_RELAY_PRIVATE` is not a kill switch for the relay any more**: for a proxied okx, okxeu, bitget or blofin account the relay url IS the channel's `host`, which the flag never gated (it gates only the `relay` candidate a direct account may fall back to). Turning the flag off leaves those sockets on the relay; the rollback is redeploying the previous build (or moving the user back to legacy).
 
+Credential-free Coinbase derivatives catalogue and candle reads use the public
+CORS route for `drb.coinbase.com`, including native JSON-RPC POST reads. Both
+public-proxy backends and the edge host allowlist must serve that origin before
+releasing this host opt-in. Spot, signed-request guards and private routes are unchanged.
+
 **Fleet REST fallback allowlist.** `transport/tealstreet/proxyFleetAllowlist.ts` must
 match the active HTTPS ACLs in `terraform/private-exchange-proxy/haproxy-sg-running.cfg`.
 Its test also requires each advertised route to select an existing backend; commented ACLs
@@ -2093,7 +2098,8 @@ edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel 
 
 **Nothing credentialed goes to the public proxy (`transport/publicProxyGuard.ts`).**
 Engine `prepare` refuses, before I/O, any request bound for `publicCorsProxy()`
-with primary/secondary intent, an `Authorization`/venue key header or a
+with primary/secondary intent, an `Authorization`/venue key header (including
+the case-insensitive `Coinbase-Authorization` proxy alias) or a
 `signature`/`sign` query param (`SignedPublicProxyRefusal`, code
 `HTTP_PREPARATION_INVALID`). Secondary read keys are deprecated, so their default
 public-proxy reads fail closed, and the native plan omits a public-proxy

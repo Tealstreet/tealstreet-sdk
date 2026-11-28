@@ -25,6 +25,17 @@ const crateSource = (crate: string): string => {
 };
 
 describe('public CORS proxy allowlist', () => {
+  it('admits the Coinbase derivatives public origin without widening other venues or hosts', () => {
+    const catalogue = 'https://drb.coinbase.com/api/v2/public/get_instruments';
+    expect(PUBLIC_CORS_HOSTS).toContain('drb.coinbase.com');
+    expect(readsViaPublicProxy('coinbase', catalogue)).toBe(true);
+    expect(readsViaPublicProxy('coinbasespot', catalogue)).toBe(false);
+    expect(readsViaPublicProxy('coinbase', catalogue.replace('drb.coinbase.com', 'drb.coinbase.com.invalid'))).toBe(
+      false,
+    );
+    expect(readsViaPublicProxy('coinbase', catalogue.replace('drb.coinbase.com', 'drb.coinbase.com:444'))).toBe(false);
+  });
+
   // The proxy config lives in tealstreet-next; the SDK mirror carries only this list.
   it.skipIf(!existsSync(PUBLIC_CORS_CONFIG))('equals the hosts public-cors.tf derives for PUBLIC_HOSTS', () => {
     const config = readFileSync(PUBLIC_CORS_CONFIG, 'utf8');

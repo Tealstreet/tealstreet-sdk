@@ -37,6 +37,7 @@ export const PUBLIC_CORS_HOSTS: readonly string[] = [
   'contract.mexc.com',
   'dapi.binance.com',
   'demo-futures.kraken.com',
+  'drb.coinbase.com',
   'dstream.binance.com',
   'edge.grvt.io',
   'edge.testnet.grvt.io',
@@ -108,7 +109,7 @@ export const PUBLIC_PROXY_READ_HOSTS: Partial<Record<ExchangeName, readonly stri
   bybit: ['api.bybit.com'],
   bybitinverse: ['api.bybit.com'],
   bybitspot: ['api.bybit.com'],
-  coinbase: ['api.coinbase.com', 'api.international.coinbase.com'],
+  coinbase: ['api.coinbase.com', 'api.international.coinbase.com', 'drb.coinbase.com'],
   coinbasespot: ['api.coinbase.com', 'api.international.coinbase.com'],
   grvt: [
     'edge.grvt.io',
