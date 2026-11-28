@@ -697,7 +697,7 @@ fn unsupported_detail(o: &OrderRow<'_>) -> String {
     )
 }
 
-pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
+pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64, hyro: bool) -> Option<Mapped> {
     let stop_order_type = present(&o.stop_order_type);
     let tpsl_mode = present(&o.tpsl_mode);
     let position_bound = matches!(tpsl_mode, Some("Full" | "Partial"));
@@ -811,10 +811,13 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         side,
         // Hyro can send a stop that is no longer resting (finished, Triggered or
         // PendingCancel) with price and trigger both empty (#3838 review); it
-        // keeps its known price rather than freezing. A live one stays NaN.
+        // keeps its known price rather than freezing. A live one stays NaN, and
+        // Bybit, which sends "0", keeps refusing an empty price.
         price: match price_text {
             Some(text) => float(text),
-            None if order_status(&o.order_status).is_some_and(|s| s != OrderStatus::Open) => {
+            None if hyro
+                && order_status(&o.order_status).is_some_and(|s| s != OrderStatus::Open) =>
+            {
                 store.order(&o.order_id).map_or(0.0, |known| known.price)
             }
             None => f64::NAN,
@@ -2252,7 +2255,7 @@ impl BybitLinear {
                     {
                         continue;
                     }
-                    let mapped = map_order(&row, cx.store, cx.now);
+                    let mapped = map_order(&row, cx.store, cx.now, self.variant.is_hyro());
                     if !admitted_order_numbers(&row, false)
                         || mapped
                             .as_ref()
@@ -2281,9 +2284,10 @@ impl BybitLinear {
                     if self.variant.is_hyro()
                         && frame.data.iter().any(|row| {
                             !valid_hyro_order(row)
-                                || map_order(row, cx.store, cx.now).is_none_or(|mapped| {
-                                    mapped.orders.iter().any(|order| !valid_hyro_mapped(order))
-                                })
+                                || map_order(row, cx.store, cx.now, self.variant.is_hyro())
+                                    .is_none_or(|mapped| {
+                                        mapped.orders.iter().any(|order| !valid_hyro_mapped(order))
+                                    })
                         })
                     {
                         self.fail_hyro(cx, "malformed private order event");
@@ -2511,7 +2515,7 @@ impl BybitLinear {
         if status == "PartiallyFilled" && or_zero(&row.price) <= 0.0 && or_zero(&row.qty) <= 0.0 {
             return;
         }
-        let Some(mapped) = map_order(row, cx.store, cx.now) else {
+        let Some(mapped) = map_order(row, cx.store, cx.now, self.variant.is_hyro()) else {
             return;
         };
         self.apply_order_row(cx, row, mapped);
@@ -2782,7 +2786,7 @@ impl BybitLinear {
                 if !self.read_row_trades(&row.category, &row.symbol) {
                     return;
                 }
-                let mapped = map_order(&row, cx.store, cx.now);
+                let mapped = map_order(&row, cx.store, cx.now, self.variant.is_hyro());
                 let well_formed = admitted_order_numbers(&row, self.variant.is_hyro());
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.

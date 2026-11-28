@@ -1648,7 +1648,7 @@ fn hyro_stop_with_empty_price_and_zero_trigger_on_the_stream_is_refused() {
 /// A terminal row loads in the snapshot, and on the stream it ends the live
 /// stop seeded first under the same id (review of #3838: a handler that drops
 /// the row must fail here, so the stream leg never starts from an empty store).
-fn assert_hyro_terminal_stop_applied(row: &str) {
+fn assert_hyro_terminal_stop_applied(row: &str) -> f64 {
     const ID: &str = "62bcbd3f-8ec5-4d14-8b0a-764f255b5b47";
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
@@ -1683,6 +1683,7 @@ fn assert_hyro_terminal_stop_applied(row: &str) {
     let ended = h.engine.store().order(ID).expect("the stop is still known");
     assert_eq!(ended.status, safe_cex_engine::model::OrderStatus::Canceled);
     assert!(ended.price.is_finite(), "{}", ended.price);
+    ended.price
 }
 
 fn hyro_deactivated_stop() -> String {
@@ -1709,9 +1710,12 @@ fn hyro_terminal_zero_priced_stop_row_is_still_applied() {
 /// the account over a finished order is the bug TEAL-21 fixed (review of #3838).
 #[test]
 fn hyro_terminal_stop_with_empty_price_and_zero_trigger_is_applied() {
-    assert_hyro_terminal_stop_applied(
+    // Trigger "0" is a present wire price, so the finished row maps at zero;
+    // only an absent price keeps the stored one.
+    let ended = assert_hyro_terminal_stop_applied(
         &hyro_deactivated_stop().replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#),
     );
+    assert_eq!(ended, 0.0);
 }
 
 /// With price and trigger both empty there is no number to map, and the NaN
@@ -1719,9 +1723,12 @@ fn hyro_terminal_stop_with_empty_price_and_zero_trigger_is_applied() {
 /// again (CodeRabbit on #3838).
 #[test]
 fn hyro_terminal_stop_with_empty_price_and_empty_trigger_is_applied() {
-    assert_hyro_terminal_stop_applied(
+    // The seeded live stop's price survives: nothing on the row replaces it
+    // (CodeRabbit on #3838: a finite check alone accepts a lost price as 0).
+    let ended = assert_hyro_terminal_stop_applied(
         &hyro_deactivated_stop().replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#),
     );
+    assert_eq!(ended, 65920.0);
 }
 
 /// Triggered and PendingCancel rows are not resting orders (the engine maps
@@ -1761,6 +1768,23 @@ fn hyro_triggered_and_pending_cancel_stops_with_no_price_keep_the_session() {
         let stop = h.engine.store().order(ID).expect("the stop is still known");
         assert_eq!(stop.price, 65920.0, "{status}");
     }
+}
+
+/// The no-price fallback is Hyro's alone: Bybit sends "0", so a Bybit row
+/// with an empty price is rejected as before, finished or not (CodeRabbit on
+/// #3838).
+#[test]
+fn bybit_finished_order_with_empty_price_is_still_rejected() {
+    let row = r#"{"symbol":"BTCUSDT","orderId":"empty-price","side":"Buy","orderType":"Limit","orderStatus":"Filled","price":"","qty":"1","leavesQty":"0","cumExecQty":"1"}"#;
+    let mut h = startup(Variant::Linear);
+    authenticate(&mut h);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[row]));
+    assert!(h.engine.store().order("empty-price").is_none());
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().order("empty-price").is_none());
 }
 
 /// A live stop priced "0" with trigger "0" passes the row gate (its price is

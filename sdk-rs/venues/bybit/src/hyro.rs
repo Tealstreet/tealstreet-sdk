@@ -587,7 +587,7 @@ impl BybitLinear {
         if row.order_status == "Rejected" {
             return Found::Rejected;
         }
-        let Some(mapped) = map_order(row, cx.store, cx.now) else {
+        let Some(mapped) = map_order(row, cx.store, cx.now, true) else {
             return Found::Incomplete("matched order cannot be mapped");
         };
         if mapped.orders.iter().any(|o| !valid_hyro_mapped(o)) {
