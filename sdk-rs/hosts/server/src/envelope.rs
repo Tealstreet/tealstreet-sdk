@@ -28,6 +28,10 @@ pub struct InitPayload {
     /// stopped and its key erased instead of being joined. Connection-local, like `resume`.
     #[serde(default, skip_serializing)]
     pub release_delegated: Option<bool>,
+    /// An explicit DELEGATED choice: the only init that may lift the bar a release left on
+    /// this account. Connection-local, like `release_delegated`.
+    #[serde(default, skip_serializing)]
+    pub claim_delegated: Option<bool>,
     /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
     #[serde(default, skip_serializing)]
     pub resume_proof: Option<String>,

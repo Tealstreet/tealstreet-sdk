@@ -149,9 +149,16 @@ reason "Cosigned was selected" (`Disposal::ModeReleased`) and rebuild the accoun
 as COSIGNED for the joining socket; resting venue orders stay. A release from a
 stale account is refused, and `stop` never revokes a resident a successor shares.
 Every live holder hears the algo finals; every other confirmed DELEGATED
-registration gets a permanent `mode_released` refusal, and its instanceId may not
-silently re-upgrade (`registration_released`): only a fresh explicit Delegated
-choice may. In-place handover that keeps algos running is not implemented (AGT-383). A proved DELEGATED join upgrades
+registration gets a permanent `mode_released` refusal tagged with its own instanceId.
+The release also bars the account itself (`delegated_bars`, keyed by `(user,
+registry_name)`, so owner + venue scope + key id, never a client instanceId) for
+`DELEGATED_RETENTION`: parked, retained and offline devices are refused with
+`mode_released` when they return, and no new client instance slips past. The bar is
+inserted under the `accounts` lock in the same step as the currency check, and every
+DELEGATED publish and in-place upgrade checks it under that lock, so a racing Delegated
+join either makes the release stale or is refused. Only an init carrying
+`claimDelegated` (an explicit Delegated choice) lifts it, and only the bar it saw when
+it began: a release after that is the newer choice and wins. In-place handover that keeps algos running is not implemented (AGT-383). A proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
 Public-key handovers locally match the candidate to the original provider's
 completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr

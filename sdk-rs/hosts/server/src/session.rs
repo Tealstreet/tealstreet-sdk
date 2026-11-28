@@ -695,7 +695,7 @@ impl Session {
             self.handovers
                 .refusal_context(&init.account_name, &init.exchange_name)
         });
-        if delegated && self.registry.registration_released(self.user(), &init) {
+        if delegated && self.registry.delegated_barred(self.user(), &init) {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated registration was released");
             self.handover_out(&init.account_name)

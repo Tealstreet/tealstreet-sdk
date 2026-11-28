@@ -269,6 +269,11 @@ pub struct Live {
     pub token: Option<(String, u64)>,
 }
 
+/// Accounts an explicit Cosigned choice released, by `(user, registry_name)`: owner, venue
+/// scope and key id, so no client instance id can slip past it. Each bar lapses with the
+/// DELEGATED retention window, the longest a released device could still return.
+type DelegatedBars = HashMap<(String, String), tokio::time::Instant>;
+
 type Confirmed = (
     crate::envelope::AccountSigningMode,
     Outbox,
@@ -801,6 +806,10 @@ impl InitAuthority {
 
 struct InitAttempt<'a> {
     pending: &'a PendingInits,
+    bars: &'a Mutex<DelegatedBars>,
+    /// A DELEGATED claim: the bar this init's choice saw at its start (`None`: no bar).
+    /// It lifts only that bar; one set after it began is a newer choice and wins.
+    claim: Option<Option<tokio::time::Instant>>,
     key: (String, String),
     authority: InitAuthority,
     /// Admission only: an account can subsequently be held by other tokens.
@@ -841,12 +850,37 @@ impl InitAttempt<'_> {
         {
             return Err("account stopped".into());
         }
+        if account.delegated().is_some() {
+            self.check_delegated_bar()?;
+        }
         let replaced = accounts.insert(self.key.clone(), account.clone());
         self.forget(&mut pending);
         self.published = true;
         Ok(replaced)
     }
 }
+
+impl InitAttempt<'_> {
+    /// Refuses a DELEGATED account the user released, unless this init's explicit claim
+    /// saw that same bar. Callers hold the `accounts` lock, so a release cannot interleave.
+    fn check_delegated_bar(&self) -> Result<(), String> {
+        let mut bars = self.bars.lock().unwrap();
+        let now = tokio::time::Instant::now();
+        bars.retain(|_, until| *until > now);
+        let Some(until) = bars.get(&self.key).copied() else {
+            return Ok(());
+        };
+        if self.claim == Some(Some(until)) {
+            bars.remove(&self.key);
+            return Ok(());
+        }
+        Err(DELEGATED_RELEASED.into())
+    }
+}
+
+/// A DELEGATED join of an account an explicit Cosigned choice released.
+pub(crate) const DELEGATED_RELEASED: &str =
+    "Cosigned was chosen for this account on another device; choose Delegated again to switch back";
 
 impl Drop for InitAttempt<'_> {
     fn drop(&mut self) {
@@ -867,9 +901,9 @@ pub struct Registry {
     pending_inits: PendingInits,
     proof_queues: proof_queue::ProofQueues,
     parked: Mutex<HashMap<String, Parked>>,
-    /// Client registrations whose DELEGATED account an explicit Cosigned choice released,
-    /// newest last and capped per account: only a new registration may upgrade it again.
-    released_registrations: Mutex<HashMap<(String, String), std::collections::VecDeque<Arc<str>>>>,
+    /// Only an init carrying an explicit Delegated choice (`claimDelegated`) lifts one.
+    /// Lock order: `accounts` before this.
+    delegated_bars: Mutex<DelegatedBars>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
     /// the server has not seen yet (no close frame) takes it over.
     open: Mutex<HashMap<String, OpenSession>>,
@@ -1280,7 +1314,7 @@ impl Registry {
             pending_inits: Arc::default(),
             proof_queues: Default::default(),
             parked: Mutex::default(),
-            released_registrations: Mutex::default(),
+            delegated_bars: Mutex::default(),
             open: Mutex::default(),
             threads,
             ids: AtomicU64::new(1),
@@ -1626,6 +1660,8 @@ impl Registry {
         }
         Ok(InitAttempt {
             pending: &self.pending_inits,
+            bars: &self.delegated_bars,
+            claim: None,
             key,
             authority,
             expires_at_ms,
@@ -1792,6 +1828,9 @@ impl Registry {
         if apply.is_some() {
             attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
         }
+        if delegated && init.claim_delegated == Some(true) {
+            attempt.claim = Some(self.delegated_bar(&attempt.key));
+        }
         if let Some(proof) = proof {
             proof
                 .check(user, init)
@@ -1875,6 +1914,10 @@ impl Registry {
                             || !account.running.io_allowed()
                         {
                             return Err("Account is retiring; account not attached".into());
+                        }
+                        {
+                            let _accounts = self.accounts.lock().unwrap();
+                            attempt.check_delegated_bar()?;
                         }
                         let upgraded =
                             match (public, attempt.authority.proved_registration.as_deref()) {
@@ -2752,16 +2795,25 @@ impl Registry {
         outbox: Outbox,
     ) -> Result<(), String> {
         const CHANGED: &str = "The account registration changed; account not attached";
-        const KEPT: usize = 64;
         let key = (account.user.clone(), account.registry_name().to_owned());
-        let current = |accounts: &AccountEntries| {
-            accounts
+        {
+            // One step with the currency check: a DELEGATED publish or upgrade that wins the
+            // accounts lock first makes this release stale, and one that loses it sees the bar.
+            let accounts = self.accounts.lock().unwrap();
+            if !accounts
                 .get(&key)
                 .is_some_and(|current| Arc::ptr_eq(current, account))
-        };
-        if !current(&self.accounts.lock().unwrap()) {
-            return Err(CHANGED.into());
+            {
+                return Err(CHANGED.into());
+            }
+            let until = tokio::time::Instant::now() + retention::DELEGATED_RETENTION;
+            self.delegated_bars
+                .lock()
+                .unwrap()
+                .insert(key.clone(), until);
         }
+        // Parked, retained and offline registrations hold no outbox; the bar refuses them
+        // with `mode_released` when they return.
         let others: Vec<(String, Outbox, Option<Arc<str>>)> = account
             .holders
             .lock()
@@ -2771,20 +2823,6 @@ impl Registry {
             .filter(|((id, _), _)| *id != holder)
             .map(|((_, label), (_, out, instance))| (label.clone(), out.clone(), instance.clone()))
             .collect();
-        {
-            let mut released = self.released_registrations.lock().unwrap();
-            let kept = released.entry(key.clone()).or_default();
-            for instance in others
-                .iter()
-                .filter_map(|(_, _, instance)| instance.clone())
-            {
-                kept.retain(|known| *known != instance);
-                kept.push_back(instance);
-                if kept.len() > KEPT {
-                    kept.pop_front();
-                }
-            }
-        }
         let mut told = account.live_outboxes();
         let same = |a: &Outbox, b: &Outbox| std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b));
         if !told.iter().any(|live| same(live, &outbox)) {
@@ -2796,8 +2834,13 @@ impl Registry {
             "Cosigned was selected",
             Some(tell_through(account, told)),
         );
-        for (label, out, _) in &others {
-            out(crate::envelope::delegated_released(label));
+        // Tagged: an attached registration awaits no reply, so the client admits only its own.
+        for (label, out, instance) in &others {
+            let notice = crate::envelope::delegated_released(label);
+            out(match instance {
+                Some(instance) => crate::envelope::with_instance_id(notice, instance),
+                None => notice,
+            });
         }
         // A successor published meanwhile keeps its resident; this join must not replace it.
         if self.accounts.lock().unwrap().contains_key(&key) {
@@ -2807,27 +2850,29 @@ impl Registry {
     }
 
     #[cfg(test)]
-    pub(crate) fn note_released_for_test(&self, user: &str, init: &InitPayload) {
+    pub(crate) fn bar_for_test(&self, user: &str, init: &InitPayload) {
         let name = identity::registry_name(user, init).unwrap();
-        self.released_registrations
+        let until = tokio::time::Instant::now() + retention::DELEGATED_RETENTION;
+        self.delegated_bars
             .lock()
             .unwrap()
-            .entry((user.to_owned(), name))
-            .or_default()
-            .push_back(init.instance_id.clone().unwrap().into());
+            .insert((user.to_owned(), name), until);
     }
 
-    /// A DELEGATED init from a registration an explicit Cosigned choice released.
-    pub(crate) fn registration_released(&self, user: &str, init: &InitPayload) -> bool {
-        let (Some(instance), Ok(name)) = (&init.instance_id, identity::registry_name(user, init))
-        else {
-            return false;
-        };
-        self.released_registrations
-            .lock()
-            .unwrap()
-            .get(&(user.to_owned(), name))
-            .is_some_and(|kept| kept.iter().any(|known| **known == **instance))
+    /// The live bar on this account, if an explicit Cosigned choice released it.
+    fn delegated_bar(&self, key: &(String, String)) -> Option<tokio::time::Instant> {
+        let mut bars = self.delegated_bars.lock().unwrap();
+        let now = tokio::time::Instant::now();
+        bars.retain(|_, until| *until > now);
+        bars.get(key).copied()
+    }
+
+    /// A DELEGATED init of a released account that does not carry an explicit Delegated
+    /// choice. Every client instance of that owner and key is barred alike.
+    pub(crate) fn delegated_barred(&self, user: &str, init: &InitPayload) -> bool {
+        init.claim_delegated != Some(true)
+            && identity::registry_name(user, init)
+                .is_ok_and(|name| self.delegated_bar(&(user.to_owned(), name)).is_some())
     }
 
     /// Reset only the live admitted holder's current account; retire older joins.
