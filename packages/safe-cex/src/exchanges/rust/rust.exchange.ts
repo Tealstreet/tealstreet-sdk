@@ -473,8 +473,8 @@ const MULTI_COMMAND_WAIT_FACTOR = 5;
 /** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
 const COLD_START_READS = /^(fetch|find|refresh)/;
 /**
- * Reads whose transport timeout is noise the host logs, not a Sentry exception (EGZ).
- * A closed list: an op outside it, or a refusal reported with no op, keeps reporting.
+ * Reads whose transport failure is reported with a `transient_read_op` tag, for the host
+ * sink to demote (EGZ). A closed list: any other op, or a refusal with no op, is untagged.
  */
 const TRANSIENT_READ_OPS: ReadonlySet<string> = new Set([
   'fetchCandles',
@@ -3039,7 +3039,7 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  /** `op` is the failed command's, when known: only a listed read can be transient. */
+  /** `op` is the failed command's, when known: only a listed read is tagged transient. */
   private reportCommandError = (error: unknown, op?: string): void => {
     // The terminal engine notification already reports all interrupted commands.
     if (this.engineFailure) {
@@ -3054,7 +3054,7 @@ export class RustEngineExchange extends BaseExchange {
       this.emitAndLogError(
         error instanceof Error ? error : String(error),
         undefined,
-        transientRead ? { transientRead } : undefined,
+        transientRead ? { transientRead, sentryTags: { transient_read_op: op } } : undefined,
       );
     } catch {
       /* Diagnostic listeners cannot replace the original write outcome. */

@@ -7,18 +7,18 @@ import { FrameStore } from '../../store/frameStore';
 import { setTelemetrySink } from '../../telemetry';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 
-// Sentry TEALSTREET-NEXT-EGZ: the page engine reported classified notSent read
-// timeouts straight to Sentry, before the host's transient-read rule could log them.
-// Only positive evidence of a read skips the report: a timeout with no command can be
-// a write refusal (PAGE_MARKETS_MISSING, the startup write wait).
+// Sentry TEALSTREET-NEXT-EGZ: page-engine read timeouts are still reported, but a listed
+// read whose failure is transport-only carries `transient_read_op` so the host sink alone
+// decides whether to demote it. A timeout with no command can be a write refusal
+// (PAGE_MARKETS_MISSING, the startup write wait), so only the op is positive evidence.
 const exchanges: { dispose(): void }[] = [];
 const timeout = (message = 'Relay or network request timed out', fields: Record<string, unknown> = {}) =>
   new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent', ...fields });
 
-let captureException: ReturnType<typeof vi.fn<(error: unknown) => void>>;
+let captureException: ReturnType<typeof vi.fn<(error: unknown, context: { tags?: Record<string, unknown> }) => void>>;
 beforeEach(() => {
   for (const method of ['error', 'warn', 'trace'] as const) vi.spyOn(console, method).mockImplementation(() => {});
-  captureException = vi.fn<(error: unknown) => void>();
+  captureException = vi.fn<(error: unknown, context: { tags?: Record<string, unknown> }) => void>();
   setTelemetrySink({ captureException });
 });
 afterEach(() => {
@@ -29,34 +29,26 @@ afterEach(() => {
 
 const exchangeErrorLogged = () =>
   vi.mocked(console.error).mock.calls.some(([first]) => String(first).includes('exchange error'));
+const reportedTags = () => {
+  expect(captureException).toHaveBeenCalledOnce();
+  return captureException.mock.calls[0][1].tags ?? {};
+};
 
 describe('BaseExchange.emitAndLogError on the main thread', () => {
-  const exchange = () => {
-    const value = new BaseExchange(
+  it('still reports a read its caller marked transient, logging it at warning level', () => {
+    const current = new BaseExchange(
       'hyperliquid',
       { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging: false } },
       new FrameStore(),
     );
-    exchanges.push(value);
-    return value;
-  };
-
-  it('logs a read its caller marked transient at warning level, with no Sentry exception', () => {
-    const current = exchange();
-    const listener = vi.fn();
-    current.on('error', listener);
-    current.emitAndLogError(timeout(), undefined, { transientRead: true });
-    expect(captureException).not.toHaveBeenCalled();
+    exchanges.push(current);
+    current.emitAndLogError(timeout(), undefined, {
+      transientRead: true,
+      sentryTags: { transient_read_op: 'fetchCandles' },
+    });
+    expect(reportedTags()).toMatchObject({ transient_read_op: 'fetchCandles', error_kind: 'timeout' });
     expect(exchangeErrorLogged()).toBe(false);
     expect(console.warn).toHaveBeenCalled();
-    expect(listener).toHaveBeenCalledOnce();
-    expect(listener.mock.calls[0][1].classified).toMatchObject({ kind: 'timeout', outcome: 'notSent' });
-  });
-
-  it('still reports a timeout no caller marked as a read', () => {
-    exchange().emitAndLogError(timeout());
-    expect(captureException).toHaveBeenCalledOnce();
-    expect(exchangeErrorLogged()).toBe(true);
   });
 });
 
@@ -80,13 +72,13 @@ describe('RustEngineExchange command reports', () => {
   };
 
   it.each([
-    ['timeout', 'notSent'],
-    ['network', 'notSent'],
-    ['timeout', undefined],
-  ])('sends no exception for a %s candle read (outcome %s)', async (kind, outcome) => {
+    ['fetchCandles', 'timeout', 'notSent'],
+    ['fetchOptionChain', 'network', 'notSent'],
+    ['refreshMarkets', 'timeout', undefined],
+  ])('tags a transport failure of %s (%s, outcome %s) and still reports it', async (op, kind, outcome) => {
     const error = timeout(undefined, { kind, outcome });
-    await expect(rust(error).command({ op: 'fetchCandles' })).rejects.toBe(error);
-    expect(captureException).not.toHaveBeenCalled();
+    await expect(rust(error).command({ op })).rejects.toBe(error);
+    expect(reportedTags()).toMatchObject({ transient_read_op: op });
     expect(exchangeErrorLogged()).toBe(false);
   });
 
@@ -95,10 +87,11 @@ describe('RustEngineExchange command reports', () => {
     ['a non-transport kind', 'fetchCandles', { kind: 'rejected', outcome: 'rejected' }],
     ['a write op', 'setLeverage', {}],
     ['an op outside the read set', 'registerCancelChecks', {}],
-  ])('still reports %s', async (_name, op, fields) => {
+  ])('reports %s untagged', async (_name, op, fields) => {
     const error = timeout(undefined, fields);
     await expect(rust(error).command({ op })).rejects.toBe(error);
-    expect(captureException).toHaveBeenCalledOnce();
+    expect(reportedTags()).not.toHaveProperty('transient_read_op');
+    expect(exchangeErrorLogged()).toBe(true);
   });
 
   it.each([
@@ -107,9 +100,9 @@ describe('RustEngineExchange command reports', () => {
       'the startup write wait',
       'hyperliquid placeOrder was not sent: the account did not load within 30s. Retry once it loads.',
     ],
-  ])('still reports %s, a timeout refusal with no command', (_name, message) => {
+  ])('reports %s, a timeout refusal with no command, untagged', (_name, message) => {
     rust(undefined).reportCommandError(timeout(message));
-    expect(captureException).toHaveBeenCalledOnce();
+    expect(reportedTags()).not.toHaveProperty('transient_read_op');
     expect(exchangeErrorLogged()).toBe(true);
   });
 });

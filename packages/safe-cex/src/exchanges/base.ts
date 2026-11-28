@@ -2232,6 +2232,7 @@ export class BaseExchange implements Exchange {
       extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
     // Set only by a caller that knows the failure was a read; see `isTransportFailure`.
+    // Still reported: its `transient_read_op` tag lets the host sink decide on demotion.
     const transientRead = structuredExtraData.transientRead === true;
 
     if (!suppressConsoleLog && transientRead) {
@@ -2384,8 +2385,7 @@ export class BaseExchange implements Exchange {
       });
     } else {
       // In main thread: report directly for a better stack trace (to the host's sink).
-      // A transient read is left to the listener, as the worker path's host does.
-      if (errorObject && !transientRead) {
+      if (errorObject) {
         reportException(errorObject, {
           tags: {
             exchange: this.name,

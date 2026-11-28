@@ -1895,14 +1895,14 @@ tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
 and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
 the kind rather than venue text.
 
-**The main-thread `emitAndLogError` sends no exception for a transient read**, and
-logs it at warning level. Only the caller can say it was a read: `RustEngineExchange.command`
-passes `{ transientRead: true }` for an op in `TRANSIENT_READ_OPS` whose failure
-`isTransportFailure` accepts (network/timeout, no write command, outcome not `unknown`).
-The `'error'` event still carries `classified` for the host to log. Before this,
-page-engine read timeouts reached Sentry ahead of the host's rule (TEALSTREET-NEXT-EGZ).
-**Never infer a read from a missing write command**: PAGE_MARKETS_MISSING and the
-startup write wait are timeout/notSent refusals with no command, and they still report.
+**A transient read is still reported, tagged `transient_read_op: <op>`**, and logged
+at warning level. Only the caller can say it was a read: `RustEngineExchange.command`
+passes `{ transientRead: true, sentryTags: { transient_read_op } }` for an op in
+`TRANSIENT_READ_OPS` whose failure `isTransportFailure` accepts (network/timeout, no
+write command, outcome not `unknown`). The host's Sentry sink is the one layer that
+demotes or escalates on that tag (TEALSTREET-NEXT-EGZ; NX #10534); safe-cex never drops
+the report. **Never infer a read from a missing write command**: PAGE_MARKETS_MISSING and
+the startup write wait are timeout/notSent refusals with no command and stay untagged.
 
 ## Proxy & Tunnel Architecture
 
