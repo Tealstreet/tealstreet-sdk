@@ -235,3 +235,20 @@ test('history kind, native code and closed cause survive the command promise', a
     return true;
   });
 });
+
+// TEALSTREET-NEXT-E95: OKX answers a timed-out candle read with [] after an attributed
+// "Request timed out"; the host re-reported it at error level and callers saw an answered read.
+test('a soft-shape read timeout settles [] tagged as a timeout and logs only its warning', async () => {
+  const r = rig(({ command }) => [diagnostic(command, 'Request timed out'), done(command, { result: '[]' })]);
+  const result = await r.host.command({ op: 'fetchCandles' });
+  assert.deepEqual(result, []);
+  assert.deepEqual(result.commandError, { message: 'Request timed out', kind: 'timeout' });
+  assert.deepEqual(r.logs, [{ level: 'warning', message: 'Request timed out' }]);
+});
+
+test('a soft-shape read that failed for another reason keeps its error report, untagged as a timeout', async () => {
+  const r = rig(({ command }) => [diagnostic(command, 'HTTP 502'), done(command, { result: '[]' })]);
+  const result = await r.host.command({ op: 'fetchCandles' });
+  assert.deepEqual(result.commandError, { message: 'HTTP 502' });
+  assert.deepEqual(r.logs, [{ level: 'warning', message: 'HTTP 502' }, { level: 'error', message: 'HTTP 502' }]);
+});

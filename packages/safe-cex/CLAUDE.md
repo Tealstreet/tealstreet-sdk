@@ -2560,6 +2560,11 @@ stage. An equal 20 s wait always won the race with a bare `CommandTimeoutError`
 Two consecutive candle-read timeouts mark a source broken even with markets loaded, and it
 is rebuilt on the shared backoff; an answered read clears the run. Without this, a wedged
 source failed every read at 20 s for hours and outlived account reloads (ECB/ED8).
+OKX's soft shape answers a failed candle read with an attributed `commandError` then `[]`; the
+host tags that array's non-enumerable `commandError` (`kind: 'timeout'` for the engine's fixed
+"Request timed out" text, the one text match: `Notice::CommandError` carries no kind), the
+source counts it as unanswered, and the timeout is logged once as a warning, not re-reported
+at error level (E95). Other soft failures keep their error report.
 
 A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
 read interruption; uncertain writes retain their existing code, reconciliation

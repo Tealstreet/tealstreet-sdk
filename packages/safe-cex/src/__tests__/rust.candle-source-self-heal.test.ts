@@ -14,7 +14,7 @@ const exchanges: RustEngineExchange[] = [];
 const opts = { symbol: 'BTCUSDT', interval: '15m' as const, from: 1_700_000_000_000, to: 1_700_000_900_000 };
 const candles = [{ timestamp: 1_700_000_000, open: 1, high: 2, low: 1, close: 2, volume: 1 }];
 
-type CandleRead = 'answers' | 'venueTimeout';
+type CandleRead = 'answers' | 'venueTimeout' | 'softTimeout';
 
 /**
  * A mirror whose page candle sources are fake engines: `health` decides, per construction,
@@ -90,9 +90,17 @@ const fixture = (
         command: (json: string) => {
           const command = JSON.parse(json);
           record.commands.push(command);
-          if (command.op === 'fetchCandles' && nextRead() === 'venueTimeout') {
+          const read = command.op === 'fetchCandles' ? nextRead() : 'answers';
+          if (read === 'venueTimeout') {
             pendingReads.set(++timers, { command: command.command, stage: 'issue' });
             return JSON.stringify([{ op: 'setTimer', timer: timers, at: Date.now() + 1 }]);
+          }
+          // OKX's native soft shape: an attributed timeout, then [] as the answer.
+          if (read === 'softTimeout') {
+            return JSON.stringify([
+              { op: 'commandError', command: command.command, message: 'Request timed out' },
+              { op: 'done', command: command.command, result: '[]' },
+            ]);
           }
           return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(candles) }]);
         },
@@ -162,6 +170,21 @@ it('a loaded source whose candle reads keep timing out is rebuilt, not reused', 
   expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
   expect(built[0].freed).not.toHaveBeenCalled();
   expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
+  expect(built[0].freed).toHaveBeenCalled();
+
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+  expect(built).toHaveLength(2);
+});
+
+// TEALSTREET-NEXT-E95: OKX resolves a timed-out candle read as [], which counted as answered,
+// so its wedged source was never rebuilt.
+it('soft-shape candle timeouts count as unanswered, so the source is rebuilt', async () => {
+  vi.useFakeTimers();
+  const { exchange, built } = fixture(['ok', 'ok'], ['softTimeout', 'answers']);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: [] });
+  expect(built[0].freed).not.toHaveBeenCalled();
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: [] });
   expect(built[0].freed).toHaveBeenCalled();
 
   await vi.advanceTimersByTimeAsync(2_000);

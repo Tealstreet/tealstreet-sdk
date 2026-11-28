@@ -3931,6 +3931,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       const candles = await source.fetchOHLCV(opts);
+      // A soft-shape venue (OKX) answers a timed-out read with []: that read was not answered.
+      if ((candles as { commandError?: { kind?: string } }).commandError?.kind === 'timeout') {
+        source.candleReadTimeouts += 1;
+        lease.failed(source, source.candleSourceBroken);
+        return candles;
+      }
       source.candleReadTimeouts = 0;
       lease.succeeded();
       return candles;
