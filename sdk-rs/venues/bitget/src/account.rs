@@ -340,7 +340,7 @@ impl BitgetFutures {
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
             Err(reason) => {
-                return self.account_sign_failed(cx, request, &reason.venue_error().message);
+                return self.account_sign_failed(cx, request, reason.venue_error());
             }
         };
         let recipe = sign::Http::new(identity, path.clone());
@@ -370,7 +370,7 @@ impl BitgetFutures {
                 } = pending
                 {
                     let _ = cx.finish_http_context(&context);
-                    self.account_sign_failed(cx, request, &reason.venue_error().message);
+                    self.account_sign_failed(cx, request, reason.venue_error());
                 }
             }
         }
@@ -1558,16 +1558,23 @@ impl BitgetFutures {
         self.refresh_positions(cx);
     }
 
+    /// Also every preparation failure (the engine's default routes it here). Only
+    /// a transport kind is kept, so a relay timeout reads as one; any other kind
+    /// stays untyped as before and never counts as auth evidence.
     pub(crate) fn account_sign_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
+        let error = match error.kind {
+            Some(ErrorKind::Timeout | ErrorKind::Network) => error,
+            _ => VenueError::new(error.message),
+        };
         match request {
             // Provider refusal is not transport evidence for Classic fallback.
-            Request::Probe => self.probe_failed(cx, error, 0.0),
-            request => self.account_failed(cx, request, error),
+            Request::Probe => self.probe_failed(cx, &error.message, 0.0),
+            request => self.account_refused(cx, request, error),
         }
     }
 

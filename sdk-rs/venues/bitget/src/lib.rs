@@ -1465,7 +1465,7 @@ impl Venue for BitgetFutures {
             } => {
                 let _ = cx.finish_http_context(&context);
                 if generation == self.account.generation {
-                    self.account_sign_failed(cx, request, &error.message);
+                    self.account_sign_failed(cx, request, error);
                     self.wake_trading(cx);
                 }
             }
