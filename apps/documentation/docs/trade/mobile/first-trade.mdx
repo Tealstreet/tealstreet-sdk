@@ -9,6 +9,12 @@ hide_table_of_contents: false
 
 ---
 
+import ShotOrderFormLimit from '/img/trading/mobile/app/order-form-limit.png';
+import ShotPositionsTab from '/img/trading/mobile/app/positions-tab.png';
+import ShotQuickActions from '/img/trading/mobile/app/quick-actions.png';
+import ShotOrdersTab from '/img/trading/mobile/app/orders-tab.png';
+import ShotTradeChart from '/img/trading/mobile/app/trade-chart.png';
+
 This walkthrough assumes you're signed in and have [connected an exchange account](./connect-accounts.mdx).
 
 :::warning Orders are sent immediately
@@ -46,11 +52,9 @@ picked, and shows the size and leverage. Under the button, an info card shows **
 **Size:** type the size into the **Size** field. The dollar buttons (for example **$100**) **add** that much
 notional to the current size each time you tap them, and **CC** clears the size.
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `order-form-limit`**: the Trade tab with the order form on **Limit**, showing the Buy/Sell
-pills, **Price**, **Size**, the dollar buttons, **Post** / **Reduce**, the order button and the info card under it.
-Use the team test account with a small balance.
-:::
+<div class="text--center">
+    <img src={ShotOrderFormLimit} alt="The Trade tab's order form on Limit" style={{ width: 250 }} />
+</div>
 
 ### If you see "Set leverage to trade"
 
@@ -118,14 +122,13 @@ the row opens its details instead.)
 
 **✕ All (N)** at the top of the tab closes **every** open position at market, with no confirmation.
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `positions-tab`**: the **Positions** tab with one small test position swiped left to show
-**Actions**, **BE** and **Close**.
-:::
+<div class="text--center">
+    <img src={ShotPositionsTab} alt="A position swiped left to show Actions, BE and Close" style={{ width: 250 }} />
+</div>
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `quick-actions`**: the **Quick Actions** sheet on its **Close** tab.
-:::
+<div class="text--center">
+    <img src={ShotQuickActions} alt="The Quick Actions sheet on its Close tab" style={{ width: 250 }} />
+</div>
 
 ## Manage open orders
 
@@ -139,10 +142,9 @@ all orders, limit/market only, or stops).
 - **Cancel from the order book:** tap (or long-press) a price level where you have orders. Tealstreet asks
   **Cancel Orders** at that price before cancelling.
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `orders-tab`**: the **Orders** tab with one resting test order swiped left to show
-**Cancel**.
-:::
+<div class="text--center">
+    <img src={ShotOrdersTab} alt="A resting order swiped left to show Cancel" style={{ width: 250 }} />
+</div>
 
 ## Charts
 
@@ -153,10 +155,9 @@ all orders, limit/market only, or stops).
 - The **bell** in the account bar opens **Price alerts**. If you can't see it, tap the circle at the top-right to
   open the account bar.
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `trade-chart`**: the Trade tab with the account bar open (showing the bell) and the chart
-with its top bar.
-:::
+<div class="text--center">
+    <img src={ShotTradeChart} alt="The account bar with the bell, and the chart with its top bar" style={{ width: 250 }} />
+</div>
 
 ## Next
 

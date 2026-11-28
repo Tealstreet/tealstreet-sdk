@@ -9,6 +9,11 @@ hide_table_of_contents: false
 
 ---
 
+import ShotSetupYourAccount from '/img/trading/mobile/app/setup-your-account.png';
+import ShotWebQrModal from '/img/trading/mobile/app/web-qr-modal.png';
+import ShotQrScanner from '/img/trading/mobile/app/qr-scanner.png';
+import ShotManualKeyForm from '/img/trading/mobile/app/manual-key-form.png';
+
 The mobile app trades through the same exchange API keys you use on the web. You can bring your existing keys
 across from your computer in a few taps, or add a key by hand.
 
@@ -22,7 +27,7 @@ keys are saved to your Tealstreet account on this phone. If you're signed out, t
 
 - **Any time:** tap the **Tealstreet logo** at the top-left, then **API keys**. This opens your account list
   (**Settings → Accounts**). Tap **Add account**: the last row of the list, or the button under
-  **No exchange accounts yet** if you have none. (Older versions of the app label it **Add**, at the top right.)
+  **No exchange accounts yet** if you have none.
 - **Your first account only:** while you have no accounts, the account bar under the top bar shows an
   **Add an API key** pill. It disappears once you have an account, so use the side panel for every account after that.
 
@@ -35,9 +40,9 @@ Both open **Set Up Your Account**, which offers four options:
 | **Paste from Clipboard**      | You copied an account in the web app and your phone shares its clipboard.      |
 | **Manually Enter API Keys**   | You want to type or paste a key and secret from your exchange yourself.        |
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `setup-your-account`**: the **Set Up Your Account** sheet showing all four options.
-:::
+<div class="text--center">
+    <img src={ShotSetupYourAccount} alt="The Set Up Your Account sheet with its four options" style={{ width: 250 }} />
+</div>
 
 ## Option 1: Scan a QR code from the web app
 
@@ -63,15 +68,13 @@ The code contains that account's API key and secret. Only show it when nobody el
 scan it with your own phone. Close it when you're done.
 :::
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `web-qr-modal`**: the web **QR Code Sync** modal *before* **Show QR code** is clicked
-(instruction text and warning visible, **no QR code on screen**). Never capture a revealed code.
-:::
+<div class="text--center">
+    <img src={ShotWebQrModal} alt="The web QR Code Sync modal before the code is shown" style={{ width: 500 }} />
+</div>
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `qr-scanner`**: the phone's **QR Scanner** screen ("Point your camera at the QR code to
-scan"), pointed at a blank surface rather than a real code.
-:::
+<div class="text--center">
+    <img src={ShotQrScanner} alt="The QR Scanner screen" style={{ width: 250 }} />
+</div>
 
 If the web app says **"This account has too much data for a QR code"**, use Option 3 (paste) for that account.
 
@@ -115,19 +118,17 @@ Use this for a brand-new key, or for an exchange you haven't set up on the web.
 For step-by-step help creating a key on a particular exchange, see the [Connect](/docs/connect/api-general) guides.
 They apply to mobile too.
 
-:::info Screenshot needed
-**SCREENSHOT PLACEHOLDER: `manual-key-form`**: the **Set Up _Exchange_** form with empty fields. Never capture a real
-key or secret.
-:::
+<div class="text--center">
+    <img src={ShotManualKeyForm} alt="The Set Up Bybit form with empty fields" style={{ width: 250 }} />
+</div>
 
 ## Editing or removing an account
 
 Open **Settings → Accounts** (side panel → **API keys**). Each account in the list opens its edit form, where you can
 change its name, keys and options.
 
-- To edit, tap the account's row. (Older versions of the app have a separate **Edit** button on the row.)
-- To remove, use **Delete**. It's at the bottom of the account's edit form; older versions show it on the row. The app
-  asks you to confirm first. Removing an account here doesn't touch the exchange: the key stays valid there until you
+- To edit, tap the account's row.
+- To remove, use **Delete** at the bottom of the account's edit form. The app asks you to confirm first. Removing an account here doesn't touch the exchange: the key stays valid there until you
   delete it on the exchange.
 
 ## Keeping keys in sync across devices
@@ -151,8 +152,7 @@ A few import results are a notice at the top of the screen instead of an alert; 
 Your QR code, file or pasted text is fine. The phone isn't signed in to Tealstreet, so it has nowhere to save the
 account.
 
-1. Tap **Sign In** on the alert and sign in. (Older versions of the app only have **OK**. In that case close the
-   alert and tap the small **sign-in icon**, an arrow going into a box, at the **top-right** of the screen.)
+1. Tap **Sign In** on the alert and sign in.
 2. If you were already signed in and still get this message, your session has gone stale. Tap the
    **Tealstreet logo** at the top-left, tap **Log Out**, wait for the app to restart, then tap the **sign-in icon** at
    the top-right and sign in again.

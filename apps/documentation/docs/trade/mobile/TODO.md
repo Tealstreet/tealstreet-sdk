@@ -1,23 +1,19 @@
-# Mobile app docs: screenshots to capture
+# Mobile app docs: screenshots
 
 This file is excluded from the built site (`docs.exclude` in `docusaurus.config.js`).
 
-Every page in this folder has `SCREENSHOT PLACEHOLDER: <id>` admonitions where an image belongs. Replace each one
-with an image under `static/img/trading/mobile/app/<id>.png`, imported the way `index.mdx` imports
-`mobile-addtohomescreen.png` and rendered in a `text--center` div at `width: 250`.
+All screenshots were captured on 2026-11-28 from a Release simulator build of tealstreet-mobile master (build 43,
+OTA 6) and live under `static/img/trading/mobile/app/<id>.png`. Each is imported the way `index.mdx` imports
+`mobile-addtohomescreen.png` and rendered in a `text--center` div at `width: 250`, except the landscape
+`web-qr-modal`, which renders at `width: 500` so its text stays readable. Retake a shot here when its screen changes.
 
-## Before promoting to production
+Two placeholders were removed rather than captured, and their text kept:
 
-The `SCREENSHOT PLACEHOLDER` admonitions render on the public pages. Replace each with a capture, or remove it,
-before this section is promoted.
+- `signed-in-no-account`: the team test logins all have exchange accounts.
+- `update-available`: it only appears when an OTA newer than the running bundle is pending, and faking one would
+  show something users never see.
 
-## Follow-ups from tealstreet-mobile
-
-- **#246 (Accounts settings cleanup):** merged. The pages lead with its layout (tap a row to edit, **Delete** in the
-  edit form, **Add account**) and keep the old row **Edit** / **Delete** and header **Add** as "older versions"
-  fallbacks in `connect-accounts.mdx`. Drop that fallback wording once #246 has reached every tester.
-- **#245 (Sign In on the signed-out import alert):** merged. Drop the "older versions only have OK" sentence in
-  `connect-accounts.mdx` once that update has reached every tester.
+The #245 and #246 "older versions" fallbacks were dropped from `connect-accounts.mdx` in the same change.
 
 ## Capture rules
 
