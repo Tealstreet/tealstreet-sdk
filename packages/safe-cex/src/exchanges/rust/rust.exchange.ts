@@ -467,6 +467,9 @@ const MULTI_COMMAND_WAIT_FACTOR = 5;
 /** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
 const COLD_START_READS = /^(fetch|find|refresh)/;
 /** How long a write may queue for startup; it must not outlive its caller's wait. */
+// Same text as the native V1_ROUTE_RETIRED refusal: Aster serves no V1 order routes.
+const ASTER_V1_RETIRED =
+  'Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account';
 const STARTUP_WRITE_WAIT_MS = 30_000;
 /** How long a worker read may wait while the account loads, matching the write refusal. */
 const STARTUP_READ_WAIT_MS = 30_000;
@@ -2951,6 +2954,9 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Valid once the account's balance loads; the engine's first error says why not. */
   validateAccount = (): Promise<ValidateAccountResult> => {
+    if (deriveSignerSetupMapping(this.name) === 'asterdex' && !this.isPublicDataOnly && this.asterApiVersion === 'v1') {
+      return Promise.resolve({ error: ASTER_V1_RETIRED, kind: 'authInvalid' });
+    }
     if (this.bridgeConstruction.apiKeyIndexRequired) {
       const index = parseLighterApiKeyIndex(this.options.apiKeyIndex);
       if (index === undefined || index < 0 || index > 255) {
