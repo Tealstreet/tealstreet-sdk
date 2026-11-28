@@ -61,7 +61,18 @@ export const restingSlicesNote = (state: TwapState | undefined): string => {
   if (!state || !slices?.length) return '';
   const side = state.side === OrderSide.Sell ? 'sell' : 'buy';
   const named = slices.map(
-    (slice) => `${side} ${slice.size}${slice.price > 0 ? ` at ${slice.price}` : ''} (order ${slice.orderIds.join(', ')})`,
+    (slice) =>
+      `${side} ${slice.size}${slice.price > 0 ? ` at ${slice.price}` : ''} (order ${slice.orderIds.join(', ')})`,
   );
   return `. Its limit orders are still open: ${named.join('; ')}`;
+};
+
+/** A limit slice a dropped row was placing may rest at the venue: say which, to check by hand. */
+export const inFlightLimitNote = (options: TwapOptions | undefined, state: TwapState | undefined): string => {
+  const inFlight = state?.inFlight;
+  if (!state || !inFlight || !options?.useLimitOrders) return '';
+  const side = state.side === OrderSide.Sell ? 'sell' : 'buy';
+  const at = inFlight.price ? ` at ${inFlight.price}` : '';
+  const id = inFlight.clientOrderId ? ` (client id ${inFlight.clientOrderId})` : '';
+  return `. A ${side} ${inFlight.size}${at} limit slice${id} was being placed and couldn’t be confirmed; check your open orders`;
 };

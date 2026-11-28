@@ -269,6 +269,34 @@ describe('RustTwapOwnership restore', () => {
     ]);
   });
 
+  it('names an in-flight limit slice of a row dropped for an owner change before its lookup', () => {
+    const ownerless = new RustTwapOwnership(
+      { emitter: { emit: (_op: string, message: string) => errors.push(message) } } as unknown as Exchange,
+      algos(),
+      (rows) => posts.push(rows),
+      () => ({ ownerId: 'A', generation: 1 }),
+    );
+    const limit = {
+      ...row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1', price: 99 } }),
+      options: { ...options, useLimitOrders: true },
+    };
+    ownerless.handle('twap:state', [limit]);
+    expect(errors).toEqual([
+      'TWAP BTCUSDT wasn’t restored because the account connection changed. A buy 0.25 at 99 limit slice (client id c1) was being placed and couldn’t be confirmed; check your open orders.',
+    ]);
+  });
+
+  it('names the slices of a restore still waiting when the engine dies', async () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    lookup.mockReturnValue(new Promise(() => {}));
+    ownership.handle('twap:state', [row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' }, limitSlices })]);
+    await vi.advanceTimersByTimeAsync(0);
+    ownership.finish();
+    expect(errors).toEqual([
+      'TWAP BTCUSDT stopped before it was restored. Its limit orders are still open: buy 0.25 at 100 (order o1).',
+    ]);
+  });
+
   it('names the resting slices of a row it drops for an owner change', () => {
     const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
     const ownerless = new RustTwapOwnership(
