@@ -278,6 +278,8 @@ pub struct BinanceFutures {
     rest_paused_until: f64,
     /// Background account reads pause until this time near the weight limit.
     background_paused_until: f64,
+    /// Chart history stops until this time after a 418 or IP-weight 429.
+    ip_limited_until: f64,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -338,6 +340,7 @@ impl BinanceFutures {
             live_tickers: Default::default(),
             rest_paused_until: 0.0,
             background_paused_until: 0.0,
+            ip_limited_until: 0.0,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
@@ -537,17 +540,24 @@ impl BinanceFutures {
     }
 
     /// Note request weight; near the limit, or on a 418/429, pause background reads.
-    fn observe_weight(&mut self, now: f64, response: &Response<'_>) {
+    /// An IP refusal also stops chart history until its `banned until`, else
+    /// `Retry-After`; a -1015 429 limits one key's orders, not the IP.
+    fn observe_weight(&mut self, now: f64, protocol_now: f64, response: &Response<'_>) {
         let pause = if matches!(response.status, 418 | 429) {
-            Some(
-                response
-                    .header("retry-after")
-                    .map(num::parse)
-                    .filter(|seconds| *seconds > 0.0)
-                    .map_or(WEIGHT_PAUSE_MS, |seconds| {
-                        (seconds * 1_000.0).min(MAX_BAN_PAUSE_MS)
-                    }),
-            )
+            let pause = banned_until(response.body)
+                .map(|until| until - protocol_now)
+                .filter(|ms| *ms > 0.0)
+                .or_else(|| {
+                    response
+                        .header("retry-after")
+                        .map(|seconds| num::parse(seconds) * 1_000.0)
+                })
+                .filter(|ms| *ms > 0.0)
+                .map_or(WEIGHT_PAUSE_MS, |ms| ms.min(MAX_BAN_PAUSE_MS));
+            if !response.body.contains("-1015") {
+                self.ip_limited_until = self.ip_limited_until.max(now + pause);
+            }
+            Some(pause)
         } else {
             response
                 .header("x-mbx-used-weight-1m")
@@ -1413,6 +1423,15 @@ fn kline_candle(open_time_ms: f64, o: &str, h: &str, l: &str, c: &str, v: &str) 
     }
 }
 
+/// The epoch-ms end of a `-1003` ban: "IP(1.2.3.4) banned until 1795867733681."
+fn banned_until(body: &str) -> Option<f64> {
+    let rest = &body[body.find("banned until ")? + "banned until ".len()..];
+    let digits = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..digits].parse().ok()
+}
+
 fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
     let levels = |side: &[[std::borrow::Cow<'_, str>; 2]]| {
         side.iter()
@@ -1435,7 +1454,7 @@ impl Venue for BinanceFutures {
     fn observe_unproven_http_response(
         &mut self,
         now: f64,
-        _: f64,
+        protocol_now: f64,
         pending: &Pending,
         response: Response<'_>,
     ) {
@@ -1444,7 +1463,7 @@ impl Venue for BinanceFutures {
             pending = inner;
         }
         if !matches!(pending, Pending::Options(_) | Pending::OptionsProduct(_)) {
-            self.observe_weight(now, &response);
+            self.observe_weight(now, protocol_now, &response);
         }
     }
 
@@ -1830,7 +1849,7 @@ impl Venue for BinanceFutures {
             self.options_product_response(cx, *request, response);
             return;
         }
-        self.observe_weight(cx.now, &response);
+        self.observe_weight(cx.now, cx.protocol_now(), &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
             return;
@@ -2188,6 +2207,18 @@ impl Venue for BinanceFutures {
                     let error = safe_cex_engine::VenueError::new(interval.unsupported("Binance"))
                         .kind(safe_cex_engine::ErrorKind::Unsupported)
                         .outcome(safe_cex_engine::Outcome::NotSent);
+                    cx.refuse_command(Operation::Read, error);
+                    return;
+                }
+                if cx.now < self.ip_limited_until {
+                    let wait = self.ip_limited_until - cx.now;
+                    let error = safe_cex_engine::VenueError::new(format!(
+                        "Binance has rate-limited this IP; chart history resumes in {} s",
+                        (wait / 1_000.0).ceil()
+                    ))
+                    .kind(safe_cex_engine::ErrorKind::RateLimited)
+                    .outcome(safe_cex_engine::Outcome::NotSent)
+                    .retry_after_ms(wait);
                     cx.refuse_command(Operation::Read, error);
                     return;
                 }
