@@ -25,7 +25,7 @@ fn public(variant: Variant, rest: &str) -> Options {
 }
 
 /// Every outstanding discovery request carries a managed read window.
-fn assert_managed(h: &Harness) {
+fn assert_managed(h: &Harness, variant: Variant) {
     let pending: Vec<_> = h
         .requests
         .iter()
@@ -34,16 +34,20 @@ fn assert_managed(h: &Harness) {
     assert!(!pending.is_empty(), "discovery is outstanding");
     for request in pending {
         assert_eq!(request.timeout_ms, WINDOW, "{} is managed", request.url);
-        assert!(
+        // Bybit's broker header stays on every Bybit alias. Hyro no longer sends
+        // it: its CORS allowlist omits X-Referer, so browsers refused these
+        // reads (TEAL-22, fix/hyro-omit-broker-referer).
+        assert_eq!(
             Harness::header(request, "X-Referer").is_some(),
-            "{} keeps the broker header",
+            !variant.is_hyro(),
+            "{} broker header",
             request.url
         );
     }
 }
 
 /// C1: instrument lists (Trading and PreLaunch) and the ticker seed go out on
-/// managed read windows with the broker header, for every alias.
+/// managed read windows, with the broker header on every Bybit alias.
 #[test]
 fn discovery_lists_go_out_on_managed_read_windows() {
     for variant in [
@@ -54,7 +58,7 @@ fn discovery_lists_go_out_on_managed_read_windows() {
         Variant::Hyrotrader,
     ] {
         let h = Harness::started(public(variant, "https://hyro.example"));
-        assert_managed(&h);
+        assert_managed(&h, variant);
     }
 }
 
@@ -142,7 +146,7 @@ fn a_late_discovery_answer_publishes_no_rows() {
 fn hyro_discovery_uses_its_configured_host_on_managed_windows() {
     let host = "https://hyro-sim.example";
     let h = Harness::started(public(Variant::Hyrotrader, host));
-    assert_managed(&h);
+    assert_managed(&h, Variant::Hyrotrader);
     for request in &h.requests {
         assert!(
             request.url.starts_with(host),
@@ -157,7 +161,7 @@ fn hyro_discovery_uses_its_configured_host_on_managed_windows() {
 #[test]
 fn hyro_filter_and_dedup_survive_managed_discovery() {
     let mut h = Harness::started(public(Variant::Hyrotrader, "https://hyro.example"));
-    assert_managed(&h);
+    assert_managed(&h, Variant::Hyrotrader);
     h.respond(
         "/v5/market/instruments-info?category=linear&limit=1000",
         200,

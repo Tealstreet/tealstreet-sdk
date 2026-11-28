@@ -1467,3 +1467,22 @@ fn hyro_uncertain_or_foreign_handshake_frames_never_claim_typed_rejection() {
         }
     }
 }
+
+/// Hyro's signed snapshot reads omit Bybit's broker `X-Referer`, which its
+/// CORS allowlist refuses in a browser (TEAL-22); Bybit's keep it.
+#[test]
+fn hyro_signed_reads_carry_no_broker_referer() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let orders = h.take("/v5/order/realtime");
+    assert!(Harness::header(&orders, "X-BAPI-SIGN").is_some());
+    assert_eq!(Harness::header(&orders, "X-Referer"), None);
+
+    let mut h = startup(Variant::Linear);
+    authenticate(&mut h);
+    let orders = h.take("/v5/order/realtime");
+    assert_eq!(
+        Harness::header(&orders, "X-Referer").as_deref(),
+        Some("Tealstreet")
+    );
+}

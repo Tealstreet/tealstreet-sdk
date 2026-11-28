@@ -949,6 +949,28 @@ impl BybitLinear {
             .map_err(|error| error.venue_error())
     }
 
+    /// Bybit's broker attribution header for unsigned reads. Hyro is not Bybit:
+    /// its CORS allowlist omits `X-Referer`, so a browser refuses any Hyro
+    /// request that carries it (TEAL-22).
+    pub(crate) fn public_headers(&self) -> &'static [(&'static str, &'static str)] {
+        if self.variant.is_hyro() {
+            &[]
+        } else {
+            &[("X-Referer", sign::BROKER_ID)]
+        }
+    }
+
+    /// The dispatch signer for one REST request, under the same Hyro header rule.
+    pub(crate) fn http_signer(&self, credentials: Credentials, payload: String) -> sign::Http {
+        let signer = sign::Http::new(credentials, payload, self.recv_window)
+            .with_header_policy(self.signing_policy.header_policy());
+        if self.variant.is_hyro() {
+            signer.without_broker_referer()
+        } else {
+            signer
+        }
+    }
+
     /// The read key signs GETs when one is set; the primary signs the rest.
     pub(crate) fn signing_identity(
         &self,
@@ -999,8 +1021,7 @@ impl BybitLinear {
             let identity = self
                 .signing_identity(Method::Get)
                 .expect("a signed read was admitted with a credential");
-            sign::Http::new(identity.clone(), rest.payload.clone(), self.recv_window)
-                .with_header_policy(self.signing_policy.header_policy())
+            self.http_signer(identity.clone(), rest.payload.clone())
         });
         let stream = rest.stream;
         let pending = Pending {
@@ -1024,7 +1045,7 @@ impl BybitLinear {
                 None,
                 Method::Get,
                 url,
-                &[("X-Referer", sign::BROKER_ID)],
+                self.public_headers(),
                 None,
                 pending,
             ),
@@ -1171,7 +1192,7 @@ impl BybitLinear {
                 None,
                 Method::Get,
                 format!("{}/v5/market/time", self.paths.rest),
-                &[("X-Referer", sign::BROKER_ID)],
+                self.public_headers(),
                 None,
                 pending,
             )
@@ -1553,8 +1574,7 @@ impl BybitLinear {
         if credentials.validate().is_err() {
             return false;
         }
-        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
-            .with_header_policy(self.signing_policy.header_policy());
+        let signing = self.http_signer(credentials.clone(), String::new());
         self.environment_probe_attempted = true;
         use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
         let Ok(context) = cx.http_context(
