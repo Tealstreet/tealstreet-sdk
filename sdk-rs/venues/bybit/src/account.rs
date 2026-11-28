@@ -374,14 +374,18 @@ fn valid_order(order: &Order) -> bool {
         .all(|v| v.is_finite() && v >= 0.0)
 }
 
-/// A Hyro trigger order priced at zero would be restored as `stopLoss:"0"` by
-/// a refused protective edit, clearing the position's protection (TEAL-21).
+/// A live Hyro trigger order priced at zero would be restored as
+/// `stopLoss:"0"` by a refused protective edit, clearing the position's
+/// protection (TEAL-21). Terminal rows are never edited, so they keep the
+/// plain numeric check: refusing one would freeze the account instead.
 pub(crate) fn valid_hyro_mapped(order: &Order) -> bool {
     valid_order(order)
-        && !(matches!(
-            order.kind,
-            OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
-        ) && order.price <= 0.0)
+        && !(!matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+            && matches!(
+                order.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+            && order.price <= 0.0)
 }
 
 fn optional_numeric(value: &Option<Str<'_>>) -> bool {

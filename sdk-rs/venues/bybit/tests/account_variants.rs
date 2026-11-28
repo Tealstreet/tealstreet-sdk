@@ -1629,3 +1629,41 @@ fn hyro_stop_with_empty_price_and_zero_trigger_on_the_stream_is_refused() {
     assert!(h.engine.store().orders().is_empty());
     assert!(!h.closed.is_empty());
 }
+
+/// Terminal stop rows keep master's admission: a Deactivated stop priced "0"
+/// with no trigger is applied, not treated as malformed (review of #3838: the
+/// zero-price guard covers live orders only, or it freezes the account again).
+#[test]
+fn hyro_terminal_zero_priced_stop_row_is_still_applied() {
+    let row = HYRO_UNTRIGGERED_STOP
+        .replace(
+            r#""orderStatus":"Untriggered""#,
+            r#""orderStatus":"Deactivated""#,
+        )
+        .replace(r#""price":"""#, r#""price":"0""#)
+        .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#);
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().orders, "{:?}", h.logs);
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+}

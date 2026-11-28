@@ -8168,3 +8168,27 @@ fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
         }
     }
 }
+
+/// A lost-ack link read that matches a live stop priced at zero proves
+/// nothing: it must not be published as the recovered order (review of #3838;
+/// pins `valid_hyro_mapped` in `hyro.rs`).
+#[test]
+fn hyro_lost_ack_match_priced_at_zero_is_not_published() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.reply(
+        create.id,
+        409,
+        r#"{"retCode":110072,"retMsg":"duplicate orderLinkId"}"#,
+    );
+    h.respond(
+        "/v5/order/realtime",
+        200,
+        &format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","createType":"CreateByStopOrder","side":"Buy","price":"0","triggerPrice":"0","qty":"1","cumExecQty":"0","leavesQty":"1"}}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    assert!(h.engine.store().order("recovered").is_none());
+}
