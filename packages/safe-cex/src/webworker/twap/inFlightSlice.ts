@@ -1,5 +1,5 @@
 import type { Exchange } from '../../exchanges/base';
-import type { Order } from '../../types';
+import type { Order, OrderSide } from '../../types';
 import type { TwapState } from './TwapState';
 
 /** How a restore settles its in-flight slice; `order` is the slice's order when it was found. */
@@ -15,13 +15,17 @@ export const settleInFlightSlice = async (
   exchange: Exchange,
   symbol: string,
   inFlight: NonNullable<TwapState['inFlight']>,
+  side: OrderSide,
   isCurrent: () => boolean = () => true,
 ): Promise<InFlightSliceOutcome> => {
+  // Everything saved about it, so the user can find the order by hand.
+  const at = inFlight.price ? ` at ${inFlight.price}` : '';
+  const id = inFlight.clientOrderId ? ` (client id ${inFlight.clientOrderId})` : '';
   const warn = () =>
     isCurrent() &&
     exchange.emitter.emit(
       'error',
-      `TWAP ${symbol}: a ${inFlight.size} slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,
+      `TWAP ${symbol}: a ${side} ${inFlight.size}${at} slice${id} was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,
     );
   if (!inFlight.clientOrderId) {
     warn();

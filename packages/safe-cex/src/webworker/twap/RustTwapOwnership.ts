@@ -113,7 +113,9 @@ export class RustTwapOwnership {
       const symbol = options?.activeMarket?.symbol ?? id;
       const refusal = twapRestoreRefusal(options, state, Date.now());
       if (refusal) {
-        this.refuse(`TWAP ${symbol} not restored: ${refusal}${restingSlicesNote(state)}`);
+        this.refuse(
+          `TWAP ${symbol} not restored: ${refusal}${restingSlicesNote(state)}${inFlightLimitNote(options, state)}`,
+        );
         refused = true;
         continue;
       }
@@ -161,7 +163,7 @@ export class RustTwapOwnership {
     }
     this.locks.set(id, release);
     const { placed, order } = inFlight
-      ? await settleInFlightSlice(this.exchange, symbol, inFlight, () => this.ownerCurrent(row))
+      ? await settleInFlightSlice(this.exchange, symbol, inFlight, row.state.side, () => this.ownerCurrent(row))
       : { placed: true, order: undefined };
     if (this.finished || this.pending.get(id) !== row) {
       this.release(id);

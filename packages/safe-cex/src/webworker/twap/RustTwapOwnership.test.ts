@@ -155,7 +155,7 @@ describe('RustTwapOwnership restore', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sent[0].data[0].state).toEqual(row('t1', { ordersExecuted: 2 }).state);
     expect(errors).toEqual([
-      'TWAP BTCUSDT: a 0.25 slice was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.',
+      `TWAP BTCUSDT: a buy 0.25 slice${'clientOrderId' in identity ? ' (client id c1)' : ''} was being placed when the page closed and could not be confirmed; it is not placed again. Check your orders.`,
     ]);
   });
 
@@ -315,6 +315,17 @@ describe('RustTwapOwnership restore', () => {
     ownerless.handle('twap:state', [row('t1', { limitSlices })]);
     expect(errors).toEqual([
       'TWAP BTCUSDT wasn’t restored because the account connection changed. Its limit orders are still open: buy 0.25 at 100 (order o1).',
+    ]);
+  });
+
+  it('names the in-flight limit slice of a row it refuses', () => {
+    const limit = {
+      ...row('old', { nextOrderAt: Date.now() - 3_600_000, inFlight: { size: 0.25, clientOrderId: 'c1', price: 99 } }),
+      options: { ...options, useLimitOrders: true },
+    };
+    ownership.handle('twap:state', [limit]);
+    expect(errors).toEqual([
+      'TWAP BTCUSDT not restored: its saved schedule expired with a slice still pending; check your open orders and fills before restarting it. A buy 0.25 at 99 limit slice (client id c1) was being placed and couldn’t be confirmed; check your open orders',
     ]);
   });
 
