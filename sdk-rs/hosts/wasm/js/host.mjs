@@ -361,6 +361,9 @@ export class ExchangeError extends Error {
   }
 }
 
+/** The engine's request-deadline text: bare on wasm, with its diagnostic suffix natively. */
+const isRequestTimeout = (message) => typeof message === 'string' && /^Request timed out(?: \(|$)/.test(message);
+
 export class CommandTimeoutError extends Error {
   constructor(timeoutMs, command) {
     super(`This action timed out after ${timeoutMs} ms`);
@@ -1729,6 +1732,11 @@ export class EngineHost {
             if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
             if (pending.historyFailure) Object.defineProperty(result, 'historyFailure', { value: pending.historyFailure, writable: true, configurable: true });
           }
+          // A soft-shape read (OKX candles) answers [] after its request failed; say so, and whether it timed out.
+          if (pending.firstCommandError !== undefined && Array.isArray(result)) {
+            const commandError = { message: pending.firstCommandError, ...(isRequestTimeout(pending.firstCommandError) ? { kind: 'timeout' } : {}) };
+            Object.defineProperty(result, 'commandError', { value: commandError, writable: true, configurable: true });
+          }
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler
@@ -1736,7 +1744,8 @@ export class EngineHost {
         let callbackFailure;
         try { this.commandProgress(action.command, [], true, false); }
         catch (error) { callbackFailure = error; }
-        if (action.error === undefined && pending.firstCommandError !== undefined) {
+        // A request timeout was already logged as a warning; it is transient, not an error to report (E95).
+        if (action.error === undefined && pending.firstCommandError !== undefined && !isRequestTimeout(pending.firstCommandError)) {
           try { this.commandDiagnostic('error', pending.firstCommandError); }
           catch (error) { callbackFailure ??= error; }
         }
