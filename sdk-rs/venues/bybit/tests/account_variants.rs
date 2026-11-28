@@ -1724,6 +1724,45 @@ fn hyro_terminal_stop_with_empty_price_and_empty_trigger_is_applied() {
     );
 }
 
+/// Triggered and PendingCancel rows are not resting orders (the engine maps
+/// them to Closed and Canceled), so an empty price and trigger there must not
+/// map to NaN and close the session; the row handler leaves the stored stop,
+/// and its price, as they were (delta review B on #3838).
+#[test]
+fn hyro_triggered_and_pending_cancel_stops_with_no_price_keep_the_session() {
+    const ID: &str = "62bcbd3f-8ec5-4d14-8b0a-764f255b5b47";
+    for status in ["Triggered", "PendingCancel"] {
+        let row = HYRO_UNTRIGGERED_STOP
+            .replace(
+                r#""orderStatus":"Untriggered""#,
+                &format!(r#""orderStatus":"{status}""#),
+            )
+            .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#);
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+        h.respond("/v5/position/list", 200, POSITIONS);
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+        assert!(h.engine.store().loaded().orders, "{status}: {:?}", h.logs);
+        assert!(h.closed.is_empty(), "{status}: {:?}", h.logs);
+
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{HYRO_UNTRIGGERED_STOP}]}}"#),
+        );
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        assert!(h.closed.is_empty(), "{status}: {:?}", h.logs);
+        let stop = h.engine.store().order(ID).expect("the stop is still known");
+        assert_eq!(stop.price, 65920.0, "{status}");
+    }
+}
+
 /// A live stop priced "0" with trigger "0" passes the row gate (its price is
 /// present) and must be refused by the stream's mapped-order guard: it would
 /// be restored as `stopLoss:"0"` (review of #3838; pins `valid_hyro_mapped`

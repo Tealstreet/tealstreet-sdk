@@ -809,11 +809,14 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         symbol: o.symbol.to_string(),
         kind,
         side,
-        // Hyro can end a stop with price and trigger both empty (CodeRabbit on
-        // #3838); a finished row keeps its known price rather than freezing.
+        // Hyro can send a stop that is no longer resting (finished, Triggered or
+        // PendingCancel) with price and trigger both empty (#3838 review); it
+        // keeps its known price rather than freezing. A live one stays NaN.
         price: match price_text {
             Some(text) => float(text),
-            None if terminal => store.order(&o.order_id).map_or(0.0, |known| known.price),
+            None if order_status(&o.order_status).is_some_and(|s| s != OrderStatus::Open) => {
+                store.order(&o.order_id).map_or(0.0, |known| known.price)
+            }
             None => f64::NAN,
         },
         amount,
