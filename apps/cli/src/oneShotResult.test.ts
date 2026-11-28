@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { connectFailureCode, findKeyRejection, stripAnsi, summarizeOneShot } from './oneShotResult';
 
 describe('summarizeOneShot', () => {
+  it('fails a chain whose step failed without printing an error line', () => {
+    expect(summarizeOneShot([{ kind: 'success', text: 'Order placed' }], undefined, [], false)).toEqual({
+      ok: false,
+      code: 'COMMAND_FAILED',
+      error: 'A step in the command failed.',
+    });
+  });
+
   it('is OK without error lines, and failed on the first error line or a throw', () => {
     expect(summarizeOneShot([{ kind: 'success', text: 'Order placed' }])).toEqual({ ok: true, code: 'OK' });
     expect(

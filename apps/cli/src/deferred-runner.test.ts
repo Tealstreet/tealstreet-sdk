@@ -60,6 +60,7 @@ it.each(['barrier', 'block', 'retry', 'capture'])('fences the next chain step af
         }),
         runWithAuditRunId: (_id: string, fn: () => Promise<void>) => fn(),
         newRunId: () => 'fixture',
+        failedSteps: new WeakSet(),
         runStep: async (step: { command: string }) => {
           dispatched.push(step.command);
           if (step.command === 'first') {
@@ -80,6 +81,67 @@ it.each(['barrier', 'block', 'retry', 'capture'])('fences the next chain step af
     expect(dispatched, change).toEqual(change === 'same' ? ['first', 'second'] : ['first']);
   }
 });
+const chainFixture = async (steps: { command: string; awaitPrior?: boolean; block?: boolean }[], failing: string) => {
+  const { storage } = await sessionFixture();
+  const failedSteps = new WeakSet<object>();
+  const dispatched: string[] = [];
+  const errors: string[] = [];
+  const run = evaluate<(input: string) => Promise<boolean>>(
+    `${sourceFunction('repl.ts', 'processCommandInSession')}\nprocessCommandInSession;`,
+    {
+      ...storage,
+      getAdapterContext: () => undefined,
+      session: {},
+      preprocessStore: {},
+      adapter: { printError: (message: string) => void errors.push(message) },
+      preprocessCommand: () => ({ warnings: [], steps }),
+      runWithAuditRunId: (_id: string, fn: () => Promise<void>) => fn(),
+      newRunId: () => 'fixture',
+      failedSteps,
+      runStep: async (step: { command: string }) => {
+        dispatched.push(step.command);
+        // reportStepError's contract: a failed, non-`set ec` step enters the set.
+        if (step.command === failing) failedSteps.add(step);
+      },
+    },
+  );
+  const succeeded = await storage.runInStorageSession(() => run('fixture'));
+  return { succeeded, dispatched, errors };
+};
+
+it('stops the reported chain when its margin-mode step fails, before the entry', async () => {
+  const { succeeded, dispatched, errors } = await chainFixture(
+    [
+      { command: 'symbol BTCUSDT' },
+      { command: 'lev 50 isolated', awaitPrior: true },
+      { command: 'buy BTCUSDT $500 at 75800.0 stop 75700.0 tp 76100.0', awaitPrior: true },
+    ],
+    'lev 50 isolated',
+  );
+  expect(succeeded).toBe(false);
+  expect(dispatched).toEqual(['symbol BTCUSDT', 'lev 50 isolated']);
+  expect(errors).toEqual(['Chain stopped after a failed step. Not run: buy BTCUSDT $500 at 75800.0 stop 75700.0 tp 76100.0']);
+});
+
+it('stops after a failed awaited step even before a parallel step', async () => {
+  const { succeeded, dispatched } = await chainFixture(
+    [{ command: 'sleep 1', block: true }, { command: 'buy $500' }],
+    'sleep 1',
+  );
+  expect(succeeded).toBe(false);
+  expect(dispatched).toEqual(['sleep 1']);
+});
+
+it('reports success when every step succeeds', async () => {
+  const { succeeded, dispatched, errors } = await chainFixture(
+    [{ command: 'lev 50' }, { command: 'buy $500', awaitPrior: true }],
+    'none',
+  );
+  expect(succeeded).toBe(true);
+  expect(dispatched).toEqual(['lev 50', 'buy $500']);
+  expect(errors).toEqual([]);
+});
+
 it.each(switches)('drops an updater immediate created before a login change: %s', async (change) => {
   const { storage, login } = await sessionFixture();
   let run = async () => {};

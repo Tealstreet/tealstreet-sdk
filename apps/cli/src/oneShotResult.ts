@@ -67,12 +67,15 @@ export const summarizeOneShot = (
   commandOutput: OneShotLine[],
   threw?: unknown,
   exchangeOutput: OneShotLine[] = [],
+  chainSucceeded = true,
 ): { ok: boolean; code: OneShotCode; error?: string } => {
   if (threw !== undefined) {
     return { ok: false, code: 'COMMAND_FAILED', error: threw instanceof Error ? threw.message : String(threw) };
   }
   const commandError = commandOutput.find((line) => line.kind === 'error')?.text;
   if (commandError) return { ok: false, code: 'COMMAND_FAILED', error: commandError };
+  // A step can fail without printing an error line (a `set ec` warning does not count).
+  if (!chainSucceeded) return { ok: false, code: 'COMMAND_FAILED', error: 'A step in the command failed.' };
   const exchangeError = exchangeOutput.find((line) => line.kind === 'error')?.text;
   return exchangeError ? { ok: false, code: 'UNCONFIRMED', error: exchangeError } : { ok: true, code: 'OK' };
 };
