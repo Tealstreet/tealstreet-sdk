@@ -25,8 +25,11 @@ The #245 and #246 "older versions" fallbacks were dropped from `connect-accounts
 ## Capture rules
 
 - Use the team test login `sam+tester1@tealstreet.io`. Never use a personal account.
-- **Never show a full API secret, passphrase or wallet key**, even a team test key's. Forms are captured empty, and
-  the secret field in the `add-key` clip is masked.
+- **Never show an API key, secret, passphrase, wallet key, login email or user id**, even for team test accounts.
+  Forms are captured empty. Clips are cut so no such frame is kept: `add-key` jumps from the empty key fields to the
+  Connected list, `signin` jumps from the empty sign-in page to the signed-in app, and `cloud-jobs` skips the side
+  panel (its header shows the email). Web stills blur the Settings header's User ID, and `app/side-panel.png` has
+  its email blurred. Scan every clip frame by frame before publishing.
 - Use small positions and orders on the test account. Crop out the status bar's carrier name and notifications.
 - iPhone shots come from the iOS simulator or TestFlight build 43 or later. Use the same device frame throughout.
 
