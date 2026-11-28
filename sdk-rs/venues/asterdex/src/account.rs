@@ -95,6 +95,7 @@ enum ModeLoad {
 }
 
 const SIGNATURE_REJECTED: &str = "Aster API key signature rejected: re-create the key (V3)";
+const V1_ROUTE_RETIRED: &str = "Aster no longer serves V1 (API key and secret) order routes: create an Aster V3 API wallet key and update this account";
 
 fn signature_rejected(code: i64, message: &str) -> bool {
     code == -1022
@@ -903,8 +904,21 @@ impl AsterDex {
                         }
                         Some(SIGNATURE_REJECTED.into())
                     } else {
-                        // Aster's whitelist refusal does not always carry a key code; its words do.
-                        if matches!(code, -2014 | -2015)
+                        // Aster removed its V1 order routes (HTML 404, no envelope): this key
+                        // can never load, so end startup with the cause rather than retry.
+                        if code == 0
+                            && r.status == 404
+                            && self.version == crate::sign::Version::V1
+                            && !matches!(
+                                request,
+                                Request::ListenKey { .. } | Request::Keepalive { .. }
+                            )
+                        {
+                            cx.startup_read_refused(
+                                &safe_cex_engine::VenueError::new(V1_ROUTE_RETIRED)
+                                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                            );
+                        } else if matches!(code, -2014 | -2015)
                             || safe_cex_engine::error::ip_whitelist_text(&m, None)
                                 .is_some_and(|(_, named)| named)
                         {
