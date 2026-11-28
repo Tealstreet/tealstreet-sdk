@@ -2,6 +2,7 @@ import type { DelegatedIntent, OutboxOptions, OutboxSnapshot } from '../delegate
 
 import { describe, expect, it } from 'vitest';
 
+import { delegatedIntentTime } from '../delegatedOrderFrames';
 import { createDelegatedIntentId, DelegatedOutbox } from '../delegatedOutbox';
 
 const params = { symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 1000 };
@@ -46,6 +47,10 @@ function fixture(version: 1 | 2 = 2) {
     floor: () => floor,
     setFloor: (value: number) => {
       floor = value;
+    },
+    /** A host upgrading its adapter to the version-2 checkpoint (floor starts at 0). */
+    setVersion: (value: 1 | 2) => {
+      version = value;
     },
     id: () => createDelegatedIntentId(now++ + skew, options.random),
     /** Distinct UUIDs that share one timestamp, as `placementLegIntent` children do. */
@@ -237,6 +242,9 @@ describe('durable caller-intent retirement', () => {
     await completed(box, first);
     for (let i = 0; i < 34; i++) await completed(box, f.id());
     expect(f.rows.has(first)).toBe(true);
+    f.advance(16_000);
+    // No durable floor: even past the key window the host cannot drop the reservation.
+    expect(await box.retire(first)).toBe(false);
     expect(await box.enqueue(params, { intentId: first })).toBe(first);
     expect(f.floor()).toBe(0);
     box.close();
@@ -362,6 +370,274 @@ describe('retirement floor against the box key window', () => {
       expect(f.rows.size).toBe(0);
       const edge = createDelegatedIntentId(f.now() + 5_000, f.options.random);
       expect(await box.enqueue(params, { intentId: edge })).toBe(edge);
+    } finally {
+      box.close();
+    }
+  });
+});
+
+// AGT-106 item 1: caller-keyed rows (the action intent as the outbox key) must not exhaust the
+// 1,056-row total. Settled ones retire once past the key window; pending and Unknown ones never
+// do for capacity, and the timers stay off here so nothing settles behind the test's back.
+describe('caller-keyed row retention', () => {
+  /** Records every frame handed to the socket, so a resend of any intent is visible. */
+  function connection(f: ReturnType<typeof fixture>, frames: string[]) {
+    const { owner, accountName, venue, accountId } = f.options;
+    return {
+      owner,
+      accountName,
+      venue,
+      accountId,
+      instanceId: 'registration',
+      signingMode: 'delegated' as const,
+      ready: true,
+      capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
+      send: (frame: string) => {
+        frames.push(frame);
+        return true;
+      },
+    };
+  }
+  const submits = (frames: string[], id: string) =>
+    frames.filter((frame) => {
+      const { t, d } = JSON.parse(frame) as { t: string; d: { intentId: string } };
+      return t === 'order.submit' && d.intentId === id;
+    }).length;
+
+  it('a total full of settled caller rows does not block trading after a relaunch', async () => {
+    const f = fixture();
+    let box = await DelegatedOutbox.open(f.options);
+    for (let i = 0; i < 1056; i++) await completed(box, f.id());
+    await expect(box.enqueue(params, { intentId: f.id() })).rejects.toThrow('Outbox is closed or full');
+    box.close();
+    expect(f.rows.size).toBe(1056);
+    f.advance(16_000);
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      expect(box.entries()).toHaveLength(32);
+      // Settled history holds none of the pending capacity: a full pending burst still fits.
+      for (let i = 0; i < 1024; i++) await box.enqueue(params, { intentId: f.id() });
+      await expect(box.enqueue(params)).rejects.toThrow('Outbox is closed or full');
+      expect(box.entries().filter((row) => row.state === 'queued')).toHaveLength(1024);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('never evicts a pending or Unknown caller row to make room, and never resends it', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const frames: string[] = [];
+    const live = box.connect(connection(f, frames));
+    const unknown = f.id();
+    await box.enqueue(params, { intentId: unknown });
+    box.disconnect(live);
+    const pending = f.id();
+    await box.enqueue(params, { intentId: pending });
+    try {
+      for (let i = 0; i < 1100; i++) {
+        await completed(box, f.id());
+        f.advance(100);
+      }
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(pending));
+      expect(box.entries().length).toBeLessThanOrEqual(2 + 32 + 151);
+      const kept = box.entries().filter((row) => row.intentId === unknown || row.intentId === pending);
+      expect(kept.map((row) => [row.intentId, row.state, row.retentionExpired])).toEqual([
+        [unknown, 'unknown', undefined],
+        [pending, 'queued', undefined],
+      ]);
+      expect(f.rows.has(unknown) && f.rows.has(pending)).toBe(true);
+      expect(await box.retire(pending)).toBe(false);
+      // Below the floor, both still join their own rows instead of refusing or sending again.
+      const again = box.connect(connection(f, frames));
+      expect(await box.enqueue(params, { intentId: unknown })).toBe(unknown);
+      expect(await box.enqueue(params, { intentId: pending })).toBe(pending);
+      await box.flush(again);
+      expect(submits(frames, unknown)).toBe(1);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('a relaunch keeps the key window, the floor and 24 h Unknown retention', async () => {
+    const f = fixture();
+    const states: [string, boolean | undefined][] = [];
+    let box = await DelegatedOutbox.open(f.options);
+    const frames: string[] = [];
+    box.connect(connection(f, frames));
+    const unknown = f.id();
+    await box.enqueue(params, { intentId: unknown });
+    box.close(); // Handed off: it restores Unknown.
+    box = await DelegatedOutbox.open(f.options);
+    const settled: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      f.advance(1_000);
+      settled.push(f.id());
+      await completed(box, settled[i]);
+    }
+    box.close();
+
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      const ids = new Set(box.entries().map((row) => row.intentId));
+      expect(box.entries().find((row) => row.intentId === unknown)?.state).toBe('unknown');
+      await box.flush(box.connect(connection(f, frames)));
+      expect(submits(frames, unknown)).toBe(1);
+      // Rows inside the key window survive the reopen; only older settled rows retire.
+      const inWindow = settled.filter((id) => delegatedIntentTime(id) >= f.now() - 15_000);
+      expect(inWindow.length).toBeGreaterThan(0);
+      expect(inWindow.every((id) => ids.has(id))).toBe(true);
+      expect(ids.size).toBe(1 + Math.max(32, inWindow.length));
+      expect(f.floor()).toBeGreaterThan(0);
+      expect(f.floor()).toBeLessThanOrEqual(f.now() - 15_000);
+      await expect(box.enqueue(params, { intentId: settled[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+    } finally {
+      box.close();
+    }
+
+    f.advance(24 * 60 * 60 * 1000);
+    f.options.changed = (row) => {
+      if (row.intentId === unknown) states.push([row.state, row.retentionExpired]);
+    };
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      await completed(box, f.id()); // Drains the expiry write queued by the reopen.
+      // Expired Unknown history is surfaced as such, never as not sent, then retires.
+      expect(states).toContainEqual(['unknown', true]);
+      expect(states.every(([state]) => state === 'unknown')).toBe(true);
+      expect(f.rows.has(unknown)).toBe(false);
+      await expect(box.enqueue(params, { intentId: unknown })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      await box.flush(box.connect(connection(f, frames)));
+      expect(submits(frames, unknown)).toBe(1);
+    } finally {
+      box.close();
+    }
+  });
+
+  // NX retires Unknown rows it has reconciled (and algo actions answered "dispatched"); caller
+  // keys must not make those calls no-ops, or 1,024 of them block every write for 24 h.
+  it('the host can retire caller-keyed Unknown rows that fill the pending cap', async () => {
+    const f = fixture();
+    let box = await DelegatedOutbox.open(f.options);
+    const frames: string[] = [];
+    const live = box.connect(connection(f, frames));
+    const unknowns: string[] = [];
+    for (let i = 0; i < 1024; i++) {
+      unknowns.push(f.id());
+      await box.enqueue(params, { intentId: unknowns[i] });
+    }
+    box.disconnect(live);
+    try {
+      await expect(box.enqueue(params)).rejects.toThrow('Outbox is closed or full');
+      // Inside the key window the box could still admit a replay, so the row stays.
+      expect(await box.retire(unknowns[1023])).toBe(false);
+      f.advance(16_000);
+      for (const id of unknowns) expect(await box.retire(id)).toBe(true);
+      expect(f.rows.size).toBe(0);
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(unknowns[1023]));
+      const again = box.connect(connection(f, frames));
+      const id = f.id();
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      expect(await box.enqueue(params)).toEqual(expect.any(String));
+      await expect(box.enqueue(params, { intentId: unknowns[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      await box.flush(again);
+    } finally {
+      box.close();
+    }
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      await expect(box.enqueue(params, { intentId: unknowns[0] })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
+      await box.flush(box.connect(connection(f, frames)));
+      expect(unknowns.every((id) => submits(frames, id) === 1)).toBe(true);
+    } finally {
+      box.close();
+    }
+  });
+
+  // CodeRabbit (AGT-106): a cancel accepted while retirement awaits compaction must not be
+  // published and then deleted with the row; it runs after retirement settles instead.
+  async function overlappingCancel(f: ReturnType<typeof fixture>, abort = false) {
+    const box = await DelegatedOutbox.open(f.options);
+    const live = box.connect(connection(f, []));
+    const id = f.id();
+    await box.enqueue(params, { intentId: id });
+    box.disconnect(live); // Handed off: Unknown, and a cancel stays pending.
+    f.advance(16_000);
+    const cancelPending: boolean[] = [];
+    f.options.changed = (row) => {
+      if (row.intentId === id) cancelPending.push(row.cancelPending);
+    };
+    const compact = f.options.storage.compact;
+    let release: (() => void) | undefined;
+    f.options.storage.compact = async (scope, checkpoint) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      if (abort) throw new Error('transaction aborted');
+      return compact(scope, checkpoint);
+    };
+    const retired = box.retire(id);
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 0));
+    const canceled = box.cancel(id);
+    f.options.storage.compact = compact;
+    release();
+    return { box, id, cancelPending, retired, canceled };
+  }
+
+  it('a cancel overlapping a retirement that lands finds no row to cancel', async () => {
+    const f = fixture();
+    const { box, id, cancelPending, retired, canceled } = await overlappingCancel(f);
+    try {
+      expect(await retired).toBe(true);
+      await canceled;
+      expect(cancelPending).not.toContain(true);
+      expect(f.rows.has(id)).toBe(false);
+      expect(box.entries().some((row) => row.intentId === id)).toBe(false);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('a cancel overlapping a failed retirement is still persisted', async () => {
+    const f = fixture();
+    const { box, id, retired, canceled } = await overlappingCancel(f, true);
+    try {
+      await expect(retired).rejects.toThrow('transaction aborted');
+      await canceled;
+      expect(f.rows.get(id)).toMatchObject({ state: 'unknown', cancelPending: true });
+    } finally {
+      box.close();
+    }
+  });
+
+  it('upgrading legacy storage to the checkpoint frees caller rows that had filled it', async () => {
+    const f = fixture(1);
+    let box = await DelegatedOutbox.open(f.options);
+    const first = f.id();
+    await completed(box, first);
+    for (let i = 1; i < 1056; i++) await completed(box, f.id());
+    f.advance(16_000);
+    await expect(box.enqueue(params, { intentId: f.id() })).rejects.toThrow('Outbox is closed or full');
+    box.close();
+
+    f.setVersion(2);
+    box = await DelegatedOutbox.open(f.options);
+    try {
+      expect(box.entries()).toHaveLength(32);
+      expect(f.floor()).toBeGreaterThan(delegatedIntentTime(first));
+      const id = f.id();
+      expect(await box.enqueue(params, { intentId: id })).toBe(id);
+      await expect(box.enqueue(params, { intentId: first })).rejects.toMatchObject({ code: 'intentRetired' });
     } finally {
       box.close();
     }

@@ -45,13 +45,13 @@ only; V3 native REST requests use the structured wallet protocol above. Aster
 has no independent WS login signature: signed listen-key creation/keepalive
 authenticates the private socket. A generic WS HMAC login remains refused.
 
-| Signed operation | Endpoints, relative to `/fapi/v1` or `/fapi/v3` |
-| --- | --- |
-| Account and reads | GET `account` (V1 uses `/fapi/v4/account`), `positionRisk`, `openOrders`, `order`, `leverageBracket`, `positionSide/dual` |
-| History | GET `allOrders`, `userTrades`, `income` |
-| Trading and settings | POST `order`, `leverage`, `marginType`, `positionSide/dual`; DELETE `order`, `allOpenOrders` |
-| V3 controls | GET/POST `stpMode`; GET `builder`, `agent` |
-| Private WS session | POST/PUT `listenKey` |
+| Signed operation     | Endpoints, relative to `/fapi/v1` or `/fapi/v3`                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Account and reads    | GET `account` (V1 uses `/fapi/v4/account`), `positionRisk`, `openOrders`, `order`, `leverageBracket`, `positionSide/dual` |
+| History              | GET `allOrders`, `userTrades`, `income`                                                                                   |
+| Trading and settings | POST `order`, `leverage`, `marginType`, `positionSide/dual`; DELETE `order`, `allOpenOrders`                              |
+| V3 controls          | GET/POST `stpMode`; GET `builder`, `agent`                                                                                |
+| Private WS session   | POST/PUT `listenKey`                                                                                                      |
 
 Amend uses cancel, order proof and replacement placement. V1 requests sign a
 fixed 20,000 ms receive window. Every authenticated V3 request signs the exact
@@ -68,6 +68,14 @@ rejection reports `AuthInvalid` through the existing startup guard, matching
 legacy credential validation. A successful resend can finish
 the read. Timestamp recovery and trading-write retries retain their existing rules.
 A V3 account signature refusal terminates unfinished credential validation.
+Aster removed the V1 futures API from its docs on 2026-11-02 and now answers the
+V1 order routes (`openOrders`, GET/POST/DELETE `order`, `batchOrders`,
+`allOpenOrders`) with an HTML 404, while V1 `account`, `positionRisk` and
+settings routes still answer. An envelope-less 404 on the V1 `openOrders`
+startup read therefore reports `AuthInvalid` at once, naming the V3 API wallet
+key as the replacement, instead of retrying until the host's start deadline
+(Sentry TEALSTREET-NEXT-C0W/EGX). A 404 on any other V1 read, whose route
+still serves, and every V3 404 keep their ordinary retry.
 Known signature refusals (`-1022`, or `-1000` with `Signature check failed`)
 report `Aster API key signature rejected: re-create the key (V3)`. Position-mode
 refusal is terminal for that account configuration: no retry timer is armed,

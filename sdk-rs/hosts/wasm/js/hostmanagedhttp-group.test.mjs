@@ -26,6 +26,9 @@ function rig(options = {}) {
     },
     prepareDispatch() { events.push(['drain']); return ''; },
     httpFailed(id) { events.push(['httpFailed', id]); return ''; },
+    httpStart(id) { events.push(['start', id]); return ''; },
+    httpChunk(id, bytes) { events.push(['chunk', id, [...bytes]]); return ''; },
+    httpEnd(id) { events.push(['end', id]); return JSON.stringify([{ op: 'managedHttp', phase: 'cancel', preparation: tokens[id - 7] }]); },
     timer() { events.push(['timer']); return ''; },
     wsOpen() { events.push(['socketOpen']); return ''; },
     wsClose(_, code) { events.push(['socketClosed', code]); return ''; },
@@ -48,7 +51,7 @@ function rig(options = {}) {
           dispatch() {
             events.push(['send', request.request]);
             options.dispatch?.(host, request.request);
-            return new Promise(() => {});
+            return options.response?.(request.request) ?? new Promise(() => {});
           },
           cancel() { events.push(['cancel', request.request]); },
         };
@@ -176,6 +179,41 @@ test('wait uses only slot zero and rechecks all resources at wake', async () => 
   assert.equal(r.events.filter(([kind]) => kind === 'preparationFailed').length, 1);
   assert.equal(r.events.some(([kind]) => kind === 'send'), false);
   r.host.dispose();
+});
+
+test('owner switch during group pacing cannot release A or consume B with colliding members and timer handles', async (t) => {
+  const a = rig({ claim(bounds) { bounds[0] = 250; return 2; } });
+  t.after(() => a.host.dispose());
+  await a.start();
+  const staleWake = a.timers.get(1).fn;
+  assert.equal(a.events.some(([kind]) => kind === 'send'), false);
+  a.host.dispose();
+  const aBefore = structuredClone(a.events);
+
+  let ready = false;
+  const replies = new Map();
+  const b = rig({
+    claim(bounds) { bounds.fill(1000); if (ready) return 1; bounds[0] = 250; return 2; },
+    response(id) { return new Promise((resolve) => { replies.set(id, resolve); }); },
+  });
+  t.after(() => b.host.dispose());
+  await b.start();
+  const bBefore = structuredClone(b.events);
+  const resources = tokens.map((token) => b.host.managedHttp.resources.get(token));
+  const bWake = b.timers.get(1);
+  a.at(250); staleWake(); staleWake();
+  await tick();
+  assert.deepEqual(a.events, aBefore);
+  assert.deepEqual(b.events, bBefore);
+  assert.equal(b.timers.get(1), bWake);
+  tokens.forEach((token, index) => assert.equal(b.host.managedHttp.resources.get(token), resources[index]));
+  ready = true; b.at(250); bWake.fn();
+  assert.deepEqual(b.events.filter(([kind]) => kind === 'send'), [['send', 7], ['send', 8]]);
+  for (const [id, resolve] of replies) resolve({ status: 200, body: new Uint8Array([id]) });
+  await tick();
+  assert.deepEqual(b.events.filter(([kind]) => kind === 'end'), [['end', 7], ['end', 8]]);
+  assert.deepEqual(b.events.filter(([kind]) => kind === 'chunk'), [['chunk', 7, [7]], ['chunk', 8, [8]]]);
+  assert.equal(b.host.managedHttp.resources.size, 0);
 });
 
 for (const clock of [Number.NaN, Number.NEGATIVE_INFINITY]) {

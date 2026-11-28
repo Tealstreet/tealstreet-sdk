@@ -8168,3 +8168,75 @@ fn a_trailing_entry_with_attached_legs_is_refused_before_any_write() {
         }
     }
 }
+
+/// A lost-ack link read that matches a live stop priced at zero proves
+/// nothing: it must not be published as the recovered order (review of #3838;
+/// pins `valid_hyro_mapped` in `hyro.rs`).
+#[test]
+fn hyro_lost_ack_match_priced_at_zero_is_not_published() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.reply(
+        create.id,
+        409,
+        r#"{"retCode":110072,"retMsg":"duplicate orderLinkId"}"#,
+    );
+    h.respond(
+        "/v5/order/realtime",
+        200,
+        &format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","createType":"CreateByStopOrder","side":"Buy","price":"0","triggerPrice":"0","qty":"1","cumExecQty":"0","leavesQty":"1"}}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    assert!(h.engine.store().order("recovered").is_none());
+}
+
+/// Hyro's CORS preflight (live 2026-11-28) allows only Content-Type and the
+/// four X-BAPI headers, so a browser refuses any Hyro request that carries
+/// Bybit's broker `X-Referer` (TEAL-22). Public reads and signed writes omit it.
+#[test]
+fn hyro_public_reads_and_signed_writes_carry_no_broker_referer() {
+    let h = Harness::started(options(Variant::Hyrotrader));
+    let instruments = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/v5/market/instruments-info"))
+        .expect("public instruments read");
+    assert_eq!(Harness::header(instruments, "X-Referer"), None);
+
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    assert!(Harness::header(&create, "X-BAPI-SIGN").is_some());
+    assert_eq!(Harness::header(&create, "X-Referer"), None);
+    assert_eq!(
+        Harness::header(&create, "Content-Type").as_deref(),
+        Some("application/json")
+    );
+}
+
+#[test]
+fn bybit_public_reads_and_signed_writes_keep_the_broker_referer() {
+    let h = Harness::started(options(Variant::Linear));
+    let instruments = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/v5/market/instruments-info"))
+        .expect("public instruments read");
+    assert_eq!(
+        Harness::header(instruments, "X-Referer").as_deref(),
+        Some("Tealstreet")
+    );
+
+    let mut h = ready(Variant::Linear);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    // Bybit resolves the symbol's position mode before its first write.
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create");
+    assert_eq!(
+        Harness::header(&create, "X-Referer").as_deref(),
+        Some("Tealstreet")
+    );
+}

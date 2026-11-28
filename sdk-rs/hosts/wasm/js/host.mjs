@@ -361,6 +361,9 @@ export class ExchangeError extends Error {
   }
 }
 
+/** The engine's request-deadline text: bare on wasm, with its diagnostic suffix natively. */
+const isRequestTimeout = (message) => typeof message === 'string' && /^Request timed out(?: \(|$)/.test(message);
+
 export class CommandTimeoutError extends Error {
   constructor(timeoutMs, command) {
     super(`This action timed out after ${timeoutMs} ms`);
@@ -418,6 +421,15 @@ export class EngineDeadError extends Error {
     }
   }
 }
+
+// Rust-returned errors are thrown by the glue after the borrow is released. Any
+// other throw unwound through wasm frames with the `&mut self` borrow still held,
+// so every later entry would fail wasm-bindgen's guard; retire the engine instead.
+const BORROW_GUARD = /^(recursive use of an object detected|attempted to take ownership of Rust value while it was borrowed|null pointer passed to rust)/;
+const engineUnusable = (error) => !(error instanceof Error)
+  || (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
+  || error instanceof RangeError || error.name === 'InternalError'
+  || BORROW_GUARD.test(error.message);
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}, options = {}) {
@@ -587,9 +599,7 @@ export class EngineHost {
       return result;
     } catch (error) {
       // Do not inspect Rust state after a trap: its mutable borrow may be held.
-      const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
-        || error instanceof RangeError;
-      if (!fatal) throw error;
+      if (!engineUnusable(error)) throw error;
       this.failEngine(error);
     }
   }
@@ -1722,6 +1732,11 @@ export class EngineHost {
             if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
             if (pending.historyFailure) Object.defineProperty(result, 'historyFailure', { value: pending.historyFailure, writable: true, configurable: true });
           }
+          // A soft-shape read (OKX candles) answers [] after its request failed; say so, and whether it timed out.
+          if (pending.firstCommandError !== undefined && Array.isArray(result)) {
+            const commandError = { message: pending.firstCommandError, ...(isRequestTimeout(pending.firstCommandError) ? { kind: 'timeout' } : {}) };
+            Object.defineProperty(result, 'commandError', { value: commandError, writable: true, configurable: true });
+          }
           this.settleCommand(action.command, result);
         }
         // Settlement wins before any consumer runs: a broken toast/log handler
@@ -1729,7 +1744,8 @@ export class EngineHost {
         let callbackFailure;
         try { this.commandProgress(action.command, [], true, false); }
         catch (error) { callbackFailure = error; }
-        if (action.error === undefined && pending.firstCommandError !== undefined) {
+        // A request timeout was already logged as a warning; it is transient, not an error to report (E95).
+        if (action.error === undefined && pending.firstCommandError !== undefined && !isRequestTimeout(pending.firstCommandError)) {
           try { this.commandDiagnostic('error', pending.firstCommandError); }
           catch (error) { callbackFailure ??= error; }
         }

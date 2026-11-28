@@ -599,15 +599,34 @@ it('preserves a frozen Error and its unknown outcome when both reporting and nat
   expect(r.errors).toHaveBeenCalledTimes(1);
 });
 
-it('preserves a non-Error rejection even when error reporting itself throws', async () => {
+it('preserves a native rejection, and the live engine, even when error reporting itself throws', async () => {
   const r = await fixture();
+  // Rust's `command` returns `Result<String, JsError>`: its rejections reach JS as Errors.
+  const rejection = new Error('native rejection');
   r.onCommand(() => {
-    throw 'native rejection';
+    throw rejection;
   });
   vi.spyOn(r.exchange, 'emitAndLogError').mockImplementation(() => {
     throw new Error('reporter failed');
   });
-  expect(await r.exchange.placeOrders([order]).catch((error: unknown) => error)).toBe('native rejection');
+  expect(await r.exchange.placeOrders([order]).catch((error: unknown) => error)).toBe(rejection);
+  expect(r.exchange.isEngineDead).toBe(false);
+});
+
+it('retires the engine on a non-Error throw even when error reporting itself throws', async () => {
+  const r = await fixture();
+  // No Rust return throws a non-Error; one escaping `command` is a foreign unwind (SpiderMonkey's
+  // 'out of memory' string) that left the wasm-bindgen borrow held. It changed from a rejection with
+  // the borrow-poisoning fix (TEALSTREET-NEXT-EGS/EGR).
+  r.onCommand(() => {
+    throw 'out of memory';
+  });
+  vi.spyOn(r.exchange, 'emitAndLogError').mockImplementation(() => {
+    throw new Error('reporter failed');
+  });
+  const error = await r.exchange.placeOrders([order]).catch((error: unknown) => error);
+  expect(error).toMatchObject({ code: 'ENGINE_DEAD', outcome: 'unknown', cause: 'out of memory' });
+  expect(r.exchange.isEngineDead).toBe(true);
 });
 
 it('does not report an already reported Error or a terminal-engine interruption again', async () => {

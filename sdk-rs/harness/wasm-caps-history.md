@@ -1847,3 +1847,28 @@ reserved size. Rule-17 raise per `harness/CLAUDE.md`, generated with
 | family | measured B | cap before | cap after |
 | --- | ---: | ---: | ---: |
 | lighter | 2432217 | 2412544 | 2443264 |
+
+## 2026-11-27 — #3829 -4109 code-table row raises the binance cap
+
+The -4109 `INACTIVE_ACCOUNT` → `Refused(AuthPermission)` row in the `BINANCE`
+code table (`46047b16`) is the only Rust change on #3829. The binance family
+measures 14 B over its ceiling (PR run 46056726747, job 140701414085, merge
+`c1243de` of PR head `46047b160d5b12940a9e427b0ebe8aef0ba07bbd` into master
+`cba454176ee269d2c52683e4a360c0b6dd3ad622`: "venue wasm 2434062 exceeds
+2434048 bytes"). Rule-17 raise per `harness/CLAUDE.md`, at measured + 10 KiB
+rounded up to a KiB.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| binance | 2434062 | 2434048 | 2445312 |
+
+## 2026-11-27 — #3832 read-timeout kind needs no further binance raise
+
+#3832 makes `expire_http_timer` add `kind=timeout` to a read's `request.failed`
+report when the venue attached none, so hosts handle an expired read as a
+transient failure. Alone it measured 63 B over the old binance ceiling (PR run
+46063758660: "venue wasm 2434111 exceeds 2434048 bytes", merge `c64a334a6f` of PR
+head `e59edfd2fc` into master `cba454176e`) and raised binance to 2445312, the
+same value #3829 already set above. Merging master keeps that single raise: both
+changes add 77 B over the base, which leaves the family under 2445312 with about
+11 KB of reserve. No cap changes here.

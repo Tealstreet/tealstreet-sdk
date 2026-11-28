@@ -339,8 +339,12 @@ deletes the row through `compact` with the current sequence, then removes it fro
 memory, so its seq is never reused; a failed delete leaves the stored and in-memory
 row as before. On version-2 storage a row still inside the key window resolves false
 and stays as completed history for compaction to retire later. It refuses (resolves false) queued, sending, acknowledged
-and cancel-pending intents, and caller-supplied keys, whose reservation must
-survive. Retirement is the host's assertion, never evidence: the SDK still
+and cancel-pending intents, and caller-supplied keys on version-1 storage, whose reservation must
+survive there. On version 2 a caller-keyed row past the key window retires like any other, Unknown
+included, and the raised floor refuses its reuse as `intentRetired` / Unknown: unexpired Unknown rows
+hold pending capacity for 24 h, so without this 1,024 reconciled caller-keyed Unknowns block every
+write (AGT-106). A `cancel` arriving while retirement awaits compaction runs after it
+settles: it finds no row once retirement lands and proceeds normally if it fails. Retirement is the host's assertion, never evidence: the SDK still
 never resends, and a later receipt for that ID finds no entry.
 
 ## DELEGATED account actions
@@ -363,7 +367,8 @@ original put rejects an identity retry as `intentNotDurable`. A later state-put
 failure never erases the original identity's durability or authorizes replay.
 The additive
 `callerSuppliedIntentId: true` reservation survives completed-history retirement
-and restore under the same 1,056-record bound. `enqueueAction` shares placement's
+and restore under the same 1,056-record bound on version-1 storage; version 2 retires it past
+the key window behind the floor. `enqueueAction` shares placement's
 not-sent and replay evidence constructors; no direct not-sent assignment is
 permitted outside `markDelegatedNotSent`. Deadline expiry leaves a handed-off
 action unknown; queue cancellation is explicit, never a venue cancel.
@@ -933,7 +938,13 @@ Both routes retain the initiating owner and bridge admission across readiness
 waits; #3513's
 page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
-expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
+expiry returns `notSent` and cannot send when startup later finishes.
+A write refused for the page engine's own MARKETS uses the static
+`PAGE_MARKETS_LOADING` text (web Sentry groups it per venue as a warning). The
+first such refusal opens a watch: markets arriving later log one Info line and
+the next write sends normally; the refused write is never resent. Markets still
+missing `PAGE_MARKETS_GIVE_UP_MS` (2 min) after that refusal report once as
+`PAGE_MARKETS_MISSING`, an error. Keep both texts static. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
 delta before the first snapshot is dropped, so it asks the source for one) and
 the engine's own frames fill the UI store. Books, candles and fills still come
@@ -1990,7 +2001,9 @@ structuredClone, which throws on a function, and exchange-server's `INIT_FIELDS`
 allowlist silently drops it. Pinned by `__tests__/transport-adapter-selection.characterization.test.ts`
 plus the two routing snapshots.
 
-**Routing source of truth (`src/transport/tealstreet/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `transport/tealstreet/routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. The Rust direct-provider WS warning uses `console.warn` on wasm (including Workers) and stderr on native, once per exchange; host logging runs after releasing the dedup lock. A poisoned warning-cache mutex is recovered, so logging bookkeeping cannot prevent subsequent socket routing. Rust callers derive `RoutingOptions` with `From<&ExchangeOptions>` (or the owned conversion); the live routing oracle exercises this account boundary for every golden case. The conversion exhaustively destructures account fields without `..`, so adding a field requires an explicit routing decision. The Rust routing input uses the account model’s `ExchangeOptionsBybitSiteId` enum and rejects misspelled serialized site IDs before resolving a host. The site-id doctest uses plain `compile_fail`; the ignored Node/Rustc gate compiles that exact example against the actual Cargo library and requires an E0308 JSON diagnostic. An unrelated error or removed type guard fails this gate; rustdoc error-code annotations carry no authority. The routing golden matrix pins 24 flag/region/site combinations per exchange, including Brazil no-op cases, and also supplies the Rust routing generator. Behavior is locked by `src/transport/tealstreet/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Bitget's public classes still do the same job with older inline counters and `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `transport/tealstreet/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, which safe-cex forwards to host handlers (`registerWorkerConfigHandler` in `store.webworker`; apps/web registers it in `StoreWorkerEntry.ts`), off by default. **Bitget is the exception**: it declares `relayWhenTunnelled`
+**Direct REST the browser cannot fetch → HTTP proxy (`engine.ts` `directProxyRoute`).** On a plain direct account (no tunnel, no proxy), the first unsigned public-intent GET whose fetch rejects with a `TypeError` (fetch's only network-failure shape: CORS, DNS, a blocked region, an extension) moves later public GETs to `/api/exchange_proxy` for that engine transport's lifetime. The engine's own startup backoff (500 ms base) is the retry, so the next attempt lands on the proxy instead of re-failing direct until the worker's 120 s start timeout. Signed requests keep the user's direct route, because the key may vouch for the user's own IP; abort and timeout errors never count; hosts the proxy fleet does not forward stay direct. No proxy route, or a proxy that fails too, raises one visible notice per streak through the proxy-authorization failure channel. This is the REST counterpart of #3827's public WS fallback.
+
+**Routing source of truth (`src/transport/tealstreet/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `transport/tealstreet/routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. The Rust direct-provider WS warning uses `console.warn` on wasm (including Workers) and stderr on native, once per exchange; host logging runs after releasing the dedup lock. A poisoned warning-cache mutex is recovered, so logging bookkeeping cannot prevent subsequent socket routing. Rust callers derive `RoutingOptions` with `From<&ExchangeOptions>` (or the owned conversion); the live routing oracle exercises this account boundary for every golden case. The conversion exhaustively destructures account fields without `..`, so adding a field requires an explicit routing decision. The Rust routing input uses the account model’s `ExchangeOptionsBybitSiteId` enum and rejects misspelled serialized site IDs before resolving a host. The site-id doctest uses plain `compile_fail`; the ignored Node/Rustc gate compiles that exact example against the actual Cargo library and requires an E0308 JSON diagnostic. An unrelated error or removed type guard fails this gate; rustdoc error-code annotations carry no authority. The routing golden matrix pins 24 flag/region/site combinations per exchange, including Brazil no-op cases, and also supplies the Rust routing generator. Behavior is locked by `src/transport/tealstreet/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Engine PUBLIC sockets advance after ONE connect the engine abandoned before it opened (its connect timeout); private sockets keep two strikes, because the choice is sticky for the engine's lifetime and one transient hang must not pin an account's private stream to the shared egress: with 10 s timeouts two hung dials took 20 s, exactly the engine's public-feed notice window, so the fallback always lost to `ws.public_unavailable`. Bitget's public classes still do the same job with older inline counters and `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `transport/tealstreet/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, which safe-cex forwards to host handlers (`registerWorkerConfigHandler` in `store.webworker`; apps/web registers it in `StoreWorkerEntry.ts`), off by default. **Bitget is the exception**: it declares `relayWhenTunnelled`
 (the relay rides a tunnelled route too) and offers it regardless of the flag,
 because Bitget rejects a private login from an IP the key is not bound to
 (40018) — see `exchanges/bitget/CLAUDE.md` → "Private WS egress". It also
@@ -2540,6 +2553,18 @@ mirror for a replacement; its rebuild backoff is shared. Each tab is its own rea
 Frame-fed account engines execute only writes; candle reads
 never run on them. The real-WASM candle-routing test pins this boundary.
 Candle reads do not wait for private reconciliation or lift an order fence.
+The source waits 25 s for `fetchCandles`, longer than the engine's 20 s candle request
+budget, so a venue that never answers fails with the engine's timeout naming the request
+stage. An equal 20 s wait always won the race with a bare `CommandTimeoutError`
+(TEALSTREET-NEXT-ED8, formerly E74).
+Two consecutive candle-read timeouts mark a source broken even with markets loaded, and it
+is rebuilt on the shared backoff; an answered read clears the run. Without this, a wedged
+source failed every read at 20 s for hours and outlived account reloads (ECB/ED8).
+OKX's soft shape answers a failed candle read with an attributed `commandError` then `[]`; the
+host tags that array's non-enumerable `commandError` (`kind: 'timeout'` for the engine's fixed
+"Request timed out" text, the one text match: `Notice::CommandError` carries no kind), the
+source counts it as unanswered, and the timeout is logged once as a warning, not re-reported
+at error level (E95). Other soft failures keep their error report.
 
 A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
 read interruption; uncertain writes retain their existing code, reconciliation
@@ -2639,17 +2664,30 @@ have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
 owner's original managed deadline. Followers never bypass an active lease or
 cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
 honoring Retry-After up to five minutes before followers can elect again.
-Unavailable storage from startup preserves independent native discovery/backoff.
-After a successful coordination transaction, storage loss refuses preparation
-instead of bypassing an unknown lease. Storage/owner failures and deadlines while
-waiting for peer coordination retain their original network/timedOut and notSent
-settlement. They report local catalogue coordination with closed
+**A strict (Binance) coordinator never refuses because storage failed.** Once storage
+has worked in a realm, any failed open/transaction (closed connection, 250 ms stall,
+quota) continues coordination in memory, seeded with the last lease/cooldown storage
+showed, so an observed peer lease is honored until it expires. Memory edits run under
+a per-key Web Lock and replicate over a `BroadcastChannel` named after the database,
+so realms that lose storage together (every account worker after an abnormal close)
+still elect ONE leader and share its cooldown and catalogue bytes; per-realm memory
+alone burst one send per realm onto a venue that had just answered 503. Storage
+unavailable from the start (Node, private mode) still reads unshared, so a module
+singleton never serves one engine's catalogue to the next. Refusing instead left
+users without markets for every 30 s pause (Sentry TEALSTREET-NEXT-E5G); do not
+reinstate it.
+Leaders hold a per-owner Web Lock named in their lease row; a waiter that finds that
+lock released (closed tab or worker) reclaims the lease at once. Rows without a lock
+(older builds, no Web Locks) still expire by deadline plus grace. Non-strict
+(Hyperliquid) policies still bypass the cache on storage failure. Deadlines while
+waiting for peer coordination retain their timedOut and notSent settlement and
+report local catalogue coordination with closed
 `http_preparation_source=catalogue_coordination`, bound to the failed catalogue await.
 HOW still waits for connection, clock and authentication within its original budget.
 Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
 The 30 s storage recovery pause starts only on an actual failed storage attempt.
-Retries refused during that pause cannot extend it; after expiry the coordinator
+Attempts during that pause coordinate in memory and cannot extend it; after expiry the coordinator
 reopens storage and rechecks the existing route-scoped lease before sending.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership

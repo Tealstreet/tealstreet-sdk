@@ -471,6 +471,8 @@
     "margin-price-delta-24h": "Price Δ 24H",
     "limit-buy": "Limit Buy",
     "limit-sell": "Limit Sell",
+    "order-requires-sign-in": "Sign in to trade",
+    "order-requires-account": "Add an exchange account to trade",
     "market-buy": "Market Buy",
     "market-sell": "Market Sell",
     "scaled-buy": "Scaled Buy",

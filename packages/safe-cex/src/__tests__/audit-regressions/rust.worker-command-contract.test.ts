@@ -164,6 +164,41 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('keeps a deferred position-refresh reply with disposed A while replacement B completes its own request', async () => {
+  vi.useFakeTimers();
+  const a = account();
+  const aDispatch = vi.fn();
+  a.emitter.on('updatePositions', aDispatch);
+  const aOutcome = a.updatePositionsInWebworker(['BTCUSDT']).catch((error: unknown) => error);
+  expect(aDispatch).toHaveBeenCalledOnce();
+  const aRequestId = aDispatch.mock.calls[0][0].requestId;
+  a.dispose();
+
+  const b = account();
+  const bDispatch = vi.fn();
+  b.emitter.on('updatePositions', bDispatch);
+  const bSettled = vi.fn();
+  const bOutcome = b.updatePositionsInWebworker(['ETHUSDT']).then(bSettled);
+  expect(bDispatch).toHaveBeenCalledOnce();
+  const bRequestId = bDispatch.mock.calls[0][0].requestId;
+  expect(bRequestId).not.toBe(aRequestId);
+  // A queued response can still reach its old emitter, or the caller can
+  // accidentally deliver that old request ID to the replacement's emitter.
+  a.emitter.emit('updatePositions:done', { requestId: aRequestId, success: true });
+  b.emitter.emit('updatePositions:done', { requestId: aRequestId, success: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(bSettled).not.toHaveBeenCalled();
+  b.emitter.emit('updatePositions:done', { requestId: bRequestId, success: true });
+  await bOutcome;
+  expect(bSettled).toHaveBeenCalledOnce();
+  // Disposal removes A's reply listener. Its existing bounded wait may still
+  // time out to A's original caller; it cannot settle or clean up B's wait.
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(await aOutcome).toMatchObject({ message: 'Timeout updatePositionsInWebworker' });
+  expect(bSettled).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('registers the response listener before dispatching a synchronous worker reply', async () => {
   const exchange = account();
   exchange.emitter.on('callMethod', ({ requestId }: { requestId: string }) => {

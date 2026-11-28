@@ -78,7 +78,7 @@ export interface DelegatedIntent extends OutboxScope {
   result?: DelegatedActionResult;
   fingerprint: string;
   intentId: string;
-  /** Caller keys remain reserved after their completed history ages. */
+  /** On version-1 storage, caller keys remain reserved after their completed history ages. */
   callerSuppliedIntentId?: true;
   seq: number;
   params: Record<string, unknown>;
@@ -354,6 +354,8 @@ export class DelegatedOutbox {
   private readonly persistedIntents = new Map<string, DelegatedIntent>();
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
+  // Rows whose retirement awaits compaction; a cancel waits for it to settle.
+  private readonly retiring = new Set<string>();
   private connection?: Readonly<OutboxConnection>;
   private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
@@ -932,8 +934,9 @@ export class DelegatedOutbox {
 
   /**
    * Removes an entry the host has settled (applied, not sent or venue-rejected)
-   * instead of retaining it as completed history or 24 h unknown work. In-flight,
-   * cancel-pending and caller-reserved intents stay. Resolves whether it was removed.
+   * instead of retaining it as completed history or 24 h unknown work. In-flight and
+   * cancel-pending intents stay, and so do caller keys on version-1 storage, which has
+   * no floor to refuse their replay. Resolves whether it was removed.
    */
   retire(intentId: string): Promise<boolean> {
     return this.serial(async () => {
@@ -942,23 +945,29 @@ export class DelegatedOutbox {
         !this.active ||
         !row ||
         row.cancelPending ||
-        row.callerSuppliedIntentId ||
+        (row.callerSuppliedIntentId && this.checkpointVersion === 1) ||
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
-      // Inside the key window it stays as completed history; compaction retires it later.
+      // Inside the key window it stays (the box could still admit a replay); past it, the
+      // raised floor refuses a reused caller key as intentRetired / Unknown.
       if (this.checkpointVersion === 2 && !this.pastKeyWindow(intentId)) return false;
       const floor =
         this.checkpointVersion === 2
           ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
           : this.retiredIntentBefore;
-      await this.options.storage.compact(this.scope, {
-        ...(this.checkpointVersion === 2
-          ? ({ version: 2, retiredIntentBefore: floor } as const)
-          : ({ version: 1 } as const)),
-        sequence: this.sequence,
-        retiredIntentIds: [intentId],
-      });
+      this.retiring.add(intentId);
+      try {
+        await this.options.storage.compact(this.scope, {
+          ...(this.checkpointVersion === 2
+            ? ({ version: 2, retiredIntentBefore: floor } as const)
+            : ({ version: 1 } as const)),
+          sequence: this.sequence,
+          retiredIntentIds: [intentId],
+        });
+      } finally {
+        this.retiring.delete(intentId);
+      }
       this.retiredIntentBefore = floor;
       this.removeIntent(row);
       return true;
@@ -966,6 +975,8 @@ export class DelegatedOutbox {
   }
 
   cancel(intentId: string): Promise<void> {
+    // Accepted mid-retirement, the cancel would be published and then deleted with the row.
+    if (this.retiring.has(intentId)) return this.serial(async () => {}).then(() => this.cancel(intentId));
     const row = this.intents.get(intentId);
     const handedOff =
       row?.state === 'sending' || row?.state === 'acknowledged' || (row?.state === 'unknown' && !row.retentionExpired);

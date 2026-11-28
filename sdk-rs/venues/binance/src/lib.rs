@@ -235,6 +235,8 @@ struct TickerSeed {
     tickers: Vec<Ticker>,
     /// Which sources have reported each market.
     reported: Vec<u8>,
+    /// Each market's REST book-ticker update id (0 when absent).
+    book_update_ids: Vec<u64>,
     /// Which sources have finished.
     finished: u8,
     failed: bool,
@@ -259,6 +261,9 @@ pub struct BinanceFutures {
     private: Connection,
     spot_tickers: Vec<Connection>,
     books: HashMap<String, BookState>,
+    /// PM only: the newest quote update applied per symbol from either book-ticker
+    /// stream. It outlives book subscriptions, whose resubscribe would reset it.
+    quote_update_ids: HashMap<String, u64>,
     /// Removing and re-adding a book must not reuse an in-flight snapshot ID.
     snapshot_generation: u64,
     candles: HashMap<(String, Interval), u32>,
@@ -321,6 +326,7 @@ impl BinanceFutures {
             private: Connection::new(true),
             spot_tickers: Vec::new(),
             books: HashMap::new(),
+            quote_update_ids: HashMap::new(),
             snapshot_generation: 0,
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
@@ -622,19 +628,14 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
+                    // Bid and ask are public: a guest account without this
+                    // stream would keep the startup REST quote forever.
+                    topics.push("!bookTicker".to_owned());
                     if self.options.portfolio_margin {
-                        // USD-M's all-market book ticker is sampled every 5s.
-                        // PM needs real-time best quotes, even without a book
-                        // subscription or private account stream.
-                        topics.extend(
-                            cx.store.markets().iter().map(|market| {
-                                format!("{}@bookTicker", market.symbol.to_lowercase())
-                            }),
-                        );
-                    } else {
-                        // Bid and ask are public: a guest account without this
-                        // stream would keep the startup REST quote forever.
-                        topics.push("!bookTicker".to_owned());
+                        // The all-market stream is sampled every 5s; an open book's
+                        // quote streams in real time. Every market's own stream was
+                        // one stale topic per quiet market (AGT-175).
+                        topics.extend(self.books.keys().map(|symbol| quote_topic(symbol)));
                     }
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
@@ -768,8 +769,6 @@ impl BinanceFutures {
                 for shard in previous_len / 1_024..self.spot_tickers.len() {
                     self.sync_interests(cx, Channel::SpotTicker(shard));
                 }
-            } else if self.options.portfolio_margin && previous_len < cx.store.markets().len() {
-                self.sync_interests(cx, Channel::Public);
             }
         }
         if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
@@ -797,6 +796,7 @@ impl BinanceFutures {
                 })
                 .collect(),
             reported: vec![0; cx.store.markets().len()],
+            book_update_ids: vec![0; cx.store.markets().len()],
             finished: 0,
             failed: false,
         };
@@ -884,15 +884,16 @@ impl BinanceFutures {
         let seed = std::mem::take(&mut self.ticker_seed);
         self.ticker_reading = false;
         let refresh = std::mem::take(&mut self.ticker_refresh_pending);
-        let mut tickers: Vec<Ticker> = if seed.failed {
-            Vec::new()
+        let (mut tickers, book_update_ids): (Vec<Ticker>, Vec<u64>) = if seed.failed {
+            Default::default()
         } else {
             seed.tickers
                 .into_iter()
                 .zip(seed.reported)
-                .filter(|(_, reported)| *reported == required)
-                .map(|(ticker, _)| ticker)
-                .collect()
+                .zip(seed.book_update_ids)
+                .filter(|((_, reported), _)| *reported == required)
+                .map(|((ticker, _), id)| (ticker, id))
+                .unzip()
         };
         cx.notice(
             Level::Info,
@@ -902,7 +903,11 @@ impl BinanceFutures {
                 tickers.len().min(cx.store.markets().len())
             ),
         );
+        let rest_quotes: Vec<(f64, f64)> = tickers.iter().map(|t| (t.bid, t.ask)).collect();
         self.live_tickers.finish(cx.store, &mut tickers);
+        if self.options.portfolio_margin {
+            self.reconcile_seeded_quotes(cx, &mut tickers, &rest_quotes, &book_update_ids);
+        }
         cx.store.set_tickers(tickers);
         self.revalue_pending_wallet(cx);
         if !self.credentials.has_primary() {
@@ -927,14 +932,52 @@ impl BinanceFutures {
         }
     }
 
+    /// PM: the stored quote and its update-id watermark come from one source, so
+    /// a seed never replaces a newer streamed quote and older samples stay rejected.
+    fn reconcile_seeded_quotes(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        tickers: &mut [Ticker],
+        rest_quotes: &[(f64, f64)],
+        book_update_ids: &[u64],
+    ) {
+        for ((ticker, &(bid, ask)), &rest_id) in
+            tickers.iter_mut().zip(rest_quotes).zip(book_update_ids)
+        {
+            let streamed = cx.store.ticker(&ticker.symbol).filter(|_| {
+                self.quote_update_ids
+                    .get(&ticker.symbol)
+                    .is_some_and(|&applied| applied > rest_id)
+            });
+            if let Some(streamed) = streamed {
+                (ticker.bid, ticker.ask) = (streamed.bid, streamed.ask);
+            } else {
+                (ticker.bid, ticker.ask) = (bid, ask);
+                self.quote_update_ids.insert(ticker.symbol.clone(), rest_id);
+            }
+        }
+    }
+
     fn on_public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
-                    if !self.is_spot() && !self.options.portfolio_margin {
-                        cx.record_socket_topic(&["!bookTicker"]);
-                    } else {
+                    if self.options.portfolio_margin {
+                        // Both streams carry an open book's symbol; a 5s sample can be older.
+                        match self.quote_update_ids.get_mut(&*event.s) {
+                            Some(applied) if event.u < *applied => return,
+                            Some(applied) => *applied = event.u,
+                            None => {
+                                self.quote_update_ids.insert(event.s.to_string(), event.u);
+                            }
+                        }
+                    }
+                    if self.is_spot()
+                        || (self.options.portfolio_margin && self.books.contains_key(&*event.s))
+                    {
                         cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
+                    } else {
+                        cx.record_socket_topic(&["!bookTicker"]);
                     }
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
@@ -1349,6 +1392,10 @@ fn market_from_wire(m: &SymbolInfo<'_>, variant: Variant) -> Market {
 
 fn depth_topic(symbol: &str) -> String {
     format!("{}@depth", symbol.to_lowercase())
+}
+
+fn quote_topic(symbol: &str) -> String {
+    format!("{}@bookTicker", symbol.to_lowercase())
 }
 
 fn kline_topic(symbol: &str, interval: Interval) -> String {
@@ -1885,6 +1932,13 @@ impl Venue for BinanceFutures {
                         t.bid = num::parse(&b.bid_price);
                         t.ask = num::parse(&b.ask_price);
                     });
+                    if let Some(id) = cx
+                        .store
+                        .market_index(&b.symbol)
+                        .and_then(|index| self.ticker_seed.book_update_ids.get_mut(index as usize))
+                    {
+                        *id = b.last_update_id;
+                    }
                 }
             }
             Pending::PremiumIndex => {

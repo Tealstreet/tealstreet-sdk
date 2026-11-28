@@ -1,0 +1,38 @@
+---
+title: Mobile App
+description: Trade with the native Tealstreet app for iOS and Android
+sidebar_position: 4
+hide_title: true
+draft: false
+hide_table_of_contents: true
+---
+
+import { MobileHero, SetupSteps } from '@site/src/components/MobileShowcase';
+
+<MobileHero />
+
+<SetupSteps />
+
+## The guide
+
+Tealstreet has a native app for iPhone, iPad and Android. You sign in, add your exchange API key, and trade. Your
+positions and orders are on the exchange, so you see the same ones on every device you sign in on.
+
+The app is in **early access**. iOS builds come through Apple's **TestFlight**, and Android builds come through
+**Firebase App Distribution**. Neither is in the App Store or Play Store yet.
+
+1. [Getting started](./getting-started.mdx): get an invite, install the app, sign in, and how app updates arrive.
+2. [Connecting your exchange accounts](./connect-accounts.mdx): create an API key on your exchange and add it in the
+   app.
+3. [Placing your first trade](./first-trade.mdx): market and limit orders, stops, positions, orders and the chart.
+4. [Feature tour](./feature-tour.mdx): what each screen is for.
+5. [FAQ and support](./faq.mdx): common questions and how to report a problem.
+
+## How the app runs your accounts
+
+On mobile, your exchange accounts run on Tealstreet's servers (Tealstreet calls this **DELEGATED mode**). As
+**Settings → Accounts** puts it: _"Your accounts run on Tealstreet's servers. If an account can't connect, it stays
+offline until it can."_
+
+In practice this means the app does not have to stay open for your chasers and other algos to keep working. See
+[Cloud jobs](./feature-tour.mdx#cloud-jobs) for what keeps running, and for how to stop it.

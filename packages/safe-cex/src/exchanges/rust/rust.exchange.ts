@@ -470,6 +470,12 @@ const COLD_START_READS = /^(fetch|find|refresh)/;
 const STARTUP_WRITE_WAIT_MS = 30_000;
 /** How long a worker read may wait while the account loads, matching the write refusal. */
 const STARTUP_READ_WAIT_MS = 30_000;
+/** Static texts: web Sentry grouping keys on them, one issue per venue (TEALSTREET-NEXT-EGH). */
+export const PAGE_MARKETS_LOADING = 'Not sent: market details are still loading. Try again in a moment.';
+export const PAGE_MARKETS_MISSING =
+  "Market details did not load, so orders can't be sent. Reconnect the account to try again.";
+/** After a write is refused for them, how long page markets may still arrive before that is an error. */
+const PAGE_MARKETS_GIVE_UP_MS = 120_000;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
@@ -477,7 +483,16 @@ const WORKER_BRIDGE_POLL_MS = 25;
 const PAGE_CANDLE_MARKETS_WAIT_MS = 10_000;
 /** A source still without markets this long after construction is stuck, not slow: rebuild it. */
 const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
-const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 20_000;
+/**
+ * Outlasts the engine's 20 s candle request budget, which starts at issuance: an equal wait always
+ * fired first and replaced the engine's timeout, naming the request stage, with a bare one (ED8).
+ */
+const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 25_000;
+/**
+ * Consecutive candle read timeouts after which a source with markets is wedged, not slow: one is a
+ * slow venue; a run of them kept one shared source failing every read for hours (ECB/ED8).
+ */
+const PAGE_CANDLE_WEDGED_TIMEOUTS = 2;
 /** One page candle source per realm and venue configuration, shared by every mirror (AGT-299). */
 const pageCandleSources = new PageCandleSources<RustEngineExchange>();
 /** Disposes the realm's shared page candle sources at once, including lingering ones. */
@@ -747,6 +762,8 @@ export class RustEngineExchange extends BaseExchange {
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
   private pageMarketsLoaded = false;
+  /** When a write was first refused for missing page markets; cleared once they arrive. */
+  private pageMarketsLateSince?: number;
   private frameFedSettled = false;
   private pageWriteSupported?: boolean;
   private frameFedEngine = false;
@@ -2199,21 +2216,44 @@ export class RustEngineExchange extends BaseExchange {
         if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during page market load'));
         else if (this.pageMarketsLoaded) finish();
       };
-      const message = 'Market details timed out while loading';
-      const timeout = setTimeout(
-        () =>
-          finish(
-            new ExchangeError(message, {
-              message,
-              kind: 'timeout',
-              outcome: 'notSent',
-            }),
-          ),
-        this.startupWriteWaitMs,
-      );
+      const message = PAGE_MARKETS_LOADING;
+      const timeout = setTimeout(() => {
+        this.watchLatePageMarkets();
+        finish(new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' }));
+      }, this.startupWriteWaitMs);
       this.startupWaiters.add(wake);
       wake();
     });
+
+  /**
+   * The refused write is never resent; this only tells the user when trading works again.
+   * Markets still missing after the give-up bound are reported once as an error.
+   */
+  private watchLatePageMarkets = () => {
+    if (this.pageMarketsLateSince !== undefined) return;
+    const since = Date.now();
+    this.pageMarketsLateSince = since;
+    const stop = () => {
+      clearTimeout(giveUp);
+      this.startupWaiters.delete(wake);
+      this.pageMarketsLateSince = undefined;
+    };
+    const wake = () => {
+      // An engine failure or disposal already reports itself.
+      if (this.isDisposed || this.engineFailure || this.startupFailure) stop();
+      else if (this.pageMarketsLoaded) {
+        stop();
+        const seconds = Math.round((Date.now() - since) / 1000);
+        this.log(`${this.name} market details loaded ${seconds}s late; orders can be sent again.`, LogSeverity.Info);
+      }
+    };
+    // Fires at most once: the watch stays open until the markets arrive.
+    const giveUp = setTimeout(() => {
+      const message = PAGE_MARKETS_MISSING;
+      this.reportCommandError(new ExchangeError(message, { message, kind: 'timeout', outcome: 'notSent' }));
+    }, PAGE_MARKETS_GIVE_UP_MS);
+    this.startupWaiters.add(wake);
+  };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
@@ -3854,16 +3894,18 @@ export class RustEngineExchange extends BaseExchange {
 
   private candleSourceLease?: PageCandleLease<RustEngineExchange>;
   private readonly constructedAt = Date.now();
+  private candleReadTimeouts = 0;
 
   /**
-   * A source that failed to start or died cannot serve a later read; one whose markets are only
-   * slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading for the next read.
+   * A source that failed to start, died or keeps timing out cannot serve a later read; one whose
+   * markets are only slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading.
    */
   private get candleSourceBroken(): boolean {
     return Boolean(
       this.isDisposed ||
       this.engineFailure ||
       this.startupFailure ||
+      this.candleReadTimeouts >= PAGE_CANDLE_WEDGED_TIMEOUTS ||
       (!(this.nativeLoaded & LOADED_FLAG.MARKETS) && Date.now() - this.constructedAt >= PAGE_CANDLE_MARKETS_STUCK_MS),
     );
   }
@@ -3889,9 +3931,18 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       const candles = await source.fetchOHLCV(opts);
+      // A soft-shape venue (OKX) answers a timed-out read with []: that read was not answered.
+      if ((candles as { commandError?: { kind?: string } }).commandError?.kind === 'timeout') {
+        source.candleReadTimeouts += 1;
+        lease.failed(source, source.candleSourceBroken);
+        return candles;
+      }
+      source.candleReadTimeouts = 0;
       lease.succeeded();
       return candles;
     } catch (error) {
+      const { kind, code } = (error ?? {}) as { kind?: unknown; code?: unknown };
+      if (kind === 'timeout' || code === 'COMMAND_TIMEOUT') source.candleReadTimeouts += 1;
       lease.failed(source, source.candleSourceBroken);
       throw error;
     }

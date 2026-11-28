@@ -334,9 +334,12 @@ it.each(BYBIT_ALIASES)(
       requestId,
     });
     expect(Object.keys(signedGet.config!.params!)).toEqual(['category', 'symbol', 'ids', 'requestId']);
+    // Hyro's CORS allowlist refuses Bybit's broker header (TEAL-22,
+    // fix/hyro-omit-broker-referer); every Bybit alias keeps it.
+    if (name === 'hyrotrader') expect(signedGet.config?.headers).not.toHaveProperty('X-Referer');
+    else expect(signedGet.config?.headers['X-Referer']).toBe('Tealstreet');
     expect(signedGet.config?.headers).toMatchObject({
       'X-Extra': 'keep',
-      'X-Referer': 'Tealstreet',
       'X-BAPI-API-KEY': PRIMARY_KEY,
       'X-BAPI-TIMESTAMP': `${STAMP}`,
       'X-BAPI-RECV-WINDOW': '8765',

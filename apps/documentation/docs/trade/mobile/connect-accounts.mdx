@@ -1,0 +1,269 @@
+---
+title: Connecting Your Exchange Accounts
+description: Get your exchange API keys onto the Tealstreet mobile app with cloud sync, a QR code, or by hand
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+import { AnnotatedStep, Steps } from '@site/src/components/AnnotatedStep';
+
+Tealstreet trades through API keys from your exchange. There are three ways to get them onto your phone:
+
+| Way                                         | Use it when                                                                  |
+| ------------------------------------------- | ---------------------------------------------------------------------------- |
+| [Cloud key sync](#cloud-key-sync)           | You already use Tealstreet on your computer. Your keys appear on their own.  |
+| [Scan a QR code](#scan-a-qr-code)           | You want one account from your computer, without turning on cloud sync.      |
+| [Enter a key by hand](#enter-a-key-by-hand) | You're new, or the key isn't in Tealstreet yet.                              |
+
+:::warning Sign in first
+Sign in on the phone before you add a key (see [Getting started](./getting-started.mdx#2-sign-in)). Keys are saved
+to your Tealstreet account.
+:::
+
+## Cloud key sync
+
+Cloud sync keeps the same API keys on every device you sign in on. Your keys are encrypted on your device with a
+**cloud sync password** before they're stored, and Tealstreet never sees that password.
+
+:::info Turn it on first
+Cloud sync must be on for your account: in the Tealstreet web app, open **Settings → Accounts** and turn on **Cloud
+sync for API keys**. It's one setting for your whole account. Each device then asks for your cloud sync password once.
+:::
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="On your computer: turn on cloud sync"
+  device="desktop"
+  image="/img/trading/mobile/steps/sync-web-switch.jpg"
+  alt="The web app's Settings, Accounts page with the Cloud sync for API keys switch"
+  callouts={[{ n: 1, x: 221, y: 507, w: 731, h: 94 }, { x: 913, y: 530 }]}
+>
+
+In the web app, open **Settings → Accounts** and flip **Cloud sync for API keys** on.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Choose a cloud sync password"
+  device="desktop"
+  image="/img/trading/mobile/steps/sync-web-password.jpg"
+  alt="The Turn on cloud sync dialog with the password fields filled in"
+  callouts={[
+    { n: 1, x: 222, y: 186, w: 512, h: 112 },
+    { n: 2, x: 222, y: 492, w: 512, h: 30 },
+    { n: 3, x: 560, y: 580, w: 170, h: 28 },
+  ]}
+>
+
+Type the password twice (1), tick that it can't be recovered (2), then **Turn on cloud sync** (3). Keep the password
+somewhere safe: if you lose it, you lose access to your synced keys.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="On your phone: unlock cloud sync"
+  image="/img/trading/mobile/steps/sync-unlock.jpg"
+  alt="The app's Unlock cloud sync prompt"
+  callouts={[
+    { n: 1, x: 44, y: 434, w: 314, h: 37 },
+    { n: 2, x: 305, y: 491, w: 53, h: 29 },
+  ]}
+>
+
+Open the app. It asks for your cloud sync password once: type it (1) and tap **Unlock** (2). Unlocking takes a few
+seconds.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="Your keys are here"
+  image="/img/trading/mobile/steps/sync-accounts.jpg"
+  alt="Settings, Accounts in the app with the synced account connected and cloud sync up to date"
+  callouts={[
+    { n: 1, x: 12, y: 122, w: 378, h: 56 },
+    { n: 2, x: 49, y: 405, w: 90, h: 26 },
+  ]}
+>
+
+Every account from your other devices is now on the phone (1) and connects on its own. **Settings → Accounts**
+shows **Up to date** (2). Keys you add or remove on any device now change everywhere.
+
+</AnnotatedStep>
+
+</Steps>
+
+## Scan a QR code
+
+A QR code carries one account from the web app to your phone. Treat it like a password: it contains the API key and
+secret.
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="On your computer: open QR Code Sync"
+  device="desktop"
+  image="/img/trading/mobile/steps/qr-web-icon.jpg"
+  alt="The web app's Settings, Accounts list with the QR Code Sync icon in the Actions column"
+  callouts={[{ n: 1, x: 840, y: 139 }]}
+>
+
+In the web app, open **Settings → Accounts** and click the **QR icon** (**QR Code Sync**) in the account's
+**Actions** column.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Keep the code on screen"
+  device="desktop"
+  image="/img/trading/mobile/steps/qr-web-modal.jpg"
+  alt="The QR Code Sync dialog. The code is blurred here."
+  callouts={[
+    { n: 1, x: 298, y: 116, w: 366, h: 46 },
+    { n: 2, x: 318, y: 224, w: 326, h: 326 },
+  ]}
+>
+
+The dialog says what to do on the phone (1) and shows the code (2). It's blurred here; yours is sharp. Only scan it
+with your own phone.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="On your phone: Scan QR Code from Web"
+  image="/img/trading/mobile/steps/qr-add-account.jpg"
+  alt="The app's Add account sheet"
+  callouts={[{ n: 1, x: 12, y: 580, w: 378, h: 52 }]}
+>
+
+Tap **Add an API key** (or side panel → **API keys** → **Add account**), then **Scan QR Code from Web**.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="Point the camera at the code"
+  image="/img/trading/mobile/steps/qr-scanner.jpg"
+  alt="The app's QR Scanner screen"
+  callouts={[{ n: 1, x: 76, y: 312, w: 250, h: 250 }]}
+>
+
+Line the code up in the frame. When the import finishes you'll see **Import successful**, and the account connects.
+Allow camera access if the phone asks.
+
+</AnnotatedStep>
+
+</Steps>
+
+## Enter a key by hand
+
+Create the key in your exchange's API settings first. Give it **read** and **trade** permissions, never withdrawal.
+For step-by-step help on a particular exchange, see the [Connect](/docs/connect/api-general) guides.
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Manually Enter API Keys"
+  image="/img/trading/mobile/steps/qr-add-account.jpg"
+  alt="The app's Add account sheet"
+  callouts={[{ n: 1, x: 12, y: 736, w: 378, h: 52 }]}
+>
+
+Tap **Add an API key** (or side panel → **API keys** → **Add account**), then **Manually Enter API Keys**.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Pick your exchange"
+  image="/img/trading/mobile/steps/key-exchanges.jpg"
+  alt="The Set Up Your Account exchange list"
+  callouts={[{ n: 1, x: 12, y: 217, w: 181, h: 56 }]}
+>
+
+Find your exchange with **Search** or the category tabs, and tap it.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="Fill in the key"
+  image="/img/trading/mobile/steps/key-form.jpg"
+  alt="The Set Up Bybit form"
+  callouts={[
+    { n: 1, x: 12, y: 490, w: 330, h: 40 },
+    { n: 2, x: 12, y: 543, w: 220, h: 24 },
+    { n: 3, x: 12, y: 681, w: 378, h: 104 },
+    { n: 4, x: 12, y: 800, w: 378, h: 50 },
+  ]}
+>
+
+Give the account a **Name** (1). If your key uses an IP whitelist, tick **Use Tealstreet IPs** (2) and add the IPs it
+shows to the key on your exchange. Paste the **API Key** and **API Key Secret** (3); some exchanges also need a
+passphrase. Tap **Done** (4).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="Connected"
+  image="/img/trading/mobile/steps/key-connected.jpg"
+  alt="Settings, Accounts with the new account connected"
+  callouts={[{ n: 1, x: 12, y: 178, w: 378, h: 56 }]}
+>
+
+Tealstreet checks the key with the exchange before saving it. The account shows **Connected** (1).
+
+</AnnotatedStep>
+
+</Steps>
+
+## Editing or removing an account
+
+Open **Settings → Accounts** (side panel → **API keys**). Tap an account's row to change its name, keys and options.
+**Delete Account** at the bottom of its form removes it from Tealstreet after you confirm; the key stays valid on the
+exchange until you delete it there.
+
+## Troubleshooting
+
+### The key was saved but won't connect ("Error validating…")
+
+- **"The account is not connected because its API key was not accepted. Check the … Tealstreet IP addresses and key
+  permissions"**: the key has an IP whitelist. Tick **Use Tealstreet IPs** and add those IPs to the key on your
+  exchange.
+- **"Couldn't read this account's balance. Check the API key permissions and try again."**: the key needs read and
+  trade permissions.
+- **"Couldn't reach Tealstreet's servers…"** or **"The exchange took too long…"**: a connection problem. Try again
+  in a moment.
+- **"Please input your …"**: a required field is empty.
+
+### "Couldn't unlock cloud sync"
+
+Check the password and your connection, then try again. The cloud sync password is not your Tealstreet login
+password. If you've lost it, use **Reset cloud sync** on a device that's still unlocked.
+
+### "Invalid QR Code" or "Invalid JSON format"
+
+The scan failed, or the code isn't a Tealstreet account code. In the web app, open **QR Code Sync** again and scan
+the code it shows.
+
+### The camera won't open
+
+If you see **"Camera access is required to scan QR codes."**, tap **Open Settings** and allow camera access for
+Tealstreet, then try again.
+
+## Next
+
+[Place your first trade →](./first-trade.mdx)

@@ -122,6 +122,9 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
       'ip not allowed',
       'ip restriction',
       'unmatched ip',
+      // Binance -4109 INACTIVE_ACCOUNT and Bybit: the venue account itself is not
+      // activated. Terminal until the user acts; retrying only repeats the refusal.
+      'this account is inactive',
       /permission.*denied/i,
       /insufficient.*permission/i,
     ],

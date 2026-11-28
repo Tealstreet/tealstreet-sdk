@@ -649,8 +649,8 @@ impl BingxSpot {
         let params = Params::new()
             .opt_str("symbol", native_symbol.as_deref())
             .opt_str("orderId", order_id.as_deref())
-            .opt_num("startTime", from_ms)
-            .opt_num("endTime", to_ms)
+            .opt_time("startTime", from_ms)
+            .opt_time("endTime", to_ms)
             .num("limit", cap as f64);
         let Ok(leg) = root.leg(
             cx,
@@ -1130,8 +1130,8 @@ impl Venue for BingxSpot {
                     .str("interval", i)
                     .num("timeZone", 0.)
                     .num("limit", limit.unwrap_or(500).clamp(1, 1440) as f64)
-                    .opt_num("startTime", from_ms)
-                    .opt_num("endTime", to_ms);
+                    .opt_time("startTime", from_ms)
+                    .opt_time("endTime", to_ms);
                 self.public_read(cx, CANDLES, p, ReadKind::Candles, Scope::Command(command));
             }
             Command::FetchOrderBook {

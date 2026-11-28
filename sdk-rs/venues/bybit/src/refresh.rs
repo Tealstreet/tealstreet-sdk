@@ -228,7 +228,7 @@ impl BybitLinear {
             None,
             Method::Get,
             url,
-            &[("X-Referer", sign::BROKER_ID)],
+            self.public_headers(),
             None,
             pending,
         ) {

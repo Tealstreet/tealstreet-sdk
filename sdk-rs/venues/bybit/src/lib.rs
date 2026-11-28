@@ -87,6 +87,9 @@ const PUBLIC_SILENCE_MS: f64 = 60_000.0;
 /// Bybit closes a public socket that subscribes too fast: ten topics per
 /// message, one message per pace interval.
 const TOPICS_PER_SUBSCRIBE: usize = 10;
+/// Hyro's public socket refuses every subscribe past 32 topics on one
+/// connection ("at most 32 topics per connection", live 2026-11-28, TEAL-20).
+const HYRO_TOPICS_PER_CONNECTION: usize = 32;
 const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
@@ -260,6 +263,8 @@ struct BookState {
     subscribers: u32,
     book: Book,
     sync: Sync,
+    /// `public_opened` when the first subscriber arrived: Hyro's capped feed keeps the newest.
+    opened: u64,
 }
 
 /// The lists startup waits for before markets and tickers go into the store.
@@ -372,11 +377,14 @@ pub struct BybitLinear {
     private: Connection,
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
-    /// Kline subscriptions by (symbol, interval), counted.
-    candles: HashMap<(String, Interval), u32>,
+    /// Kline subscriptions by (symbol, interval): subscriber count and `public_opened` order.
+    candles: HashMap<(String, Interval), (u32, u64)>,
     /// Live bar per subscription, extended by trades between native klines.
     live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
+    /// Opening order of public books and klines, so a feed capped at Hyro's
+    /// per-connection limit keeps the newest rather than HashMap order.
+    public_opened: u64,
     startup: Startup,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
@@ -638,6 +646,7 @@ impl BybitLinear {
             candles: HashMap::new(),
             live_candles: HashMap::new(),
             trade_subscribers: HashMap::new(),
+            public_opened: 0,
             startup: Startup {
                 prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
@@ -949,6 +958,28 @@ impl BybitLinear {
             .map_err(|error| error.venue_error())
     }
 
+    /// Bybit's broker attribution header for unsigned reads. Hyro is not Bybit:
+    /// its CORS allowlist omits `X-Referer`, so a browser refuses any Hyro
+    /// request that carries it (TEAL-22).
+    pub(crate) fn public_headers(&self) -> &'static [(&'static str, &'static str)] {
+        if self.variant.is_hyro() {
+            &[]
+        } else {
+            &[("X-Referer", sign::BROKER_ID)]
+        }
+    }
+
+    /// The dispatch signer for one REST request, under the same Hyro header rule.
+    pub(crate) fn http_signer(&self, credentials: Credentials, payload: String) -> sign::Http {
+        let signer = sign::Http::new(credentials, payload, self.recv_window)
+            .with_header_policy(self.signing_policy.header_policy());
+        if self.variant.is_hyro() {
+            signer.without_broker_referer()
+        } else {
+            signer
+        }
+    }
+
     /// The read key signs GETs when one is set; the primary signs the rest.
     pub(crate) fn signing_identity(
         &self,
@@ -999,8 +1030,7 @@ impl BybitLinear {
             let identity = self
                 .signing_identity(Method::Get)
                 .expect("a signed read was admitted with a credential");
-            sign::Http::new(identity.clone(), rest.payload.clone(), self.recv_window)
-                .with_header_policy(self.signing_policy.header_policy())
+            self.http_signer(identity.clone(), rest.payload.clone())
         });
         let stream = rest.stream;
         let pending = Pending {
@@ -1024,7 +1054,7 @@ impl BybitLinear {
                 None,
                 Method::Get,
                 url,
-                &[("X-Referer", sign::BROKER_ID)],
+                self.public_headers(),
                 None,
                 pending,
             ),
@@ -1171,7 +1201,7 @@ impl BybitLinear {
                 None,
                 Method::Get,
                 format!("{}/v5/market/time", self.paths.rest),
-                &[("X-Referer", sign::BROKER_ID)],
+                self.public_headers(),
                 None,
                 pending,
             )
@@ -1331,12 +1361,28 @@ impl BybitLinear {
         Some(Channel::Public)
     }
 
-    /// The current category's ticker topics from the store.
+    /// The current category's ticker topics from the store. Under Hyro's
+    /// connection cap, symbols the account is using come first: order sizing
+    /// reads their ticker.
     fn ticker_topics(&self, cx: &Cx<'_, Pending>) -> Vec<String> {
-        cx.store
+        let markets = cx
+            .store
             .markets()
             .iter()
-            .filter(|m| self.owns_symbol(&m.symbol))
+            .filter(|m| self.owns_symbol(&m.symbol));
+        if !self.variant.is_hyro() {
+            return markets.map(|m| format!("tickers.{}", m.symbol)).collect();
+        }
+        let in_use = |symbol: &str| {
+            self.books.contains_key(symbol)
+                || self.candles.keys().any(|(s, _)| s == symbol)
+                || self.trade_subscribers.contains_key(symbol)
+                || cx.store.positions().iter().any(|p| p.symbol == symbol)
+                || cx.store.orders().iter().any(|o| o.symbol == symbol)
+        };
+        let (mut used, rest): (Vec<_>, Vec<_>) = markets.partition(|m| in_use(&m.symbol));
+        used.extend(rest);
+        used.into_iter()
             .map(|m| format!("tickers.{}", m.symbol))
             .collect()
     }
@@ -1345,6 +1391,9 @@ impl BybitLinear {
     /// tickers. Tickers are capped so the requested topics always fit the
     /// engine's interest bound; the bool reports a cap.
     fn public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        if self.variant.is_hyro() {
+            return self.hyro_public_interests(cx);
+        }
         let mut topics: Vec<String> = Vec::new();
         let spot = self.variant.is_spot();
         for (symbol, state) in &self.books {
@@ -1377,6 +1426,71 @@ impl BybitLinear {
         )
     }
 
+    /// Hyro holds 32 topics per connection. The newest books and klines
+    /// keep their slots, each book or kline with its own symbol's ticker beside
+    /// it; tickers for other symbols in use, then idle markets, fill the rest.
+    /// A book resubscribing after a sequence gap is out of the set only for its
+    /// fresh snapshot, so its slot is held and its ticker kept: the gap costs
+    /// the book's own unsubscribe and subscribe, nothing else. The bool
+    /// reports that something was left out.
+    fn hyro_public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        // (opened, topic, symbol whose ticker rides beside it, slot held empty)
+        let mut streams: Vec<(u64, String, Option<&str>, bool)> = Vec::new();
+        for (symbol, state) in &self.books {
+            if Category::for_symbol(symbol) == self.category {
+                streams.push((
+                    state.opened,
+                    Self::book_topic(self.paths.book_depth, symbol),
+                    Some(symbol),
+                    matches!(state.sync, Sync::Resubscribing(_)),
+                ));
+            }
+        }
+        // Hyro has no trade feed (`fetch_candles` subscribes none), so only books and klines.
+        for ((symbol, interval), (_, opened)) in &self.candles {
+            if let Some(topic) = Self::kline_topic(symbol, *interval)
+                && self.owns_symbol(symbol)
+            {
+                streams.push((*opened, topic, Some(symbol), false));
+            }
+        }
+        streams.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let mut topics: Vec<String> = Vec::new();
+        let mut held = 0;
+        let mut capped = false;
+        for (_, topic, symbol, resubscribing) in streams {
+            let ticker = symbol
+                .map(|symbol| format!("tickers.{symbol}"))
+                .filter(|ticker| !topics.contains(ticker));
+            // An older stream never displaces a newer one, nor its ticker.
+            if topics.len() + held + 1 + usize::from(ticker.is_some()) > HYRO_TOPICS_PER_CONNECTION
+            {
+                capped = true;
+                break;
+            }
+            if resubscribing {
+                held += 1;
+            } else {
+                topics.push(topic);
+            }
+            topics.extend(ticker);
+        }
+        for ticker in self.ticker_topics(cx) {
+            if topics.contains(&ticker) {
+                continue;
+            }
+            if topics.len() + held == HYRO_TOPICS_PER_CONNECTION {
+                capped = true;
+                break;
+            }
+            topics.push(ticker);
+        }
+        (
+            topics.into_iter().map(Interest::from_wire_args).collect(),
+            capped,
+        )
+    }
+
     fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
         let Some(feed) = self.public.feed.filter(|_| self.public.open) else {
             return;
@@ -1384,11 +1498,21 @@ impl BybitLinear {
         let (interests, capped) = self.public_interests(cx);
         if capped && !self.public.tickers_capped {
             self.public.tickers_capped = true;
-            cx.notice(
-                Level::Warn,
-                code::SUBSCRIPTION_REJECTED,
-                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
-            );
+            // Every Hyro catalogue exceeds its 32-topic connection, so the cap
+            // is expected there rather than a warning.
+            if self.variant.is_hyro() {
+                cx.notice(
+                    Level::Info,
+                    code::SUBSCRIPTION_REJECTED,
+                    "HyroTrader streams at most 32 public topics per connection; tickers for symbols not in use are not streamed",
+                );
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+                );
+            }
         }
         if let Err(error) = cx.set_socket_interests(feed, interests) {
             self.socket_failed(cx, error);
@@ -1553,8 +1677,7 @@ impl BybitLinear {
         if credentials.validate().is_err() {
             return false;
         }
-        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
-            .with_header_policy(self.signing_policy.header_policy());
+        let signing = self.http_signer(credentials.clone(), String::new());
         self.environment_probe_attempted = true;
         use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
         let Ok(context) = cx.http_context(
@@ -2210,9 +2333,12 @@ impl BybitLinear {
                 subscribers: 0,
                 book: Book::default(),
                 sync: Sync::Waiting,
+                opened: 0,
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
+            self.public_opened += 1;
+            state.opened = self.public_opened;
             self.subscribe(
                 cx,
                 "subscribe",
@@ -2272,9 +2398,11 @@ impl BybitLinear {
         }
         let key = (symbol.clone(), interval);
         if add {
-            let count = self.candles.entry(key).or_insert(0);
-            *count += 1;
-            if *count == 1 {
+            let count = self.candles.entry(key).or_insert((0, 0));
+            count.0 += 1;
+            if count.0 == 1 {
+                self.public_opened += 1;
+                count.1 = self.public_opened;
                 let mut topics: Vec<String> = kline.into_iter().collect();
                 if trades {
                     let subscribers = self.trade_subscribers.entry(symbol.clone()).or_insert(0);
@@ -2286,8 +2414,8 @@ impl BybitLinear {
                 self.subscribe(cx, "subscribe", &topics);
             }
         } else if let Some(count) = self.candles.get_mut(&key) {
-            *count -= 1;
-            if *count == 0 {
+            count.0 -= 1;
+            if count.0 == 0 {
                 self.candles.remove(&key);
                 self.live_candles.remove(&key);
                 let mut topics: Vec<String> = kline.into_iter().collect();
@@ -3878,6 +4006,7 @@ mod public_decoder_tests {
                 subscribers: 1,
                 book: Book::default(),
                 sync: Sync::Waiting,
+                opened: 0,
             },
         );
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);

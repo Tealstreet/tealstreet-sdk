@@ -14,17 +14,28 @@ const exchanges: RustEngineExchange[] = [];
 const opts = { symbol: 'BTCUSDT', interval: '15m' as const, from: 1_700_000_000_000, to: 1_700_000_900_000 };
 const candles = [{ timestamp: 1_700_000_000, open: 1, high: 2, low: 1, close: 2, volume: 1 }];
 
+type CandleRead = 'answers' | 'venueTimeout' | 'softTimeout';
+
 /**
  * A mirror whose page candle sources are fake engines: `health` decides, per construction,
- * whether the source loads its markets, never does, or fails to start.
+ * whether the source loads its markets, never does, or fails to start. `candleRead: 'venueTimeout'`
+ * issues the candle request one dispatch hop after receipt and fails it when the engine's own
+ * 20 s request budget runs out, as a venue that never answers does; an array picks per construction,
+ * and a nested array per candle read.
  */
-const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
+const fixture = (
+  health: Array<'ok' | 'late' | 'stuck' | 'fails'>,
+  candleRead: CandleRead | Array<CandleRead | CandleRead[]> = 'answers',
+) => {
   const built: Array<{ commands: Array<Record<string, unknown>>; freed: ReturnType<typeof vi.fn> }> = [];
   const Constructor = Object.assign(
     function (_venue: string, json: string) {
       const config = JSON.parse(json);
       const page = config.publicDataOnly === true;
       const state = page ? (health[built.length] ?? 'ok') : 'ok';
+      const planned = Array.isArray(candleRead) ? (candleRead[built.length] ?? 'answers') : candleRead;
+      let candleReads = 0;
+      const nextRead = () => (Array.isArray(planned) ? (planned[candleReads++] ?? 'answers') : planned);
       const record = { commands: [] as Array<Record<string, unknown>>, freed: vi.fn() };
       if (page) built.push(record);
       // 'late': the catalogue lands 15 s after start, past the 10 s per-read wait.
@@ -38,6 +49,8 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
           }),
         );
       const idle = () => '[]';
+      const pendingReads = new Map<number, { command: number; stage: 'issue' | 'deadline' }>();
+      let timers = 100;
       return {
         construction: () => JSON.stringify({ frameFed: false, publicDataOnly: page }),
         syncHostTime: () => true,
@@ -46,9 +59,21 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
           if (state === 'fails') throw new Error('instrument read refused');
           return state === 'late' ? JSON.stringify([{ op: 'setTimer', timer: 1, at: Date.now() + 15_000 }]) : '[]';
         },
-        timer: () => {
-          landed = true;
-          return '[]';
+        timer: (timer: number) => {
+          const read = pendingReads.get(timer);
+          if (!read) {
+            landed = true;
+            return '[]';
+          }
+          pendingReads.delete(timer);
+          if (read.stage === 'issue') {
+            pendingReads.set(++timers, { command: read.command, stage: 'deadline' });
+            return JSON.stringify([{ op: 'setTimer', timer: timers, at: Date.now() + 20_000 }]);
+          }
+          const message = 'HTTP request timed out (class=read budget=20000ms elapsed=20000ms)';
+          return JSON.stringify([
+            { op: 'done', command: read.command, error: message, detail: { message, kind: 'timeout' } },
+          ]);
         },
         wsOpen: idle,
         wsMessage: idle,
@@ -65,6 +90,18 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
         command: (json: string) => {
           const command = JSON.parse(json);
           record.commands.push(command);
+          const read = command.op === 'fetchCandles' ? nextRead() : 'answers';
+          if (read === 'venueTimeout') {
+            pendingReads.set(++timers, { command: command.command, stage: 'issue' });
+            return JSON.stringify([{ op: 'setTimer', timer: timers, at: Date.now() + 1 }]);
+          }
+          // OKX's native soft shape: an attributed timeout, then [] as the answer.
+          if (read === 'softTimeout') {
+            return JSON.stringify([
+              { op: 'commandError', command: command.command, message: 'Request timed out' },
+              { op: 'done', command: command.command, result: '[]' },
+            ]);
+          }
           return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(candles) }]);
         },
       } satisfies WasmEngineLike;
@@ -108,7 +145,61 @@ it('a page candle read is bounded: a short markets wait and a candle command dea
   const result = await settle(exchange.fetchOHLCV(opts));
   expect(result).toEqual({ value: candles });
   expect(built).toHaveLength(1);
-  expect(built[0].commands.find((command) => command.op === 'fetchCandles')).toMatchObject({ timeoutMs: 20_000 });
+  expect(built[0].commands.find((command) => command.op === 'fetchCandles')).toMatchObject({ timeoutMs: 25_000 });
+});
+
+// TEALSTREET-NEXT-ED8/E74: the read's own 20 s deadline matched the engine's 20 s candle request
+// budget, which starts at issuance, so the host's generic "This action timed out after 20000 ms"
+// always won and discarded the engine's account of where the request was stuck.
+it('a venue that never answers a page candle read fails with the engine timeout, not a bare deadline', async () => {
+  vi.useFakeTimers();
+  const { exchange } = fixture(['ok'], 'venueTimeout');
+  const result = await settle(exchange.fetchOHLCV(opts), 26_000);
+  expect(result).toMatchObject({
+    error: expect.objectContaining({ message: expect.stringMatching(/^HTTP request timed out \(class=read/) }),
+  });
+  expect((result as { error: Error }).error.name).not.toBe('CommandTimeoutError');
+});
+
+// TEALSTREET-NEXT-ECB/ED8: a source with markets whose candle requests never answered was never
+// called broken, so it failed every read at 20 s for hours, and outlived account reloads.
+it('a loaded source whose candle reads keep timing out is rebuilt, not reused', async () => {
+  vi.useFakeTimers();
+  const { exchange, built } = fixture(['ok', 'ok'], ['venueTimeout', 'answers']);
+  // One timeout is a slow venue: the source is kept.
+  expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
+  expect(built[0].freed).not.toHaveBeenCalled();
+  expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
+  expect(built[0].freed).toHaveBeenCalled();
+
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+  expect(built).toHaveLength(2);
+});
+
+// TEALSTREET-NEXT-E95: OKX resolves a timed-out candle read as [], which counted as answered,
+// so its wedged source was never rebuilt.
+it('soft-shape candle timeouts count as unanswered, so the source is rebuilt', async () => {
+  vi.useFakeTimers();
+  const { exchange, built } = fixture(['ok', 'ok'], ['softTimeout', 'answers']);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: [] });
+  expect(built[0].freed).not.toHaveBeenCalled();
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: [] });
+  expect(built[0].freed).toHaveBeenCalled();
+
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+  expect(built).toHaveLength(2);
+});
+
+it('an answered candle read clears the timeout run, so isolated slow reads keep the source', async () => {
+  vi.useFakeTimers();
+  const { exchange, built } = fixture(['ok'], [['venueTimeout', 'answers', 'venueTimeout']]);
+  expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+  expect(await settle(exchange.fetchOHLCV(opts), 26_000)).toHaveProperty('error');
+  expect(built[0].freed).not.toHaveBeenCalled();
+  expect(built).toHaveLength(1);
 });
 
 // #3095 review: a slow catalogue was torn down at every 10 s read and never converged.

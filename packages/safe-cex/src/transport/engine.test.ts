@@ -753,6 +753,40 @@ describe('engine socket routing at the raw transport boundary', () => {
     expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
   });
 
+  // A dial the engine gave up on before it opened (its 10 s connect timeout) is a route
+  // failure, not silence: two of them took 20 s, as long as the public-feed notice waits.
+  it('one connect the engine abandons before it opens selects the fallback', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
+    const url = 'wss://stream.bybit.com/v5/public/linear';
+    routed.connect(url, handlers('public')).close();
+    routed.connect(url, handlers('public'));
+    expect(raw.connect.mock.calls.map(([target]) => target)).toEqual([
+      url,
+      'wss://bybit-proxy-ja.tealstreet.io/v5/public/linear',
+    ]);
+  });
+
+  it('a private connect abandoned before it opens keeps the two-silent-connect rule', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
+    const url = 'wss://stream.bybit.com/v5/private';
+    routed.connect(url, handlers('private')).close();
+    routed.connect(url, handlers('private'));
+    expect(raw.connect.mock.lastCall?.[0]).toBe(url);
+  });
+
+  it('a local close after the socket opened keeps the two-silent-connect rule', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
+    const url = 'wss://stream.bybit.com/v5/public/linear';
+    const socket = routed.connect(url, handlers('public'));
+    raw.connect.mock.lastCall![1].onOpen();
+    socket.close();
+    routed.connect(url, handlers('public'));
+    expect(raw.connect.mock.lastCall?.[0]).toBe(url);
+  });
+
   it('tracks channel fallback lifetimes separately even when upstream URLs match', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('okx', options(), raw);

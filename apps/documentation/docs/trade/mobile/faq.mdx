@@ -1,0 +1,70 @@
+---
+title: FAQ and Support
+description: Common questions about the Tealstreet mobile app, and how to report a problem
+sidebar_position: 5
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+---
+
+## Reporting a problem
+
+The app doesn't have a "report a bug" button yet. Report problems to us directly:
+
+- **Discord:** join [our Discord server](https://teal.link/discord) and post in the **issues** channel. This is the
+  fastest way to reach the team. See the [Discord guide](/docs/support/discord) if you're new to Discord.
+- **Email:** [support@tealstreet.io](mailto:support@tealstreet.io).
+
+Help us fix it quickly by including:
+
+- **iPhone or Android**, and the **app version** shown at the bottom of the side panel.
+- **What you did and what happened**: the exchange, the market, and the exact text of any error message.
+- **A screenshot or screen recording**, if you can. **Check it doesn't show an API key or secret** before you
+  send it.
+
+If the app shows an **Application Error** screen, tap **📋 Copy Stack Trace & Error Details** and paste the result
+into your report. Read it through before you send it, and remove anything that looks like a key or secret.
+
+:::danger Never share your keys
+We will never ask for your API secret or your cloud sync password. Anyone who asks for them is not from Tealstreet.
+:::
+
+## Frequently asked questions
+
+### Do I need new API keys for the phone?
+
+No. If you already have a key for Tealstreet, add the same key in the app (see
+[Connecting your exchange accounts](./connect-accounts.mdx)). A key works on any number of devices.
+
+### How do I sign out, or switch to another Tealstreet login?
+
+Tap the Tealstreet logo at the **top-left**, then **Log Out**. After the app restarts, tap the **sign-in icon** at the
+**top-right**. The sign-in page lets you choose a different account.
+
+### We said a fix is out, but I don't see it
+
+Tap **Check for Updates** in the side panel and choose **Update now**. If the app says the update is already
+downloaded, fully close Tealstreet (swipe it away in the app switcher) and open it again. Some fixes need a new
+build, which comes through TestFlight (iOS) or App Tester (Android). See
+[App updates](./getting-started.mdx#3-app-updates).
+
+### Do my chasers and TWAPs keep running when I close the app?
+
+Yes, for up to 48 hours after your last device disconnects. See [Cloud jobs](./feature-tour.mdx#cloud-jobs).
+
+### Does the app ask me to confirm orders?
+
+No. The order button, **Close** and **✕ All** act on the first tap. See
+[Placing your first trade](./first-trade.mdx).
+
+### My exchange isn't available on mobile
+
+Not every exchange is supported on mobile yet. The exchange list in **Set Up Your Account** shows the ones that are.
+
+### My TestFlight or Firebase invite never arrived
+
+Check your spam folder for emails from **App Store Connect**, **TestFlight** or **Firebase App Distribution**. iOS
+invites expire if they're not accepted within about three days. If yours has expired or never arrived, contact us
+and we'll send it again. Make sure we have your **Apple ID** email for iOS.

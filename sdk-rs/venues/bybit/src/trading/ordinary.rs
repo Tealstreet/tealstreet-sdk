@@ -10,7 +10,7 @@ use super::{
     Call, Job, LocalWrite, Planned, check_client_order_ids, describe, is_virtual, mark_canceled,
     not_sent, trade_command_id, validate_stop_triggers,
 };
-use crate::sign::{self, Query};
+use crate::sign::Query;
 use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
     self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
@@ -752,8 +752,7 @@ impl BybitLinear {
             url.push('?');
             url.push_str(&payload);
         }
-        let step = sign::Http::new(identity.clone(), payload.clone(), self.recv_window)
-            .with_header_policy(self.signing_policy.header_policy());
+        let step = self.http_signer(identity.clone(), payload.clone());
         let body = (method != Method::Get).then(|| payload.clone());
         let pending = Pending {
             category: self.category,
@@ -1770,7 +1769,7 @@ impl BybitLinear {
                     .front()
                     .is_some_and(|leg| matches!(leg.planned.call, Call::PartialStop { .. }))
             })
-            .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+            .and_then(|flow| flow.replacement_refusal(cx.store))
         else {
             return;
         };
@@ -1797,7 +1796,7 @@ impl BybitLinear {
             return false;
         };
         if self.trading.gone_before_cancel.contains(replaced)
-            || flow.validate(cx.store, cx.now, true).is_err()
+            || flow.validate(cx.store, true).is_err()
         {
             return false;
         }
@@ -2086,7 +2085,7 @@ impl BybitLinear {
             let refusal = run
                 .partial
                 .as_ref()
-                .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+                .and_then(|flow| flow.replacement_refusal(cx.store))
                 .unwrap_or_else(|| error.message.clone());
             let swapped = self.swap_replacement_for_put_back(cx, request.command, run, refusal);
             self.trading.gone_before_cancel.remove(&replaced);
@@ -2222,10 +2221,8 @@ impl BybitLinear {
         }
         if let Some(flow) = &run.partial {
             match active.leg.planned.call {
-                Call::PartialStop { .. } => flow.validate(store, release.time.raw_ms, false)?,
-                Call::RestorePartialStop { .. } => {
-                    flow.validate(store, release.time.raw_ms, true)?
-                }
+                Call::PartialStop { .. } => flow.validate(store, false)?,
+                Call::RestorePartialStop { .. } => flow.validate(store, true)?,
                 _ => {}
             }
         }

@@ -608,3 +608,213 @@ fn hyro_v1_configured_simulator_hosts_override_bybit_demo_and_testnet() {
         );
     }
 }
+
+/// `markets` linear USDT perpetuals named `M0USDT`, `M1USDT`, ...
+fn many_instruments(markets: usize) -> String {
+    let rows: Vec<String> = (0..markets)
+        .map(|i| {
+            format!(
+                r#"{{"symbol":"M{i}USDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"M{i}","quoteCoin":"USDT","deliveryTime":"0","leverageFilter":{{"minLeverage":"1","maxLeverage":"100.00","leverageStep":"0.01"}},"priceFilter":{{"minPrice":"0.01","maxPrice":"199999.98","tickSize":"0.01"}},"lotSizeFilter":{{"maxOrderQty":"7240.00","minOrderQty":"0.01","qtyStep":"0.01"}},"settleCoin":"USDT"}}"#
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"category":"linear","list":[{}],"nextPageCursor":""}},"retExtInfo":{{}},"time":1735809771618}}"#,
+        rows.join(",")
+    )
+}
+
+/// Replays the subscribe/unsubscribe frames sent on the public socket and
+/// returns the live topic set after the last frame and its largest size.
+fn live_public_topics(h: &Harness) -> (std::collections::BTreeSet<String>, usize) {
+    let mut live = std::collections::BTreeSet::new();
+    let mut peak = 0;
+    for text in h.sent_on("/v5/public/linear") {
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let Some(args) = frame["args"].as_array() else {
+            continue;
+        };
+        for arg in args.iter().map(|a| a.as_str().unwrap().to_owned()) {
+            match frame["op"].as_str() {
+                Some("subscribe") => live.insert(arg),
+                Some("unsubscribe") => live.remove(&arg),
+                _ => false,
+            };
+        }
+        peak = peak.max(live.len());
+    }
+    (live, peak)
+}
+
+/// Hyro refuses the subscribe that takes one connection past 32 topics, and
+/// every one after it (live 2026-11-28: 32 accepted, the 33rd refused with
+/// "at most 32 topics per connection", TEAL-20). Forty markets would ask for
+/// 41 topics; the live set must stay at 32 and keep the book being viewed.
+#[test]
+fn hyro_public_feed_never_asks_one_connection_for_more_than_32_topics() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert_eq!(live.len(), 32);
+    assert!(
+        live.iter()
+            .any(|t| t.starts_with("orderbook.") && t.ends_with(".M39USDT")),
+        "{live:?}"
+    );
+    // The viewed symbol's ticker is kept ahead of idle markets: sizing reads it.
+    assert!(live.contains("tickers.M39USDT"), "{live:?}");
+    let notices: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("at most 32 public topics"))
+        .collect();
+    assert_eq!(notices.len(), 1, "{:?}", h.logs);
+}
+
+/// The 32-topic cap is Hyro's alone: Bybit streams every ticker it lists.
+#[test]
+fn bybit_public_feed_is_not_held_to_hyros_connection_cap() {
+    let mut h = Harness::started(public_options(Variant::Linear));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, _) = live_public_topics(&h);
+    assert_eq!(live.len(), 41, "{live:?}");
+}
+
+fn has_book(live: &std::collections::BTreeSet<String>, symbol: &str) -> bool {
+    live.iter()
+        .any(|t| t.starts_with("orderbook.") && t.ends_with(&format!(".{symbol}")))
+}
+
+/// Past the cap, opening a book evicts the OLDEST streams, never an arbitrary
+/// live book or the one just opened, and each kept book keeps its own ticker
+/// (review of #3837: HashMap order once evicted M19, M17, then M32 and M33).
+#[test]
+fn hyro_capped_feed_keeps_the_newest_books_each_with_its_ticker() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..36 {
+        let symbol = format!("M{i}USDT");
+        h.command(Command::SubscribeOrderBook {
+            symbol: symbol.clone(),
+        });
+        h.advance(500.0);
+        let (live, peak) = live_public_topics(&h);
+        assert!(peak <= 32, "Hyro connection reached {peak} topics");
+        assert!(has_book(&live, &symbol), "opened {symbol}: {live:?}");
+        assert!(
+            live.contains(&format!("tickers.{symbol}")),
+            "opened {symbol} without its ticker: {live:?}"
+        );
+    }
+    // Sixteen book-and-ticker pairs fill 32 topics: exactly the sixteen newest.
+    let (live, _) = live_public_topics(&h);
+    for i in 0..36 {
+        let symbol = format!("M{i}USDT");
+        assert_eq!(has_book(&live, &symbol), i >= 20, "{symbol}: {live:?}");
+        assert_eq!(
+            live.contains(&format!("tickers.{symbol}")),
+            i >= 20,
+            "{symbol}: {live:?}"
+        );
+    }
+    assert_eq!(live.len(), 32);
+}
+
+/// With 31 other books open, a newly opened book streams with its own ticker
+/// (review of #3837: it used to stream `orderbook.*.M39USDT` without one).
+#[test]
+fn hyro_book_opened_beside_31_others_streams_with_its_ticker() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..31 {
+        h.command(Command::SubscribeOrderBook {
+            symbol: format!("M{i}USDT"),
+        });
+    }
+    h.advance(2_000.0);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert!(has_book(&live, "M39USDT"), "{live:?}");
+    assert!(live.contains("tickers.M39USDT"), "{live:?}");
+}
+
+/// Every (op, topic) the public socket was sent, in order.
+fn public_ops(h: &Harness) -> Vec<(String, String)> {
+    let mut ops = Vec::new();
+    for text in h.sent_on("/v5/public/linear") {
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if let (Some(op), Some(args)) = (frame["op"].as_str(), frame["args"].as_array()) {
+            for arg in args {
+                ops.push((op.to_owned(), arg.as_str().unwrap().to_owned()));
+            }
+        }
+    }
+    ops
+}
+
+/// A sequence gap takes the book out of the set only for its fresh snapshot.
+/// At the cap its ticker stays and its slot is held, so the gap sends the
+/// book's own unsubscribe and subscribe and nothing else (review of #3837: the
+/// slot went to the oldest evicted book and ticker, eight frames per gap).
+#[test]
+fn hyro_sequence_gap_at_the_cap_churns_only_the_gapped_book() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..36 {
+        h.command(Command::SubscribeOrderBook {
+            symbol: format!("M{i}USDT"),
+        });
+        h.advance(500.0);
+    }
+    let (live, _) = live_public_topics(&h);
+    let book = live
+        .iter()
+        .find(|t| t.starts_with("orderbook.") && t.ends_with(".M35USDT"))
+        .expect("the newest book is live")
+        .clone();
+    h.message(
+        "/v5/public/linear",
+        &format!(
+            r#"{{"topic":"{book}","type":"snapshot","ts":1,"data":{{"s":"M35USDT","b":[["1.00","1"]],"a":[["1.01","1"]],"u":10,"seq":1}},"cts":1}}"#
+        ),
+    );
+    let before = public_ops(&h).len();
+    h.message(
+        "/v5/public/linear",
+        &format!(
+            r#"{{"topic":"{book}","type":"delta","ts":2,"data":{{"s":"M35USDT","b":[],"a":[],"u":13,"seq":2}},"cts":2}}"#
+        ),
+    );
+    h.advance(50.0);
+    let (during, _) = live_public_topics(&h);
+    assert!(
+        !during.contains(&book),
+        "the gapped book awaits its snapshot"
+    );
+    assert!(during.contains("tickers.M35USDT"), "{during:?}");
+    assert!(!has_book(&during, "M19USDT") && !during.contains("tickers.M19USDT"));
+    h.advance(500.0);
+    let (after, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert_eq!(after, live);
+    assert_eq!(
+        public_ops(&h)[before..],
+        [
+            ("unsubscribe".to_owned(), book.clone()),
+            ("subscribe".to_owned(), book),
+        ]
+    );
+}

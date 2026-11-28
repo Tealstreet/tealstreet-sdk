@@ -38,6 +38,9 @@ const TAGS: &[&str] = &[
     "target",
     "startup_unloaded",
     "startup_refused",
+    "route",
+    "endpoint_class",
+    "cause",
     "user_id",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
@@ -461,9 +464,16 @@ fn panic_event(info: &std::panic::PanicHookInfo<'_>) -> Event<'static> {
 }
 
 /// The throttle key: an explicit fingerprint, else the exception (a panic) or message.
+/// A transport failure keeps its target in the key, so each venue host and route
+/// still sends its own sample per window now that they share one issue.
 fn throttle_key(event: &Event<'static>) -> String {
-    let explicit: Vec<&str> = event.fingerprint.iter().map(|part| part.as_ref()).collect();
+    let mut explicit: Vec<&str> = event.fingerprint.iter().map(|part| part.as_ref()).collect();
     if explicit != ["{{ default }}"] {
+        if event.tags.contains_key("cause")
+            && let Some(target) = event.tags.get("target")
+        {
+            explicit.push(target);
+        }
         return explicit.join("|");
     }
     let detail = match event.exception.values.first() {
@@ -549,6 +559,10 @@ pub struct Report<'a> {
     /// not loaded, never which read failed.
     pub startup_unloaded: Option<&'static str>,
     pub startup_refused: Option<bool>,
+    /// A transport failure's closed route mode, request class and cause class.
+    pub route: Option<&'static str>,
+    pub endpoint_class: Option<&'static str>,
+    pub cause: Option<&'static str>,
     pub running_jobs: Option<usize>,
     pub paused_jobs: Option<usize>,
     pub pending_work: Option<usize>,
@@ -564,6 +578,9 @@ impl Report<'_> {
             ("error_kind", self.error_kind),
             ("venue_code", self.venue_code),
             ("startup_unloaded", self.startup_unloaded),
+            ("route", self.route),
+            ("endpoint_class", self.endpoint_class),
+            ("cause", self.cause),
             (
                 "startup_refused",
                 self.startup_refused
@@ -587,15 +604,32 @@ impl Report<'_> {
                 extra.insert(key.into(), count.into());
             }
         }
-        // One issue per condition and target, not per venue message.
-        let fingerprint: Vec<String> = [Some(self.kind), self.target, self.error_kind]
+        // A transport failure groups by condition, route mode (a request) or
+        // host (a socket open) and closed cause: venue and request class are
+        // tags, so one tunnel outage is one issue whose venue split is visible.
+        // Other conditions group by condition, target and error kind.
+        let parts = match self.cause {
+            Some(cause) => [Some(self.kind), self.route.or(self.target), Some(cause)],
+            None => [Some(self.kind), self.target, self.error_kind],
+        };
+        let fingerprint: Vec<String> = parts
             .into_iter()
             .flatten()
             .map(|part| scrub(part).chars().take(120).collect())
             .collect();
+        // Transport churn the engine retries is a warning; our own proxy refusing
+        // our authorization is a defect.
+        let level = match self.cause {
+            Some(cause) if cause != "proxy_auth" => Level::Warning,
+            _ => Level::Error,
+        };
+        let message = match (self.cause, self.route.or(self.target)) {
+            (Some(cause), Some(via)) => format!("{}: {cause} ({via})", self.summary),
+            _ => self.summary.to_owned(),
+        };
         Event {
-            level: Level::Error,
-            message: Some(self.summary.to_owned()),
+            level,
+            message: Some(message),
             fingerprint: fingerprint
                 .into_iter()
                 .map(Into::into)
@@ -663,6 +697,9 @@ fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<
         venue_code: report.venue_code,
         startup_unloaded: report.startup_unloaded,
         startup_refused: report.startup_refused,
+        route: report.route,
+        endpoint_class: report.endpoint_class,
+        cause: report.cause,
         running_jobs: None,
         paused_jobs: None,
         pending_work: None,
@@ -1030,6 +1067,9 @@ mod tests {
                     venue_code: None,
                     startup_unloaded: None,
                     startup_refused: None,
+                    route: None,
+                    endpoint_class: None,
+                    cause: None,
                 }));
             });
             assert_eq!(
@@ -1357,6 +1397,11 @@ mod tests {
                 "target",
                 "startup_unloaded",
                 "startup_refused",
+                // Transport grouping: closed values from report.rs/transport.rs
+                // classifiers (route mode, request class, cause), never text.
+                "route",
+                "endpoint_class",
+                "cause",
                 "user_id",
             ]
         );
@@ -1383,6 +1428,9 @@ mod tests {
                 venue: None,
                 startup_unloaded: Some("balance"),
                 startup_refused: Some(true),
+                route: None,
+                endpoint_class: None,
+                cause: None,
             })
             .event();
             for (key, value) in [
@@ -1517,6 +1565,30 @@ mod tests {
         assert_eq!(FLUSHES.load(Ordering::SeqCst), 0);
     }
 
+    fn transport_report(
+        kind: safe_cex_native::report::ErrorKind,
+        venue: Option<&'static str>,
+        target: &'static str,
+        route: Option<&'static str>,
+        cause: &'static str,
+    ) -> Event<'static> {
+        from_native(&safe_cex_native::report::ErrorReport {
+            kind,
+            user: None,
+            label: None,
+            target: Some(target),
+            error_kind: None,
+            venue_code: None,
+            venue,
+            startup_unloaded: None,
+            startup_refused: None,
+            route,
+            endpoint_class: route.map(|_| "orderRead"),
+            cause: Some(cause),
+        })
+        .event()
+    }
+
     #[test]
     fn transport_reports_carry_their_venue_and_route_but_no_url() {
         use safe_cex_native::report::{ErrorKind, ErrorReport};
@@ -1525,20 +1597,13 @@ mod tests {
                 (Some("bybitdemo"), "api-demo.bybit.com direct"),
                 (None, "ws.okx.com"),
             ] {
-                sentry::capture_event(
-                    from_native(&ErrorReport {
-                        kind: ErrorKind::RequestFailed,
-                        user: None,
-                        label: None,
-                        target: Some(target),
-                        error_kind: None,
-                        venue_code: None,
-                        venue,
-                        startup_unloaded: None,
-                        startup_refused: None,
-                    })
-                    .event(),
-                );
+                sentry::capture_event(transport_report(
+                    ErrorKind::RequestFailed,
+                    venue,
+                    target,
+                    Some("direct"),
+                    "timeout",
+                ));
             }
         });
         let tags = |event: &Event<'static>| {
@@ -1551,7 +1616,10 @@ mod tests {
         assert_eq!(
             tags(&events[0]),
             [
+                ("cause".to_owned(), "timeout".to_owned()),
+                ("endpoint_class".to_owned(), "orderRead".to_owned()),
                 ("kind".to_owned(), "transport.request_failed".to_owned()),
+                ("route".to_owned(), "direct".to_owned()),
                 ("service".to_owned(), "exchange-server".to_owned()),
                 ("target".to_owned(), "api-demo.bybit.com direct".to_owned()),
                 ("venue".to_owned(), "bybitdemo".to_owned()),
@@ -1569,8 +1637,84 @@ mod tests {
             venue: None,
             startup_unloaded: None,
             startup_refused: None,
+            route: None,
+            endpoint_class: None,
+            cause: None,
         });
         assert_eq!(start.venue, Some("kraken"));
         assert_eq!(start.user_tag.as_deref(), Some("a1b2c3"));
+    }
+
+    /// EXCHANGE-SERVER-A7/AA/AD/AC/B2/AX/AP were one tunnel condition split by
+    /// venue host. The fingerprint now holds no host, URL or error text for a
+    /// request; each target still sends its own throttled sample.
+    #[test]
+    fn transport_failures_group_by_route_and_cause_not_by_venue_host() {
+        use safe_cex_native::report::ErrorKind;
+        let events = captured(Identity::default(), || {
+            for (venue, target) in [
+                (Some("bybit"), "api.bybit.com via HTTP tunnel"),
+                (Some("bitget"), "api.bitget.com via HTTP tunnel"),
+                (Some("bitget"), "api.bitget.com via HTTP tunnel"),
+            ] {
+                sentry::capture_event(transport_report(
+                    ErrorKind::RequestFailed,
+                    venue,
+                    target,
+                    Some("tunnel"),
+                    "tunnel_closed",
+                ));
+            }
+            sentry::capture_event(transport_report(
+                ErrorKind::RequestFailed,
+                Some("okx"),
+                "www.okx.com via proxies.tyo.tealstreet.io",
+                Some("proxy"),
+                "proxy_auth",
+            ));
+            sentry::capture_event(transport_report(
+                ErrorKind::SocketOpenFailed,
+                None,
+                "wss.woox.io",
+                None,
+                "http_5xx",
+            ));
+        });
+        // The repeated bitget target is throttled; bybit's is not.
+        assert_eq!(events.len(), 4);
+        let fingerprint = |event: &Event<'static>| {
+            event
+                .fingerprint
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+        };
+        for event in &events[..2] {
+            assert_eq!(
+                fingerprint(event),
+                ["transport.request_failed", "tunnel", "tunnel_closed"]
+            );
+            assert_eq!(event.level, Level::Warning);
+        }
+        assert_eq!(
+            events[0].message.as_deref(),
+            Some("venue request failed in transport: tunnel_closed (tunnel)")
+        );
+        assert_eq!(events[0].tags["venue"], "bybit");
+        assert_eq!(events[1].tags["venue"], "bitget");
+        assert_eq!(
+            fingerprint(&events[2]),
+            ["transport.request_failed", "proxy", "proxy_auth"]
+        );
+        assert_eq!(events[2].level, Level::Error);
+        assert_eq!(
+            fingerprint(&events[3]),
+            ["transport.socket_open_failed", "wss.woox.io", "http_5xx"]
+        );
+        assert_eq!(events[3].level, Level::Warning);
+        assert_eq!(
+            events[3].message.as_deref(),
+            Some("venue, relay or tunnel socket did not open: http_5xx (wss.woox.io)")
+        );
     }
 }

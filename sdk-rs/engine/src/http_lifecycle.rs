@@ -2697,6 +2697,7 @@ impl<V: Venue> Engine<V> {
         }
         let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
+        let read = managed.lifecycle.context().operation() != Operation::Mutation;
         #[cfg(not(target_arch = "wasm32"))]
         let timeout_message = format!(
             "Request timed out ({})",
@@ -2730,10 +2731,17 @@ impl<V: Venue> Engine<V> {
         }
         // Only notices from this original timeout callback receive its opaque request ID.
         // The JS host joins it to a redacted template before cancelling the resource.
+        // A venue's text-only read report also gains the timeout kind, so hosts handle
+        // it as a transient read failure instead of an unclassified error.
         for action in &mut self.io.core.actions[first_action..] {
             if let Action::Notice(Notice::Event(event)) = action
                 && event.code == log_code::REQUEST_FAILED
             {
+                if read && event.fields.iter().all(|(key, _)| *key != "kind") {
+                    event
+                        .fields
+                        .push(("kind", ErrorKind::Timeout.as_str().into()));
+                }
                 event
                     .fields
                     .push(("httpTimeoutRequest", request.0.to_string().into()));
@@ -7346,7 +7354,46 @@ mod tests {
                 "httpTimeoutRequest",
                 tokens[1].attempt().request.0.to_string().into()
             )));
+            // Without a typed kind the host classifies "Request timed out" by text,
+            // misses its `timeout` pattern and reports a read expiry as an unknown error.
+            assert_eq!(
+                events[0]
+                    .fields
+                    .iter()
+                    .filter(|(key, _)| *key == "kind")
+                    .collect::<Vec<_>>(),
+                [&("kind", "timeout".into())],
+                "released={released}"
+            );
         }
+    }
+
+    #[test]
+    fn released_write_timeout_report_stays_unclassified() {
+        let (mut engine, _) = start(Probe {
+            report_read_failure: true,
+            ..Probe::default()
+        });
+        let (_, token, timer) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        assert!(matches!(
+            engine.claim_http(2., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.drain_actions().for_each(drop);
+        engine.handle(100., Event::TimerFired { timer });
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.code == log_code::REQUEST_FAILED => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        // A write whose outcome is unknown must stay visible, never a transient read.
+        assert!(events[0].fields.iter().all(|(key, _)| *key != "kind"));
     }
 
     #[test]
