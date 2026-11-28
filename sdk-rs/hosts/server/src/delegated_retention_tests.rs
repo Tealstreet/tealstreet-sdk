@@ -1659,3 +1659,418 @@ async fn without_a_notifier_retention_arms_no_warning_and_queues_nothing() {
         })
         .await;
 }
+
+fn cosigned_join(release: bool) -> InitPayload {
+    InitPayload {
+        account_name: "synthetic-main".into(),
+        exchange_name: "bybit".into(),
+        key: "synthetic-key".into(),
+        signing_mode: Some("cosigned".into()),
+        release_delegated: release.then_some(true),
+        ..Default::default()
+    }
+}
+
+async fn verified_cosigned_join(
+    registry: &Arc<Registry>,
+    init: &InitPayload,
+) -> Result<Arc<Account>, crate::delegated::probe::ProbeRefusal> {
+    joined_as(registry, "A", init, 9, 9).await
+}
+
+/// Joins as socket `holder` with a possession proof verified on socket `verified`.
+async fn joined_as(
+    registry: &Arc<Registry>,
+    user: &str,
+    init: &InitPayload,
+    verified: u64,
+    holder: u64,
+) -> Result<Arc<Account>, crate::delegated::probe::ProbeRefusal> {
+    let permit = registry
+        .probe_permit(user, init)?
+        .verified_fixture(verified);
+    registry
+        .obtain_probed_join(
+            user,
+            init,
+            holder,
+            Some(("synthetic-valid-token".into(), u64::MAX)),
+            Arc::new(|_| true),
+            None,
+            permit,
+        )
+        .await
+}
+
+// Sam 2026-11-15, "picking one switches at once": the newest explicit choice wins.
+#[tokio::test]
+async fn an_explicit_cosigned_join_erases_the_delegated_key_and_audits_the_algo_stop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+            let registry = tests::registry();
+            let (resident_account, inbox) = resident(&registry, "A");
+            let resident_account = testing::run_algos(
+                resident_account,
+                safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| false)),
+                inbox,
+            );
+            let provider = resident_account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+
+            let joined = verified_cosigned_join(&registry, &cosigned_join(true))
+                .await
+                .unwrap();
+            assert!(!Arc::ptr_eq(&joined, &resident_account));
+            assert!(
+                joined.delegated().is_none(),
+                "the rebuilt account signs through the browser"
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported,
+                "the resident key is erased, not parked"
+            );
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+            }
+            let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
+            let stop = lines
+                .iter()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|line| line["op"] == "terminateAll")
+                .expect("the resident's algo stop is audited");
+            assert_eq!(stop["origin"], "Cosigned was selected");
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_cosigned_join_without_release_still_attaches_to_the_delegated_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, mut inbox) = resident(&registry, "A");
+            let provider = resident_account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            let joined = verified_cosigned_join(&registry, &cosigned_join(false))
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&joined, &resident_account));
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_release_from_a_stale_account_never_revokes_a_successor_sharing_the_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (stale, _inbox) = resident(&registry, "A");
+            let shared = stale.delegated().unwrap();
+            let (successor, _successor_inbox) =
+                resident_from(&registry, "A", Some("synthetic-key"), false, |_| {
+                    shared.clone()
+                });
+            assert!(!Arc::ptr_eq(&stale, &successor));
+            let provider = successor.delegated().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            assert!(
+                registry
+                    .release_delegated(&stale, 0, Arc::new(|_| true))
+                    .is_err()
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            registry.dispose(&successor, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+fn capture() -> (Outbox, Arc<Mutex<Vec<Value>>>) {
+    let frames = Arc::new(Mutex::new(Vec::new()));
+    let sink = frames.clone();
+    (
+        Arc::new(move |frame: String| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::from_str(&frame).unwrap());
+            true
+        }),
+        frames,
+    )
+}
+
+fn delegated_reinit(instance: &str) -> InitPayload {
+    InitPayload {
+        account_name: "synthetic-main".into(),
+        exchange_name: "bybit".into(),
+        key: "synthetic-key".into(),
+        signing_mode: Some("delegated".into()),
+        instance_id: Some(instance.into()),
+        ..Default::default()
+    }
+}
+
+fn delegated_claim(instance: &str) -> InitPayload {
+    InitPayload {
+        claim_delegated: Some(true),
+        ..delegated_reinit(instance)
+    }
+}
+
+/// Joins as socket `holder` with DELEGATED setup and a possession proof for it.
+async fn delegated_joined_as(
+    registry: &Arc<Registry>,
+    init: &InitPayload,
+    holder: u64,
+) -> Result<Arc<Account>, crate::delegated::probe::ProbeRefusal> {
+    let permit = registry.probe_permit("A", init)?.verified_fixture(holder);
+    registry
+        .obtain_probed_join(
+            "A",
+            init,
+            holder,
+            Some(("synthetic-valid-token".into(), u64::MAX)),
+            Arc::new(|_| true),
+            Some(DelegatedPair::new(
+                init.key.clone(),
+                "synthetic-secret".into(),
+                None,
+            )),
+            permit,
+        )
+        .await
+}
+
+// Review B on #3844: a backgrounded phone is parked, so its confirmation is gone; the
+// bar must still refuse it, and lapse with the retention window it could return within.
+#[tokio::test(start_paused = true)]
+async fn a_release_bars_a_parked_device_until_the_retention_window_lapses() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, _inbox) = resident(&registry, "A");
+            registry.park(
+                "phone-resume".into(),
+                "A",
+                vec![(resident_account.clone(), 7)],
+            );
+            let joined = verified_cosigned_join(&registry, &cosigned_join(true))
+                .await
+                .unwrap();
+            assert!(registry.delegated_barred("A", &delegated_reinit("registration-7")));
+            advance(retention::DELEGATED_RETENTION + Duration::from_secs(1)).await;
+            assert!(
+                !registry.delegated_barred("A", &delegated_reinit("registration-7")),
+                "the bar lapses with the window a released device could return in"
+            );
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+// Review B on #3844: a stale device's ordinary handover must not quietly put the key back
+// on the account the user just moved to Cosigned.
+#[tokio::test]
+async fn a_released_account_is_not_quietly_upgraded_back_to_delegated() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (_resident_account, _inbox) = resident(&registry, "A");
+            let joined = verified_cosigned_join(&registry, &cosigned_join(true))
+                .await
+                .unwrap();
+            assert!(joined.delegated().is_none());
+            let quiet = delegated_joined_as(&registry, &delegated_reinit("registration-7"), 11)
+                .await
+                .map(|account| account.delegated().is_some());
+            assert!(!matches!(quiet, Ok(true)), "no quiet re-upgrade: {quiet:?}");
+            assert!(joined.delegated().is_none(), "the account stays Cosigned");
+            assert!(
+                registry.delegated_barred("A", &delegated_reinit("registration-7")),
+                "a quiet join leaves the bar in place"
+            );
+            // This harness never answers the Cosigned account's browser signatures, so the
+            // upgrade itself stays transiently Busy; what matters is that the claim passed the bar.
+            let chosen = delegated_joined_as(&registry, &delegated_claim("registration-7"), 12)
+                .await
+                .map(|account| account.delegated().is_some());
+            assert!(
+                matches!(
+                    chosen,
+                    Ok(true)
+                        | Err(crate::delegated::probe::ProbeRefusal {
+                            transient: true,
+                            ..
+                        })
+                ),
+                "the explicit choice is past the bar: {chosen:?}"
+            );
+            assert!(
+                !registry.delegated_barred("A", &delegated_reinit("phone")),
+                "an explicit Delegated choice lifts the bar for every device"
+            );
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_release_tells_every_other_delegated_registration_and_bars_its_silent_reupgrade() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, _inbox) = resident(&registry, "A");
+            let (phone, frames) = capture();
+            resident_account.hold(
+                8,
+                Live {
+                    outbox: phone.clone(),
+                    token: None,
+                },
+            );
+            resident_account.confirm_signing_mode(
+                8,
+                &resident_account.name,
+                Delegated,
+                phone,
+                Some("phone"),
+            );
+            frames.lock().unwrap().clear();
+            let joined = verified_cosigned_join(&registry, &cosigned_join(true))
+                .await
+                .unwrap();
+            let released: Vec<_> = frames
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|frame| frame["d"]["data"][1]["reason"] == "mode_released")
+                .cloned()
+                .collect();
+            assert_eq!(
+                released.len(),
+                1,
+                "the other device hears that Delegated stopped"
+            );
+            assert_eq!(released[0]["d"]["data"][1]["transient"], false);
+            assert_eq!(
+                released[0]["d"]["instanceId"], "phone",
+                "tagged with the released registration, which awaits no reply"
+            );
+            for instance in ["phone", "registration-7", "a-fresh-exchange"] {
+                assert!(
+                    registry.delegated_barred("A", &delegated_reinit(instance)),
+                    "{instance} is barred: the bar keys on the account, not the instance"
+                );
+            }
+            assert!(
+                !registry.delegated_barred("A", &delegated_claim("phone")),
+                "an explicit Delegated choice may upgrade again"
+            );
+            assert!(!registry.delegated_barred("B", &delegated_reinit("phone")));
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_release_without_this_sockets_proof_is_refused_and_keeps_the_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, mut inbox) = resident(&registry, "A");
+            let provider = resident_account.delegated().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            assert!(
+                joined_as(&registry, "A", &cosigned_join(true), 8, 9)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.dispose(&resident_account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn another_users_release_never_touches_the_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, mut inbox) = resident(&registry, "A");
+            let provider = resident_account.delegated().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            if let Ok(other) = joined_as(&registry, "B", &cosigned_join(true), 9, 9).await {
+                assert!(!Arc::ptr_eq(&other, &resident_account));
+                registry.dispose(&other, Disposal::PageDisposed);
+            }
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.dispose(&resident_account, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_racing_release_and_plain_join_never_leave_a_delegated_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, _inbox) = resident(&registry, "A");
+            let provider = resident_account.delegated().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            let (release, plain) = (cosigned_join(true), cosigned_join(false));
+            let quiet = delegated_reinit("registration-7");
+            let (released, attached, rejoined) = tokio::join!(
+                joined_as(&registry, "A", &release, 9, 9),
+                joined_as(&registry, "A", &plain, 10, 10),
+                delegated_joined_as(&registry, &quiet, 11),
+            );
+            if registry.delegated_barred("A", &quiet) {
+                assert!(
+                    !rejoined
+                        .as_ref()
+                        .is_ok_and(|account| account.delegated().is_some()),
+                    "a barred account never runs Delegated"
+                );
+            }
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            for account in registry.accounts.lock().unwrap().values() {
+                assert!(
+                    account.delegated().is_none(),
+                    "no DELEGATED account survives the release"
+                );
+            }
+            for account in [released.ok(), attached.ok(), rejoined.ok()]
+                .into_iter()
+                .flatten()
+            {
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}

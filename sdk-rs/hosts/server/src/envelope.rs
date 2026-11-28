@@ -24,6 +24,14 @@ pub struct InitPayload {
     /// Connection-local, like `sealed`; never a setting or fingerprint field.
     #[serde(default, skip_serializing)]
     pub resume: Option<bool>,
+    /// An explicit COSIGNED choice: once this join proves possession, a DELEGATED resident is
+    /// stopped and its key erased instead of being joined. Connection-local, like `resume`.
+    #[serde(default, skip_serializing)]
+    pub release_delegated: Option<bool>,
+    /// An explicit DELEGATED choice: the only init that may lift the bar a release left on
+    /// this account. Connection-local, like `release_delegated`.
+    #[serde(default, skip_serializing)]
+    pub claim_delegated: Option<bool>,
     /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
     #[serde(default, skip_serializing)]
     pub resume_proof: Option<String>,
@@ -483,6 +491,28 @@ impl ModeTransitionRefusal {
     pub fn transient(self) -> bool {
         self == Self::Busy
     }
+}
+
+/// A registration whose DELEGATED account a verified explicit Cosigned choice released.
+/// Permanent: an automatic re-init from it must not quietly upgrade the account again.
+pub fn delegated_released(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Cosigned was chosen for this account on another device, so Delegated stopped here. Choose Delegated again to switch back.",
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": "admission",
+                "reason": "mode_released",
+                "transient": false,
+                "requestedMode": AccountSigningMode::Delegated,
+                "residentMode": AccountSigningMode::Cosigned,
+                "attached": false,
+            }
+        ]),
+    )
 }
 
 /// Resident mode describes the account, not authority granted to this candidate.

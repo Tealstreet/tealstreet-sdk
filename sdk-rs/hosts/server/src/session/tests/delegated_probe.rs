@@ -596,3 +596,31 @@ fn private_read_metadata(code: i64) -> envelope::InitRefusalMetadata {
         stage: Some(RefusalStage::PrivateRead),
     }
 }
+
+// Every client instance is barred alike: a fresh exchange mints a fresh instanceId.
+#[tokio::test]
+async fn a_released_account_refuses_any_quiet_delegated_init_but_an_explicit_choice_proves() {
+    let f = fixture().await;
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let stale = payload(&mut session, Some("released-registration"));
+    f.registry.bar_for_test("alice", &stale);
+    for instance in ["released-registration", "fresh-registration"] {
+        let init = payload(&mut session, Some(instance));
+        session.init(init).await.unwrap();
+        assert!(
+            !session.pending_verifications.contains_key("acct"),
+            "{instance}: no proof, no handover"
+        );
+        let refused = std::iter::from_fn(|| sent.try_recv().ok())
+            .map(|text| serde_json::from_str::<Value>(&text).unwrap())
+            .any(|frame| frame["d"]["data"][1]["reason"] == "mode_released");
+        assert!(refused, "{instance}: told why");
+    }
+    let mut chosen = payload(&mut session, Some("fresh-registration"));
+    chosen.claim_delegated = Some(true);
+    session.init(chosen).await.unwrap();
+    assert!(
+        session.pending_verifications.contains_key("acct"),
+        "an explicit Delegated choice still proves and joins"
+    );
+}

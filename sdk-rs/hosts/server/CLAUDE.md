@@ -141,7 +141,24 @@ construction also retains original typed identity facts bound to the same provid
 venue and serialized refs; JSON must never restore ScalarOnly credential absence.
 Public mode is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
-to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
+to a DELEGATED resident without downgrading it, unless its init carries
+`releaseDelegated: true` (an explicit Cosigned choice; the newest explicit mode
+choice wins, Sam 2026-11-15). Only after that join's possession proof does
+`release_delegated` revoke the resident key, stop its algos with the audited
+reason "Cosigned was selected" (`Disposal::ModeReleased`) and rebuild the account
+as COSIGNED for the joining socket; resting venue orders stay. A release from a
+stale account is refused, and `stop` never revokes a resident a successor shares.
+Every live holder hears the algo finals; every other confirmed DELEGATED
+registration gets a permanent `mode_released` refusal tagged with its own instanceId.
+The release also bars the account itself (`delegated_bars`, keyed by `(user,
+registry_name)`, so owner + venue scope + key id, never a client instanceId) for
+`DELEGATED_RETENTION`: parked, retained and offline devices are refused with
+`mode_released` when they return, and no new client instance slips past. The bar is
+inserted under the `accounts` lock in the same step as the currency check, and every
+DELEGATED publish and in-place upgrade checks it under that lock, so a racing Delegated
+join either makes the release stale or is refused. Only an init carrying
+`claimDelegated` (an explicit Delegated choice) lifts it, and only the bar it saw when
+it began: a release after that is the newer choice and wins. In-place handover that keeps algos running is not implemented (AGT-383). A proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
 Public-key handovers locally match the candidate to the original provider's
 completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr
