@@ -61,7 +61,29 @@ pub struct OwnPlacements {
     /// client id, fill id). Fill keys and claims use them.
     native_ids: HashMap<Key, (String, Instant)>,
     fill_native_ids: HashMap<(String, String, String), (String, Instant)>,
+    /// The leg suffixes (`_sl`, `_tp`) last seen on rows of this account's own
+    /// native orders (`observe_legs`), by (symbol, native id).
+    leg_rows: HashMap<Key, (Vec<String>, Instant)>,
+    /// Own orders that gained a leg while this account's own command on that
+    /// symbol was in flight: theirs or another login's, settled by the command.
+    /// Each keeps the client ids and parents its rows carry, which a child may
+    /// name instead of the native id.
+    provisional: HashMap<Key, (Vec<String>, Instant)>,
+    /// Own orders that gained a leg another client added (AGT-333: another
+    /// login's OKX full-position leg joined this one's algo), by native id and
+    /// by each of their rows' client ids and parents. Which leg fired is
+    /// unknown, so their triggered children link to nobody.
+    joint: HashMap<Key, ((), Instant)>,
+    /// Own orders an own placement just joined before their new leg row was
+    /// seen (the ack came first): that leg, seen within `OWN_JOIN_WINDOW`, is
+    /// this account's own.
+    own_joins: HashMap<Key, Instant>,
 }
+
+/// How long an own join's acknowledgement waits for its new leg row. OKX
+/// allows one leg of each kind, so once the join is acknowledged no other
+/// client can add a leg until one is deleted.
+const OWN_JOIN_WINDOW: Duration = Duration::from_secs(60);
 
 /// A fill's native order id on a client-keyed venue (`OwnPlacements::resolve`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +145,10 @@ impl OwnPlacements {
                 self.recorded.remove(&oldest);
             }
         }
+        // A joint order stays joint as long as it stays recorded here.
+        if self.joint.contains_key(&key) {
+            insert_bounded(&mut self.joint, key.clone(), (), now);
+        }
         self.recorded.insert(key, now + RETENTION);
         fresh
     }
@@ -175,7 +201,19 @@ impl OwnPlacements {
     /// An id equal to a caller-chosen client id (a client-keyed venue's
     /// completion) never claims: that venue's native id comes from
     /// `record_placement_native_id`.
-    pub fn record_completion(&mut self, symbols: &[String], legs: &[Leg], result: &str) {
+    ///
+    /// `held` lists the rows already open on the symbol when the command was
+    /// dispatched that are not this account's (`held_rows`). A completion id
+    /// naming one of them is an order the command joined, not one it placed
+    /// (OKX completes a full-position join with the held algo's id, AGT-333),
+    /// so it records nothing.
+    pub fn record_completion(
+        &mut self,
+        symbols: &[String],
+        legs: &[Leg],
+        result: &str,
+        held: &[String],
+    ) {
         let [symbol] = symbols else {
             return;
         };
@@ -183,10 +221,38 @@ impl OwnPlacements {
             return;
         }
         for id in result_ids(result) {
-            if !caller_chosen(legs, &id) {
+            if !caller_chosen(legs, &id) && !names_held(held, &id) {
                 self.record(symbol, &id);
             }
         }
+    }
+
+    /// The ids and parent ids of `orders` on `symbols` that this account did
+    /// not place: what a placement dispatched now may join but never claims.
+    pub fn held_rows(
+        &self,
+        symbols: &[String],
+        orders: &[safe_cex_engine::model::Order],
+    ) -> Vec<String> {
+        let now = Instant::now();
+        // A leg row (`{algoId}_sl`) is this account's when its native order is.
+        let ours = |order: &safe_cex_engine::model::Order| {
+            [
+                Some(order.id.as_str()),
+                order.id.split_once('_').map(|(native, _)| native),
+                order.parent_id.as_deref(),
+                order.client_order_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|identity| self.placed_at(&order.symbol, identity, now))
+        };
+        orders
+            .iter()
+            .filter(|order| symbols.contains(&order.symbol) && !ours(order))
+            .flat_map(|order| [Some(order.id.clone()), order.parent_id.clone()])
+            .flatten()
+            .collect()
     }
 
     /// A failed batch's legs the venue proved accepted. A leg is matched by
@@ -310,12 +376,146 @@ impl OwnPlacements {
     }
 
     pub fn link_at(&mut self, symbol: &str, order_id: &str, triggered_by: &[String], now: Instant) {
+        let joint = |algo: &String| {
+            self.joint
+                .get(&(symbol.to_owned(), algo.clone()))
+                .is_some_and(|(_, expiry)| now < *expiry)
+        };
+        let provisional = |algo: &String| {
+            self.provisional
+                .iter()
+                .any(|((s, native), (aliases, expiry))| {
+                    s == symbol && now < *expiry && (native == algo || aliases.contains(algo))
+                })
+        };
+        // A joint (or unsettled) algo's child may be another login's leg.
+        if triggered_by
+            .iter()
+            .filter(|algo| !algo.is_empty())
+            .any(|algo| joint(algo) || provisional(algo))
+        {
+            return;
+        }
         if triggered_by
             .iter()
             .any(|algo| self.placed_at(symbol, algo, now))
         {
             self.record_at(symbol, order_id, now);
         }
+    }
+
+    /// Note the leg rows (`{native}_{leg}`) of this account's own orders. A
+    /// leg new since the last look was added by this account only if its own
+    /// command on that symbol was in flight (`in_flight`), which `settle`
+    /// decides; otherwise another client added it and the order is joint.
+    /// The first look at an order only sets what it carries.
+    pub fn observe_legs(
+        &mut self,
+        orders: &[safe_cex_engine::model::Order],
+        in_flight: impl Fn(&str) -> bool,
+    ) {
+        let now = Instant::now();
+        let mut current: HashMap<Key, (Vec<String>, Vec<String>)> = HashMap::new();
+        for order in orders {
+            // By its native id, or the client id or parent a child also links
+            // through (an OKX algo whose ack was lost keeps its receipt's id).
+            let Some((native, leg)) = order.id.split_once('_') else {
+                continue;
+            };
+            let aliases = [order.client_order_id.as_deref(), order.parent_id.as_deref()];
+            let ours = std::iter::once(Some(native))
+                .chain(aliases)
+                .flatten()
+                .any(|identity| self.placed_at(&order.symbol, identity, now));
+            if ours {
+                let (legs, known) = current
+                    .entry((order.symbol.clone(), native.to_owned()))
+                    .or_default();
+                legs.push(leg.to_owned());
+                for alias in aliases.into_iter().flatten() {
+                    if !alias.is_empty() && alias != native && !known.iter().any(|k| k == alias) {
+                        known.push(alias.to_owned());
+                    }
+                }
+            }
+        }
+        for (key, (legs, aliases)) in current {
+            let grew = self
+                .leg_rows
+                .get(&key)
+                .filter(|(_, expiry)| now < *expiry)
+                .is_some_and(|(seen, _)| legs.iter().any(|leg| !seen.contains(leg)));
+            let own_join = grew
+                && self
+                    .own_joins
+                    .remove(&key)
+                    .is_some_and(|expiry| now < expiry);
+            if grew && !own_join {
+                if in_flight(&key.0) {
+                    insert_bounded(&mut self.provisional, key.clone(), aliases, now);
+                } else {
+                    self.mark_joint(&key, &aliases, now);
+                }
+            }
+            insert_bounded(&mut self.leg_rows, key, legs, now);
+        }
+    }
+
+    fn mark_joint(&mut self, (symbol, native): &Key, aliases: &[String], now: Instant) {
+        for identity in std::iter::once(native).chain(aliases) {
+            insert_bounded(&mut self.joint, (symbol.clone(), identity.clone()), (), now);
+        }
+    }
+
+    /// This account's own command on `symbols` ended. An order that gained a
+    /// leg while it was in flight is this account's own join only if the
+    /// command completed naming it (`result`); a failed or unnamed one is joint.
+    /// A placement that completes naming an own order it could join (`joinable`,
+    /// its `joinable` at dispatch) joined it; if that new leg has not been seen
+    /// yet, it is expected (`OWN_JOIN_WINDOW`).
+    pub fn settle(&mut self, symbols: &[String], result: Option<&str>, joinable: &[String]) {
+        let named = result.map(result_ids).unwrap_or_default();
+        let settled: Vec<Key> = self
+            .provisional
+            .keys()
+            .filter(|(symbol, _)| symbols.contains(symbol))
+            .cloned()
+            .collect();
+        let now = Instant::now();
+        for key in settled {
+            let Some((aliases, _)) = self.provisional.remove(&key) else {
+                continue;
+            };
+            if !named.contains(&key.1) {
+                self.mark_joint(&key, &aliases, now);
+            }
+        }
+        // A placement completes with an existing id only when it joined it.
+        let [symbol] = symbols else {
+            return;
+        };
+        for id in named.into_iter().filter(|id| joinable.contains(id)) {
+            let key = (symbol.clone(), id);
+            if !self.joint.contains_key(&key) {
+                if self.own_joins.len() >= CAPACITY {
+                    self.own_joins.retain(|_, expiry| now < *expiry);
+                }
+                if self.own_joins.len() < CAPACITY {
+                    self.own_joins.insert(key, now + OWN_JOIN_WINDOW);
+                }
+            }
+        }
+    }
+
+    /// The own orders on `symbols` whose leg rows are tracked: what a placement
+    /// dispatched now could join.
+    pub fn joinable(&self, symbols: &[String]) -> Vec<String> {
+        let now = Instant::now();
+        self.leg_rows
+            .iter()
+            .filter(|((symbol, _), (_, expiry))| symbols.contains(symbol) && now < *expiry)
+            .map(|((_, native), _)| native.clone())
+            .collect()
     }
 
     /// Whether this account placed the order on `symbol` with exactly this id
@@ -330,6 +530,14 @@ impl OwnPlacements {
             .get(&(symbol.to_owned(), identity.to_owned()))
             .is_some_and(|expiry| now < *expiry)
     }
+}
+
+/// Whether `id` is a held row, or the native order a held row is a leg of
+/// (OKX stores an algo's legs as `{algoId}_sl`/`_tp`). Matching a leg by its
+/// prefix only ever withholds a claim, the fail-open side.
+fn names_held(held: &[String], id: &str) -> bool {
+    held.iter()
+        .any(|row| row == id || row.strip_prefix(id).is_some_and(|leg| leg.starts_with('_')))
 }
 
 fn caller_chosen(legs: &[Leg], identity: &str) -> bool {
@@ -508,10 +716,248 @@ mod tests {
     fn a_completion_records_ids_only_under_its_one_symbol() {
         let mut placements = OwnPlacements::default();
         let legs: Vec<Leg> = vec![(BTC.into(), None), ("ETHUSDT".into(), None)];
-        placements.record_completion(&[BTC.into(), "ETHUSDT".into()], &legs, r#"["1","2"]"#);
+        placements.record_completion(&[BTC.into(), "ETHUSDT".into()], &legs, r#"["1","2"]"#, &[]);
         assert!(!placements.placed(BTC, "1") && !placements.placed("ETHUSDT", "2"));
-        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["3"]"#);
+        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["3"]"#, &[]);
         assert!(placements.placed(BTC, "3") && !placements.placed("ETHUSDT", "3"));
+    }
+
+    /// AGT-333: OKX completes a full-position join with the HELD algo's id.
+    /// Another login's held algo (stored as its `_sl` leg) is never claimed by
+    /// the login that joined it; this login's own held algo still is, and a
+    /// fresh id beside it records as before. Synthetic rows.
+    #[test]
+    fn a_completion_never_claims_an_order_it_joined() {
+        use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+        let row = |id: &str, symbol: &str| Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: symbol.into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 36000.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: true,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "88");
+        let orders = [
+            row("77_sl", BTC),
+            row("88_sl", BTC),
+            row("99_sl", "ETHUSDT"),
+        ];
+        let held = placements.held_rows(&[BTC.into()], &orders);
+        assert_eq!(held, ["77_sl"], "only another login's rows on this symbol");
+        let one = [(BTC.to_owned(), None)];
+        placements.record_completion(&[BTC.into()], &one, r#"["77"]"#, &held);
+        assert!(
+            !placements.placed(BTC, "77"),
+            "a joined algo is not placed here"
+        );
+        placements.record_completion(&[BTC.into()], &one, r#"["7","770"]"#, &held);
+        assert!(placements.placed(BTC, "7") && placements.placed(BTC, "770"));
+    }
+
+    fn leg(id: &str) -> safe_cex_engine::model::Order {
+        use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: BTC.into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 36000.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: true,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    /// AGT-333 review: an own algo that gains a leg no own command added is
+    /// joint, and its children link to nobody. The first look only sets what
+    /// it carries; a leg deleted and later re-added by another client is new
+    /// again. Synthetic rows.
+    #[test]
+    fn an_own_algo_that_gains_a_foreign_leg_links_nobody() {
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "77");
+        placements.record(BTC, "88");
+        placements.observe_legs(&[leg("77_sl"), leg("88_sl"), leg("88_tp")], |_| false);
+        placements.link(BTC, "child-88", &["88".into()]);
+        assert!(
+            placements.placed(BTC, "child-88"),
+            "a first look is no growth"
+        );
+        placements.observe_legs(&[leg("77_sl"), leg("77_tp"), leg("88_sl")], |_| false);
+        placements.observe_legs(
+            &[leg("77_sl"), leg("77_tp"), leg("88_sl"), leg("88_tp")],
+            |_| false,
+        );
+        for algo in ["77", "88"] {
+            let child = format!("child-{algo}-2");
+            placements.link(BTC, &child, &[algo.into(), "its-client-id".into()]);
+            assert!(!placements.placed(BTC, &child), "{algo}: joint");
+        }
+        assert!(
+            placements.placed(BTC, "77"),
+            "the algo itself stays recorded"
+        );
+    }
+
+    /// Review A (8e01a745a1): an algo known here only by its client id (the
+    /// ack was lost) is still tracked through its rows' client id, under its
+    /// native id, so a foreign leg makes it joint for both identities.
+    #[test]
+    fn an_algo_known_only_by_its_client_id_still_becomes_joint() {
+        let with_client = |id: &str| {
+            let mut row = leg(id);
+            row.client_order_id = Some("algo-client".into());
+            row
+        };
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "algo-client");
+        placements.observe_legs(&[with_client("77_sl")], |_| false);
+        placements.observe_legs(&[with_client("77_sl"), with_client("77_tp")], |_| false);
+        placements.link(BTC, "child", &["77".into(), "algo-client".into()]);
+        assert!(!placements.placed(BTC, "child"));
+    }
+
+    /// CodeRabbit (7fe0f26557): a joint algo's child that names only the
+    /// algo's client id links nobody, and so does a provisional one's.
+    #[test]
+    fn a_joint_algos_child_named_only_by_client_id_links_nobody() {
+        let with_client = |id: &str, client: &str| {
+            let mut row = leg(id);
+            row.client_order_id = Some(client.into());
+            row
+        };
+        let mut placements = OwnPlacements::default();
+        for (native, client) in [("77", "c77"), ("88", "c88")] {
+            placements.record(BTC, native);
+            placements.record(BTC, client);
+        }
+        placements.observe_legs(
+            &[with_client("77_sl", "c77"), with_client("88_sl", "c88")],
+            |_| false,
+        );
+        placements.observe_legs(
+            &[with_client("77_sl", "c77"), with_client("77_tp", "c77")],
+            |_| false,
+        );
+        placements.observe_legs(
+            &[
+                with_client("77_sl", "c77"),
+                with_client("77_tp", "c77"),
+                with_client("88_sl", "c88"),
+                with_client("88_tp", "c88"),
+            ],
+            |_| true,
+        );
+        placements.link(BTC, "child-77", &[String::new(), "c77".into()]);
+        placements.link(BTC, "child-88", &[String::new(), "c88".into()]);
+        assert!(!placements.placed(BTC, "child-77"), "joint");
+        assert!(!placements.placed(BTC, "child-88"), "provisional");
+        placements.settle(&[BTC.into()], None, &[]);
+        placements.link(BTC, "child-88-2", &[String::new(), "c88".into()]);
+        assert!(
+            !placements.placed(BTC, "child-88-2"),
+            "settled joint by alias too"
+        );
+    }
+
+    /// CodeRabbit (7fe0f26557): recording a joint order again keeps it joint
+    /// for as long as it stays recorded.
+    #[test]
+    fn a_joint_order_recorded_again_stays_joint() {
+        let start = Instant::now();
+        let mut placements = OwnPlacements::default();
+        placements.record_at(BTC, "77", start);
+        placements.observe_legs(&[leg("77_sl")], |_| false);
+        placements.observe_legs(&[leg("77_sl"), leg("77_tp")], |_| false);
+        let refreshed = start + RETENTION - Duration::from_secs(1);
+        placements.record_at(BTC, "77", refreshed);
+        let later = start + RETENTION + Duration::from_secs(60);
+        assert!(placements.placed_at(BTC, "77", later));
+        placements.link_at(BTC, "child", &["77".into()], later);
+        assert!(!placements.placed_at(BTC, "child", later));
+    }
+
+    /// CodeRabbit (7fe0f26557): an own join acknowledged before its new leg row
+    /// is seen expects that leg; a placement that could not join (not joinable
+    /// at dispatch) expects nothing, so a later foreign leg is still joint.
+    #[test]
+    fn an_own_join_acknowledged_before_its_row_keeps_the_order_claimable() {
+        let symbols = [BTC.to_owned()];
+        let mut placements = OwnPlacements::default();
+        placements.record(BTC, "77");
+        placements.record(BTC, "99");
+        placements.observe_legs(&[leg("77_sl"), leg("99_sl")], |_| false);
+        placements.settle(&symbols, Some(r#"["77"]"#), &["77".into()]);
+        placements.settle(&symbols, Some(r#"["99"]"#), &[]);
+        placements.observe_legs(
+            &[leg("77_sl"), leg("77_tp"), leg("99_sl"), leg("99_tp")],
+            |_| false,
+        );
+        placements.link(BTC, "c77", &["77".into()]);
+        placements.link(BTC, "c99", &["99".into()]);
+        assert!(placements.placed(BTC, "c77"), "its own join");
+        assert!(!placements.placed(BTC, "c99"), "not joinable: joint");
+    }
+
+    /// A leg that appears while this account's own command on the symbol is in
+    /// flight is its own only if that command completes naming the algo.
+    #[test]
+    fn a_leg_added_during_an_own_command_is_settled_by_it() {
+        let symbols = [BTC.to_owned()];
+        let mut placements = OwnPlacements::default();
+        for algo in ["1", "2", "3"] {
+            placements.record(BTC, algo);
+        }
+        placements.observe_legs(&[leg("1_sl"), leg("2_sl"), leg("3_sl")], |_| false);
+        let joined = [
+            leg("1_sl"),
+            leg("1_tp"),
+            leg("2_sl"),
+            leg("2_tp"),
+            leg("3_sl"),
+            leg("3_tp"),
+        ];
+        placements.observe_legs(&joined, |symbol| symbol == BTC);
+        placements.link(BTC, "early", &["1".into()]);
+        assert!(!placements.placed(BTC, "early"), "unsettled: nobody");
+        placements.settle(&symbols, Some(r#"["1"]"#), &[]);
+        placements.settle(&symbols, None, &[]);
+        placements.link(BTC, "c1", &["1".into()]);
+        placements.link(BTC, "c2", &["2".into()]);
+        assert!(
+            placements.placed(BTC, "c1"),
+            "named by its completion: own join"
+        );
+        assert!(!placements.placed(BTC, "c2"), "not named: joint");
+        placements.observe_legs(&joined, |_| false);
+        placements.link(BTC, "c1-again", &["1".into()]);
+        assert!(placements.placed(BTC, "c1-again"), "no growth since");
     }
 
     /// Review B (e6e681d490): Coinbase completes a repeated client id with the
@@ -522,14 +968,14 @@ mod tests {
         let mut placements = OwnPlacements::default();
         placements.set_idempotent_client_ids();
         let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
-        placements.record_completion(&[BTC.into()], &desk, r#"["their-order"]"#);
+        placements.record_completion(&[BTC.into()], &desk, r#"["their-order"]"#, &[]);
         placements.record_proven_legs(
             &[(BTC.into(), "desk".into())],
             &desk,
             &[placed_leg(0, Some("desk"), &["their-order"])],
         );
         assert!(!placements.placed(BTC, "their-order"));
-        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["mine"]"#);
+        placements.record_completion(&[BTC.into()], &[(BTC.into(), None)], r#"["mine"]"#, &[]);
         assert!(placements.placed(BTC, "mine"));
     }
 
@@ -645,7 +1091,7 @@ mod tests {
     fn only_an_acked_native_id_claims_a_caller_id_placement() {
         let desk: Vec<Leg> = vec![(BTC.into(), Some("desk".into()))];
         let mut placements = OwnPlacements::default();
-        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#);
+        placements.record_completion(&[BTC.into()], &desk, r#"["desk"]"#, &[]);
         assert!(!placements.placed(BTC, "desk"), "a client-keyed completion");
         placements.record_placement_native_id(&desk, BTC, "other", "n-other");
         placements.record_placement_native_id(&desk, "ETHUSDT", "desk", "n-eth");

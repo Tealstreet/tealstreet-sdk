@@ -53,7 +53,7 @@ fn complete(h: &Harness, ledger: &mut OwnPlacements, command: u32) {
         .and_then(|(_, result)| result.clone().ok())
         .expect("the placement completed");
     // These placements carry no caller id: Binance's are engine-generated.
-    ledger.record_completion(&[SYMBOL.into()], &[(SYMBOL.into(), None)], &result);
+    ledger.record_completion(&[SYMBOL.into()], &[(SYMBOL.into(), None)], &result, &[]);
 }
 
 fn query(url: &str, name: &str) -> String {
@@ -251,7 +251,7 @@ fn record_caller_ack(
         .cloned()
         .expect("completed")
         .expect("placed");
-    ledger.record_completion(&[SYMBOL.into()], legs, &result);
+    ledger.record_completion(&[SYMBOL.into()], legs, &result, &[]);
 }
 
 /// Review A and B (b515532bfa) through real Binance portfolio-margin frame
