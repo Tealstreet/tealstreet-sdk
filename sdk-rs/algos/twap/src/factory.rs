@@ -510,13 +510,14 @@ impl Inner {
         let owner = inner.owner_snapshot();
         let future = cx.port.command(command);
         inner.placing.set(inner.placing.get() + 1);
-        let (inner, task_cx) = (inner.clone(), cx.clone());
+        let (inner, task_cx, request) = (inner.clone(), cx.clone(), request.clone());
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
             inner.placing.set(inner.placing.get() - 1);
             inner.placed.notify_waiters();
             if owner != inner.owner_snapshot() {
                 Self::refresh_owner(&inner, &task_cx);
+                report_orphaned_limit(&task_cx, &request, &outcome);
                 return;
             }
             match (settle_token, outcome) {
@@ -804,6 +805,49 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
+}
+
+/// A limit slice that answered after the account connection changed belongs to no
+/// TWAP and may not be cancelled under the new owner: name it, or say it is unknown.
+fn report_orphaned_limit(
+    cx: &AlgoCx,
+    request: &TwapOrderRequest,
+    outcome: &Result<Vec<String>, SliceFailure>,
+) {
+    let (OrderKind::Limit, Some(price)) = (request.kind, request.price) else {
+        return;
+    };
+    let ids = match outcome {
+        Ok(ids) => ids.clone(),
+        Err(failure) => crate::retained_order_ids(failure),
+    };
+    let symbol = &request.symbol;
+    let message = if !ids.is_empty() {
+        let slice = LimitSlice {
+            order_ids: ids,
+            price,
+            size: request.amount,
+        };
+        format!(
+            "TWAP {symbol}’s limit order placed as the account connection changed is still open: {}.",
+            crate::describe_slices(request.side, &[slice])
+        )
+    } else if outcome
+        .as_ref()
+        .is_err_and(|failure| !crate::known_refusal(failure))
+    {
+        format!(
+            "We couldn’t confirm whether TWAP {symbol}’s {} {} limit order at {price} was placed as the account connection changed. Check your open orders before trying again.",
+            match request.side {
+                OrderSide::Buy => "buy",
+                OrderSide::Sell => "sell",
+            },
+            request.amount
+        )
+    } else {
+        return;
+    };
+    report(cx, &message);
 }
 
 /// A TWAP error the user must see: the `error` op is what the web toasts.

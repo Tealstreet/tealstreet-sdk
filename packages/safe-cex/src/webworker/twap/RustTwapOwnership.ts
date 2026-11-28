@@ -4,14 +4,15 @@ import type { TwapOwner } from './TwapOwner';
 import type { TwapState } from './TwapState';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 
-import { inFlightSlicePlaced } from './inFlightSlice';
+import { settleInFlightSlice } from './inFlightSlice';
 import { acquireTwapLock, acquireTwapLockWithin, TWAP_RESTORE_LOCK_WAIT_MS, twapLockName } from './twapLock';
 import { captureTwapOwner } from './TwapOwner';
 import { restingSlicesNote, twapRestoreRefusal } from './twapRestoreRefusal';
 import { TwapStatus } from './TwapStatus';
 
 type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number };
-type PendingRow = Row & { ownerSession: TwapOwner | null | undefined };
+/** `stopped`: the user stopped it while it waited; its limit slices still need the algos' cancel. */
+type PendingRow = Row & { ownerSession: TwapOwner | null | undefined; stopped?: boolean };
 type PersistedTwap = Row & { id: string };
 
 /**
@@ -43,8 +44,12 @@ export class RustTwapOwnership {
     if (op === 'twap:state') return this.restore(data, ownerSession);
     const row = typeof data === 'string' ? this.pending.get(data) : undefined;
     if (!row) return this.send(op, data);
-    // A restored row awaiting its lock: resume waits for the lock.
-    if (op === 'twap:stop') this.pending.delete(data as string);
+    // A restored row awaiting its lock: resume waits for the lock. A stopped row that
+    // holds limit slices is still restored, paused, so the algos can cancel them.
+    if (op === 'twap:stop' && row.state.limitSlices?.length) {
+      row.stopped = true;
+      row.state = { ...row.state, status: TwapStatus.Paused };
+    } else if (op === 'twap:stop') this.pending.delete(data as string);
     else if (op === 'twap:pause' && row.state.status === TwapStatus.Running)
       row.state = { ...row.state, status: TwapStatus.Paused };
     else if (op === 'twap:cleanup') row.state = { ...row.state, markForCleanup: true };
@@ -102,7 +107,7 @@ export class RustTwapOwnership {
         continue;
       }
       if (ownerSession !== undefined && ownerId === undefined) {
-        this.cancelForOwnerChange(id, symbol, 'persisted ownerId is missing');
+        this.cancelForOwnerChange(id, symbol, state, 'persisted ownerId is missing');
         continue;
       }
       const row: PendingRow = {
@@ -113,7 +118,7 @@ export class RustTwapOwnership {
         ...(ownerGeneration !== undefined ? { ownerGeneration } : {}),
       };
       if (!this.ownerCurrent(row)) {
-        this.cancelForOwnerChange(id, symbol);
+        this.cancelForOwnerChange(id, symbol, row.state);
         continue;
       }
       this.pending.set(id, row);
@@ -132,7 +137,7 @@ export class RustTwapOwnership {
     }
     if (!this.ownerCurrent(row)) {
       release?.();
-      this.cancelForOwnerChange(id, symbol);
+      this.cancelForOwnerChange(id, symbol, row.state);
       return;
     }
     if (!release) {
@@ -142,29 +147,43 @@ export class RustTwapOwnership {
       return;
     }
     this.locks.set(id, release);
-    const placed = inFlight
-      ? await inFlightSlicePlaced(this.exchange, symbol, inFlight, () => this.ownerCurrent(row))
-      : true;
+    const { placed, order } = inFlight
+      ? await settleInFlightSlice(this.exchange, symbol, inFlight, () => this.ownerCurrent(row))
+      : { placed: true, order: undefined };
     if (this.finished || this.pending.get(id) !== row) {
       this.release(id);
       this.publish();
       return;
     }
     if (!this.ownerCurrent(row)) {
-      this.cancelForOwnerChange(id, symbol);
+      this.cancelForOwnerChange(id, symbol, row.state);
       return;
     }
     this.pending.delete(id);
     const { inFlight: _settled, ...rest } = row.state;
+    // A found limit slice rests like any other: the TWAP owns it and cancels it at its end.
+    const adopted =
+      inFlight && order && row.options.useLimitOrders && order.price > 0
+        ? {
+            ...rest,
+            limitSlices: [
+              ...(rest.limitSlices ?? []),
+              { orderIds: [order.id], price: order.price, size: inFlight.size },
+            ],
+          }
+        : rest;
     const state: TwapState = !inFlight
       ? row.state
       : placed
-        ? { ...rest, ordersExecuted: rest.ordersExecuted + 1 }
+        ? { ...adopted, ordersExecuted: rest.ordersExecuted + 1 }
         : { ...rest, ordersSizes: [inFlight.size, ...rest.ordersSizes] };
     // Its last slice was the one in flight: the TWAP is complete, unless limit slices
     // it placed still rest, which it cancels at the end of their interval.
-    const { ownerSession: _ownerSession, ...restored } = row;
-    if (state.ordersSizes.length > 0 || state.limitSlices?.length) this.send('twap:state', [{ id, ...restored, state }]);
+    const { ownerSession: _ownerSession, stopped, ...restored } = row;
+    if (state.ordersSizes.length > 0 || state.limitSlices?.length) {
+      this.send('twap:state', [{ id, ...restored, state }]);
+      if (stopped) this.send('twap:stop', id);
+    }
     // The algos refused it, or it already completed.
     if (!(id in this.rows)) this.release(id);
     this.publish();
@@ -191,7 +210,10 @@ export class RustTwapOwnership {
   }
 
   private publish() {
-    const pending = [...this.pending].map(([id, { ownerSession: _ownerSession, ...row }]) => [id, row]);
+    const pending = [...this.pending].map(([id, { ownerSession: _ownerSession, stopped: _stopped, ...row }]) => [
+      id,
+      row,
+    ]);
     if (!this.finished) this.post({ ...this.rows, ...Object.fromEntries(pending) });
   }
 
@@ -208,12 +230,12 @@ export class RustTwapOwnership {
     );
   }
 
-  private cancelForOwnerChange(id: string, symbol: string, _reason?: string) {
+  private cancelForOwnerChange(id: string, symbol: string, state: TwapState | undefined, _reason?: string) {
     this.pending.delete(id);
     this.release(id);
     this.exchange.emitter.emit(
       'warning',
-      `TWAP ${symbol} wasn’t restored because the account connection changed.`,
+      `TWAP ${symbol} wasn’t restored because the account connection changed${restingSlicesNote(state)}.`,
     );
     this.publish();
   }

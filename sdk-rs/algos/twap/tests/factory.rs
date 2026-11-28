@@ -1932,3 +1932,55 @@ async fn a_listed_slice_whose_cancel_is_refused_is_named_to_the_user() {
         })
         .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_limit_slice_landing_after_an_owner_change_is_named_and_not_cancelled() {
+    LocalSet::new()
+        .run_until(async {
+            let owner = Rc::new(RefCell::new(safe_cex_algo_twap::TwapOwner {
+                owner_id: "A".into(),
+                generation: 7,
+            }));
+            let port = Rc::new(Port::default());
+            port.answer_ms.set(100);
+            port.store.borrow_mut().tickers.insert(
+                "BTCUSDT".into(),
+                Ticker {
+                    id: "BTCUSDT".into(),
+                    symbol: "BTCUSDT".into(),
+                    bid: 100.0,
+                    ask: 100.5,
+                    last: 100.25,
+                    ..Ticker::default()
+                },
+            );
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::with_owner(
+                "a",
+                owner.borrow().clone(),
+                cx.clone(),
+                Rc::new(Chasers::default()),
+            )
+            .guard_owner(Rc::new({
+                let owner = owner.clone();
+                move || owner.borrow().clone()
+            }));
+            factory
+                .handle(
+                    "twap:start",
+                    &twap_options(json!({ "useLimitOrders": true })),
+                    &cx,
+                )
+                .unwrap();
+            settle().await;
+            owner.borrow_mut().owner_id = "B".into();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            settle().await;
+            assert!(cancelled_ids(&port).is_empty());
+            assert!(errors(&port).contains(&json!(
+                "TWAP BTCUSDT’s limit order placed as the account connection changed is still open: buy 0.5 at 100 (order order-1)."
+            )), "{:?}", errors(&port));
+            cx.scope.dispose();
+        })
+        .await;
+}

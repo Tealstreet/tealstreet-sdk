@@ -48,8 +48,7 @@ const row = (id: string, state: Record<string, unknown> = {}) => ({
     ...state,
   },
 });
-const persisted = (...rows: ReturnType<typeof row>[]) =>
-  Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]));
+const persisted = (...rows: ReturnType<typeof row>[]) => Object.fromEntries(rows.map(({ id, ...rest }) => [id, rest]));
 
 let errors: string[];
 let sent: { op: string; data: any }[];
@@ -143,7 +142,11 @@ describe('RustTwapOwnership restore', () => {
   });
 
   it.each([
-    ['an inconclusive lookup', { clientOrderId: 'c1' }, () => lookup.mockResolvedValue({ found: false, definitive: false })],
+    [
+      'an inconclusive lookup',
+      { clientOrderId: 'c1' },
+      () => lookup.mockResolvedValue({ found: false, definitive: false }),
+    ],
     ['a failed lookup', { clientOrderId: 'c1' }, () => lookup.mockRejectedValue(new Error('offline'))],
     ['no client id', {}, () => {}],
   ])('counts an unconfirmable in-flight slice after %s, with a warning', async (_case, identity, arrange) => {
@@ -171,6 +174,46 @@ describe('RustTwapOwnership restore', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sent[0].data[0].state.limitSlices).toEqual(limitSlices);
     expect(errors).toEqual([]);
+  });
+
+  it('adopts a found in-flight limit slice so the TWAP cancels it at its end', async () => {
+    lookup.mockResolvedValue({ found: true, order: { id: 'o9', price: 100 } });
+    const limit = {
+      ...row('t1', { ordersSizes: [], inFlight: { size: 0.25, clientOrderId: 'c1' } }),
+      options: { ...options, useLimitOrders: true },
+    };
+    ownership.handle('twap:state', [limit]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent[0].data[0].state.limitSlices).toEqual([{ orderIds: ['o9'], price: 100, size: 0.25 }]);
+    expect(sent[0].data[0].state.ordersExecuted).toBe(2);
+  });
+
+  it('restores a row stopped while it waited, paused then stopped, when it holds limit slices', async () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    let releaseLookup!: (value: unknown) => void;
+    lookup.mockReturnValue(new Promise((resolve) => (releaseLookup = resolve)));
+    ownership.handle('twap:state', [row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' }, limitSlices })]);
+    await vi.advanceTimersByTimeAsync(0);
+    ownership.handle('twap:stop', 't1');
+    expect(posts.at(-1)).not.toHaveProperty('t1.stopped');
+    releaseLookup({ found: false, definitive: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map(({ op }) => op)).toEqual(['twap:state', 'twap:stop']);
+    expect(sent[0].data[0].state).toMatchObject({ status: TwapStatus.Paused, limitSlices });
+  });
+
+  it('names the resting slices of a row it drops for an owner change', () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    const ownerless = new RustTwapOwnership(
+      { emitter: { emit: (_op: string, message: string) => errors.push(message) } } as unknown as Exchange,
+      algos(),
+      (rows) => posts.push(rows),
+      () => ({ ownerId: 'A', generation: 1 }),
+    );
+    ownerless.handle('twap:state', [row('t1', { limitSlices })]);
+    expect(errors).toEqual([
+      'TWAP BTCUSDT wasn’t restored because the account connection changed. Its limit orders are still open: buy 0.25 at 100 (order o1).',
+    ]);
   });
 
   it('names the resting limit slices of a row it refuses', () => {
@@ -216,9 +259,7 @@ describe('RustTwapOwnership started TWAPs', () => {
     await vi.advanceTimersByTimeAsync(0);
     ownership.receive(persisted(row('fresh', { ordersExecuted: 2 })));
     await vi.advanceTimersByTimeAsync(0);
-    expect(errors).toEqual([
-      'TWAP BTCUSDT started without its cross-tab lock; a duplicated tab could also run it',
-    ]);
+    expect(errors).toEqual(['TWAP BTCUSDT started without its cross-tab lock; a duplicated tab could also run it']);
   });
 });
 

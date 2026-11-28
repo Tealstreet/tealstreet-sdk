@@ -185,3 +185,8 @@ the standard check-your-orders wording. Neither is ever resent.
 An Unknown halt still issues no write (#3355 above). Instead it names each
 resting slice by side, size, price and order id, as do a refused restore and an
 owner change, which may not write for another owner.
+A limit slice whose placement answers after an owner change is named the same
+way, never cancelled. On a restore, the TS wrapper adopts an in-flight slice it
+finds by client id into `limitSlices`, and a restore the user stops while it
+waits for its lock is still sent (paused, then stopped) when it holds slices, so
+the algos cancel them.

@@ -1,18 +1,22 @@
 import type { Exchange } from '../../exchanges/base';
+import type { Order } from '../../types';
 import type { TwapState } from './TwapState';
 
+/** How a restore settles its in-flight slice; `order` is the slice's order when it was found. */
+export type InFlightSliceOutcome = { placed: boolean; order?: Order };
+
 /**
- * Settles a slice a previous worker was placing when it died: true when it
- * counts as placed (found by client id, or not confirmable either way, with a
- * warning, because placing it again could double it); false on a definitive
- * miss, so its size is placed again.
+ * Settles a slice a previous worker was placing when it died: placed when it
+ * was found by client id, or is not confirmable either way (with a warning,
+ * because placing it again could double it); not placed on a definitive miss,
+ * so its size is placed again.
  */
-export const inFlightSlicePlaced = async (
+export const settleInFlightSlice = async (
   exchange: Exchange,
   symbol: string,
   inFlight: NonNullable<TwapState['inFlight']>,
   isCurrent: () => boolean = () => true,
-): Promise<boolean> => {
+): Promise<InFlightSliceOutcome> => {
   const warn = () =>
     isCurrent() &&
     exchange.emitter.emit(
@@ -21,14 +25,15 @@ export const inFlightSlicePlaced = async (
     );
   if (!inFlight.clientOrderId) {
     warn();
-    return true;
+    return { placed: true };
   }
   try {
     const lookup = await exchange.findOrderByClientOrderId(symbol, inFlight.clientOrderId);
-    if (!lookup.found && !lookup.definitive) warn();
-    return lookup.found || !lookup.definitive;
+    if (lookup.found) return { placed: true, order: lookup.order };
+    if (!lookup.definitive) warn();
+    return { placed: !lookup.definitive };
   } catch {
     warn();
-    return true;
+    return { placed: true };
   }
 };
