@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { engineEventClassified } from '../commandOutcome';
 import { ExchangeHealthMonitor } from './ExchangeHealthMonitor';
 
 describe('ExchangeHealthMonitor', () => {
@@ -371,6 +372,15 @@ describe('typed classification', () => {
     // A catch-all kind never hides a text-detected auth failure.
     expect(monitor.processMessage('invalid api key', true, { kind: 'rejected' })).toBe('auth_invalid');
     expect(monitor.processMessage('something unmatched', true, { kind: 'rejected' })).toBe('order_rejected');
+  });
+
+  it('reads an engine read expiry as network only through its kind', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    const text = 'Request timed out (class=orderRead budget=20000ms elapsed=20003ms)';
+    // The text alone misses the `timeout` pattern; the engine's kind field carries it.
+    expect(monitor.processMessage(text, true)).toBe('unknown');
+    const event = { code: 'request.failed', fields: { kind: 'timeout', httpTimeoutRequest: '7' } };
+    expect(monitor.processMessage(text, true, engineEventClassified(event))).toBe('network');
   });
 
   it('reports an insufficient balance by its kind, even when the text matches another pattern', () => {
