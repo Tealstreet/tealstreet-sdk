@@ -9,7 +9,9 @@ use safe_cex_algos::{AlgoCx, AlgoFactory};
 use safe_cex_chaser::{ChaserBook, ChaserOptions, ClientIdMinter};
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::{Outcome, VenueError};
-use safe_cex_engine::model::{CancelOrderRef, OrderSide as EngineSide, OrderStatus, PlaceOrderOpts};
+use safe_cex_engine::model::{
+    CancelOrderRef, OrderSide as EngineSide, OrderStatus, PlaceOrderOpts,
+};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 

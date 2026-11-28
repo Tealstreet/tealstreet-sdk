@@ -19,8 +19,8 @@ pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SC
 pub use amend::{TwapAmendment, TwapUpdate};
 pub use instance::TwapInstance;
 pub use types::{
-    InFlightSlice, LimitSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapOwner,
-    TwapState, TwapStatus,
+    InFlightSlice, LimitSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin,
+    TwapOwner, TwapState, TwapStatus,
 };
 
 use std::collections::{HashSet, VecDeque};

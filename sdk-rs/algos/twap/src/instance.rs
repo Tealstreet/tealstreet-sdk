@@ -290,7 +290,6 @@ impl TwapInstance {
         });
     }
 
-
     pub fn tracked_chaser_ids(&self) -> &[String] {
         &self.tracked_chaser_ids
     }

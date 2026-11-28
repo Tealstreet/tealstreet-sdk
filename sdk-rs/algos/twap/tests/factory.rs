@@ -1776,3 +1776,159 @@ fn native_partial_facts_distinguish_refusal_from_uncertainty() {
         assert_eq!(error.message, ENGINE_UNKNOWN_TEXT);
     }
 }
+
+/// A limit TWAP whose first slice rests as `order-1`, listed open when `listed`.
+async fn resting_limit_slice(listed: bool) -> (Rc<Port>, AlgoCx, TwapFactory) {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    let port = Rc::new(Port::default());
+    port.store.borrow_mut().tickers.insert(
+        "BTCUSDT".into(),
+        Ticker {
+            id: "BTCUSDT".into(),
+            symbol: "BTCUSDT".into(),
+            bid: 100.0,
+            ask: 100.5,
+            last: 100.25,
+            ..Ticker::default()
+        },
+    );
+    let cx = AlgoCx::new(port.clone(), Scope::new());
+    let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+    factory
+        .handle(
+            "twap:start",
+            &twap_options(json!({ "useLimitOrders": true })),
+            &cx,
+        )
+        .unwrap();
+    settle().await;
+    if listed {
+        port.store.borrow_mut().orders.push(Order {
+            id: "order-1".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 100.0,
+            amount: 0.5,
+            filled: 0.0,
+            remaining: 0.5,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        });
+    }
+    assert_eq!(
+        factory.active_twaps("a")[0]["currentOrderIds"],
+        json!(["order-1"])
+    );
+    (port, cx, factory)
+}
+
+fn cancelled_ids(port: &Port) -> Vec<(bool, Vec<String>)> {
+    port.commands
+        .borrow()
+        .iter()
+        .filter_map(|command| match command {
+            Command::CancelOrders { ids, .. } => Some((true, ids.clone())),
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                Some((false, orders.iter().map(|order| order.id.clone()).collect()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn errors(port: &Port) -> Vec<Value> {
+    port.emits
+        .borrow()
+        .iter()
+        .filter(|(op, _)| op == "error")
+        .map(|(_, data)| data.clone())
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_a_limit_twap_cancels_its_resting_slice_and_disposal_waits_for_it() {
+    LocalSet::new()
+        .run_until(async {
+            let (port, cx, factory) = resting_limit_slice(true).await;
+            port.answer_ms.set(3_000);
+            let id = factory.active_twaps("a")[0]["id"].clone();
+            factory.handle("twap:stop", &id.to_string(), &cx).unwrap();
+            assert_eq!(cancelled_ids(&port), [(true, vec!["order-1".to_owned()])]);
+            let started = tokio::time::Instant::now();
+            factory.placements_settled().await;
+            assert!(started.elapsed() >= Duration::from_millis(3_000));
+            assert!(errors(&port).is_empty(), "{:?}", errors(&port));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_slice_cancel_is_told_and_never_resent() {
+    LocalSet::new()
+        .run_until(async {
+            let (port, _, factory) = resting_limit_slice(true).await;
+            port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Unknown));
+            factory.terminate_all();
+            settle().await;
+            tokio::time::sleep(Duration::from_millis(120_000)).await;
+            settle().await;
+            assert_eq!(cancelled_ids(&port).len(), 1);
+            assert_eq!(
+                errors(&port),
+                [json!(
+                    "We couldn’t confirm TWAP BTCUSDT’s limit orders were cancelled: buy 0.5 at 100 (order order-1). Check your open orders before trying again."
+                )]
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slice_gone_from_the_store_is_cancelled_by_symbol_and_its_refusal_is_quiet() {
+    LocalSet::new()
+        .run_until(async {
+            let (port, cx, factory) = resting_limit_slice(false).await;
+            port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Rejected));
+            let id = factory.active_twaps("a")[0]["id"].clone();
+            factory.handle("twap:stop", &id.to_string(), &cx).unwrap();
+            settle().await;
+            assert_eq!(cancelled_ids(&port), [(false, vec!["order-1".to_owned()])]);
+            assert!(errors(&port).is_empty(), "{:?}", errors(&port));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_listed_slice_whose_cancel_is_refused_is_named_to_the_user() {
+    LocalSet::new()
+        .run_until(async {
+            let (port, cx, factory) = resting_limit_slice(true).await;
+            port.fail.set(true);
+            port.fail_outcome
+                .set(Some(safe_cex_engine::error::Outcome::Rejected));
+            let id = factory.active_twaps("a")[0]["id"].clone();
+            factory.handle("twap:stop", &id.to_string(), &cx).unwrap();
+            settle().await;
+            assert_eq!(
+                errors(&port),
+                [json!(
+                    "TWAP BTCUSDT couldn’t cancel its limit orders: buy 0.5 at 100 (order order-1). rejected"
+                )]
+            );
+        })
+        .await;
+}
