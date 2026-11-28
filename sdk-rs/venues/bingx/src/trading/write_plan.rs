@@ -138,19 +138,6 @@ impl Journals {
         start
     }
 
-    pub(super) fn restore(&mut self, step: &Step) {
-        let rows = self.plan.outcomes();
-        let mut all = rows
-            .iter()
-            .map(|row| row.element.clone())
-            .collect::<Vec<_>>();
-        all.extend(elements(step, all.len()));
-        self.plan = WritePlan::new(all);
-        for row in rows {
-            let _ = self.plan.record(row.element.index, row.result);
-        }
-    }
-
     pub(super) fn settle(
         &mut self,
         request: &Request,

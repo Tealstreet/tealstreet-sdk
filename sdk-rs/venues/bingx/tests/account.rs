@@ -4153,7 +4153,7 @@ fn protective_references_keep_the_real_field_receipt_through_seed_and_live_updat
         assert_eq!(
             h.requests
                 .iter()
-                .any(|r| r.url.ends_with("/trade/cancelReplace")),
+                .any(|r| r.method == Method::Delete && r.url.contains("/trade/order?")),
             allowed,
             "{working_type}/{live_last:?}: {:?}",
             h.failures
@@ -4212,7 +4212,7 @@ fn a_refused_premium_envelope_cannot_renew_a_protective_reference() {
     assert!(
         !h.requests
             .iter()
-            .any(|r| r.url.contains("/trade/cancelReplace"))
+            .any(|r| r.method == Method::Delete && r.url.contains("/trade/order?"))
     );
     let read = h.take("/quote/premiumIndex");
     h.reply(
@@ -4226,7 +4226,7 @@ fn a_refused_premium_envelope_cannot_renew_a_protective_reference() {
 }
 
 #[test]
-fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance() {
+fn native_stop_snapshot_supplies_exact_replacement_parameters_and_frame_provenance() {
     use safe_cex_engine::{Venue, error::Protection};
     let orders = serde_json::json!({"code":0,"data":{"orders":[{
         "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL",
@@ -4319,15 +4319,14 @@ fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance(
         price: Some(59100.),
         amount: None,
     }));
-    let edit = h.take("/trade/cancelReplace");
+    // Cancel, confirm, place (#3828): the exact native original rides the replacement.
+    let cancel = h.take("/trade/order?");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(cancel.id,200,&serde_json::json!({"code":0,"data":{"orderId":ORDER_ID,"status":"CANCELED","executedQty":"0"}}).to_string());
+    let edit = h.take("/trade/order");
+    assert_eq!(edit.method, Method::Post);
     let body: serde_json::Value = serde_json::from_str(edit.body.as_deref().unwrap()).unwrap();
-    assert_eq!(body["reduceOnly"], true);
-    assert_eq!(body["workingType"], "CONTRACT_PRICE");
     assert_eq!(body["stopPrice"].as_f64(), Some(59100.));
-    h.reply(edit.id,200,&serde_json::json!({"code":0,"data":{"cancelOrderId":ORDER_ID,"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}).to_string());
-    let restore = h.take("/trade/order");
-    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
-    assert_eq!(body["stopPrice"].as_f64(), Some(59000.));
     assert_eq!(body["quantity"].as_f64(), Some(0.1));
     assert_eq!(body["positionId"].as_u64(), Some(8389765519993909001));
     assert_eq!(body["reduceOnly"], true);
@@ -4335,9 +4334,13 @@ fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance(
     assert_eq!(body["stopGuaranteed"], false);
     assert_eq!(body["workingType"], "CONTRACT_PRICE");
     h.reply(
-        restore.id,
+        edit.id,
         200,
-        r#"{"code":0,"data":{"orderId":"555","status":"NEW"}}"#,
+        r#"{"code":110411,"msg":"would immediately trigger"}"#,
+    );
+    assert!(
+        h.requests.iter().all(|r| r.method == Method::Get),
+        "no put-back"
     );
     let error = &h
         .failures
@@ -4345,7 +4348,7 @@ fn native_stop_snapshot_supplies_exact_put_back_parameters_and_frame_provenance(
         .find(|(command, _)| *command == 301)
         .unwrap()
         .1;
-    assert_eq!(error.protection, Some(Protection::Restored), "{error:?}");
+    assert_eq!(error.protection, Some(Protection::Unprotected), "{error:?}");
 }
 
 #[test]

@@ -675,6 +675,144 @@ fn price_replace_is_atomic_and_uses_successful_new_id() {
     assert!(h.engine.store().order("9223372036854775807").is_none());
 }
 
+#[test]
+fn unguarded_price_replace_ignores_only_a_blank_order_id_alias() {
+    // bingx.native-amend.test.ts's capture carries `orderID: ""` beside the real id.
+    for (replacement, accepted) in [
+        (r#"{"orderId":"777","orderID":""}"#, true),
+        (r#"{"orderId":""}"#, false),
+        (r#"{"orderID":""}"#, false),
+    ] {
+        let mut h = Harness::new(Some((order(), "LIMIT")));
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.0),
+            amount: None,
+        });
+        h.reply(&format!(
+            r#"{{"code":0,"data":{{"cancelResult":"true","replaceResult":"true","newOrderResponse":{replacement}}}}}"#
+        ));
+        assert_eq!(h.done[0].is_ok(), accepted, "{replacement}: {:?}", h.done);
+        if accepted {
+            assert_eq!(h.done[0].as_ref().unwrap(), "[\"777\"]");
+        }
+    }
+}
+
+/// A reduce-only limit is protection: its price move is cancel, confirm, place.
+fn closing_limit() -> Harness {
+    let mut o = order();
+    o.reduce_only = true;
+    let mut h = Harness::new(Some((o, "LIMIT")));
+    let mut p = position();
+    p.side = PositionSide::Short;
+    h.engine.store_mut().set_positions(vec![p]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert_stop_cancel_request(&h);
+    h
+}
+fn cancel_limit(h: &mut Harness) {
+    h.reply(&serde_json::json!({"code":0,"data":{"order":{"orderId":order().id,"symbol":"BTC-USDT","status":"CANCELLED","executedQty":"0"}}}).to_string());
+}
+
+#[test]
+fn closing_limit_price_move_cancels_confirms_then_places() {
+    let mut h = closing_limit();
+    cancel_limit(&mut h);
+    assert_eq!(h.requests.len(), 1, "{:?}", h.done);
+    assert!(h.requests[0].url.ends_with("/trade/order"));
+    let wire: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+    assert_eq!(wire["type"], "LIMIT");
+    assert_eq!(wire["price"], 96.0);
+    assert_eq!(wire["reduceOnly"], true);
+    assert!(
+        wire["clientOrderId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    for absent in [
+        "cancelOrderId",
+        "cancelClientOrderId",
+        "cancelReplaceMode",
+        "cancelRestrictions",
+    ] {
+        assert!(wire.get(absent).is_none(), "{absent} in {wire}");
+    }
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":"777","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"NEW"}}}"#);
+    assert!(h.requests.is_empty());
+    assert_eq!(h.done[0].as_ref().unwrap(), "[\"777\"]");
+}
+
+#[test]
+fn closing_limit_cancel_refused_or_unconfirmed_places_nothing() {
+    // A refused cancel takes whatever the venue table says (an unlisted code is
+    // Unknown); an unconfirmed one is always Unknown. Neither places anything.
+    for (status, body, unknown) in [
+        (200, r#"{"code":109421,"msg":"order not exist"}"#, None),
+        (
+            200,
+            r#"{"code":110411,"msg":"order cannot be cancelled"}"#,
+            None,
+        ),
+        (200, r#"{"code":0,"data":{}}"#, Some(true)),
+        (500, r#"{"msg":"upstream"}"#, Some(true)),
+    ] {
+        let mut h = closing_limit();
+        h.reply_status(status, body);
+        assert!(
+            h.requests.is_empty(),
+            "{status}/{body}: nothing placed or resent"
+        );
+        assert!(h.done[0].is_err(), "{status}/{body}: {:?}", h.done);
+        if let Some(unknown) = unknown {
+            assert_eq!(
+                h.failures[0].outcome == Some(safe_cex_engine::Outcome::Unknown),
+                unknown,
+                "{status}/{body}: {:?}",
+                h.failures
+            );
+        }
+        assert_ne!(
+            h.failures[0].protection,
+            Some(safe_cex_engine::error::Protection::Unprotected)
+        );
+    }
+}
+
+#[test]
+fn closing_limit_placement_failure_after_a_confirmed_cancel_is_visible_and_never_put_back() {
+    for (status, body, unknown) in [
+        (200, r#"{"code":101204,"msg":"insufficient margin"}"#, false),
+        (500, r#"{"msg":"upstream"}"#, true),
+    ] {
+        let mut h = closing_limit();
+        cancel_limit(&mut h);
+        h.reply_status(status, body);
+        assert!(h.requests.is_empty(), "{status}: no put-back, no resend");
+        let error = &h.failures[0];
+        if unknown {
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{error:?}"
+            );
+        } else {
+            assert_eq!(
+                error.protection,
+                Some(safe_cex_engine::error::Protection::Unprotected),
+                "{error:?}"
+            );
+            assert!(error.message.contains("re-place protection"), "{error:?}");
+        }
+    }
+}
+
 fn accept_parity_payload(h: &mut Harness, id: &str) -> serde_json::Value {
     assert_eq!(h.requests.len(), 1);
     let body = serde_json::from_str(h.body()).expect("native payload");
@@ -1161,69 +1299,19 @@ fn writeplan_local_release_veto_settles_pending_cancel_replace_not_sent() {
     let elements = h.failures[0]
         .elements
         .as_ref()
-        .expect("both native effects were locally vetoed");
+        .expect("the vetoed cancel and its never-sent placement");
     assert_eq!(elements.len(), 2);
-    for element in elements.iter() {
-        assert!(
-            matches!(&element.result, ElementResult::NotSent { error: Some(error) }
-            if error.outcome == Some(safe_cex_engine::Outcome::NotSent))
-        );
-    }
+    assert!(
+        matches!(&elements[0].result, ElementResult::NotSent { error: Some(error) }
+        if error.outcome == Some(safe_cex_engine::Outcome::NotSent)),
+        "{elements:?}"
+    );
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { .. }),
+        "{elements:?}"
+    );
 }
 
-#[test]
-fn writeplan_held_restore_journals_the_cancel_refusal_and_restore_attempt() {
-    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
-    for gateway in [false, true] {
-        let mut h = guarded_stop(true);
-        edit_stop(&mut h);
-        half_refusal(&mut h);
-        assert_eq!(h.requests.len(), 1, "class-A restore is held unchanged");
-        if gateway {
-            h.reply_status(503, r#"{"msg":"upstream unavailable"}"#);
-        } else {
-            h.reply(r#"{"code":0,"data":{"orderId":"restored","status":"NEW"}}"#);
-        }
-        assert!(h.requests.is_empty());
-        let elements = h.failures[0].elements.as_ref().unwrap_or_else(|| {
-            panic!(
-                "all held-restore effects, gateway={gateway}: {:?}",
-                h.failures
-            )
-        });
-        assert_eq!(elements.len(), 3);
-        assert_eq!(
-            elements
-                .iter()
-                .map(|row| row.element.index)
-                .collect::<Vec<_>>(),
-            [0, 1, 2]
-        );
-        assert!(matches!(&elements[0].result, ElementResult::Applied {
-            effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
-        } if id == &order().id));
-        assert!(
-            matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
-            if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
-        );
-        if gateway {
-            assert!(h.failures[0].message.contains(ENGINE_UNKNOWN_TEXT));
-            assert!(
-                matches!(&elements[2].result, ElementResult::Unknown { error }
-                if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
-            );
-        } else {
-            assert!(
-                matches!(&elements[2].result, ElementResult::Placed { order_ids }
-                if order_ids == &["restored"])
-            );
-            assert_eq!(
-                h.failures[0].protection,
-                Some(safe_cex_engine::error::Protection::Restored)
-            );
-        }
-    }
-}
 #[test]
 fn cancel_continues_after_failure_and_marks_only_successes() {
     let mut second = order();
@@ -2883,209 +2971,147 @@ fn edit_stop(h: &mut Harness) {
 fn cancel_stop(h: &mut Harness) {
     h.reply(&serde_json::json!({"code":0,"data":{"orderId":order().id,"status":"CANCELED","executedQty":"0"}}).to_string());
 }
-fn half_refusal(h: &mut Harness) {
-    h.reply(&serde_json::json!({"code":0,"data":{"cancelOrderId":order().id,"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}).to_string());
-}
 
-#[test]
-fn proven_standalone_stops_use_native_cancel_replace_and_preserve_the_closing_flags() {
-    let mut h = guarded_stop(true);
-    edit_stop(&mut h);
-    assert!(h.requests[0].url.ends_with("/trade/cancelReplace"));
-    let wire: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-    assert_eq!(wire["reduceOnly"], true);
-    assert_eq!(wire["stopPrice"], 91.0);
-    assert_eq!(
-        wire["cancelOrderId"].as_u64(),
-        Some(order().id.parse::<u64>().unwrap())
-    );
-    assert_eq!(wire["cancelRestrictions"], "ONLY_NEW");
-    assert_eq!(wire["workingType"], "MARK_PRICE");
-    h.reply(&serde_json::json!({"code":0,"data":{"cancelOrderId":order().id,"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"555"}}).to_string());
-    assert!(h.done[0].is_ok(), "{:?}", h.done);
-}
-
-/// Live cancelReplace nests the cancelled order under cancelResponse (ccxt's
-/// captured payload; the legacy TS native-amend fixture uses the same shape).
-fn live_cancel_replace(cancel_response: serde_json::Value) -> String {
-    live_cancel_replace_with(cancel_response, |_| {})
-}
-fn live_cancel_replace_with(
-    cancel_response: serde_json::Value,
-    edit: impl FnOnce(&mut serde_json::Value),
-) -> String {
-    let mut reply = serde_json::json!({"code":0,"msg":"","data":{
-        "cancelResult":"true","cancelMsg":"","cancelResponse":cancel_response,
-        "replaceResult":"true","replaceMsg":"",
-        "newOrderResponse":{"orderId":"555","symbol":"BTC-USDT","positionSide":"BOTH","side":"SELL",
-            "type":"STOP_MARKET","price":"0","quantity":"1","stopPrice":"91","workingType":"MARK_PRICE",
-            "clientOrderID":"","timeInForce":"GTC","reduceOnly":true}}});
-    edit(&mut reply["data"]["newOrderResponse"]);
-    reply.to_string()
-}
-fn live_cancelled_stop(executed: &str) -> serde_json::Value {
-    serde_json::json!({"cancelClientOrderId":"","cancelOrderId":order().id,"symbol":"BTC-USDT",
-        "orderId":order().id,"side":"SELL","positionSide":"BOTH","type":"STOP_MARKET","origQty":"1",
-        "price":"0","executedQty":executed,"avgPrice":"0","cumQuote":"0","stopPrice":"90","profit":"0",
-        "commission":"0","status":"PENDING","time":"1707339747860","updateTime":"1707339747860",
-        "clientOrderId":"","leverage":"20X","workingType":"MARK_PRICE","onlyOnePosition":false,
-        "reduceOnly":true})
-}
-
-#[test]
-fn live_cancel_replace_proves_its_nested_cancellation() {
-    let mut h = guarded_stop(true);
-    edit_stop(&mut h);
-    assert!(h.requests[0].url.ends_with("/trade/cancelReplace"));
-    h.reply(&live_cancel_replace(live_cancelled_stop("0")));
+/// A guarded edit is cancel, confirm, place (#3828): never native cancelReplace.
+fn assert_stop_cancel_request(h: &Harness) {
+    assert_eq!(h.requests.len(), 1, "{:?}", h.done);
+    assert_eq!(h.requests[0].method, safe_cex_engine::Method::Delete);
     assert!(
-        h.done[0].as_ref().is_ok_and(|ids| ids.contains("555")),
-        "{:?}",
-        h.done
+        h.requests[0].url.contains("/trade/order?"),
+        "{}",
+        h.requests[0].url
     );
-    assert!(h.failures.is_empty(), "{:?}", h.failures);
-}
-
-#[test]
-fn live_cancel_replace_ignores_only_a_blank_order_id_alias_on_the_replacement() {
-    // bingx.native-amend.test.ts's capture carries `orderID: ""` beside the real id.
-    let mut h = guarded_stop(true);
-    edit_stop(&mut h);
-    h.reply(&live_cancel_replace_with(
-        live_cancelled_stop("0"),
-        |order| {
-            order["orderID"] = "".into();
-        },
-    ));
     assert!(
-        h.done[0].as_ref().is_ok_and(|ids| ids.contains("555")),
-        "{:?}",
-        h.done
+        h.requests[0]
+            .url
+            .contains(&format!("orderId={}", order().id)),
+        "{}",
+        h.requests[0].url
     );
-    // A blank primary id, or a blank alias alone, still names no fresh order.
-    for edit in [
-        (|order: &mut serde_json::Value| order["orderId"] = "".into())
-            as fn(&mut serde_json::Value),
-        |order| {
-            order.as_object_mut().unwrap().remove("orderId");
-            order["orderID"] = "".into();
-        },
-    ] {
-        let mut h = guarded_stop(true);
-        edit_stop(&mut h);
-        h.reply(&live_cancel_replace_with(live_cancelled_stop("0"), edit));
-        assert!(h.done[0].is_err(), "{:?}", h.done);
-        assert_eq!(
-            h.failures[0].outcome,
-            Some(safe_cex_engine::Outcome::Unknown)
-        );
-    }
+}
+fn placed_stop(h: &mut Harness) {
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":"555","symbol":"BTC-USDT","side":"SELL","type":"STOP_MARKET","status":"NEW"}}}"#);
 }
 
 #[test]
-fn live_cancel_replace_without_a_consistent_unfilled_target_stays_unproven() {
-    let mut other = live_cancelled_stop("0");
-    other["orderId"] = "another-order".into();
-    other["cancelOrderId"] = "another-order".into();
-    let mut contradictory = live_cancelled_stop("0");
-    contradictory["orderId"] = "another-order".into();
-    // The nested row's own orderId/orderID disagree: no id is taken from it,
-    // so its matching cancelOrderId must not prove the cancel by itself.
-    let mut contradictory_aliases = live_cancelled_stop("0");
-    contradictory_aliases["orderID"] = "another-order".into();
-    for cancel_response in [
-        other,
-        contradictory,
-        contradictory_aliases,
-        live_cancelled_stop("0.25"),
-    ] {
-        let mut h = guarded_stop(true);
-        edit_stop(&mut h);
-        h.reply(&live_cancel_replace(cancel_response));
-        assert!(h.done[0].is_err(), "{:?}", h.done);
-        assert_eq!(
-            h.failures[0].outcome,
-            Some(safe_cex_engine::Outcome::Unknown)
-        );
-    }
-}
-
-#[test]
-fn native_partial_refusal_puts_back_the_exact_original_once_with_typed_protection() {
-    use safe_cex_engine::error::Protection;
+fn proven_standalone_stops_cancel_confirm_then_place_preserving_the_closing_flags() {
     let mut h = guarded_stop(true);
     edit_stop(&mut h);
-    half_refusal(&mut h);
+    assert_stop_cancel_request(&h);
+    cancel_stop(&mut h);
     assert_eq!(h.requests.len(), 1, "{:?}", h.done);
     assert!(h.requests[0].url.ends_with("/trade/order"));
     let wire: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-    for (key, value) in [
-        ("type", serde_json::json!("STOP_MARKET")),
-        ("stopPrice", serde_json::json!(90)),
-        ("side", serde_json::json!("SELL")),
-        ("workingType", serde_json::json!("MARK_PRICE")),
-        ("reduceOnly", serde_json::json!(true)),
-        ("priceProtect", serde_json::json!(true)),
-        ("stopGuaranteed", serde_json::json!(false)),
-    ] {
-        assert_eq!(wire[key], value, "{key} in {wire}");
+    assert_eq!(wire["type"], "STOP_MARKET");
+    assert_eq!(wire["reduceOnly"], true);
+    assert_eq!(wire["stopPrice"], 91.0);
+    assert_eq!(wire["workingType"], "MARK_PRICE");
+    for absent in ["cancelOrderId", "cancelReplaceMode", "cancelRestrictions"] {
+        assert!(wire.get(absent).is_none(), "{absent} in {wire}");
     }
-    assert_eq!(wire["quantity"].as_f64(), Some(order().amount));
-    assert!(wire.get("cancelOrderId").is_none());
-    h.reply(r#"{"code":0,"data":{"orderId":"restored","status":"NEW"}}"#);
-    assert_eq!(
-        h.failures[0].protection,
-        Some(Protection::Restored),
-        "{:?}",
-        h.failures
-    );
+    placed_stop(&mut h);
     assert!(h.requests.is_empty());
+    assert!(
+        h.done[0].as_ref().is_ok_and(|ids| ids.contains("555")),
+        "{:?}",
+        h.done
+    );
 }
 
 #[test]
-fn refused_or_unproven_put_back_never_loops_and_only_definite_refusal_claims_unprotected() {
-    use safe_cex_engine::{Outcome, error::Protection};
-    for (status, body, protection) in [
+fn a_refused_stop_cancel_places_nothing_and_leaves_the_stop() {
+    for body in [
+        r#"{"code":109421,"msg":"order not exist"}"#,
+        r#"{"code":110411,"msg":"order cannot be cancelled"}"#,
+    ] {
+        refused_stop_cancel(body);
+    }
+}
+fn refused_stop_cancel(body: &str) {
+    let mut h = guarded_stop(true);
+    edit_stop(&mut h);
+    assert_stop_cancel_request(&h);
+    h.reply(body);
+    assert!(h.requests.is_empty(), "a refused cancel must not place");
+    assert!(h.done[0].is_err(), "{:?}", h.done);
+    assert_ne!(
+        h.failures[0].protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "the stop was never cancelled: {:?}",
+        h.failures
+    );
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open
+    );
+}
+
+#[test]
+fn an_unconfirmed_stop_cancel_is_unknown_and_places_nothing() {
+    for (status, body) in [
+        (200, r#"{"code":0,"data":{}}"#),
         (
             200,
-            r#"{"code":110411,"msg":"would immediately trigger"}"#,
-            Some(Protection::Unprotected),
+            r#"{"code":0,"data":{"orderId":"another-order","status":"CANCELED","executedQty":"0"}}"#,
         ),
-        (
-            200,
-            r#"{"code":100001,"msg":"bad signature"}"#,
-            Some(Protection::Unprotected),
-        ),
-        (200, r#"{"code":100410,"msg":"rate limited"}"#, None),
-        (429, r#"{"code":110411,"msg":"rate limited"}"#, None),
-        (200, r#"{"code":0,"data":{}}"#, None),
-        (500, r#"{"code":110411,"msg":"old refusal in 500"}"#, None),
-        (408, "", None),
+        (500, r#"{"msg":"upstream"}"#),
     ] {
         let mut h = guarded_stop(true);
         edit_stop(&mut h);
-        half_refusal(&mut h);
         h.reply_status(status, body);
-        assert!(h.requests.is_empty(), "{status}/{body} must never retry");
-        let error = &h.failures[0];
-        assert_eq!(error.protection, protection, "{status}/{body}: {error:?}");
-        if protection.is_none() {
-            assert_eq!(
-                error.outcome,
-                Some(Outcome::Unknown),
-                "{status}/{body}: {error:?}"
-            );
-            assert!(
-                error.message.contains("confirm")
-                    && error.message.to_ascii_lowercase().contains("open orders"),
-                "{error:?}"
-            );
-            assert!(!error.message.contains("is unprotected"));
-            assert!(
-                error.message.contains("original stop put-back"),
-                "{status}/{body}: {error:?}"
-            );
-        }
+        assert!(
+            h.requests.is_empty(),
+            "{status}/{body}: no place, no resend"
+        );
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{body}: {:?}",
+            h.failures
+        );
+        assert!(
+            h.failures[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("open orders")
+                || h.failures[0].message.contains("check protection"),
+            "{status}/{body}: {:?}",
+            h.failures
+        );
+    }
+}
+
+#[test]
+fn a_refused_placement_after_a_confirmed_cancel_reports_unprotected_without_a_put_back() {
+    let mut h = guarded_stop(true);
+    edit_stop(&mut h);
+    cancel_stop(&mut h);
+    h.reply(r#"{"code":110411,"msg":"would immediately trigger"}"#);
+    assert!(h.requests.is_empty(), "nothing is put back or resent");
+    let error = &h.failures[0];
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "{error:?}"
+    );
+    assert!(error.message.contains("is unprotected"), "{error:?}");
+    assert!(error.message.contains("re-place protection"), "{error:?}");
+}
+
+#[test]
+fn an_unknown_placement_after_a_confirmed_cancel_is_unknown_and_never_resent() {
+    for (status, body) in [(500, r#"{"msg":"upstream"}"#), (408, "")] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        cancel_stop(&mut h);
+        h.reply_status(status, body);
+        assert!(h.requests.is_empty(), "{status}: never resent or put back");
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}: {:?}",
+            h.failures
+        );
     }
 }
 
@@ -3369,10 +3395,16 @@ fn native_sl_tp_both_sides_sources_and_full_close_keep_the_original_size() {
                     price: Some(new),
                     amount: None,
                 });
-                assert!(h.requests[0].url.ends_with("/trade/cancelReplace"));
+                assert_stop_cancel_request(&h);
+                cancel_stop(&mut h);
                 let edit: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-                assert_eq!(edit["cancelRestrictions"], "ONLY_PENDING");
-                assert_eq!(edit["quantity"].as_f64(), Some(2.));
+                assert_eq!(edit["type"], native);
+                assert_eq!(
+                    edit["quantity"].as_f64(),
+                    Some(2.),
+                    "the edit must not substitute the 3-contract position"
+                );
+                assert_eq!(edit["stopPrice"].as_f64(), Some(new));
                 assert_eq!(edit["workingType"], working);
                 if full {
                     assert_eq!(edit["closePosition"], "true");
@@ -3380,17 +3412,8 @@ fn native_sl_tp_both_sides_sources_and_full_close_keep_the_original_size() {
                 } else {
                     assert_eq!(edit["reduceOnly"], true);
                 }
-                half_refusal(&mut h);
-                let put_back: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-                assert_eq!(
-                    put_back["quantity"].as_f64(),
-                    Some(2.),
-                    "put-back must not substitute the 3-contract position"
-                );
-                assert_eq!(put_back["stopPrice"].as_f64(), Some(old));
-                assert_eq!(put_back["type"], native);
-                assert_eq!(put_back["side"], edit["side"]);
-                assert_eq!(put_back["workingType"], working);
+                h.reply(r#"{"code":110411,"msg":"would immediately trigger"}"#);
+                assert!(h.requests.is_empty(), "nothing is put back");
             }
         }
     }
@@ -3447,11 +3470,7 @@ fn a_streamed_fill_wins_over_an_older_cancel_reply_and_never_creates() {
         o.filled = 0.25;
         o.remaining -= 0.25;
         h.engine.store_mut().upsert_order(o);
-        if native {
-            half_refusal(&mut h);
-        } else {
-            cancel_stop(&mut h);
-        }
+        cancel_stop(&mut h);
         assert!(h.requests.is_empty());
         assert_eq!(
             h.failures[0].outcome,
