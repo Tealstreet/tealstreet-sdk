@@ -436,10 +436,10 @@ const HyrotraderMetadata: ExchangeMetadata = {
   darkLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
   refLink: undefined,
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
-  enabled: false,
+  // On in production and preview (Sam, AGT-240, 2026-11-25). Hyro fronts the
+  // production simulator at a TLS hostname with Tealstreet browser CORS.
+  enabled: true,
   enabledInDev: true,
-  // Hyro now fronts the production simulator at a TLS hostname with Tealstreet
-  // browser CORS, so preview can run direct while production stays explicitly dark.
   enableInPreview: true,
   forbidCors: false,
   enforceWsTunnel: false,
@@ -2258,7 +2258,8 @@ const LighterRobinhoodMetadata: ExchangeMetadata = {
   refLink: 'https://lighter.xyz',
   prettyName: 'Lighter Robinhood',
   defaultQuote: 'USDG',
-  enabled: false,
+  // On in production and preview (Sam, AGT-240, 2026-11-25).
+  enabled: true,
   enabledInDev: true,
   enableInPreview: true,
   supportedOnMobile: false,
