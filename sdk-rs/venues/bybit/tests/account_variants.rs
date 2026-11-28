@@ -1667,3 +1667,60 @@ fn hyro_terminal_zero_priced_stop_row_is_still_applied() {
         h.logs
     );
 }
+
+/// A Hyro-shaped terminal stop (price "" and trigger "0") is applied, never
+/// treated as malformed: only live rows need a positive trigger, and freezing
+/// the account over a finished order is the bug TEAL-21 fixed (review of #3838).
+#[test]
+fn hyro_terminal_stop_with_empty_price_and_zero_trigger_is_applied() {
+    let row = HYRO_UNTRIGGERED_STOP
+        .replace(
+            r#""orderStatus":"Untriggered""#,
+            r#""orderStatus":"Deactivated""#,
+        )
+        .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#);
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().orders, "{:?}", h.logs);
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+}
+
+/// A live stop priced "0" with trigger "0" passes the row gate (its price is
+/// present) and must be refused by the stream's mapped-order guard: it would
+/// be restored as `stopLoss:"0"` (review of #3838; pins `valid_hyro_mapped`
+/// on the `order` topic).
+#[test]
+fn hyro_live_stop_priced_at_zero_on_the_stream_is_refused() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP
+        .replace(r#""price":"""#, r#""price":"0""#)
+        .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
