@@ -1193,6 +1193,24 @@ a saturated lookback. Other venues retain their existing read shape and limits.
 
 ## Rust incomplete history
 
+Canonical Bybit closed-position records group native closing orders only when the fills
+and order-leg join prove one lifecycle and its full closed volume. The reader
+joins transaction-log `positionAfter` and `executionQuantity` by execution ID
+to establish the initial signed size independently; a window that starts during an older position must
+not assume it started flat. Missing or contradictory anchors keep it incomplete.
+The generic fill fold's original ordering remains the default; Bybit supplies
+the source order established from native post-trade sizes for equal-time fills.
+The reader uses a bounded 14-day lookback for straddling lifecycles; average
+entry price and time gaps never establish identity. Keys use the `bybit-lifecycle-v2` namespace
+and canonical native opening/closing execution identities, so overlapping
+queries update the same lifecycle. Partial closes of a still-open lifecycle do
+not create closed positions. Missing joins, incomplete source reads, missing
+close events, and ambiguous opposing fills at the same native timestamp leave
+the history incomplete rather than inventing groups. Raw closing events remain
+available through `fetchClosedPositions`. Previously stored heuristic aggregates
+need a controlled replay before they can be combined with the new projection;
+the SDK does not delete persisted history or upgrade the venue's grade.
+
 A successful partial Rust history read returns the available rows with a
 command-attributed `history.incomplete` notice. The JS host marks
 that command's array with non-enumerable `incomplete: true`, independently of

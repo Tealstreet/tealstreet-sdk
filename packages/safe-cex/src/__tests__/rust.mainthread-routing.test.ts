@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../exchangeMetadata';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { aggregateBybitClosedPnl } from '../journal/bybit.position-adapter';
 import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderType, PositionSide } from '../types';
 import { ExchangeWorker } from '../webworker/ExchangeWorker';
@@ -292,26 +291,62 @@ describe('main-thread Rust trading routing', () => {
         updatedTime: '1001',
       },
     ];
-    const orders = [{ id: 'o1', positionSide: PositionSide.Long }];
+    const orders = [
+      { id: 'open', positionSide: PositionSide.Long },
+      { id: 'o1', positionSide: PositionSide.Long },
+    ];
+    const fills = [
+      { id: 'f1', orderId: 'open', symbol: 'BTCUSDT', timestamp: 0.9, side: OrderSide.Buy, price: 100, qty: 1 },
+      { id: 'f2', orderId: 'o1', symbol: 'BTCUSDT', timestamp: 1.001, side: OrderSide.Sell, price: 110, qty: 1 },
+    ];
     const calls = answering('bybit', {
       fetchEngineCapabilities: JSON.parse(engineCapabilities('bybit')),
       fetchClosedPositions: rows,
       fetchHistoricalOrders: orders,
+      fetchHistoricalFills: fills,
+      fetchIncomeHistoryRange: [
+        {
+          tradeId: 'f1',
+          positionAfter: '1',
+          executionQuantity: '1',
+          income: 0,
+          symbol: 'BTCUSDT',
+          timestamp: 900,
+          incomeType: 'OTHER',
+          category: 'other',
+          asset: 'USDT',
+          tranId: 'f1:position',
+        },
+        {
+          tradeId: 'f2',
+          positionAfter: '0',
+          executionQuantity: '1',
+          income: 10,
+          symbol: 'BTCUSDT',
+          timestamp: 1001,
+          incomeType: 'REALIZED_PNL',
+          category: 'realized_pnl',
+          asset: 'USDT',
+          tranId: 'f2:flow',
+        },
+      ],
     });
     const window = { from: 1_000, to: 2_000 };
     const records = await main!.fetchHistoricalPositions!({ ...window, account: 'a' });
-    expect(records).toEqual(
-      aggregateBybitClosedPnl(rows, {
-        account: 'a',
-        resolveSettleCurrency: () => 'USDT',
-        resolveLeg: (orderId: string) => (orderId === 'o1' ? PositionSide.Long : undefined),
-      }),
-    );
+    expect(records[0]).toMatchObject({
+      account: 'a',
+      realizedPnl: 10,
+      closedSize: 1,
+      closeCount: 1,
+      positionSide: PositionSide.Long,
+    });
     expect(records.length).toBe(1);
     expect(calls).toEqual([
       { method: 'fetchEngineCapabilities', args: [] },
-      { method: 'fetchClosedPositions', args: [window] },
-      { method: 'fetchHistoricalOrders', args: [window] },
+      { method: 'fetchClosedPositions', args: [{ ...window, from: window.from - 14 * 86400000 }] },
+      { method: 'fetchHistoricalOrders', args: [{ ...window, from: window.from - 14 * 86400000 }] },
+      { method: 'fetchHistoricalFills', args: [{ ...window, from: window.from - 14 * 86400000, limit: 1000 }] },
+      { method: 'fetchIncomeHistoryRange', args: [window.from - 14 * 86400000, window.to] },
     ]);
     expect(main!.hasStarted).toBe(false);
   });
