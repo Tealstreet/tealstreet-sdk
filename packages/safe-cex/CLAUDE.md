@@ -1895,6 +1895,13 @@ tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
 and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
 the kind rather than venue text.
 
+**The main-thread `emitAndLogError` sends no exception for a transient read**
+(`isTransientReadFailure`: kind `network`/`timeout`, no write command, outcome not
+`unknown`). It still emits `'error'` with `classified`, and the host logs it, just as
+the web host already treats a worker report. Before this, page-engine read timeouts
+reached Sentry ahead of the host's rule (TEALSTREET-NEXT-EGZ). A write or an unknown
+outcome may have reached the venue, so those are still reported.
+
 ## Proxy & Tunnel Architecture
 
 Exchanges connect to APIs in three modes, controlled by metadata flags in `exchangeMetadata.ts`. The decision logic lives in `createExchangeFromAccount.ts` and request wiring in `safeCexAxiosCreate.ts`.

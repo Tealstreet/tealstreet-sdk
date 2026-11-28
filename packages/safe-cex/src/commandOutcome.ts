@@ -218,6 +218,15 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
   return Object.keys(result).length ? result : undefined;
 };
 
+/**
+ * A network/timeout READ whose outcome is not `unknown`: transport noise the host logs,
+ * not an exception. A write command or an unknown outcome may have reached the venue.
+ */
+export const isTransientReadFailure = (classified: ClassifiedError | undefined): boolean =>
+  (classified?.kind === 'network' || classified?.kind === 'timeout') &&
+  !classified.command &&
+  classified.outcome !== 'unknown';
+
 const AUTH_KINDS: readonly string[] = ['authInvalid', 'authExpired', 'authPermission'];
 
 /**

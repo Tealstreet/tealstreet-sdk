@@ -28,7 +28,13 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
+import {
+  classifiedError,
+  deserializeCommandError,
+  exchangeErrorTags,
+  isTransientReadFailure,
+  markErrorReported,
+} from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
@@ -2379,7 +2385,8 @@ export class BaseExchange implements Exchange {
       });
     } else {
       // In main thread: report directly for a better stack trace (to the host's sink).
-      if (errorObject) {
+      // A transient read is left to the listener, as the worker path's host does.
+      if (errorObject && !isTransientReadFailure(classified)) {
         reportException(errorObject, {
           tags: {
             exchange: this.name,
