@@ -279,7 +279,7 @@ impl BybitLinear {
             None,
             Method::Get,
             url,
-            &[("X-Referer", sign::BROKER_ID)],
+            self.public_headers(),
             None,
             pending,
         ) {
@@ -370,8 +370,7 @@ impl BybitLinear {
             .streamed()
             .signed();
         let url = format!("{}{}", self.paths.rest, rest.path);
-        let signing = sign::Http::new(credentials, rest.payload.clone(), self.recv_window)
-            .with_header_policy(self.signing_policy.header_policy());
+        let signing = self.http_signer(credentials, rest.payload.clone());
         let pending = Pending {
             category: self.category,
             rest,

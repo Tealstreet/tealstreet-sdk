@@ -41,6 +41,11 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 - Cross margin and one-way positions only. Isolated/hedged mode changes return
   typed `unsupported` / `notSent` errors before any network write; selecting the
   already-supported modes is a local success.
+- Hyro requests carry no `X-Referer`. That header is Bybit's broker
+  attribution, and Hyro's CORS allowlist (Content-Type plus the four `X-BAPI-*`
+  headers, checked 2026-11-28) omits it, so a browser refused every Hyro REST
+  call that carried it (TEAL-22). Bybit aliases keep it on public and signed
+  requests alike.
 - Signed writes use exact JSON bytes and `Content-Type: application/json`.
   Conditional `triggerDirection` is a JSON number. Bybit variants retain their
   existing wire representation.

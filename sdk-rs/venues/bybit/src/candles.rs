@@ -1,7 +1,7 @@
 //! Public klines on the engine's managed Read authority: one command Context
 //! with a native 20 s window, streamed `result.list`, typed terminals.
 use crate::policy::read_policy;
-use crate::sign::{self, Query};
+use crate::sign::Query;
 use crate::trading::codes::BYBIT;
 use crate::wire::{KlineRow, Status, float};
 use crate::{BybitLinear, Category, MARKETS_PATH, Pending, Rest, Then, interval_code};
@@ -88,7 +88,7 @@ impl BybitLinear {
             None,
             Method::Get,
             url,
-            &[("X-Referer", sign::BROKER_ID)],
+            self.public_headers(),
             None,
             pending,
         ) {
