@@ -4289,7 +4289,8 @@ impl PublicFeedWatch {
         if self.serial != self.seen_serial {
             self.seen_serial = self.serial;
             self.last_attempt = now;
-            if self.deadline.is_none() && !self.noticed {
+            // Attempts made outside `handle` reach here late; one that already opened arms nothing.
+            if self.deadline.is_none() && !self.noticed && !self.attempts.is_empty() {
                 self.deadline = Some(now + Self::WAIT_MS);
             }
         }
@@ -4299,6 +4300,51 @@ impl PublicFeedWatch {
         self.deadline = None;
         self.noticed = !self.attempts.is_empty() || now - self.last_attempt < Self::STILL_TRYING_MS;
         self.noticed
+    }
+}
+
+#[cfg(test)]
+mod public_feed_watch_tests {
+    use super::{PublicFeedWatch, SocketId};
+
+    /// TEALSTREET-NEXT-ECW: `handle_command` and `start` open sockets without `is_due`,
+    /// so the first `is_due` can follow that socket's own open. A later connect must
+    /// still get the full wait rather than the remainder of that stale deadline.
+    #[test]
+    fn a_connect_that_opened_before_the_first_check_arms_no_deadline() {
+        let mut watch = PublicFeedWatch::default();
+        watch.attempted(SocketId(1));
+        watch.opened(SocketId(1));
+        assert!(!watch.is_due(300.));
+        watch.attempted(SocketId(2));
+        assert!(!watch.is_due(19000.));
+        assert!(
+            !watch.is_due(20500.),
+            "socket 2 had been connecting for 1.5 s"
+        );
+        assert!(!watch.is_due(38900.));
+        assert!(
+            watch.is_due(39000.),
+            "socket 2 never opened in the full wait"
+        );
+    }
+
+    #[test]
+    fn a_connect_that_never_opens_is_noticed_once_after_the_wait() {
+        let mut watch = PublicFeedWatch::default();
+        watch.attempted(SocketId(1));
+        assert!(!watch.is_due(0.));
+        assert!(!watch.is_due(19900.));
+        assert!(watch.is_due(20000.));
+        watch.attempted(SocketId(1));
+        assert!(!watch.is_due(45000.), "one notice per outage");
+        watch.opened(SocketId(1));
+        watch.attempted(SocketId(1));
+        assert!(!watch.is_due(50000.));
+        assert!(
+            watch.is_due(70000.),
+            "a fresh outage after recovery is noticed again"
+        );
     }
 }
 
