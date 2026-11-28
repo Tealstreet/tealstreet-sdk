@@ -5,7 +5,7 @@ import type { TwapState } from './TwapState';
 import { describe, expect, it } from 'vitest';
 
 import { OrderSide } from '../../types';
-import { twapRestoreRefusal } from './twapRestoreRefusal';
+import { restingSlicesNote, twapRestoreRefusal } from './twapRestoreRefusal';
 import { TwapStatus } from './TwapStatus';
 
 const now = 1_800_000_000_000;
@@ -52,6 +52,27 @@ describe('twapRestoreRefusal with a slice in flight', () => {
     );
     expect(twapRestoreRefusal(options, state({ nextOrderAt: now - 3_600_000 }), now)).toBe(
       'its saved schedule has expired',
+    );
+  });
+});
+
+describe('twapRestoreRefusal with resting limit slices', () => {
+  const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.2 }];
+
+  it('restores a row in its last interval, which still has limit slices to cancel', () => {
+    expect(
+      twapRestoreRefusal(options, state({ ordersSizes: [], ordersExecuted: 5, limitSlices }), now),
+    ).toBeUndefined();
+    expect(twapRestoreRefusal(options, state({ ordersSizes: [], ordersExecuted: 5 }), now)).toBe('no slices remain');
+  });
+
+  it('names each resting slice for a refusal message', () => {
+    expect(restingSlicesNote(state({ side: OrderSide.Sell, limitSlices }))).toBe(
+      '. Its limit orders are still open: sell 0.2 at 100 (order o1)',
+    );
+    expect(restingSlicesNote(state())).toBe('');
+    expect(restingSlicesNote(state({ limitSlices: [{ orderIds: ['o2'], price: 0, size: 0.1 }] }))).toBe(
+      '. Its limit orders are still open: buy 0.1 (order o2)',
     );
   });
 });

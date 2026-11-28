@@ -1872,3 +1872,51 @@ head `e59edfd2fc` into master `cba454176e`) and raised binance to 2445312, the
 same value #3829 already set above. Merging master keeps that single raise: both
 changes add 77 B over the base, which leaves the family under 2445312 with about
 11 KB of reserve. No cap changes here.
+
+## 2026-11-28 — #3850 TWAP limit-slice cleanup raises every family cap and the combined cap
+
+A "Limit orders" TWAP left its unfilled slices resting after every end (stop,
+finish, account disposal, nuke, restore). The fix ships in every venue's wasm:
+the `CancelSlices` effect and its factory cancel with outcome reporting, the
+persisted `limitSlices` (serde for the new slice row and the in-flight price),
+the last-interval wait, and the user-facing text that names each resting slice
+by side, size, price and id on a halt, refused restore or owner change. Every
+family was measured above its ceiling. Rule-17 raise per `harness/CLAUDE.md`,
+generated with `update-wasm-caps.mjs` from PR run 46141189328 (sealed source
+`1237d15883933b717951f47b62f27a89a380ef27`, the merge of PR head
+`43a13e75a76223ef98b2156f9298eb6f41f2e823` into master
+`e634a269c97075990e69f7091ccba23d29833c9a`). The run's combined package was not
+uploaded (its replay job was cancelled), so the combined cap is `nextWasmCap`
+over the size its `combined consumers` job logged: `combined wasm 18092676
+exceeds 18087936 bytes`.
+
+| family | measured B | cap before | cap after |
+| --- | ---: | ---: | ---: |
+| apexomni | 2265471 | 2251776 | 2276352 |
+| asterdex | 2415478 | 2409472 | 2425856 |
+| backpack | 2239244 | 2236416 | 2249728 |
+| binance | 2450230 | 2445312 | 2460672 |
+| bingx | 2339437 | 2325504 | 2350080 |
+| bitget | 2963684 | 2960384 | 2974720 |
+| bitrue | 2071916 | 2059264 | 2082816 |
+| bitunix | 2166935 | 2153472 | 2178048 |
+| blofin | 2236710 | 2223104 | 2247680 |
+| bybit | 2766070 | 2752512 | 2777088 |
+| coinbase | 2504894 | 2497536 | 2515968 |
+| cryptocom | 1974175 | 1966080 | 1984512 |
+| grvt | 2203587 | 2191360 | 2213888 |
+| hyperliquid | 2466068 | 2459648 | 2477056 |
+| kraken | 2449746 | 2442240 | 2460672 |
+| kucoin | 2028160 | 2016256 | 2038784 |
+| kucoinspot | 2731247 | 2714624 | 2742272 |
+| lighter | 2446404 | 2443264 | 2457600 |
+| mexc | 2117474 | 2109440 | 2127872 |
+| okx | 2236554 | 2233344 | 2247680 |
+| orderly | 1933486 | 1928192 | 1944576 |
+| paradex | 2477593 | 2465792 | 2488320 |
+| phemex | 2287501 | 2284544 | 2297856 |
+| polymarket | 1804934 | 1799168 | 1815552 |
+| txflow | 2312861 | 2300928 | 2323456 |
+| weex | 2194671 | 2181120 | 2205696 |
+| woo | 2936683 | 2920448 | 2947072 |
+| combined | 18092676 | 18087936 | 18103296 |

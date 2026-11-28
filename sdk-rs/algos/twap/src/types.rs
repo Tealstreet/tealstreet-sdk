@@ -122,8 +122,24 @@ pub struct TwapState {
     /// its order goes out and cleared once it settles, as TS `TwapState.inFlight`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_flight: Option<InFlightSlice>,
+    /// Direct limit slices this TWAP placed and still owns: whatever of them rests
+    /// when it ends is cancelled, so they persist with it across a restore.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limit_slices: Vec<LimitSlice>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// One placed `useLimitOrders` slice: its order ids (a venue may split it) and
+/// what it asked for, so an end that cannot cancel it can say which order it is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitSlice {
+    pub order_ids: Vec<String>,
+    #[serde(serialize_with = "js_number")]
+    pub price: f64,
+    #[serde(serialize_with = "js_number")]
+    pub size: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -134,6 +150,13 @@ pub struct InFlightSlice {
     /// The caller id the slice order carried, for a restore to look it up by.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_order_id: Option<String>,
+    /// A limit slice's price, so a restore that finds its order can name it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "js_option_number"
+    )]
+    pub price: Option<f64>,
 }
 
 /// A trusted host snapshot, independent of account names and restore payloads.

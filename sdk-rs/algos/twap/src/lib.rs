@@ -19,8 +19,8 @@ pub use validate::{MAX_ORDERS_COUNT, MAX_TWAPS_PER_ACCOUNT, RETIRED_IDS_KEPT, SC
 pub use amend::{TwapAmendment, TwapUpdate};
 pub use instance::TwapInstance;
 pub use types::{
-    InFlightSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin, TwapOwner,
-    TwapState, TwapStatus,
+    InFlightSlice, LimitSlice, OrderSide, PersistedTwap, SliceAction, TwapOptions, TwapOrigin,
+    TwapOwner, TwapState, TwapStatus,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -153,6 +153,30 @@ fn retained_order_ids(error: &SliceFailure) -> Vec<String> {
     ids
 }
 
+/// `buy 0.001 at 49900 (order o1)`, for each slice: enough to find it among open orders.
+pub fn describe_slices(side: OrderSide, slices: &[LimitSlice]) -> String {
+    let side = match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    };
+    slices
+        .iter()
+        .map(|slice| {
+            let at = if slice.price > 0.0 {
+                format!(" at {}", slice.price)
+            } else {
+                String::new()
+            };
+            format!(
+                "{side} {}{at} (order {})",
+                slice.size,
+                slice.order_ids.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// The chaser a `useChaserOrders` slice starts, with the id TWAP tracks it by.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChaserRequest {
@@ -185,6 +209,14 @@ pub enum TwapEffect {
     },
     /// Stop the chaser and cancel its open order.
     RemoveChaser { twap_id: String, chaser_id: String },
+    /// The TWAP ended: cancel whatever of its direct limit slices still rests. A
+    /// cancel that cannot be confirmed is told to the user, never sent again.
+    CancelSlices {
+        twap_id: String,
+        symbol: String,
+        side: OrderSide,
+        slices: Vec<LimitSlice>,
+    },
     /// A user-facing error log (`LogSeverity.Error`).
     Log { message: String },
     /// Send `{ op: 'twap:stateUpdate', data }` to the account's clients.
@@ -406,6 +438,21 @@ impl TwapBook {
             instance.start(env, view, effects);
         }
         Ok(id)
+    }
+
+    /// Each managed TWAP's resting limit slices, for a report that cannot cancel them.
+    pub fn resting_slices(&self) -> Vec<(String, OrderSide, Vec<LimitSlice>)> {
+        self.managed_entries()
+            .map(|entry| &entry.instance)
+            .filter(|instance| !instance.state.limit_slices.is_empty())
+            .map(|instance| {
+                (
+                    instance.options.symbol().to_owned(),
+                    instance.options.side,
+                    instance.state.limit_slices.clone(),
+                )
+            })
+            .collect()
     }
 
     /// The managed TWAPs that have not completed.
@@ -670,8 +717,9 @@ impl TwapBook {
                 if self.owner_id.is_some() && entry.owner_id != self.owner_id {
                     effects.push(TwapEffect::Log {
                         message: format!(
-                            "TWAP {} not restored: persisted TWAP owner or generation does not match",
-                            entry.options.symbol()
+                            "TWAP {} not restored: persisted TWAP owner or generation does not match{}",
+                            entry.options.symbol(),
+                            still_open(&entry)
                         ),
                     });
                     continue;
@@ -709,7 +757,11 @@ impl TwapBook {
                 .and_then(|()| self.has_capacity())
             {
                 effects.push(TwapEffect::Log {
-                    message: format!("TWAP {} not restored: {reason}", entry.options.symbol()),
+                    message: format!(
+                        "TWAP {} not restored: {reason}{}",
+                        entry.options.symbol(),
+                        still_open(&entry)
+                    ),
                 });
                 continue;
             }
@@ -743,6 +795,7 @@ impl TwapBook {
             if entry.managed && entry.instance.state.status == TwapStatus::Completed {
                 entry.managed = false;
                 finished.push(entry.instance.id.clone());
+                entry.instance.release_slices(effects);
                 if let Some(end) = entry.instance.end() {
                     effects.push(TwapEffect::Ended {
                         twap_id: entry.instance.id.clone(),
@@ -766,6 +819,17 @@ impl TwapBook {
     }
 }
 
+/// A row that is not restored leaves its limit slices to the user: name them.
+fn still_open(entry: &PersistedTwap) -> String {
+    if entry.state.limit_slices.is_empty() {
+        return String::new();
+    }
+    format!(
+        ". Its limit orders are still open: {}",
+        describe_slices(entry.options.side, &entry.state.limit_slices)
+    )
+}
+
 fn active_twap(instance: &TwapInstance) -> Value {
     let mut object = Map::new();
     object.insert("id".to_owned(), Value::String(instance.id.clone()));
@@ -779,7 +843,7 @@ fn active_twap(instance: &TwapInstance) -> Value {
     }
     object.insert(
         "currentOrderIds".to_owned(),
-        Value::from(instance.current_order_ids().to_vec()),
+        Value::from(instance.current_order_ids()),
     );
     let size = match instance.options.side {
         OrderSide::Sell => -instance.options.size,

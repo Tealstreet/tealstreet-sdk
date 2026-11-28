@@ -527,6 +527,9 @@ ordersCount}`) is `TwapEffect::Ended`: every slice handed off, or the user's
 page reads a normal finish as a lost TWAP (AGT-58). A halt on an unknown outcome
 (`twap:outcome` tells it) and an account disposal (`terminate_all`) send none:
 a disposal must never read as a normal end.
+With "Limit orders" slices, `completed` arrives one slice interval after the
+last slice, at the TWAP's stated duration, once its unfilled slices are cancelled
+(`algos/twap/README.md` → "Limit slices end with their TWAP").
 
 ## Classified admission refusals
 

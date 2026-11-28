@@ -3,7 +3,8 @@
 
 use crate::math::{add, lodash_random, multiply, subtract};
 use crate::types::{
-    InFlightSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState, TwapStatus,
+    InFlightSlice, LimitSlice, OrderSide, SliceAction, TwapOptions, TwapOrigin, TwapState,
+    TwapStatus,
 };
 use crate::{
     ChaserRequest, OrderKind, SliceFailure, TwapEffect, TwapEnd, TwapEnv, TwapMarketView,
@@ -34,7 +35,8 @@ struct PendingSlice {
     schedule_revision: u64,
     token: u64,
     element_index: usize,
-    priced_limit: bool,
+    /// A direct limit slice's `(price, size)`: what lands of it rests on the book.
+    limit: Option<(f64, f64)>,
     executed_before: u32,
     next_order_at: f64,
     wait_ms: f64,
@@ -56,7 +58,6 @@ pub struct TwapInstance {
     pub options: TwapOptions,
     pub state: TwapState,
     tracked_chaser_ids: Vec<String>,
-    tracked_limit_order_ids: Vec<String>,
     slice_due_at: Option<f64>,
     chaser_watch_at: Option<f64>,
     slice_timeouts: Vec<SliceTimeout>,
@@ -118,7 +119,6 @@ impl TwapInstance {
             options,
             state,
             tracked_chaser_ids: Vec::new(),
-            tracked_limit_order_ids: Vec::new(),
             slice_due_at: None,
             chaser_watch_at: None,
             slice_timeouts: Vec::new(),
@@ -177,8 +177,23 @@ impl TwapInstance {
         effects.push(TwapEffect::Log {
             message: error.message.clone(),
         });
+        // Its limit slices stay as they are; the user is told which they are.
+        let slices = std::mem::take(&mut self.state.limit_slices);
+        if !slices.is_empty() {
+            effects.push(TwapEffect::Log {
+                message: self.resting_message(&slices),
+            });
+        }
         self.terminal_unknown = Some(error);
         self.report_unknown(effects);
+    }
+
+    fn resting_message(&self, slices: &[LimitSlice]) -> String {
+        format!(
+            "TWAP {} stopped. Its limit orders are still open: {}.",
+            self.options.symbol(),
+            crate::describe_slices(self.options.side, slices)
+        )
     }
 
     fn report_unknown(&self, effects: &mut Vec<TwapEffect>) {
@@ -242,8 +257,37 @@ impl TwapInstance {
     }
 
     /// Direct limit orders this TWAP placed (`currentOrderIds`).
-    pub fn current_order_ids(&self) -> &[String] {
-        &self.tracked_limit_order_ids
+    pub fn current_order_ids(&self) -> Vec<String> {
+        self.state
+            .limit_slices
+            .iter()
+            .flat_map(|slice| slice.order_ids.iter().cloned())
+            .collect()
+    }
+
+    fn track_limit(&mut self, limit: Option<(f64, f64)>, order_ids: Vec<String>) {
+        if let Some((price, size)) = limit.filter(|_| !order_ids.is_empty()) {
+            self.state.limit_slices.push(LimitSlice {
+                order_ids,
+                price,
+                size,
+            });
+            self.state_changed = true;
+        }
+    }
+
+    /// The TWAP has ended: cancel its resting limit slices, unless an Unknown halted
+    /// it, which issues no write (#3355) and has already named them to the user.
+    pub(crate) fn release_slices(&mut self, effects: &mut Vec<TwapEffect>) {
+        if self.terminal_unknown.is_some() || self.state.limit_slices.is_empty() {
+            return;
+        }
+        effects.push(TwapEffect::CancelSlices {
+            twap_id: self.id.clone(),
+            symbol: self.options.symbol().to_owned(),
+            side: self.options.side,
+            slices: std::mem::take(&mut self.state.limit_slices),
+        });
     }
 
     pub fn tracked_chaser_ids(&self) -> &[String] {
@@ -430,6 +474,12 @@ impl TwapInstance {
         ) {
             return;
         }
+        // The last limit slices' interval is over (`finish_slice`).
+        if self.state.status == TwapStatus::Running && self.state.orders_sizes.is_empty() {
+            self.complete();
+            self.report_shortfall(effects);
+            return;
+        }
         let order_size =
             (!self.state.orders_sizes.is_empty()).then(|| self.state.orders_sizes.remove(0));
         let order_size = order_size.map(|size| self.whole_steps(size, view));
@@ -540,7 +590,7 @@ impl TwapInstance {
             schedule_revision: self.schedule_revision,
             token,
             element_index,
-            priced_limit: priced,
+            limit: priced.then_some((price, order_size)),
             executed_before,
             next_order_at,
             wait_ms,
@@ -564,6 +614,7 @@ impl TwapInstance {
         self.state.in_flight = Some(InFlightSlice {
             size: order_size,
             client_order_id: request.client_order_id.clone(),
+            price: request.price,
         });
         self.state_changed = true;
         self.record(
@@ -625,13 +676,13 @@ impl TwapInstance {
             Ok(order_ids) => {
                 self.consecutive_refusals = 0;
                 self.record_success(pending.element_index, &order_ids, effects);
-                if pending.priced_limit && !order_ids.is_empty() {
-                    self.tracked_limit_order_ids.extend(order_ids);
-                }
+                self.track_limit(pending.limit, order_ids);
             }
             Err(failure) => {
                 if !crate::known_refusal(&failure) {
                     self.state.orders_executed = executed;
+                    // Its accepted part rests like any slice; halting names it.
+                    self.track_limit(pending.limit, crate::retained_order_ids(&failure));
                     self.halt_unknown(pending.element_index, failure, effects);
                     return;
                 }
@@ -640,9 +691,7 @@ impl TwapInstance {
                 if !placed_some {
                     executed = pending.executed_before;
                 }
-                if pending.priced_limit {
-                    self.tracked_limit_order_ids.extend(placed_ids);
-                }
+                self.track_limit(pending.limit, placed_ids);
                 self.record(
                     pending.element_index,
                     ElementResult::NotSent {
@@ -665,8 +714,16 @@ impl TwapInstance {
                 }
             }
         }
-        // terminate() may have run while the placement was in flight.
+        // terminate() may have run while the placement was in flight: what
+        // landed is past the end's cancel, so it is cancelled (or named) now.
         if self.state.status == TwapStatus::Completed {
+            if self.terminal_unknown.is_some() && !self.state.limit_slices.is_empty() {
+                let slices = std::mem::take(&mut self.state.limit_slices);
+                effects.push(TwapEffect::Log {
+                    message: self.resting_message(&slices),
+                });
+            }
+            self.release_slices(effects);
             self.report_unknown(effects);
             return;
         }
@@ -702,13 +759,21 @@ impl TwapInstance {
     fn finish_slice(&mut self, orders_executed: u32, next_order_at: f64, wait_ms: f64, now: f64) {
         self.state.orders_executed = orders_executed;
         self.state_changed = true;
-        if self.state.orders_sizes.is_empty() {
-            self.state.status = TwapStatus::Completed;
-            self.end.get_or_insert(TwapEnd::Completed);
+        // Resting limit slices get the last slice's interval to fill, so the TWAP ends
+        // at its stated duration; the wake then finds no slice left and completes.
+        if self.state.orders_sizes.is_empty() && self.state.limit_slices.is_empty() {
+            self.complete();
             return;
         }
         self.state.next_order_at = next_order_at;
         self.slice_due_at = Some(now + wait_ms);
+    }
+
+    fn complete(&mut self) {
+        self.state.status = TwapStatus::Completed;
+        self.end.get_or_insert(TwapEnd::Completed);
+        self.slice_due_at = None;
+        self.state_changed = true;
     }
 
     /// The chaser runtime's reason when it refused: nothing runs for this slice.
@@ -983,6 +1048,7 @@ fn new_state(options: &TwapOptions, env: &mut dyn TwapEnv) -> TwapState {
         created_at: Some(env.now_ms()),
         started_at: None,
         in_flight: None,
+        limit_slices: Vec::new(),
         extra: Map::new(),
     }
 }

@@ -101,8 +101,9 @@ pub fn restored(options: &TwapOptions, state: &TwapState, now_ms: f64) -> Result
         TwapStatus::Running | TwapStatus::Paused => {}
     }
     let in_flight = state.in_flight.as_ref();
-    // A last slice still being placed is settled on restore, not refused.
-    if state.orders_sizes.is_empty() && in_flight.is_none() {
+    // A last slice still being placed is settled on restore, not refused, and resting
+    // limit slices in their last interval are the TWAP's to cancel when it ends.
+    if state.orders_sizes.is_empty() && in_flight.is_none() && state.limit_slices.is_empty() {
         return Err("no slices remain".to_owned());
     }
     if in_flight.is_some_and(|slice| !(slice.size.is_finite() && slice.size > 0.0)) {

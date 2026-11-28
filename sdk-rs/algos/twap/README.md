@@ -158,3 +158,38 @@ KNOWN-ISSUE (legacy TS also partial-places): a valid prefix can land before a
 later native-rule refusal. The earlier full-plan validator, notional sidecars and
 dispatch-controlling helper adoption were reverted. The reporting helper cannot
 veto dispatch; TWAP's explicit Unknown policy decides the action's stop.
+
+# Limit slices end with their TWAP
+
+A `useLimitOrders` slice rests at the bid (buy) or ask (sell). Legacy TS only
+listed these ids (`currentOrderIds`) and never cancelled them, so every end
+(stop, finish, account disposal on a web reload, nuke, a restore) left unfilled
+slices resting with nothing managing them. This port deliberately departs from
+legacy here (lead decision, 2026-11-28): every end that is the TWAP's own emits
+`TwapEffect::CancelSlices` for each slice it still holds, including a slice
+whose placement lands after the stop.
+
+The slices persist in `TwapState.limitSlices` (`orderIds`, `price`, `size`), so a
+restored TWAP still owns and cancels them, and a row in its last interval
+(no sizes left, slices held) is restorable. Finishing does not complete when
+the last slice is placed: the TWAP stays `running` for that slice's interval and
+completes at its stated duration, then cancels what still rests.
+
+The factory sends one cancel for the slices the store lists open and one by
+symbol for those it does not list (a lost row still rests at the venue). Both are
+counted in `placements_settled`, so disposal and nuke wait for them. A refusal of
+an unlisted slice means it was already filled or cancelled, and stays quiet. A
+refusal of a listed slice is reported, and an unconfirmed cancel is reported with
+the standard check-your-orders wording. Neither is ever resent.
+
+An Unknown halt still issues no write (#3355 above). Instead it names each
+resting slice by side, size, price and order id, as do a refused restore and an
+owner change, which may not write for another owner.
+A limit slice whose placement answers after an owner change is named the same
+way, never cancelled. On a restore, the TS wrapper adopts an in-flight slice it
+finds by client id into `limitSlices`, and a restore the user stops while it
+waits for its lock is still sent (paused, then stopped) when it holds slices or
+is placing one, so the algos cancel them. That stop intent is persisted on the row
+(`stopped`, never sent to the algos), so a reload before the lock is taken keeps
+it. An order found during an owner change is named, not adopted. `inFlight` carries
+the slice's price, because some venues report a found order without one.

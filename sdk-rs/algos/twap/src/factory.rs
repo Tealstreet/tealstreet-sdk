@@ -9,13 +9,15 @@ use safe_cex_algos::{AlgoCx, AlgoFactory};
 use safe_cex_chaser::{ChaserBook, ChaserOptions, ClientIdMinter};
 use safe_cex_engine::engine::Command;
 use safe_cex_engine::error::{Outcome, VenueError};
-use safe_cex_engine::model::{OrderSide as EngineSide, PlaceOrderOpts};
+use safe_cex_engine::model::{
+    CancelOrderRef, OrderSide as EngineSide, OrderStatus, PlaceOrderOpts,
+};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use crate::{
-    ChaserProgress, ChaserRequest, OrderKind, OrderSide, SliceFailure, TickerQuote, TwapBook,
-    TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest, TwapOwner,
+    ChaserProgress, ChaserRequest, LimitSlice, OrderKind, OrderSide, SliceFailure, TickerQuote,
+    TwapBook, TwapEffect, TwapEnv, TwapMarketView, TwapOptions, TwapOrderRequest, TwapOwner,
 };
 
 /// The account's chaser runtime, as TWAP slices use it.
@@ -62,7 +64,8 @@ struct Inner {
     rescheduled: Notify,
     driver_started: Cell<bool>,
     client_ids: ClientIdMinter,
-    /// Slice placements awaiting their answer: each may yet land.
+    /// Slice placements awaiting their answer, each of which may yet land, and
+    /// slice cancels awaiting theirs: disposal waits for both.
     placing: Cell<usize>,
     placed: Notify,
     owner_provider: RefCell<Option<OwnerProvider>>,
@@ -332,11 +335,20 @@ impl Inner {
             return false;
         };
         let had_rows = inner.book.borrow().ids().next().is_some();
+        let resting = inner.book.borrow().resting_slices();
         if !inner.book.borrow_mut().rebind_owner(Some(owner)) {
             return false;
         }
         if had_rows {
-            report(cx, "TWAPs stopped because the account connection changed");
+            // Another owner's writes are not ours to make: name its slices instead.
+            let mut message = "TWAPs stopped because the account connection changed".to_owned();
+            for (symbol, side, slices) in &resting {
+                message.push_str(&format!(
+                    ". TWAP {symbol}'s limit orders are still open: {}",
+                    crate::describe_slices(*side, slices)
+                ));
+            }
+            report(cx, &message);
         }
         cx.port.emit("twap:stateUpdate", "{}".into());
         inner.rescheduled.notify_one();
@@ -443,6 +455,12 @@ impl Inner {
                         Self::place(inner, cx, twap_id, settle_token, element_index, &request);
                 }
                 TwapEffect::RemoveChaser { chaser_id, .. } => inner.chasers.remove(cx, &chaser_id),
+                TwapEffect::CancelSlices {
+                    symbol,
+                    side,
+                    slices,
+                    ..
+                } => Self::cancel_slices(inner, cx, &symbol, side, slices),
                 TwapEffect::Log { message } => report(cx, &message),
                 TwapEffect::StateUpdate { data } => {
                     cx.port.emit("twap:stateUpdate", data.to_string())
@@ -492,13 +510,14 @@ impl Inner {
         let owner = inner.owner_snapshot();
         let future = cx.port.command(command);
         inner.placing.set(inner.placing.get() + 1);
-        let (inner, task_cx) = (inner.clone(), cx.clone());
+        let (inner, task_cx, request) = (inner.clone(), cx.clone(), request.clone());
         cx.spawn(async move {
             let outcome = placement_outcome(future.await);
             inner.placing.set(inner.placing.get() - 1);
             inner.placed.notify_waiters();
             if owner != inner.owner_snapshot() {
                 Self::refresh_owner(&inner, &task_cx);
+                report_orphaned_limit(&task_cx, &request, &outcome);
                 return;
             }
             match (settle_token, outcome) {
@@ -509,6 +528,94 @@ impl Inner {
             }
         });
         true
+    }
+
+    /// One cancel for the slices the store lists open, one by symbol for those it
+    /// does not list. A refusal of an unlisted one means it is gone already (filled
+    /// or cancelled elsewhere); anything else the user must hear. Never retried.
+    fn cancel_slices(
+        inner: &Rc<Self>,
+        cx: &AlgoCx,
+        symbol: &str,
+        side: OrderSide,
+        slices: Vec<LimitSlice>,
+    ) {
+        let (mut listed, mut unlisted) = (Vec::new(), Vec::new());
+        {
+            let store = cx.port.store();
+            for slice in slices {
+                let mut open = slice.clone();
+                open.order_ids.retain(|id| match store.order(id) {
+                    None => {
+                        unlisted.push((id.clone(), slice.clone()));
+                        false
+                    }
+                    Some(order) => {
+                        !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                    }
+                });
+                if !open.order_ids.is_empty() {
+                    listed.push(open);
+                }
+            }
+        }
+        let unlisted = unlisted
+            .into_iter()
+            .map(|(id, slice)| LimitSlice {
+                order_ids: vec![id],
+                ..slice
+            })
+            .collect::<Vec<_>>();
+        let capabilities = cx.port.capabilities();
+        for (slices, listed) in [(listed, true), (unlisted, false)] {
+            if slices.is_empty() {
+                continue;
+            }
+            let orders = slices
+                .iter()
+                .flat_map(|slice| &slice.order_ids)
+                .map(|id| CancelOrderRef {
+                    id: id.clone(),
+                    symbol: symbol.to_owned(),
+                })
+                .collect();
+            let command = cx.port.next_command_id();
+            let command = if listed {
+                safe_cex_algos::cancel_command(&capabilities, command, orders)
+            } else {
+                Command::CancelOrdersWithSymbols { command, orders }
+            };
+            let future = cx.port.command(command);
+            inner.placing.set(inner.placing.get() + 1);
+            let (inner, task_cx, symbol) = (inner.clone(), cx.clone(), symbol.to_owned());
+            cx.spawn(async move {
+                let result = future.await;
+                inner.placing.set(inner.placing.get() - 1);
+                inner.placed.notify_waiters();
+                let Err(error) = result else {
+                    return;
+                };
+                let orders = crate::describe_slices(side, &slices);
+                if crate::known_refusal(&error) && !listed {
+                    eprintln!("[TWAP] {symbol} slice cancel refused, not open: {orders}");
+                } else if crate::known_refusal(&error) {
+                    report(
+                        &task_cx,
+                        &format!(
+                            "TWAP {symbol} couldn’t cancel its limit orders: {orders}. {}",
+                            error.message
+                        ),
+                    );
+                } else {
+                    report(
+                        &task_cx,
+                        &format!(
+                            "We couldn’t confirm TWAP {symbol}’s limit orders were cancelled: {orders}. Check your open orders before trying again."
+                        ),
+                    );
+                }
+            });
+        }
     }
 
     fn settled(
@@ -698,6 +805,54 @@ impl TwapChasers for Rc<ChaserBook> {
     fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
         ChaserBook::remove(self, chaser_id);
     }
+}
+
+/// A limit slice that answered after the account connection changed belongs to no
+/// TWAP and may not be cancelled under the new owner: name it, or say it is unknown.
+fn report_orphaned_limit(
+    cx: &AlgoCx,
+    request: &TwapOrderRequest,
+    outcome: &Result<Vec<String>, SliceFailure>,
+) {
+    let (OrderKind::Limit, Some(price)) = (request.kind, request.price) else {
+        return;
+    };
+    let ids = match outcome {
+        Ok(ids) => ids.clone(),
+        Err(failure) => crate::retained_order_ids(failure),
+    };
+    let symbol = &request.symbol;
+    let unresolved = outcome
+        .as_ref()
+        .is_err_and(|failure| !crate::known_refusal(failure));
+    let message = if !ids.is_empty() {
+        let slice = LimitSlice {
+            order_ids: ids,
+            price,
+            size: request.amount,
+        };
+        let rest = if unresolved {
+            " The rest of it couldn’t be confirmed. Check your open orders before trying again."
+        } else {
+            ""
+        };
+        format!(
+            "TWAP {symbol}’s limit order placed as the account connection changed is still open: {}.{rest}",
+            crate::describe_slices(request.side, &[slice])
+        )
+    } else if unresolved {
+        format!(
+            "We couldn’t confirm whether TWAP {symbol}’s {} {} limit order at {price} was placed as the account connection changed. Check your open orders before trying again.",
+            match request.side {
+                OrderSide::Buy => "buy",
+                OrderSide::Sell => "sell",
+            },
+            request.amount
+        )
+    } else {
+        return;
+    };
+    report(cx, &message);
 }
 
 /// A TWAP error the user must see: the `error` op is what the web toasts.

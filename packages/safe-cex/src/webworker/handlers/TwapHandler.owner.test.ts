@@ -258,8 +258,13 @@ it.each(['uncertain', 'failed'] as const)(
     h.lookupReply.resolve();
     await vi.advanceTimersByTimeAsync(1000);
     expect(h.slices).toEqual([]);
+    // The stale lookup's own warning is suppressed; the owner-change notice still says
+    // the slice it could not confirm, since nothing will manage that order now.
     expect(h.exchange.emitter.emit.mock.calls).toEqual([
-      ['warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.'],
+      [
+        'warning',
+        'TWAP BTCUSDT wasn’t restored because the account connection changed. A 0.15 slice being placed couldn’t be confirmed; check your open orders.',
+      ],
     ]);
   },
 );
