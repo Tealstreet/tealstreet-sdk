@@ -235,7 +235,9 @@ Connect to `/accounts/<id>` with `Authorization: Bearer <account-token>`. Browse
 clients, whose WebSocket API cannot set that header, send subprotocols:
 
 ```ts
-const ws = new WebSocket(url + '/accounts/binance', ['safe-cex-frame.v1', 'bearer.' + accountToken]);
+const ws = new WebSocket(url + '/accounts/binance', [
+  'safe-cex-frame.v1', 'bearer.' + accountToken,
+]);
 ws.binaryType = 'arraybuffer';
 ```
 
