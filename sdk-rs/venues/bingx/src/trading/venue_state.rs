@@ -7,7 +7,7 @@
 //! observations sorted by order id, each as strings (a u32 length and UTF-8
 //! bytes) plus an attached byte. The observed order itself is the store's: a
 //! frame-fed engine's ingested ORDERS are its reconcile.
-//! Readers also accept v1, which omits originals and grants no put-back provenance.
+//! Readers also accept v1, which omits the typed native originals.
 use super::{Observation, Trading, protection};
 use safe_cex_engine::model::OrderStatus;
 

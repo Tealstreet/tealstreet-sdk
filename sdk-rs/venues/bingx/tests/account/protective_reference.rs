@@ -84,13 +84,21 @@ fn fresh_public_reference_allows_frame_fed_sl_and_tp_exactly_once() {
             assert!(h.requests.is_empty(), "one bounded public read only");
             h.reply(read.id, 200, response);
             assert!(h.failures.is_empty(), "{:?}; {:?}", h.failures, h.logs);
-            let write = h.take("/trade/cancelReplace");
+            // Cancel, confirm, place (#3828).
+            let cancel = h.take("/trade/order?");
+            assert_eq!(cancel.method, Method::Delete);
+            h.reply(cancel.id, 200, &format!(r#"{{"code":0,"data":{{"orderId":"{ORDER_ID}","status":"CANCELED","executedQty":"0"}}}}"#));
+            let write = h.take("/trade/order");
             assert_eq!(write.method, Method::Post);
             let body: serde_json::Value =
                 serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
             assert_eq!(body["workingType"], working_type);
             assert_eq!(body["reduceOnly"], true);
-            h.reply(write.id, 200, &format!(r#"{{"code":0,"data":{{"cancelOrderId":"{ORDER_ID}","cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"replacement"}}}}"#));
+            h.reply(
+                write.id,
+                200,
+                r#"{"code":0,"data":{"order":{"orderId":"replacement","status":"NEW"}}}"#,
+            );
             assert_eq!(h.done, vec![(900, Ok("[\"replacement\"]".into()))]);
             assert!(h.requests.iter().all(|r| r.method == Method::Get));
             h.reply(read.id, 200, response);

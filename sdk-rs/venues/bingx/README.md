@@ -46,7 +46,7 @@ or impose a combined native-write count limit. Ordinary quantity amendment
 checks normalized quantity bounds; atomic price replacement leaves its new
 notional and quantity rules to the venue. These known partial-placement cases
 retain the pre-existing behavior rather than adding a new validation gate.
-Protective put-back, restore and replacement behavior is unchanged.
+Protective edits are cancel, confirm, place, with no automatic put-back (#3828).
 
 Lot allocation follows `bingx.exchange.ts:1544-1564`: take
 `ceil(amount / maxQty)` equal rounded lots, then append the rounded native
@@ -75,7 +75,7 @@ An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`
 uses the same satisfied-cancel path as `80016`: the command completes, but its
 symbols remain fenced until a fresh primary-key order snapshot reconciles them.
 Edits and protective cancels require their existing cancellation proof; a missing
-order reply never authorizes a replacement or put-back. Generic `109400`
+order reply never authorizes a replacement. Generic `109400`
 parameter and timestamp refusals keep their existing classifications.
 
 Invalid-input diagnostics for a sent cancel/amend retain a closed
@@ -141,17 +141,22 @@ canceled alongside the existing status spellings. Other unknown states still
 refuse the whole history read; this read-only mapping conveys no write authority.
 
 Protective edits retain native closing authority and use a final managed-Claim
-veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
-use native cancelReplace; explicit partial refusal permits one exact put-back.
-Ambiguous replies and guarded rate limits are Unknown, with no resend or restore.
+veto with a genuine <=5 s Mark/Last receipt. Every protective edit, including a
+reduce-only LIMIT price move, cancels the original, requires a target-matching
+terminal cancellation with zero execution, then places; native cancelReplace
+remains only for unguarded LIMIT moves. A refused cancel leaves the original; a
+refused placement after a proven cancel is Unprotected with a re-place warning.
+The placement's final Claim refuses if the cancelled original changed or filled
+after its proof, and its ACK must name a fresh id on the edited symbol.
+Ambiguous replies and guarded rate limits are Unknown, with no resend or put-back.
 A missing or stale requested receipt triggers one unsigned Daily (Last) or
 Premium (Mark) preflight read, bounded to 20 s with no retry, before destructive
 admission. The target row retains its actual receipt time and is usable only
 after the whole envelope succeeds, within the unchanged 5 s freshness limit.
 Frame-fed edits use this same path; frame arrival never refreshes a reference.
 A failed, sparse, wrong-source or delayed read leaves the original open. Final
-Claims, re-signs and restores still use the same pure veto. Only the veto is
-I/O-free; re-signs and restores retain their existing server-time reads and writes.
+Claims and re-signs still use the same pure veto. Only the veto is I/O-free;
+re-signs retain their existing server-time reads and writes.
 See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
 for the native classes, proof requirements and frame-state version contract.
 The genuine <=5 s per-source proof is intentionally stricter than legacy TS,

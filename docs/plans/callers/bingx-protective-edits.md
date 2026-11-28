@@ -7,18 +7,19 @@ an opening order merely because the edit reformatted it.
 
 A complete native snapshot supplies the original quantity, side, position side,
 trigger and workingType, closing flags, stopGuaranteed, priceProtect and exact
-positionId. Native STOP_MARKET and TAKE_PROFIT_MARKET edits use
-POST /openApi/swap/v1/trade/cancelReplace with STOP_ON_FAILURE and the matching
-NEW or PENDING cancellation restriction. LIMIT quantity edits retain native
-amend; protected parent LIMIT price edits remain refused. Unsupported stop size
-edits remain NotSent. No refused or 404 native edit falls back to cancellation.
+positionId. Every protective edit (a standalone STOP_MARKET/TAKE_PROFIT_MARKET
+trigger move, a TRIGGER_MARKET move or a reduce-only LIMIT price move) is a
+guarded serial cancel, confirm, place: DELETE the original, require the
+cancellation proof below, then POST the replacement. LIMIT quantity edits retain
+native amend; protected parent LIMIT price edits remain refused; unsupported stop
+size edits remain NotSent. Only an unguarded LIMIT price move still uses native
+cancelReplace.
 
-The vendor documents these stop-market classes for cancelReplace, but its
-separate cancelResult and newOrderResult do not establish rollback of a
-successful cancellation when replacement fails. Only the matching cancelOrderId,
-positive cancelResult and explicit FAILED newOrderResult, without contradictory
-placement evidence, authorize one exact put-back. Any ambiguous half is Unknown.
-See the [vendor modification reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-trade/api-reference.md#vi-order-modification-and-replacement).
+Guarded edits used native cancelReplace until #3828. Its live reply nests the
+cancelled order under `cancelResponse`, which the proof never read, so every such
+edit surfaced an Unknown cancellation after BingX had replaced the order; its
+separate cancelResult/newOrderResult also never established rollback. Serial
+cancel/confirm/place replaced it rather than a further decoder.
 
 All destructive managed Claims, including signature/timestamp re-signs, evaluate
 one pure venue veto. The rounded trigger uses its native Mark or Last source;
@@ -37,33 +38,34 @@ proof without discarding the clocks that fence earlier reads.
 The <=5 s genuine proof intentionally remains stricter than legacy TS
 replaceTriggerOrderPrice, which optionally checked Store Mark without an age gate.
 
-Remaining supported shapes use guarded serial cancel/create. A target-matching
-terminal cancellation with explicit zero execution is required before creating;
-an empty code-0 object, missing execution proof, a foreign identity/symbol or a
-contradictory streamed fill is Unknown. Complete native TRIGGER_MARKET parameters
-are preserved when available, including guaranteed-stop flags. Attached, group,
-split and other unproven originals grant no put-back authority. Native flags
-that cannot be preserved invalidate amendment metadata before cancellation.
+A target-matching terminal cancellation with explicit zero execution is required
+before placing; an empty code-0 object, missing execution proof, a foreign
+identity/symbol or a contradictory streamed fill is Unknown and places nothing.
+The replacement's own final Claim re-checks the cancelled original: a fill or
+other change learned after the cancel proof refuses the placement. Its ACK must
+name a fresh order id (not the cancelled original's) on the edited or an omitted
+symbol, or the edit is Unknown and nothing more is sent.
+Stop and trigger replacements keep the complete native parameters, including the
+original quantity and closing/guaranteed-stop flags. A reduce-only LIMIT keeps
+`positionId`, `priceProtect` and `stopGuaranteed` from a matching native snapshot;
+a flag it cannot carry refuses the edit before cancellation, as does any other
+native flag that cannot be preserved.
 
-After proven cancellation and a definitive replacement refusal, a proven
-standalone original is submitted once with its original quantity, not the edit's
-requested size or today's position size. A positive fresh OPEN/NEW/PENDING/WORKING
-acknowledgement is required for typed Restored. A refused restore, a release veto
-on restore or missing exact provenance reports typed Unprotected with a visible
-re-place warning. There is no loop and no plain market-order recovery. Trigger
-orders do not accept caller IDs; a LIMIT caller ID with no proven reuse contract
-does not authorize restoration.
+Nothing is ever placed automatically after a failure. A refused cancel leaves the
+original open. After a proven cancellation, a definitive replacement refusal
+reports typed Unprotected with a visible re-place warning; an unclear replacement
+is Unknown with Open Orders wording. Neither resends nor puts the original back.
 
 HTTP 429 and native 100410 on guarded legs are Unknown, even with a refusal-shaped
-body. Unknown replacement or put-back never resends or restores and never claims
-protection. Unrelated gateway classification is unchanged. Before each guarded
-leg, present_plan_failure registers its current unknown words, so an engine-sealed
-408/5xx/transport loss or timeout cannot present a stale replacement refusal about
-a put-back that may already be resting. Outcome and protection remain engine-owned.
+body. An Unknown leg never resends and never claims protection. Unrelated gateway
+classification is unchanged. Before each guarded leg, present_plan_failure
+registers its current unknown words, so an engine-sealed 408/5xx/transport loss or
+timeout cannot present a stale replacement refusal. Outcome and protection remain
+engine-owned.
 
 VENUE_STATE exports version 2 with the typed native original and existing
 observation. Readers also accept version 1 from older sources, loading mode and
-observations without any put-back provenance. Unknown versions fail closed. The real native
+observations without the typed native original. Unknown versions fail closed. The real native
 snapshot -> frame control pins this contract. Frame arrival, replayed snapshots,
 time-only updates and sparse rows never grant local reference freshness.
 
@@ -83,7 +85,7 @@ envelope succeeds, it validates the captured guard and hands that same preflight
 to the existing write plan. Changed/filled orders, a vanished protected position,
 a crossed trigger, a retired owner or a failed read leave the original open with
 NotSent. Every later managed Claim still performs the unchanged pure guard,
-including re-signs and exact put-backs; expiry at that boundary never schedules
+including re-signs; expiry at that boundary never schedules
 another read. LOCAL/COSIGNED frame-fed page engines can therefore obtain genuine
 proof without trusting frame arrival or changing the VENUE_STATE format.
 

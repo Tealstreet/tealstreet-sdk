@@ -127,6 +127,10 @@ impl Original {
         if self.client_order_id.as_ref().is_some_and(|s| !s.is_empty()) {
             return None;
         }
+        self.native_flags(p)
+    }
+    /// The native flags a replacement must keep; `None` when one cannot be carried.
+    pub(super) fn native_flags(&self, mut p: Params) -> Option<Params> {
         for (key, value) in [
             ("stopGuaranteed", &self.stop_guaranteed),
             ("priceProtect", &self.price_protect),
@@ -174,12 +178,36 @@ impl Guard {
             })
     }
 
+    /// The replacement's final Claim: the proven-cancelled original may only have
+    /// changed status, so a fill or change learned after the cancel proof refuses it.
+    /// A row that has since left the Store keeps its proven zero-execution cancel.
+    pub(super) fn check_replacement(&self, store: &Store) -> Result<(), VenueError> {
+        let Some(current) = store.order(&self.order.id) else {
+            return Ok(());
+        };
+        let mut expected = self.order.clone();
+        expected.status = current.status;
+        expected.last_update = current.last_update;
+        if *current != expected
+            || current.status != OrderStatus::Canceled
+            || current.filled != 0.0
+            || current.remaining != current.amount
+        {
+            let mut error = not_sent(format!(
+                "Your {} replacement was not placed: the cancelled order changed or filled",
+                self.order.symbol
+            ))
+            .kind(ErrorKind::InvalidInput);
+            error.presents = true;
+            return Err(error);
+        }
+        Ok(())
+    }
     pub(super) fn check(
         &self,
         store: &Store,
         references: &HashMap<String, References>,
         now: f64,
-        restoring: bool,
     ) -> Result<(), VenueError> {
         let refuse = |cause: &str| {
             let mut error = not_sent(format!(
@@ -193,12 +221,7 @@ impl Guard {
         let current = store
             .order(&self.order.id)
             .ok_or_else(|| refuse("order changed"))?;
-        let mut expected = self.order.clone();
-        if restoring {
-            expected.status = OrderStatus::Canceled;
-            expected.last_update = current.last_update;
-        }
-        if *current != expected || current.filled != 0.0 || current.remaining != current.amount {
+        if *current != self.order || current.filled != 0.0 || current.remaining != current.amount {
             return Err(refuse("order changed or filled"));
         }
         if self.closing {
@@ -216,11 +239,7 @@ impl Guard {
                 return Err(refuse("protected position is no longer on that side"));
             }
         }
-        if let Some(trigger) = if restoring {
-            self.trigger.map(|_| self.order.price)
-        } else {
-            self.trigger
-        } {
+        if let Some(trigger) = self.trigger {
             let source = self.source.ok_or_else(|| refuse("reference stale"))?;
             let reference = references
                 .get(&self.order.symbol)
@@ -274,7 +293,7 @@ impl Trading {
         request: &Request,
         release: &HttpRelease,
     ) -> Result<(), VenueError> {
-        if !request.protective {
+        if !request.protective && !request.replacement {
             return Ok(());
         }
         let guard = self
@@ -283,12 +302,10 @@ impl Trading {
             .filter(|r| r.plan.owner() == request.plan.owner())
             .and_then(|r| r.job.guard.as_ref())
             .ok_or_else(|| not_sent("Protective edit guard is no longer available"))?;
-        guard.check(
-            store,
-            &self.references,
-            release.time.raw_ms,
-            request.restoring,
-        )
+        if request.replacement {
+            return guard.check_replacement(store);
+        }
+        guard.check(store, &self.references, release.time.raw_ms)
     }
 }
 
@@ -296,34 +313,24 @@ impl Job {
     pub(super) fn unknown_words(&self) -> Option<String> {
         self.guard.as_ref().map(|guard| {
             format!(
-                "{UNKNOWN_WORDS}. Your {} {} was not confirmed; check protection before re-placing it",
-                guard.order.symbol,
-                if self.restoring {
-                    "original stop put-back"
-                } else {
-                    "order change"
-                }
+                "{UNKNOWN_WORDS}. Your {} order change was not confirmed; check protection before re-placing it",
+                guard.order.symbol
             )
         })
     }
-    pub(super) fn protection_error(&self, mut error: VenueError, restored: bool) -> VenueError {
+    /// After a confirmed cancel nothing is put back automatically: the user re-places.
+    pub(super) fn protection_error(&self, mut error: VenueError) -> VenueError {
         let Some(guard) = &self.guard else {
             return error;
         };
         error.presents = true;
-        if restored {
-            error.protection = Some(Protection::Restored);
-            error.message = format!(
-                "Your {} stop is unchanged: its replacement was refused, so the original stop was put back as a new order",
-                guard.order.symbol
-            );
-        } else if error.outcome == Some(Outcome::Unknown) {
+        if error.outcome == Some(Outcome::Unknown) {
             error.protection = None;
             error.message = self.unknown_words().unwrap();
         } else {
             error.protection = Some(Protection::Unprotected);
             error.message = format!(
-                "Your {} position is unprotected: the replacement or original stop could not be confirmed in place; re-place protection. {}",
+                "Your {} position is unprotected: the original order was cancelled and its replacement was refused; re-place protection. {}",
                 guard.order.symbol, error.message
             );
         }
@@ -331,18 +338,8 @@ impl Job {
     }
 }
 
-pub(super) const REPLACEMENT_FAILED: safe_cex_engine::classify::CodeTable =
-    safe_cex_engine::classify::CodeTable {
-        rows: &[safe_cex_engine::classify::Row {
-            key: safe_cex_engine::classify::Key::Text("FAILED"),
-            verdict: Verdict::Refused(ErrorKind::Rejected),
-            only: None,
-        }],
-        success: &[],
-        unlisted: Verdict::Unknown(None),
-        status: &[],
-    };
-pub(super) const RESTORE_AUTH: safe_cex_engine::classify::CodeTable =
+/// Auth refusals of a later ordered write (the placement after a cancel): never resent.
+pub(super) const LATER_WRITE_AUTH: safe_cex_engine::classify::CodeTable =
     safe_cex_engine::classify::CodeTable {
         rows: &[
             safe_cex_engine::classify::Row {

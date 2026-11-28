@@ -181,7 +181,7 @@ impl Trading {
                 });
             self.observe_reference(&guard.order.symbol, read.source, value, at);
         }
-        if let Err(error) = guard.check(cx.store, &self.references, cx.now, false) {
+        if let Err(error) = guard.check(cx.store, &self.references, cx.now) {
             read.entry.reject(cx, error);
             return;
         }

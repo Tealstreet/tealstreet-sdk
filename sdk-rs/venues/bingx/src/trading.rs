@@ -62,7 +62,8 @@ pub struct Request {
     path: &'static str,
     params: Params,
     protective: bool,
-    restoring: bool,
+    /// The guarded placement after a proven cancel: its final Claim re-checks the original.
+    replacement: bool,
 }
 impl Request {
     pub fn settings_scope(&self) -> Option<Option<&str>> {
@@ -144,8 +145,6 @@ struct Job {
     // A limit's cancelReplace may cancel and then refuse the placement.
     replaces_order: Option<String>,
     guard: Option<protection::Guard>,
-    restore: Option<Params>,
-    restoring: bool,
     cancelled: bool,
     // A failed bracket leaves the placed entry without the protection the user asked for.
     entry_with_brackets: Option<(String, usize)>,
@@ -302,10 +301,13 @@ impl Data<'_> {
 
     fn id(&self) -> Result<Option<String>, String> {
         let nested = self.order.as_ref().map(|o| o.id()).transpose()?.flatten();
+        // The legacy capture sends a blank `orderID` alias beside the real
+        // `orderId`; a blank alias names nothing, but a blank `orderId` still fails.
         matching_id(
             self.order_id_text
                 .as_ref()
                 .map(Id::text)
+                .filter(|id| !id.trim().is_empty())
                 .into_iter()
                 .chain(self.order_id.as_ref().map(Id::text))
                 .chain(nested),
@@ -347,16 +349,6 @@ impl Data<'_> {
             order.canceled()?;
         }
         Ok(())
-    }
-    fn open_placement(&self) -> bool {
-        let own = self.status.is_empty()
-            || matches!(self.status.as_ref(), "NEW" | "OPEN" | "PENDING" | "WORKING");
-        own && (matches!(self.status.as_ref(), "NEW" | "OPEN" | "PENDING" | "WORKING")
-            || self.order.as_ref().is_some_and(|o| o.open_placement()))
-            && self
-                .order
-                .as_ref()
-                .is_none_or(|o| o.status.is_empty() || o.open_placement())
     }
     fn accepted(&self) -> Result<(), String> {
         if !self.status.is_empty()
@@ -693,11 +685,7 @@ impl Trading {
         let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        if run.error.is_some()
-            && !run.job.continue_on_error
-            && !run.job.continue_after_refusal
-            && !run.job.restoring
-        {
+        if run.error.is_some() && !run.job.continue_on_error && !run.job.continue_after_refusal {
             let plan = run.plan.clone();
             let error = run
                 .error
@@ -770,10 +758,9 @@ impl Trading {
                 .unknown_words()
                 .unwrap_or_else(|| UNKNOWN_WORDS.into());
             let _ = cx.present_plan_failure(&plan, words);
-            let protective = run.job.guard.is_some()
-                && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
-                    || run.job.restoring);
-            let restoring = run.job.restoring;
+            let protective = run.job.guard.is_some() && matches!(step.call, Call::Cancel { .. });
+            let replacement =
+                run.job.guard.is_some() && run.job.cancelled && matches!(step.call, Call::Place);
             let shape = diagnostics::capture(
                 cx,
                 &step,
@@ -797,7 +784,7 @@ impl Trading {
                     path: step.path,
                     params: step.params,
                     protective,
-                    restoring,
+                    replacement,
                 },
             );
         } else {
@@ -879,7 +866,7 @@ impl Trading {
         {
             present_unknown(error, None)
         } else if run.job.cancelled {
-            run.job.protection_error(error, false)
+            run.job.protection_error(error)
         } else {
             error
         };
@@ -979,10 +966,6 @@ impl Trading {
             .jobs
             .get(&request.command)
             .is_some_and(|r| r.job.guard.is_some());
-        let restoring = self
-            .jobs
-            .get(&request.command)
-            .is_some_and(|r| r.job.restoring);
         let rate_limited = guarded
             && (response.status == 429 || envelope.as_ref().is_ok_and(|e| e.code == 100410));
         let consistent_symbol = self
@@ -1007,34 +990,13 @@ impl Trading {
         let cancel_proven = consistent_symbol
             && current_unfilled
             && match call {
-                Call::Replace { old_id } => data.is_some_and(|d| {
-                    d.cancel_order_id.as_ref().map(Id::text).as_deref() == Some(old_id)
-                        && matches!(d.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
-                        && d.unfilled()
-                        && d.failed.as_ref().is_none_or(Vec::is_empty)
-                }),
                 Call::Cancel { ids, .. } => data.is_some_and(|d| d.proves_cancel(ids)),
                 _ => false,
             };
         let missing_cancel_proof = guarded
             && envelope.as_ref().is_ok_and(|e| e.code == 0)
-            && matches!(call, Call::Cancel { .. } | Call::Replace { .. })
+            && matches!(call, Call::Cancel { .. })
             && !cancel_proven;
-        let half_refused = guarded
-            && !rate_limited
-            && (200..300).contains(&response.status)
-            && cancel_proven
-            && matches!(call, Call::Replace { .. })
-            && data.is_some_and(|d| {
-                d.new_order_result == "FAILED"
-                    && (d.replace_result.is_empty() || d.replace_result == "FAILED")
-                    && d.new_order_id.is_none()
-                    && d.new_order_response.is_none()
-                    && d.order_id.is_none()
-                    && d.order_id_text.is_none()
-                    && d.order.is_none()
-                    && d.status.is_empty()
-            });
         let missing_order = ((200..300).contains(&response.status) || response.status == 400)
             && matches!(
                 call,
@@ -1057,7 +1019,8 @@ impl Trading {
                     ..
                 }
             );
-        let canceled = (!guarded || cancel_proven)
+        // Only an unguarded limit move still uses cancelReplace.
+        let canceled = !guarded
             && matches!(call, Call::Replace { .. })
             && data.is_some_and(|data| {
                 matches!(data.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
@@ -1079,45 +1042,34 @@ impl Trading {
                     absent,
                 )
             });
-        let decoded = if restoring
-            && decoded.is_ok()
-            && (!data.is_some_and(Data::open_placement)
-                || decoded.as_ref().is_ok_and(|ids| {
-                    self.jobs
-                        .get(&request.command)
-                        .and_then(|r| r.job.guard.as_ref())
-                        .is_some_and(|g| ids.iter().any(|id| id == &g.order.id))
-                })) {
-            Err(unknown(
-                "BingX put-back did not prove a fresh open protection order",
-            ))
-        } else {
-            decoded
-        };
-        let decoded = if guarded && (rate_limited || half_refused || missing_cancel_proof) {
+        let decoded = if guarded && (rate_limited || missing_cancel_proof) {
             Err(unknown(if rate_limited {
                 "BingX didn’t confirm this change. Check your open orders before trying again."
-            } else if half_refused {
-                "BingX replacement was refused after its target was canceled"
             } else {
                 "BingX didn’t confirm this order’s cancellation. Check your open orders before trying again."
             }))
         } else {
             decoded
         };
-        let decoded = if guarded
-            && matches!(call, Call::Replace { .. })
-            && data.is_some_and(|d| {
-                let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
-                !d.new_order_result.is_empty()
-                    && !d.replace_result.is_empty()
-                    && success(&d.new_order_result) != success(&d.replace_result)
-            }) {
-            Err(unknown(
-                "BingX replacement results contradict each other; check Open Orders",
-            ))
-        } else {
-            decoded
+        // A guarded replacement must prove a NEW order on the edited symbol.
+        let decoded = match (
+            &decoded,
+            self.jobs
+                .get(&request.command)
+                .and_then(|r| r.job.guard.as_ref()),
+        ) {
+            (Ok(ids), Some(guard))
+                if matches!(call, Call::Place)
+                    && (!consistent_symbol
+                        || ids.is_empty()
+                        || ids.iter().any(|id| id == &guard.order.id)) =>
+            {
+                Err(unknown(format!(
+                    "BingX didn’t confirm a new {} order. Check your open orders before trying again.",
+                    guard.order.symbol
+                )))
+            }
+            _ => decoded,
         };
         let result = if let (true, Ok(ids)) = (
             envelope.as_ref().is_ok_and(|e| e.code == 0),
@@ -1182,24 +1134,16 @@ impl Trading {
                 let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
                 message = safe_cex_engine::error::with_detail(&lost, &message);
             }
-            let native = if half_refused {
-                Some(Native {
-                    code: NativeCode::Text("FAILED"),
-                    message: "newOrderResult",
-                })
-            } else {
-                envelope.as_ref().ok().map(|e| Native {
-                    code: NativeCode::Int(e.code),
-                    message: &e.msg,
-                })
-            };
+            let native = envelope.as_ref().ok().map(|e| Native {
+                code: NativeCode::Int(e.code),
+                message: &e.msg,
+            });
             let timestamp = crate::sign::timestamp::refused(response.body);
-            let table = if half_refused {
-                &protection::REPLACEMENT_FAILED
-            } else if (restoring || (request.write > 0 && !matches!(call, Call::Cancel { .. })))
+            let table = if request.write > 0
+                && !matches!(call, Call::Cancel { .. })
                 && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
             {
-                &protection::RESTORE_AUTH
+                &protection::LATER_WRITE_AUTH
             } else if native
                 .as_ref()
                 .is_some_and(|n| context::names_duplicate_client_id(n.message))
@@ -1221,10 +1165,7 @@ impl Trading {
                     return;
                 }
             };
-            let fact = if half_refused {
-                fact
-            } else if rate_limited
-                || (guarded && matches!(call, Call::Replace { .. }))
+            let fact = if rate_limited
                 || missing_cancel_proof
                 || data.is_some_and(Data::has_order_claim)
                 || canceled
@@ -1311,7 +1252,7 @@ impl Trading {
                         && self
                             .jobs
                             .get(&request.command)
-                            .is_some_and(|run| run.job.replaces_cancelled.is_some() || restoring)))
+                            .is_some_and(|run| run.job.replaces_cancelled.is_some())))
             {
                 diagnostics::remember(&mut self.replacement_ids, ids);
             }
@@ -1336,19 +1277,10 @@ impl Trading {
             .as_ref()
             .is_err_and(|error| error.outcome == Some(Outcome::Unknown));
         match result {
-            Ok(ids) => {
-                run.native_ids.extend(ids);
-                if restoring {
-                    if let Some(error) = run.error.take() {
-                        run.error = Some(run.job.protection_error(error, true));
-                    }
-                    run.job.restoring = false;
-                }
-            }
+            Ok(ids) => run.native_ids.extend(ids),
             Err(error) => {
-                let definite = error.outcome == Some(Outcome::Rejected) && !rate_limited;
                 let error = if run.job.cancelled {
-                    run.job.protection_error(error, false)
+                    run.job.protection_error(error)
                 } else {
                     error
                 };
@@ -1357,26 +1289,6 @@ impl Trading {
                 }
                 if guarded || uncertain {
                     run.job.steps.clear();
-                }
-                if guarded
-                    && run.job.cancelled
-                    && definite
-                    && !restoring
-                    && let Some(params) = run.job.restore.take()
-                {
-                    let restore = Step {
-                        receipts: Vec::new(),
-                        method: Method::Post,
-                        path: ORDER,
-                        params,
-                        call: Call::Place,
-                        role: None,
-                    };
-                    run.writes.restore(&restore);
-                    run.job.steps.push_back(restore);
-                    run.job.restoring = true;
-                } else {
-                    run.job.restoring = false;
                 }
             }
         }
@@ -1389,7 +1301,7 @@ impl Trading {
             return;
         }
         let settled = if !run.job.continue_on_error
-            && (run.error.is_none() || run.job.restoring || run.job.continue_after_refusal)
+            && (run.error.is_none() || run.job.continue_after_refusal)
             && !run.job.steps.is_empty()
         {
             cx.continue_serial_plan(
@@ -1846,45 +1758,10 @@ impl Trading {
                 initial.trigger = None;
             }
             initial
-                .check(cx.store, &self.references, cx.now, false)
+                .check(cx.store, &self.references, cx.now)
                 .map_err(|e| e.message)?;
-            if !meta.attached
-                && matches!(
-                    meta.native_kind.as_str(),
-                    "STOP_MARKET" | "TAKE_PROFIT_MARKET"
-                )
-                && let Some(original) = meta
-                    .original
-                    .as_ref()
-                    .filter(|v| v.matches(o, &meta.native_kind, &meta.position_side))
-                && let Some(mut params) = original.params()
-            {
-                params = params
-                    .num("stopPrice", next)
-                    .str("cancelReplaceMode", "STOP_ON_FAILURE")
-                    .integer(
-                        "cancelOrderId",
-                        id.parse()
-                            .map_err(|_| "Order id is not a numeric int64; stop not changed")?,
-                    )
-                    .str(
-                        "cancelRestrictions",
-                        if meta.native_status == "PENDING" {
-                            "ONLY_PENDING"
-                        } else {
-                            "ONLY_NEW"
-                        },
-                    );
-                let mut job = one(
-                    Method::Post,
-                    REPLACE,
-                    params,
-                    Call::Replace { old_id: id.into() },
-                );
-                job.guard = Some(guard);
-                job.restore = original.params();
-                return Ok(job);
-            }
+            // Cancel, confirm it by its terminal status, then place; on any doubt the
+            // edit ends Unknown and nothing is resent or put back (#3828).
             if let Some(original) = meta
                 .original
                 .as_ref()
@@ -1961,14 +1838,69 @@ impl Trading {
         if !price.is_finite() || price <= 0.0 || price == o.price {
             return Err("Replacement price must change after rounding".into());
         }
-        let mut params = base
+        let identity = generated_id(cx)?;
+        let mut order = base
             .str("side", side(o.side))
             .str("positionSide", &meta.position_side)
             .str("type", "LIMIT")
             .num("quantity", o.amount)
             .num("price", price)
             .str("timeInForce", tif(o.time_in_force.expect("checked TIF")))
-            .str("cancelReplaceMode", "STOP_ON_FAILURE");
+            .str("clientOrderId", &identity);
+        if !cx.store.hedged() && o.reduce_only {
+            order = order.boolean("reduceOnly", true);
+        }
+        // With no put-back, a closing limit's replacement keeps its native identity
+        // flags, or the edit is refused before anything is cancelled.
+        if o.reduce_only
+            && let Some(original) = meta
+                .original
+                .as_ref()
+                .filter(|v| v.matches(o, &meta.native_kind, &meta.position_side))
+        {
+            order = original.native_flags(order).ok_or(
+                "Native order flags cannot be carried to the replacement; order not changed",
+            )?;
+        }
+        let receipts = vec![OrderIdentityReceipt {
+            symbol: o.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
+        }];
+        if o.reduce_only {
+            // A closing limit is protection: cancel, confirm it by its terminal
+            // status, then place; on any doubt it ends Unknown with no put-back.
+            let guard = protection::Guard {
+                order: o.clone(),
+                trigger: None,
+                kind: o.kind,
+                source: None,
+                closing: true,
+            };
+            guard
+                .check(cx.store, &self.references, cx.now)
+                .map_err(|e| e.message)?;
+            let mut job = self.cancel(cx, &[id.into()])?;
+            job.guard = Some(guard);
+            job.continue_on_error = false;
+            if let Some(Step {
+                call: Call::Cancel { absent_ok, .. },
+                ..
+            }) = job.steps.front_mut()
+            {
+                *absent_ok = false;
+            }
+            job.steps.push_back(Step {
+                receipts,
+                method: Method::Post,
+                path: ORDER,
+                params: order,
+                call: Call::Place,
+                role: None,
+            });
+            return Ok(job);
+        }
+        let mut params = order.str("cancelReplaceMode", "STOP_ON_FAILURE");
         // As legacy: a WORKING or OPEN order may still be PENDING at the venue.
         params = match meta.native_status.as_ref() {
             "PENDING" => params.str("cancelRestrictions", "ONLY_PENDING"),
@@ -1983,11 +1915,6 @@ impl Trading {
                 id.parse().map_err(|_| "Order id is not a numeric int64")?,
             );
         }
-        let identity = generated_id(cx)?;
-        params = params.str("clientOrderId", &identity);
-        if !cx.store.hedged() && o.reduce_only {
-            params = params.boolean("reduceOnly", true);
-        }
         let mut job = one(
             Method::Post,
             REPLACE,
@@ -1996,29 +1923,8 @@ impl Trading {
                 old_id: o.id.clone(),
             },
         );
-        job.steps.front_mut().unwrap().receipts = vec![OrderIdentityReceipt {
-            symbol: o.symbol.clone(),
-            kind: OrderIdentityKind::ClientOrderId,
-            identity,
-        }];
+        job.steps.front_mut().unwrap().receipts = receipts;
         job.replaces_order = Some(o.symbol.clone());
-        if o.reduce_only {
-            let guard = protection::Guard {
-                order: o.clone(),
-                trigger: None,
-                kind: o.kind,
-                source: None,
-                closing: true,
-            };
-            guard
-                .check(cx.store, &self.references, cx.now, false)
-                .map_err(|e| e.message)?;
-            job.guard = Some(guard);
-            job.restore = meta
-                .original
-                .as_ref()
-                .and_then(protection::Original::params);
-        }
         Ok(job)
     }
     fn leverage(
