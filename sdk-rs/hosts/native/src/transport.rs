@@ -17,6 +17,7 @@ use tokio_tungstenite::tungstenite::{
     http::{HeaderName, HeaderValue},
 };
 
+mod egress_bans;
 mod http;
 mod websocket;
 pub use http::{BoundHttp, HttpPrepareError, HttpPrepareFuture, PreparedHttp};

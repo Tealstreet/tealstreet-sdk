@@ -1,5 +1,6 @@
 //! Preparation and final handoff for the existing native HTTP executor.
 use super::NetworkTransport;
+use super::egress_bans::{self, Ban, Egress};
 use crate::how_pool::HowConnection;
 use crate::routing::{HttpRoute, HttpRouteMode, http_packet, insert_header};
 use crate::{Events, HostEvent};
@@ -92,9 +93,33 @@ struct Bound {
     /// Venue host and the way it went, for a transport failure's log line; never a URL.
     route: String,
     route_mode: &'static str,
+    /// Where a direct send leaves from, for the bans shared across accounts.
+    egress: Option<Egress>,
+    read: bool,
     guard: Option<super::IoGuard>,
     venue: Option<std::sync::Arc<str>>,
     report_user: Option<crate::report::ReportUser>,
+}
+
+/// The venue and, when it differs, the proxy a direct send goes to. A tunnelled
+/// send has none: the tunnel applies its own ban policy.
+fn egress(origin: &str, packet: &Packet) -> Option<Egress> {
+    let Packet::Direct(_, request) = packet else {
+        return None;
+    };
+    let authority = |url: &reqwest::Url| {
+        Some(format!(
+            "{}:{}",
+            url.host_str()?,
+            url.port_or_known_default()?
+        ))
+    };
+    let venue = authority(&reqwest::Url::parse(origin).ok()?)?;
+    let sent = authority(request.url())?;
+    Some(Egress {
+        via: (sent != venue).then_some(sent),
+        venue,
+    })
 }
 
 /// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`,
@@ -352,6 +377,7 @@ impl PreparedHttp for Prepared {
             )
         };
         let (route, route_mode) = route_label(&self.origin, &packet);
+        let egress = egress(&self.origin, &packet);
         Ok(Box::new(Bound {
             started: self.started,
             class: self.class,
@@ -362,6 +388,8 @@ impl PreparedHttp for Prepared {
             proxied,
             route,
             route_mode,
+            egress,
+            read: self.method == Method::Get,
             guard: self.guard.clone(),
             venue: self.venue.clone(),
             report_user: self.report_user.clone(),
@@ -385,10 +413,21 @@ impl BoundHttp for Bound {
             proxied,
             route,
             route_mode,
+            egress,
+            read,
             guard,
             venue,
             report_user,
         } = *self;
+        // A read into an egress the venue has banned is answered here, never sent;
+        // writes always go, so nothing the venue might still accept is refused.
+        if read
+            && let Some(ban) = egress
+                .as_ref()
+                .and_then(|egress| egress_bans::held(egress, egress_bans::now_ms()))
+        {
+            return tokio::spawn(async move { answer_held(request, &ban, &events) }).abort_handle();
+        }
         let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
@@ -399,7 +438,14 @@ impl BoundHttp for Bound {
             }
             match packet {
                 Packet::Direct(http, packet) => {
-                    direct_response(http.execute(*packet), request, response_events, proxied).await
+                    direct_response(
+                        http.execute(*packet),
+                        request,
+                        response_events,
+                        proxied,
+                        egress,
+                    )
+                    .await
                 }
                 Packet::How(tunnel, packet) => {
                     tunnel
@@ -440,6 +486,37 @@ impl BoundHttp for Bound {
     }
 }
 
+fn header_lines(response: &reqwest::Response) -> String {
+    response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn emit_buffered(events: &Events, request: RequestId, status: u16, headers: String, body: &[u8]) {
+    let _ = events.send(HostEvent::HttpStart {
+        request,
+        status,
+        headers,
+    });
+    for piece in body.chunks(16 * 1024) {
+        let _ = events.send(HostEvent::HttpChunk(request, piece.to_vec()));
+    }
+    let _ = events.send(HostEvent::HttpEnd(request));
+}
+
+/// The venue's own refusal, so its rate-limit handling runs unchanged, with the
+/// seconds left as Retry-After and a marker that nothing was sent.
+fn answer_held(request: RequestId, ban: &Ban, events: &Events) {
+    let left = ((ban.until_ms - egress_bans::now_ms()) / 1_000.0)
+        .ceil()
+        .max(1.0);
+    let headers = format!("retry-after: {left}\nx-tealstreet-egress-hold: 1");
+    emit_buffered(events, request, ban.status, headers, ban.body.as_bytes());
+}
+
 const PROXY_AUTHORIZATION_MISSING: &str =
     "Tealstreet proxy authorization missing: no proxy token, so the private request was not sent";
 
@@ -457,20 +534,48 @@ async fn direct_response(
     request: RequestId,
     events: Events,
     proxied: bool,
+    egress: Option<Egress>,
 ) -> Result<(), String> {
     let response = response
         .await
         .map_err(|error| error.without_url().to_string())?;
+    let status = response.status().as_u16();
+    if let Some(egress) = egress.filter(|_| matches!(status, 418 | 429)) {
+        let headers = header_lines(&response);
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = response
+            .bytes()
+            .await
+            .map_err(|error| error.without_url().to_string())?;
+        let text = String::from_utf8_lossy(&body);
+        let now = egress_bans::now_ms();
+        if let Some((ip, until_ms)) = egress_bans::parse(status, &text, retry_after.as_deref(), now)
+        {
+            eprintln!(
+                "venue banned egress: {} via {} ip={} for {}s",
+                egress.venue,
+                egress.via.as_deref().unwrap_or("this host"),
+                ip.as_deref().unwrap_or("unnamed"),
+                ((until_ms - now) / 1_000.0).ceil()
+            );
+            let ban = Ban {
+                status,
+                body: text.into_owned(),
+                until_ms,
+            };
+            egress_bans::record(&egress, ip, ban, now);
+        }
+        emit_buffered(&events, request, status, headers, &body);
+        return Ok(());
+    }
     // The edge's 401 fails as a transport error (retried by the venue's read
     // policy), never as a 401 the venue would classify as a refused key.
-    if proxied && response.status().as_u16() == 401 {
-        let status = response.status().as_u16();
-        let headers = response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
-            .collect::<Vec<_>>()
-            .join("\n");
+    if proxied && status == 401 {
+        let headers = header_lines(&response);
         let body = response
             .bytes()
             .await
@@ -482,26 +587,13 @@ async fn direct_response(
                 text.trim()
             ));
         }
-        let _ = events.send(HostEvent::HttpStart {
-            request,
-            status,
-            headers,
-        });
-        for piece in body.chunks(16 * 1024) {
-            let _ = events.send(HostEvent::HttpChunk(request, piece.to_vec()));
-        }
-        let _ = events.send(HostEvent::HttpEnd(request));
+        emit_buffered(&events, request, status, headers, &body);
         return Ok(());
     }
-    let headers = response
-        .headers()
-        .iter()
-        .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let headers = header_lines(&response);
     let _ = events.send(HostEvent::HttpStart {
         request,
-        status: response.status().as_u16(),
+        status,
         headers,
     });
     let mut body = response.bytes_stream();
@@ -1041,5 +1133,96 @@ mod tests {
         let bound = prepared.bind(packet).unwrap();
         assert!(!format!("{bound:?}").contains("sentinel"));
         assert!(!format!("{bound:?}").contains("venue.invalid"));
+    }
+
+    /// Dispatches `packet` and collects its events up to its end or failure.
+    async fn exchange(transport: &NetworkTransport, packet: HttpRequest) -> Vec<HostEvent> {
+        let bound = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap()
+            .bind(packet)
+            .unwrap();
+        let (events, mut replies) = tokio::sync::mpsc::unbounded_channel();
+        bound.dispatch(events);
+        let mut seen = Vec::new();
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_secs(3), replies.recv()).await
+        {
+            let last = matches!(event, HostEvent::HttpEnd(_) | HostEvent::HttpFailed(..));
+            seen.push(event);
+            if last {
+                break;
+            }
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn a_ban_on_this_hosts_ip_holds_every_accounts_reads_but_never_writes() {
+        let until = egress_bans::now_ms() + 5_000.0;
+        let body: &'static str = Box::leak(
+            format!(
+                r#"{{"code":-1003,"msg":"Way too many requests; IP(203.0.113.9) banned until {until}. Please use the websocket for live updates to avoid bans."}}"#
+            )
+            .into_boxed_str(),
+        );
+        let (url, server) = answer_once("418 I'm a teapot", body).await;
+        let get = HttpRequest {
+            method: Method::Get,
+            ..request(&url)
+        };
+        let first = exchange(&NetworkTransport::new(), get.clone()).await;
+        assert!(
+            matches!(first[0], HostEvent::HttpStart { status: 418, .. }),
+            "{first:?}"
+        );
+        server.await.unwrap();
+
+        // Another account on this host: the venue is not asked again (its only
+        // connection is spent, so a send would fail), it gets the same refusal.
+        let other = NetworkTransport::new();
+        let held = exchange(&other, get.clone()).await;
+        let HostEvent::HttpStart {
+            status, headers, ..
+        } = &held[0]
+        else {
+            panic!("{held:?}")
+        };
+        assert_eq!(*status, 418);
+        assert!(headers.contains("x-tealstreet-egress-hold: 1"), "{headers}");
+        let left: f64 = headers
+            .lines()
+            .find_map(|line| line.strip_prefix("retry-after: "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!((1.0..=5.0).contains(&left), "{left}");
+        assert!(matches!(&held[1], HostEvent::HttpChunk(_, bytes) if bytes == body.as_bytes()));
+        assert!(matches!(held[2], HostEvent::HttpEnd(_)));
+
+        // A write is always sent: here it reaches the closed listener and fails.
+        let write = exchange(&other, request(&url)).await;
+        assert!(
+            matches!(write.last(), Some(HostEvent::HttpFailed(..))),
+            "{write:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_order_limit_429_holds_no_other_read() {
+        let body = r#"{"code":-1015,"msg":"Too many new orders; current limit is 300 orders per TEN_SECONDS."}"#;
+        let (url, server) = answer_once("429 Too Many Requests", body).await;
+        let get = HttpRequest {
+            method: Method::Get,
+            ..request(&url)
+        };
+        exchange(&NetworkTransport::new(), get.clone()).await;
+        server.await.unwrap();
+        let next = exchange(&NetworkTransport::new(), get).await;
+        assert!(
+            matches!(next.last(), Some(HostEvent::HttpFailed(..))),
+            "{next:?}"
+        );
     }
 }
