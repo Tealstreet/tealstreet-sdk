@@ -265,6 +265,38 @@ struct BookState {
     sync: Sync,
 }
 
+/// When each public book, kline and trade stream was opened, so a feed capped
+/// at Hyro's per-connection limit keeps the newest rather than whichever a
+/// HashMap yields first.
+#[derive(Default)]
+struct StreamOrder {
+    next: u64,
+    opened: HashMap<String, u64>,
+}
+
+impl StreamOrder {
+    fn open(&mut self, key: String) {
+        self.next += 1;
+        self.opened.insert(key, self.next);
+    }
+    fn close(&mut self, key: &str) {
+        self.opened.remove(key);
+    }
+    fn opened(&self, key: &str) -> u64 {
+        self.opened.get(key).copied().unwrap_or(0)
+    }
+}
+
+fn book_stream(symbol: &str) -> String {
+    format!("book:{symbol}")
+}
+fn kline_stream(symbol: &str, interval: Interval) -> String {
+    format!("kline:{symbol}:{interval:?}")
+}
+fn trade_stream(symbol: &str) -> String {
+    format!("trade:{symbol}")
+}
+
 /// The lists startup waits for before markets and tickers go into the store.
 #[derive(Default)]
 struct Startup {
@@ -380,6 +412,7 @@ pub struct BybitLinear {
     /// Live bar per subscription, extended by trades between native klines.
     live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
+    stream_order: StreamOrder,
     startup: Startup,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
@@ -641,6 +674,7 @@ impl BybitLinear {
             candles: HashMap::new(),
             live_candles: HashMap::new(),
             trade_subscribers: HashMap::new(),
+            stream_order: StreamOrder::default(),
             startup: Startup {
                 prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
@@ -1361,9 +1395,12 @@ impl BybitLinear {
     }
 
     /// The current category's public topics: live books, candles, trades, then
-    /// tickers. The set is capped to the engine's interest bound, or Hyro's
-    /// per-connection limit, tickers first; the bool reports a cap.
+    /// tickers. Tickers are capped so the requested topics always fit the
+    /// engine's interest bound; the bool reports a cap.
     fn public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        if self.variant.is_hyro() {
+            return self.hyro_public_interests(cx);
+        }
         let mut topics: Vec<String> = Vec::new();
         let spot = self.variant.is_spot();
         for (symbol, state) in &self.books {
@@ -1386,19 +1423,78 @@ impl BybitLinear {
                 .filter(|symbol| self.owns_symbol(symbol))
                 .map(|symbol| format!("publicTrade.{symbol}")),
         );
-        let mut capped = false;
-        let limit = if self.variant.is_hyro() {
-            // Past the cap Hyro refuses the book too, so even requested topics trim.
-            capped = topics.len() > HYRO_TOPICS_PER_CONNECTION;
-            topics.truncate(HYRO_TOPICS_PER_CONNECTION);
-            HYRO_TOPICS_PER_CONNECTION
-        } else {
-            MAX_INTERESTS
-        };
         let tickers = self.ticker_topics(cx);
-        let room = limit.saturating_sub(topics.len());
-        capped |= tickers.len() > room;
+        let room = MAX_INTERESTS.saturating_sub(topics.len());
+        let capped = tickers.len() > room;
         topics.extend(tickers.into_iter().take(room));
+        (
+            topics.into_iter().map(Interest::from_wire_args).collect(),
+            capped,
+        )
+    }
+
+    /// Hyro holds 32 topics per connection. The newest books, klines and trades
+    /// keep their slots, each book or kline with its own symbol's ticker beside
+    /// it; tickers for other symbols in use, then idle markets, fill the rest.
+    /// The bool reports that something was left out.
+    fn hyro_public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        let mut streams: Vec<(u64, String, Option<&str>)> = Vec::new();
+        for (symbol, state) in &self.books {
+            if Category::for_symbol(symbol) == self.category
+                && !matches!(state.sync, Sync::Resubscribing(_))
+            {
+                streams.push((
+                    self.stream_order.opened(&book_stream(symbol)),
+                    Self::book_topic(self.paths.book_depth, symbol),
+                    Some(symbol),
+                ));
+            }
+        }
+        for (symbol, interval) in self.candles.keys() {
+            if let Some(topic) = Self::kline_topic(symbol, *interval)
+                && self.owns_symbol(symbol)
+            {
+                streams.push((
+                    self.stream_order.opened(&kline_stream(symbol, *interval)),
+                    topic,
+                    Some(symbol),
+                ));
+            }
+        }
+        for symbol in self.trade_subscribers.keys() {
+            if self.owns_symbol(symbol) {
+                streams.push((
+                    self.stream_order.opened(&trade_stream(symbol)),
+                    format!("publicTrade.{symbol}"),
+                    None,
+                ));
+            }
+        }
+        streams.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let mut topics: Vec<String> = Vec::new();
+        let mut capped = false;
+        for (_, topic, symbol) in streams {
+            let ticker = symbol
+                .map(|symbol| format!("tickers.{symbol}"))
+                .filter(|ticker| !topics.contains(ticker));
+            // An older stream never displaces a newer one, nor its ticker.
+            if topics.len() + 1 + usize::from(ticker.is_some()) > HYRO_TOPICS_PER_CONNECTION {
+                capped = true;
+                break;
+            }
+            topics.push(topic);
+            topics.extend(ticker);
+        }
+        for ticker in self.ticker_topics(cx) {
+            if topics.contains(&ticker) {
+                continue;
+            }
+            if topics.len() == HYRO_TOPICS_PER_CONNECTION {
+                capped = true;
+                break;
+            }
+            topics.push(ticker);
+        }
         (
             topics.into_iter().map(Interest::from_wire_args).collect(),
             capped,
@@ -2251,6 +2347,7 @@ impl BybitLinear {
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
+            self.stream_order.open(book_stream(&symbol));
             self.subscribe(
                 cx,
                 "subscribe",
@@ -2272,6 +2369,7 @@ impl BybitLinear {
             {
                 cx.clear_timer(timer);
             }
+            self.stream_order.close(&book_stream(symbol));
             self.subscribe(
                 cx,
                 "unsubscribe",
@@ -2313,11 +2411,13 @@ impl BybitLinear {
             let count = self.candles.entry(key).or_insert(0);
             *count += 1;
             if *count == 1 {
+                self.stream_order.open(kline_stream(&symbol, interval));
                 let mut topics: Vec<String> = kline.into_iter().collect();
                 if trades {
                     let subscribers = self.trade_subscribers.entry(symbol.clone()).or_insert(0);
                     *subscribers += 1;
                     if *subscribers == 1 {
+                        self.stream_order.open(trade_stream(&symbol));
                         topics.push(format!("publicTrade.{symbol}"));
                     }
                 }
@@ -2328,11 +2428,13 @@ impl BybitLinear {
             if *count == 0 {
                 self.candles.remove(&key);
                 self.live_candles.remove(&key);
+                self.stream_order.close(&kline_stream(&symbol, interval));
                 let mut topics: Vec<String> = kline.into_iter().collect();
                 if trades && let Some(subscribers) = self.trade_subscribers.get_mut(&symbol) {
                     *subscribers -= 1;
                     if *subscribers == 0 {
                         self.trade_subscribers.remove(&symbol);
+                        self.stream_order.close(&trade_stream(&symbol));
                         topics.push(format!("publicTrade.{symbol}"));
                     }
                 }

@@ -47,10 +47,12 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 - Public subscribe/unsubscribe frames contain at most 10 topics per request.
 - One public connection holds at most 32 topics: the simulator refuses the
   subscribe that crosses it, and every one after it, with `at most 32 topics
-  per connection` (live 2026-11-28, TEAL-20). The desired set is capped at 32,
-  books, candles and trades first; tickers fill the rest, symbols in use (book,
-  candles, trades, position or order) before idle markets. Idle tickers are not
-  streamed, reported once as an Info notice rather than a warning.
+per connection` (live 2026-11-28, TEAL-20). The desired set is capped at 32:
+  books, klines and trades newest-opened first, each book or kline with its own
+  symbol's ticker beside it, so opening one more evicts the oldest stream and
+  never the one just opened. Tickers for other symbols in use (position or
+  order), then idle markets, fill the rest. What is left out is reported once
+  as an Info notice rather than a warning.
 - Flat position clears can omit side/leverage. Live positions still require a
   valid side and positive leverage, and accept `entryPrice` when `avgPrice` is
   absent/empty. Flat rows with missing, empty or nonpositive leverage retain the
@@ -168,7 +170,6 @@ Frequent reads while an authenticated engine exists can collect those terminal
 rows before expiry. This does not recover expired rows or provide durable capture
 while no engine is running; deeper backfill cannot close that retention gap.
 
-
 ## Later-page history failure diagnostics
 
 Closed-PnL and query history capture their closed native operation when binding
@@ -187,6 +188,7 @@ from an auxiliary order-history failure without treating a retained prefix as
 complete coverage. An earlier missing-coverage reason remains authoritative;
 first-page failures and serialization failures still reject. These diagnostics
 do not change requests, deadlines, retry policy, pacing or writes.
+
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and

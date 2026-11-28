@@ -688,3 +688,65 @@ fn bybit_public_feed_is_not_held_to_hyros_connection_cap() {
     let (live, _) = live_public_topics(&h);
     assert_eq!(live.len(), 41, "{live:?}");
 }
+
+fn has_book(live: &std::collections::BTreeSet<String>, symbol: &str) -> bool {
+    live.iter()
+        .any(|t| t.starts_with("orderbook.") && t.ends_with(&format!(".{symbol}")))
+}
+
+/// Past the cap, opening a book evicts the OLDEST streams, never an arbitrary
+/// live book or the one just opened, and each kept book keeps its own ticker
+/// (review of #3837: HashMap order once evicted M19, M17, then M32 and M33).
+#[test]
+fn hyro_capped_feed_keeps_the_newest_books_each_with_its_ticker() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..36 {
+        let symbol = format!("M{i}USDT");
+        h.command(Command::SubscribeOrderBook {
+            symbol: symbol.clone(),
+        });
+        h.advance(500.0);
+        let (live, peak) = live_public_topics(&h);
+        assert!(peak <= 32, "Hyro connection reached {peak} topics");
+        assert!(has_book(&live, &symbol), "opened {symbol}: {live:?}");
+        assert!(
+            live.contains(&format!("tickers.{symbol}")),
+            "opened {symbol} without its ticker: {live:?}"
+        );
+    }
+    // Sixteen book-and-ticker pairs fill 32 topics: exactly the sixteen newest.
+    let (live, _) = live_public_topics(&h);
+    for i in 0..36 {
+        let symbol = format!("M{i}USDT");
+        assert_eq!(has_book(&live, &symbol), i >= 20, "{symbol}: {live:?}");
+        assert_eq!(
+            live.contains(&format!("tickers.{symbol}")),
+            i >= 20,
+            "{symbol}: {live:?}"
+        );
+    }
+    assert_eq!(live.len(), 32);
+}
+
+/// With 31 other books open, a newly opened book streams with its own ticker
+/// (review of #3837: it used to stream `orderbook.*.M39USDT` without one).
+#[test]
+fn hyro_book_opened_beside_31_others_streams_with_its_ticker() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    for i in 0..31 {
+        h.command(Command::SubscribeOrderBook {
+            symbol: format!("M{i}USDT"),
+        });
+    }
+    h.advance(2_000.0);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert!(has_book(&live, "M39USDT"), "{live:?}");
+    assert!(live.contains("tickers.M39USDT"), "{live:?}");
+}
