@@ -1724,3 +1724,69 @@ fn only_the_bracketed_orders_rows_are_named_in_a_mixed_batch() {
         ]
     );
 }
+
+/// Aster removed the V1 order routes; its router answers an HTML 404 that never
+/// reached an order handler. That is a visible refusal naming the V3 key, not Unknown.
+const RETIRED_ROUTE: &str =
+    "<!DOCTYPE html>\n<html><head><title>404</title></head><body>Not Found</body></html>";
+
+fn assert_retired_refusal(h: &Harness) {
+    let (_, error) = h.failures.last().expect("the write fails visibly");
+    assert_ne!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.kind,
+        Some(safe_cex_engine::ErrorKind::AuthInvalid),
+        "{error:?}"
+    );
+    assert!(error.message.contains("V3 API wallet"), "{}", error.message);
+    assert!(
+        h.requests.iter().all(|r| r.method == Method::Get),
+        "never resent: {:?}",
+        h.requests
+    );
+}
+
+#[test]
+fn v1_place_on_a_retired_route_is_refused_with_the_v3_steer() {
+    let mut h = Harness::new();
+    h.place(limit());
+    let request = h.take(Method::Post);
+    assert!(request.url.contains("/fapi/v1/order?"));
+    h.reply_status(request, 404, RETIRED_ROUTE);
+    assert_retired_refusal(&h);
+}
+
+#[test]
+fn v1_cancel_on_a_retired_route_is_refused_with_the_v3_steer() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("7", OrderType::Limit)]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["7".into()],
+    });
+    let request = h.take(Method::Delete);
+    h.reply_status(request, 404, RETIRED_ROUTE);
+    assert_retired_refusal(&h);
+}
+
+#[test]
+fn v3_place_404_keeps_its_existing_classification() {
+    // V3 still serves its order routes; only the retired V1 routes are a known refusal.
+    let mut h = Harness::options(v3_options());
+    h.place(limit());
+    let request = h.take(Method::Post);
+    assert!(request.url.contains("/fapi/v3/order?"));
+    h.reply_status(request, 404, RETIRED_ROUTE);
+    let (_, error) = h.failures.last().expect("the write fails visibly");
+    assert!(
+        !error.message.contains("V3 API wallet"),
+        "{}",
+        error.message
+    );
+}

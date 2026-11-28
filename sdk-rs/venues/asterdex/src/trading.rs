@@ -1,6 +1,6 @@
 //! Aster order entry uses sequential individual requests. Conditional orders
 //! share the ordinary order endpoint; amendments cancel before replacing.
-use crate::account::venue_error;
+use crate::account::{V1_ROUTE_RETIRED, venue_error};
 use crate::sign::{Query, Version};
 use crate::{AsterDex, Options, Pending};
 use safe_cex_engine::classify::{
@@ -256,6 +256,17 @@ const ASTER_STATUS: &[(u16, Verdict)] = &[
     (418, Verdict::Refused(ErrorKind::RateLimited)),
     (429, Verdict::Refused(ErrorKind::RateLimited)),
 ];
+
+/// Aster removed its V1 order routes; their router 404 never reached an order
+/// handler, so it is a refusal, never an unknown placement or cancel.
+const ASTER_V1_RETIRED: CodeTable = CodeTable {
+    rows: ASTER.rows,
+    success: ASTER.success,
+    unlisted: ASTER.unlisted,
+    status: &[(404, Verdict::Refused(ErrorKind::AuthInvalid))],
+};
+/// Internal stand-in for that envelope-less 404; Aster's own codes are negative.
+const RETIRED_ROUTE: i64 = 404;
 
 /// Only while a write still has its single resend: V1 -1022 and -1021.
 pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
@@ -1086,7 +1097,16 @@ impl AsterDex {
             .as_ref()
             .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let status_429 = response.as_ref().is_ok_and(|r| r.status == 429);
+        let retired = self.version == Version::V1
+            && matches!(
+                call,
+                Call::Place { .. } | Call::Cancel { .. } | Call::CancelSymbol(_)
+            )
+            && response
+                .as_ref()
+                .is_ok_and(|r| r.status == 404 && matches!(venue_error(r), Some((0, _))));
         let outcome = match response {
+            Ok(_) if retired => Err((RETIRED_ROUTE, V1_ROUTE_RETIRED.to_owned())),
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.message)),
         };
@@ -1299,7 +1319,7 @@ impl AsterDex {
                             .filter(|_| *code == -1000)
                             .unwrap_or(message),
                     };
-                    let native = (*code != 0).then_some(&native);
+                    let native = (*code != 0 && !retired).then_some(&native);
                     let told = match self
                         .trading
                         .jobs
@@ -1316,7 +1336,9 @@ impl AsterDex {
                         Some(gone) => safe_cex_engine::error::with_detail(&gone, message),
                         None => message.clone(),
                     };
-                    let table = if protective {
+                    let table = if retired {
+                        &ASTER_V1_RETIRED
+                    } else if protective {
                         &ASTER_PROTECTIVE
                     } else {
                         &ASTER
@@ -2073,6 +2095,9 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
 /// `failure` for a stop's replacement or put-back: a code `ASTER` does not list as a
 /// refusal leaves the write unknown, as `ASTER_PROTECTIVE` classifies it.
 fn protective_failure(code: i64, message: String) -> VenueError {
+    if code == RETIRED_ROUTE {
+        return failure(code, message);
+    }
     let listed = {
         let native = Native {
             code: NativeCode::Int(code),
@@ -2096,6 +2121,7 @@ fn protective_failure(code: i64, message: String) -> VenueError {
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
+        RETIRED_ROUTE => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
         -1000 if refusal_1000(&message) == Some(DEVICE_TIME) => {
             (Some(ErrorKind::Rejected), Outcome::Rejected)
         }
@@ -2114,7 +2140,7 @@ fn failure(code: i64, message: String) -> VenueError {
     };
     let mut error = VenueError::new(message.clone()).outcome(outcome);
     error.kind = kind;
-    if code != 0 {
+    if code != 0 && code != RETIRED_ROUTE {
         error = error.venue_code(code.to_string()).venue_message(message);
     }
     error
