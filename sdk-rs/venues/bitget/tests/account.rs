@@ -1315,3 +1315,70 @@ fn an_invalid_uta_settings_reply_is_not_optional_leverage_absence() {
         assert!(h.engine.store().loaded().balance);
     }
 }
+
+/// A relay/tunnel that never prepares an account read is a transport timeout,
+/// not a refusal: its `request.failed` event keeps the engine's typed kind so
+/// hosts can treat it as a transient read (Sentry TEALSTREET-NEXT-E4E).
+#[test]
+fn an_account_read_preparation_timeout_keeps_its_timeout_kind() {
+    use safe_cex_engine::log::Level;
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    use safe_cex_engine::{Action, ErrorKind, Notice, Response, VenueError};
+    let mut h = Harness::private_started();
+    let settings = h.take("/account/settings");
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: settings.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+            },
+        },
+    );
+    h.engine.prepare_dispatch(h.now);
+    let preparation = h
+        .engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(http) => match *http {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("/account/accounts") => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("managed account balance preparation");
+    // As the wasm host's `preparation_failure("timedOut")` reports it.
+    h.engine.http_preparation_failed(
+        h.now,
+        preparation,
+        Error::TimedOut,
+        VenueError::new("Relay or network request timed out").kind(ErrorKind::Timeout),
+    );
+    let event = h
+        .engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == "request.failed"
+                    && event
+                        .message
+                        .starts_with("Relay or network request timed out") =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("the failed account read is reported");
+    assert_eq!(event.level, Level::Error);
+    assert!(
+        event.fields.contains(&("kind", "timeout".into())),
+        "typed kind dropped: {:?}",
+        event.fields
+    );
+}

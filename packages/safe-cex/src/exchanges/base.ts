@@ -2231,8 +2231,13 @@ export class BaseExchange implements Exchange {
     const structuredExtraData =
       extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
+    // Set only by a caller that knows the failure was a read; see `isTransportFailure`.
+    // Still reported: its `transient_read_op` tag lets the host sink decide on demotion.
+    const transientRead = structuredExtraData.transientRead === true;
 
-    if (!suppressConsoleLog) {
+    if (!suppressConsoleLog && transientRead) {
+      diagnosticConsole.warn('exchange read failed', err);
+    } else if (!suppressConsoleLog) {
       diagnosticConsole.error('exchange error', err);
       diagnosticConsole.trace();
     }
@@ -2259,6 +2264,7 @@ export class BaseExchange implements Exchange {
           key !== 'sentryTags' &&
           key !== 'sentryExtra' &&
           key !== 'suppressConsoleLog' &&
+          key !== 'transientRead' &&
           key !== 'engineEvent' &&
           key !== 'classified',
       ),

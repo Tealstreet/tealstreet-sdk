@@ -218,6 +218,16 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
   return Object.keys(result).length ? result : undefined;
 };
 
+/**
+ * A network/timeout failure with no write command and an outcome other than `unknown`.
+ * Necessary, not sufficient, for transport noise: a write refusal can have this shape
+ * too, so only a caller that knows the operation was a read may treat it as transient.
+ */
+export const isTransportFailure = (classified: ClassifiedError | undefined): boolean =>
+  (classified?.kind === 'network' || classified?.kind === 'timeout') &&
+  !classified.command &&
+  classified.outcome !== 'unknown';
+
 const AUTH_KINDS: readonly string[] = ['authInvalid', 'authExpired', 'authPermission'];
 
 /**
