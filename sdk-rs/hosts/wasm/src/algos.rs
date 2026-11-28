@@ -493,15 +493,21 @@ impl Algos {
             );
         }
         self.twap.terminate_all();
-        let (book, scope, port, finished) = (
+        let (book, twap, scope, port, finished) = (
             self.book.clone(),
+            self.twap.clone(),
             self.scope.clone(),
             self.port.clone(),
             self.finished.clone(),
         );
         // Outside the scope: this task is what disposes it.
         drop(executor::spawn(async move {
-            if executor::timeout(SHUTDOWN_DEADLINE_MS, book.shutdown(&reason))
+            // The TWAPs' last slice placements and their limit-slice cancels too.
+            let settling = async {
+                book.shutdown(&reason).await;
+                twap.placements_settled().await;
+            };
+            if executor::timeout(SHUTDOWN_DEADLINE_MS, settling)
                 .await
                 .is_err()
             {
