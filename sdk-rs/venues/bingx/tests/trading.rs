@@ -702,9 +702,12 @@ fn unguarded_price_replace_ignores_only_a_blank_order_id_alias() {
 
 /// A reduce-only limit is protection: its price move is cancel, confirm, place.
 fn closing_limit() -> Harness {
+    closing_limit_with(None)
+}
+fn closing_limit_with(original: Option<trading::protection::Original>) -> Harness {
     let mut o = order();
     o.reduce_only = true;
-    let mut h = Harness::new(Some((o, "LIMIT")));
+    let mut h = Harness::with_original(Some((o, "LIMIT")), "NEW", original);
     let mut p = position();
     p.side = PositionSide::Short;
     h.engine.store_mut().set_positions(vec![p]);
@@ -786,7 +789,7 @@ fn closing_limit_cancel_refused_or_unconfirmed_places_nothing() {
 }
 
 #[test]
-fn closing_limit_placement_failure_after_a_confirmed_cancel_is_visible_and_never_put_back() {
+fn closing_limit_placement_failure_after_a_confirmed_cancel_is_visible_and_not_retried() {
     for (status, body, unknown) in [
         (200, r#"{"code":101204,"msg":"insufficient margin"}"#, false),
         (500, r#"{"msg":"upstream"}"#, true),
@@ -810,6 +813,79 @@ fn closing_limit_placement_failure_after_a_confirmed_cancel_is_visible_and_never
             );
             assert!(error.message.contains("re-place protection"), "{error:?}");
         }
+    }
+}
+
+fn limit_original(flags: serde_json::Value) -> trading::protection::Original {
+    let mut raw = serde_json::json!({
+        "symbol":"BTC-USDT", "type":"LIMIT", "side":"BUY", "positionSide":"BOTH",
+        "quantity":1.0, "price":95.0, "reduceOnly":true, "timeInForce":"GTC",
+    });
+    raw.as_object_mut()
+        .unwrap()
+        .extend(flags.as_object().unwrap().clone());
+    serde_json::from_value(raw).unwrap()
+}
+
+#[test]
+fn closing_limit_replacement_carries_the_native_snapshot_flags() {
+    let mut h = closing_limit_with(Some(limit_original(serde_json::json!({
+        "positionId":8389765519993909001_u64, "priceProtect":true, "stopGuaranteed":false,
+    }))));
+    cancel_limit(&mut h);
+    let wire: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+    assert_eq!(wire["positionId"].as_u64(), Some(8389765519993909001));
+    assert_eq!(wire["priceProtect"], true);
+    assert_eq!(wire["stopGuaranteed"], false);
+    assert_eq!(wire["price"], 96.0);
+}
+
+#[test]
+fn closing_limit_with_an_uncarriable_native_flag_is_refused_before_cancelling() {
+    let mut o = order();
+    o.reduce_only = true;
+    let original = limit_original(serde_json::json!({"positionId":1.5}));
+    let mut h = Harness::with_original(Some((o, "LIMIT")), "NEW", Some(original));
+    let mut p = position();
+    p.side = PositionSide::Short;
+    h.engine.store_mut().set_positions(vec![p]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.requests.is_empty(), "nothing may be cancelled");
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "{:?}",
+        h.failures
+    );
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open
+    );
+}
+
+#[test]
+fn closing_limit_placement_rate_limit_after_a_confirmed_cancel_is_unknown() {
+    // A dispatched write's unclear reply is Unknown (the duplicate-write rule).
+    for (status, body) in [
+        (200, r#"{"code":100410,"msg":"rate limit"}"#),
+        (429, r#"{"code":101204,"msg":"refusal-shaped"}"#),
+    ] {
+        let mut h = closing_limit();
+        cancel_limit(&mut h);
+        h.reply_status(status, body);
+        assert!(h.requests.is_empty());
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}: {:?}",
+            h.failures
+        );
+        assert!(h.failures[0].protection.is_none());
     }
 }
 
@@ -3082,7 +3158,7 @@ fn an_unconfirmed_stop_cancel_is_unknown_and_places_nothing() {
 }
 
 #[test]
-fn a_refused_placement_after_a_confirmed_cancel_reports_unprotected_without_a_put_back() {
+fn a_refused_placement_after_a_confirmed_cancel_reports_unprotected() {
     let mut h = guarded_stop(true);
     edit_stop(&mut h);
     cancel_stop(&mut h);
@@ -3112,6 +3188,96 @@ fn an_unknown_placement_after_a_confirmed_cancel_is_unknown_and_never_resent() {
             "{status}: {:?}",
             h.failures
         );
+    }
+}
+
+/// The replacement's ACK must prove a NEW order on the edited symbol.
+fn guarded_replacement_ack(h: &mut Harness, body: &str) {
+    h.reply(body);
+    assert!(h.requests.is_empty(), "{body}: nothing more is sent");
+}
+
+#[test]
+fn a_replacement_ack_naming_the_cancelled_original_or_a_foreign_symbol_is_unknown() {
+    let stale = format!(
+        r#"{{"code":0,"data":{{"order":{{"orderId":"{}","symbol":"BTC-USDT","status":"NEW"}}}}}}"#,
+        order().id
+    );
+    let foreign =
+        r#"{"code":0,"data":{"order":{"orderId":"777","symbol":"ETH-USDT","status":"NEW"}}}"#;
+    for body in [stale.as_str(), foreign] {
+        for limit in [false, true] {
+            let mut h = if limit {
+                let mut h = closing_limit();
+                cancel_limit(&mut h);
+                h
+            } else {
+                let mut h = guarded_stop(true);
+                edit_stop(&mut h);
+                cancel_stop(&mut h);
+                h
+            };
+            guarded_replacement_ack(&mut h, body);
+            assert!(h.done[0].is_err(), "limit={limit} {body}: {:?}", h.done);
+            assert_eq!(
+                h.failures[0].outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "limit={limit} {body}: {:?}",
+                h.failures
+            );
+        }
+    }
+}
+
+#[test]
+fn a_fresh_replacement_ack_on_the_edited_or_an_omitted_symbol_succeeds() {
+    for body in [
+        r#"{"code":0,"data":{"order":{"orderId":"777","symbol":"BTC-USDT","status":"FILLED"}}}"#,
+        r#"{"code":0,"data":{"order":{"orderId":"777","status":"NEW"}}}"#,
+    ] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        cancel_stop(&mut h);
+        guarded_replacement_ack(&mut h, body);
+        assert_eq!(h.done[0].as_ref().unwrap(), "[\"777\"]", "{body}");
+    }
+}
+
+#[test]
+fn a_fill_learned_after_the_cancel_proof_vetoes_the_replacement_claim() {
+    for limit in [false, true] {
+        let mut h = if limit {
+            closing_limit()
+        } else {
+            let mut h = guarded_stop(true);
+            edit_stop(&mut h);
+            h
+        };
+        // Handle the proven cancel, but learn of a fill before the replacement is claimed.
+        let id = h.requests.remove(0).id;
+        h.now += 1.;
+        let proof = serde_json::json!({"code":0,"data":{"orderId":order().id,"status":"CANCELED","executedQty":"0"}}).to_string();
+        h.engine.handle(
+            h.now,
+            Event::HttpResponse {
+                request: id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &proof,
+                },
+            },
+        );
+        h.engine.store_mut().update_order(&order().id, |o| {
+            o.filled = 0.25;
+            o.remaining = o.amount - 0.25;
+        });
+        h.collect();
+        assert!(
+            h.requests.is_empty(),
+            "limit={limit}: a filled original must not be re-placed at full size"
+        );
+        assert!(h.done[0].is_err(), "limit={limit}: {:?}", h.done);
     }
 }
 
@@ -3149,7 +3315,7 @@ fn guarded_rate_limits_are_unknown_without_changing_unrelated_gateway_classifica
 }
 
 #[test]
-fn contradictory_execution_and_replacement_results_never_authorize_put_back() {
+fn contradictory_cancel_acknowledgements_never_authorize_a_replacement() {
     for (native, data) in [
         (
             true,
@@ -3184,7 +3350,7 @@ fn contradictory_execution_and_replacement_results_never_authorize_put_back() {
 }
 
 #[test]
-fn ambiguous_native_halves_and_empty_or_filled_cancel_evidence_never_create() {
+fn ambiguous_or_filled_cancel_evidence_never_places_a_replacement() {
     for body in [r#"{"code":0,"data":{}}"#.to_string(),
         serde_json::json!({"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}).to_string(),
         serde_json::json!({"code":0,"data":{"cancelOrderId":"other","cancelResult":"SUCCESS","newOrderResult":"FAILED"}}).to_string(),
@@ -3420,7 +3586,7 @@ fn native_sl_tp_both_sides_sources_and_full_close_keep_the_original_size() {
 }
 
 #[test]
-fn contradictory_native_halves_or_symbols_are_unknown_without_put_back() {
+fn cancel_replies_with_foreign_symbols_or_ids_are_unknown_and_place_nothing() {
     for extra in [
         serde_json::json!({"newOrderId":"possibly-live"}),
         serde_json::json!({"symbol":"ETH-USDT"}),
@@ -3511,7 +3677,7 @@ fn another_fresh_ticker_field_never_refreshes_a_stale_or_missing_trigger_referen
 }
 
 #[test]
-fn missing_order_edits_never_replace_or_put_back_without_cancel_proof() {
+fn missing_order_edits_never_place_without_cancel_proof() {
     for (code, message) in [
         (109400, "order not exist"),
         (109421, "order does not exist"),

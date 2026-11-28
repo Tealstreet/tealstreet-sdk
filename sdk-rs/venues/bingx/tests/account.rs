@@ -4352,7 +4352,7 @@ fn native_stop_snapshot_supplies_exact_replacement_parameters_and_frame_provenan
 }
 
 #[test]
-fn trigger_market_keeps_native_guarantee_flags_without_guessing_a_put_back() {
+fn trigger_market_keeps_native_guarantee_flags_on_its_replacement() {
     let orders = serde_json::json!({"code":0,"data":{"orders":[{
         "orderId":ORDER_ID,"symbol":"BTC-USDT","type":"TRIGGER_MARKET","side":"SELL",
         "status":"NEW","origQty":"0.1","executedQty":"0","stopPrice":"59000",

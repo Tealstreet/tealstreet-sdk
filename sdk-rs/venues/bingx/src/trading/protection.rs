@@ -127,6 +127,10 @@ impl Original {
         if self.client_order_id.as_ref().is_some_and(|s| !s.is_empty()) {
             return None;
         }
+        self.native_flags(p)
+    }
+    /// The native flags a replacement must keep; `None` when one cannot be carried.
+    pub(super) fn native_flags(&self, mut p: Params) -> Option<Params> {
         for (key, value) in [
             ("stopGuaranteed", &self.stop_guaranteed),
             ("priceProtect", &self.price_protect),
@@ -174,6 +178,31 @@ impl Guard {
             })
     }
 
+    /// The replacement's final Claim: the proven-cancelled original may only have
+    /// changed status, so a fill or change learned after the cancel proof refuses it.
+    /// A row that has since left the Store keeps its proven zero-execution cancel.
+    pub(super) fn check_replacement(&self, store: &Store) -> Result<(), VenueError> {
+        let Some(current) = store.order(&self.order.id) else {
+            return Ok(());
+        };
+        let mut expected = self.order.clone();
+        expected.status = current.status;
+        expected.last_update = current.last_update;
+        if *current != expected
+            || current.status != OrderStatus::Canceled
+            || current.filled != 0.0
+            || current.remaining != current.amount
+        {
+            let mut error = not_sent(format!(
+                "Your {} replacement was not placed: the cancelled order changed or filled",
+                self.order.symbol
+            ))
+            .kind(ErrorKind::InvalidInput);
+            error.presents = true;
+            return Err(error);
+        }
+        Ok(())
+    }
     pub(super) fn check(
         &self,
         store: &Store,
@@ -264,7 +293,7 @@ impl Trading {
         request: &Request,
         release: &HttpRelease,
     ) -> Result<(), VenueError> {
-        if !request.protective {
+        if !request.protective && !request.replacement {
             return Ok(());
         }
         let guard = self
@@ -273,6 +302,9 @@ impl Trading {
             .filter(|r| r.plan.owner() == request.plan.owner())
             .and_then(|r| r.job.guard.as_ref())
             .ok_or_else(|| not_sent("Protective edit guard is no longer available"))?;
+        if request.replacement {
+            return guard.check_replacement(store);
+        }
         guard.check(store, &self.references, release.time.raw_ms)
     }
 }
@@ -306,7 +338,8 @@ impl Job {
     }
 }
 
-pub(super) const RESTORE_AUTH: safe_cex_engine::classify::CodeTable =
+/// Auth refusals of a later ordered write (the placement after a cancel): never resent.
+pub(super) const LATER_WRITE_AUTH: safe_cex_engine::classify::CodeTable =
     safe_cex_engine::classify::CodeTable {
         rows: &[
             safe_cex_engine::classify::Row {

@@ -62,6 +62,8 @@ pub struct Request {
     path: &'static str,
     params: Params,
     protective: bool,
+    /// The guarded placement after a proven cancel: its final Claim re-checks the original.
+    replacement: bool,
 }
 impl Request {
     pub fn settings_scope(&self) -> Option<Option<&str>> {
@@ -757,6 +759,8 @@ impl Trading {
                 .unwrap_or_else(|| UNKNOWN_WORDS.into());
             let _ = cx.present_plan_failure(&plan, words);
             let protective = run.job.guard.is_some() && matches!(step.call, Call::Cancel { .. });
+            let replacement =
+                run.job.guard.is_some() && run.job.cancelled && matches!(step.call, Call::Place);
             let shape = diagnostics::capture(
                 cx,
                 &step,
@@ -780,6 +784,7 @@ impl Trading {
                     path: step.path,
                     params: step.params,
                     protective,
+                    replacement,
                 },
             );
         } else {
@@ -1046,6 +1051,26 @@ impl Trading {
         } else {
             decoded
         };
+        // A guarded replacement must prove a NEW order on the edited symbol.
+        let decoded = match (
+            &decoded,
+            self.jobs
+                .get(&request.command)
+                .and_then(|r| r.job.guard.as_ref()),
+        ) {
+            (Ok(ids), Some(guard))
+                if matches!(call, Call::Place)
+                    && (!consistent_symbol
+                        || ids.is_empty()
+                        || ids.iter().any(|id| id == &guard.order.id)) =>
+            {
+                Err(unknown(format!(
+                    "BingX didn’t confirm a new {} order. Check your open orders before trying again.",
+                    guard.order.symbol
+                )))
+            }
+            _ => decoded,
+        };
         let result = if let (true, Ok(ids)) = (
             envelope.as_ref().is_ok_and(|e| e.code == 0),
             decoded.as_ref(),
@@ -1118,7 +1143,7 @@ impl Trading {
                 && !matches!(call, Call::Cancel { .. })
                 && (timestamp || envelope.as_ref().is_ok_and(|e| e.code == 100001))
             {
-                &protection::RESTORE_AUTH
+                &protection::LATER_WRITE_AUTH
             } else if native
                 .as_ref()
                 .is_some_and(|n| context::names_duplicate_client_id(n.message))
@@ -1824,6 +1849,18 @@ impl Trading {
             .str("clientOrderId", &identity);
         if !cx.store.hedged() && o.reduce_only {
             order = order.boolean("reduceOnly", true);
+        }
+        // With no put-back, a closing limit's replacement keeps its native identity
+        // flags, or the edit is refused before anything is cancelled.
+        if o.reduce_only
+            && let Some(original) = meta
+                .original
+                .as_ref()
+                .filter(|v| v.matches(o, &meta.native_kind, &meta.position_side))
+        {
+            order = original.native_flags(order).ok_or(
+                "Native order flags cannot be carried to the replacement; order not changed",
+            )?;
         }
         let receipts = vec![OrderIdentityReceipt {
             symbol: o.symbol.clone(),
