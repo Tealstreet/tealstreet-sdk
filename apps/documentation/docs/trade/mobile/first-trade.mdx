@@ -14,6 +14,8 @@ import ShotPositionsTab from '/img/trading/mobile/app/positions-tab.png';
 import ShotQuickActions from '/img/trading/mobile/app/quick-actions.png';
 import ShotOrdersTab from '/img/trading/mobile/app/orders-tab.png';
 import ShotTradeChart from '/img/trading/mobile/app/trade-chart.png';
+import { MobileClip } from '@site/src/components/MobileShowcase';
+import { AnnotatedStep, Steps } from '@site/src/components/AnnotatedStep';
 
 This walkthrough assumes you're signed in and have [connected an exchange account](./connect-accounts.mdx).
 
@@ -65,12 +67,35 @@ unlocks.
 
 ## Place a market order
 
-1. Choose **Market** in the order type selector.
-2. Tap the **Buy** pill to go long or the **Sell** pill to go short.
-3. Enter a **Size**.
-4. Tap the **order button** under the form.
+<Steps>
 
-A notice confirms the order, and the new position appears in the **Positions** tab.
+<AnnotatedStep
+  n={1}
+  title="Choose Market"
+  image="/img/trading/mobile/steps/order-type.jpg"
+  alt="The Order Type picker with MARKET highlighted"
+  callouts={[{ n: 1, x: 4, y: 734, w: 392, h: 32 }]}
+>
+
+Tap the order type on the left of the form, then **MARKET** (1).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Enter a size and tap Buy or Sell"
+  image="/img/trading/mobile/steps/order-form.jpg"
+  alt="The market order form with a size of 0.2 SOL"
+  callouts={[{ n: 1, x: 8, y: 488, w: 236, h: 38 }, { n: 2, x: 8, y: 650, w: 236, h: 52 }]}
+>
+
+Tap the **Buy** or **Sell** pill, enter a **Size** (1), and tap the order button (2). It shows the side, leverage, size and value before you tap. A notice confirms the fill, and the position appears under **Positions**.
+
+</AnnotatedStep>
+
+</Steps>
+
+<MobileClip name="trade-order" label="Placing a 0.2 SOL market buy" />
 
 ## Place a limit order
 
@@ -103,6 +128,38 @@ at set tick distances from the price. Each tap sends one order straight away.
 - **Take profit:** place a **Limit** order on the other side of your position with **Reduce** turned on. For a long,
   that's a sell limit above your entry. Reduce-only makes sure it can only close the position.
 
+### From the chart
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Grab TP or SL on your position line"
+  image="/img/trading/mobile/steps/tpsl-handles.jpg"
+  alt="The chart with the position line and its TP and SL handles"
+  callouts={[{ n: 1, x: 252, y: 300, w: 58, h: 24 }]}
+>
+
+While you hold a position, its line on the chart has **TP** and **SL** handles (1). Drag one up or down.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Let go at your price"
+  image="/img/trading/mobile/steps/tpsl-placed.jpg"
+  alt="The chart with a take profit above and a stop loss below the position"
+  callouts={[{ n: 1, x: 106, y: 258, w: 300, h: 20 }, { n: 2, x: 106, y: 331, w: 300, h: 20 }]}
+>
+
+Release to place the order: the take profit (1) and stop loss (2) show on the chart and under **Orders**. Tap **✕** on a line to cancel it.
+
+</AnnotatedStep>
+
+</Steps>
+
+<MobileClip name="trade-tpsl" label="Dragging take profit and stop loss off the position line" />
+
 Your stops and take-profit orders are listed in the **Orders** tab. Use its filter to show **Stops**.
 
 ## Watch your positions
@@ -121,6 +178,38 @@ the row opens its details instead.)
 **Chase** only appears when chasers are turned on in settings (they are by default) and your exchange supports them.
 
 **✕ All (N)** at the top of the tab closes **every** open position at market, with no confirmation.
+
+### Close a position
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Swipe the position left"
+  image="/img/trading/mobile/steps/close-swipe.jpg"
+  alt="A position swiped left to show Actions, BE and Close"
+  callouts={[{ n: 1, x: 320, y: 457, w: 82, h: 54 }]}
+>
+
+On **Positions**, swipe the row left and tap **Close** (1). It closes the whole position at market, with no confirmation.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Done"
+  image="/img/trading/mobile/steps/close-done.jpg"
+  alt="The Positions tab with no open positions"
+  callouts={[{ n: 1, x: 120, y: 745, w: 162, h: 26 }]}
+>
+
+The fill notice appears and the position is gone (1). Any stops attached to it are cancelled with it.
+
+</AnnotatedStep>
+
+</Steps>
+
+<MobileClip name="trade-close" label="Swiping a position left and tapping Close" />
 
 <div class="text--center">
     <img src={ShotPositionsTab} alt="A position swiped left to show Actions, BE and Close" style={{ width: 250 }} />

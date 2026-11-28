@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Request early access, install the Tealstreet app on iOS or Android, sign in, and keep it up to date
+description: Install the Tealstreet app on iOS or Android, sign in, and keep it up to date
 sidebar_position: 1
 hide_title: false
 draft: false
@@ -9,29 +9,16 @@ hide_table_of_contents: false
 
 ---
 
-import ShotSigninTopRightIcon from '/img/trading/mobile/app/signin-top-right-icon.png';
+import { AnnotatedStep, Steps } from '@site/src/components/AnnotatedStep';
 import ShotSidePanel from '/img/trading/mobile/app/side-panel.png';
 
 This page takes you from "I'd like the app" to signed in. When you're done, continue with
 [Connecting your exchange accounts](./connect-accounts.mdx).
 
-## 1. Request an invite
+Tealstreet mobile is in early access. To get an invite, ask in our [Discord](https://teal.link/discord) or email
+[support@tealstreet.io](mailto:support@tealstreet.io).
 
-The app is invite-only during early access. Request an invite from the Tealstreet web app:
-
-1. Open Tealstreet on your computer and sign in.
-2. Open **Updates** in the header and switch to the **Mobile** tab.
-3. Under **Mobile early access**, click **Request invite**.
-4. Pick your **Platform**:
-    - **iOS**: enter your **Apple ID Email**. TestFlight sends the invite to your Apple ID, which may not be the
-      email you use for Tealstreet.
-    - **Android**: enter the **Email** that should get the invite.
-5. Click **Send request**.
-
-The team adds each invite by hand, so the invite can take a little while to arrive. If you have already been
-invited directly (for example by the team in Discord or by email), skip this step.
-
-## 2. Install the app
+## 1. Install the app
 
 ### iPhone and iPad (TestFlight)
 
@@ -68,21 +55,62 @@ Android builds come through Firebase App Distribution, not the Play Store:
 App Tester tells you when a new build is available. Each Firebase build expires about 150 days after release, so
 install the newer build when App Tester offers one.
 
-## 3. Sign in
+## 2. Sign in
 
 The app opens on the **Trade** tab even before you sign in, with live public market data. Your accounts, balances
-and orders need you to sign in with your Tealstreet account. Use the same login as the web app.
+and orders need a Tealstreet account, which you create or sign in to from the app.
 
-1. Tap the **sign-in icon** at the **top-right** of the screen. It's a small arrow-into-a-box icon.
-2. Tealstreet's sign-in page opens. Choose **Google**, or sign in with your **email** and password. Use the same
-   method you use on the web.
-3. When the sign-in page closes, you're back in the app. The top-right icon becomes a circle. Once you've connected
-   an exchange account, it shows that exchange's logo. Until then it's empty, and the Trade screen shows
-   **No exchange account** with an **Add an API key** button.
+<Steps>
 
-<div class="text--center">
-    <img src={ShotSigninTopRightIcon} alt="The Trade tab while signed out, with the sign-in icon at the top-right circled" style={{ width: 250 }} />
-</div>
+<AnnotatedStep
+  n={1}
+  title="Tap the sign-in icon"
+  image="/img/trading/mobile/steps/signin-icon.jpg"
+  alt="The Trade tab while signed out, with the sign-in icon at the top-right"
+  callouts={[{ n: 1, x: 364, y: 76 }]}
+>
+
+It's the arrow-into-a-box icon at the **top-right** of the screen.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Let the app open the sign-in page"
+  image="/img/trading/mobile/steps/signin-continue.jpg"
+  alt="The iOS prompt asking to use tealstreet.io to sign in"
+  callouts={[{ n: 1, x: 203, y: 482, w: 136, h: 48 }]}
+>
+
+Your phone asks whether Tealstreet may use tealstreet.io to sign in. Tap **Continue** (1).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="Sign in or sign up"
+  image="/img/trading/mobile/steps/signin-page.jpg"
+  alt="Tealstreet's sign-in page"
+  callouts={[{ n: 1, x: 42, y: 388, w: 318, h: 52 }, { n: 2, x: 180, y: 530, w: 58, h: 23 }, { n: 3, x: 42, y: 611, w: 318, h: 52 }]}
+>
+
+Sign in with your **email** (1), or tap **Sign up** (2) to create your account right here. **Google**, **Discord**, **X** and **Apple** work too (3).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="You're in"
+  image="/img/trading/mobile/steps/signin-done.jpg"
+  alt="The Trade tab after sign-in, with the account bar showing the connected account"
+  callouts={[{ n: 1, x: 6, y: 104, w: 120, h: 40 }]}
+>
+
+The sign-in page closes and you're back in the app. Once you've [connected an exchange account](./connect-accounts.mdx), it shows in the account bar (1). Until then the Trade screen shows **No exchange account** with an **Add an API key** button.
+
+</AnnotatedStep>
+
+</Steps>
 
 ### Signing out, and signing back in
 
@@ -97,7 +125,7 @@ app to restart, then tap the top-right sign-in icon.
     <img src={ShotSidePanel} alt="The side panel, opened from the Tealstreet logo at the top-left" style={{ width: 250 }} />
 </div>
 
-## 4. App updates
+## 3. App updates
 
 There are two kinds of update:
 
