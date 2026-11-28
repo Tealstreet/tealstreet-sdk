@@ -938,9 +938,9 @@ impl BinanceFutures {
                             }
                         }
                     }
-                    if self.options.portfolio_margin && self.books.contains_key(&*event.s) {
-                        cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
-                    } else if self.is_spot() {
+                    if self.is_spot()
+                        || (self.options.portfolio_margin && self.books.contains_key(&*event.s))
+                    {
                         cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
                     } else {
                         cx.record_socket_topic(&["!bookTicker"]);
