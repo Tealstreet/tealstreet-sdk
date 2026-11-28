@@ -4,14 +4,17 @@ This file is excluded from the built site (`docs.exclude` in `docusaurus.config.
 
 All screenshots were captured on 2026-11-28 from a Release simulator build of tealstreet-mobile master (build 43,
 OTA 6) and live under `static/img/trading/mobile/app/<id>.png`. Each is imported the way `index.mdx` imports
-`mobile-addtohomescreen.png` and rendered in a `text--center` div at `width: 250`, except the landscape
-`web-qr-modal`, which renders at `width: 500` so its text stays readable. Retake a shot here when its screen changes.
+`mobile-addtohomescreen.png` and rendered in a `text--center` div at `width: 250`. Retake a shot here when its screen changes.
 
 Two placeholders were removed rather than captured, and their text kept:
 
 - `signed-in-no-account`: the team test logins all have exchange accounts.
 - `update-available`: it only appears when an OTA newer than the running bundle is pending, and faking one would
   show something users never see.
+
+The web screenshots (`web-request-invite`, `web-qr-modal`) and the phone's `qr-scanner` were cut on 2026-11-28:
+the mobile app, not the web app, is the path for users now, so the web QR import is a short note in
+`connect-accounts.mdx`. Do not capture web screens for these pages.
 
 The #245 and #246 "older versions" fallbacks were dropped from `connect-accounts.mdx` in the same change.
 

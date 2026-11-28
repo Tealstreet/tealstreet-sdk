@@ -10,8 +10,6 @@ hide_table_of_contents: false
 ---
 
 import ShotSetupYourAccount from '/img/trading/mobile/app/setup-your-account.png';
-import ShotWebQrModal from '/img/trading/mobile/app/web-qr-modal.png';
-import ShotQrScanner from '/img/trading/mobile/app/qr-scanner.png';
 import ShotManualKeyForm from '/img/trading/mobile/app/manual-key-form.png';
 
 The mobile app trades through the same exchange API keys you use on the web. You can bring your existing keys
@@ -35,7 +33,7 @@ Both open **Set Up Your Account**, which offers four options:
 
 | Option                        | Use it when                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------ |
-| **Scan QR Code from Web**     | You have Tealstreet open on a computer. The quickest and safest way to import. |
+| **Scan QR Code from Web**     | You still use Tealstreet on a computer (see the note below this table).        |
 | **Import JSON from Web**      | You have an `accounts.json` export from the web app on this phone.             |
 | **Paste from Clipboard**      | You copied an account in the web app and your phone shares its clipboard.      |
 | **Manually Enter API Keys**   | You want to type or paste a key and secret from your exchange yourself.        |
@@ -44,41 +42,13 @@ Both open **Set Up Your Account**, which offers four options:
     <img src={ShotSetupYourAccount} alt="The Set Up Your Account sheet with its four options" style={{ width: 250 }} />
 </div>
 
-## Option 1: Scan a QR code from the web app
-
-On your computer:
-
-1. Open Tealstreet and go to **Settings → Accounts**.
-2. Find the account you want on your phone. Either click the **QR icon** (tooltip **QR Code Sync**) in that row's
-   **Actions** column, or click **Edit** (the pen icon) and open the **QR Code Sync** section.
-3. Click **Show QR code**.
-
-On your phone:
-
-1. In **Set Up Your Account**, tap **Scan QR Code from Web**.
-2. Allow camera access if asked.
-3. Point the camera at the code on your computer screen. When the import finishes you'll see **Import successful**,
-   and the account appears in your account list.
-
-One QR code carries one account. For the next account, open **Set Up Your Account** again from the side panel
-(**API keys → Add account**) and repeat.
-
-:::caution Treat the QR code like a password
-The code contains that account's API key and secret. Only show it when nobody else can see your screen, and only
-scan it with your own phone. Close it when you're done.
+:::note
+**Scan QR Code from Web** copies an account from the Tealstreet web app on a computer: open the account's **QR Code
+Sync** there, click **Show QR code**, and point the phone at it. Treat that code like a password. The phone is the main
+way to use Tealstreet now, so this guide covers adding a key in the app.
 :::
 
-<div class="text--center">
-    <img src={ShotWebQrModal} alt="The web QR Code Sync modal before the code is shown" style={{ width: 500 }} />
-</div>
-
-<div class="text--center">
-    <img src={ShotQrScanner} alt="The QR Scanner screen" style={{ width: 250 }} />
-</div>
-
-If the web app says **"This account has too much data for a QR code"**, use Option 3 (paste) for that account.
-
-## Option 2: Import a JSON file from the web app
+## Option 1: Import a JSON file from the web app
 
 1. On your computer, go to **Settings → Accounts** and click **Export**. This downloads `accounts.json` with all your
    accounts.
@@ -90,7 +60,7 @@ Never send it by email, Telegram, Discord or any other chat. Delete it from your
 drive once the import has worked.
 :::
 
-## Option 3: Paste from the clipboard
+## Option 2: Paste from the clipboard
 
 1. On your computer, go to **Settings → Accounts** and click the **copy icon** (tooltip **Copy**) in the account's
    **Actions** column.
@@ -100,7 +70,7 @@ drive once the import has worked.
 
 Don't move the copied text through a chat app or notes app. It contains your API secret.
 
-## Option 4: Enter an API key by hand
+## Option 3: Enter an API key by hand
 
 Use this for a brand-new key, or for an exchange you haven't set up on the web.
 
