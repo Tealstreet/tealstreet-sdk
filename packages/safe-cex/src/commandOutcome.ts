@@ -219,10 +219,11 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
 };
 
 /**
- * A network/timeout READ whose outcome is not `unknown`: transport noise the host logs,
- * not an exception. A write command or an unknown outcome may have reached the venue.
+ * A network/timeout failure with no write command and an outcome other than `unknown`.
+ * Necessary, not sufficient, for transport noise: a write refusal can have this shape
+ * too, so only a caller that knows the operation was a read may treat it as transient.
  */
-export const isTransientReadFailure = (classified: ClassifiedError | undefined): boolean =>
+export const isTransportFailure = (classified: ClassifiedError | undefined): boolean =>
   (classified?.kind === 'network' || classified?.kind === 'timeout') &&
   !classified.command &&
   classified.outcome !== 'unknown';

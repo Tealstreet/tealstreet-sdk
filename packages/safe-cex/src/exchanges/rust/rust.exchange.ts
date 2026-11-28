@@ -68,7 +68,13 @@ import type { FailedPrivateReadKind } from './startupDiagnostics';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
-import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
+import {
+  classifiedError,
+  engineEventClassified,
+  isErrorReported,
+  isTransportFailure,
+  markErrorReported,
+} from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness, withHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -466,6 +472,23 @@ const rowsFromAccountFrame = (method: string, result: unknown, symbols: unknown)
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 /** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
 const COLD_START_READS = /^(fetch|find|refresh)/;
+/**
+ * Reads whose transport timeout is noise the host logs, not a Sentry exception (EGZ).
+ * A closed list: an op outside it, or a refusal reported with no op, keeps reporting.
+ */
+const TRANSIENT_READ_OPS: ReadonlySet<string> = new Set([
+  'fetchCandles',
+  'fetchFills',
+  'fetchOrderHistory',
+  'fetchIncome',
+  'fetchClosedPositions',
+  'fetchClosedPnl',
+  'fetchBalanceInfo',
+  'fetchAccountGreeks',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'refreshMarkets',
+]);
 /** How long a write may queue for startup; it must not outlive its caller's wait. */
 const STARTUP_WRITE_WAIT_MS = 30_000;
 /** How long a worker read may wait while the account loads, matching the write refusal. */
@@ -3016,7 +3039,8 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  private reportCommandError = (error: unknown): void => {
+  /** `op` is the failed command's, when known: only a listed read can be transient. */
+  private reportCommandError = (error: unknown, op?: string): void => {
     // The terminal engine notification already reports all interrupted commands.
     if (this.engineFailure) {
       markErrorReported(error);
@@ -3025,7 +3049,13 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed || isErrorReported(error)) return;
     markErrorReported(error);
     try {
-      this.emitAndLogError(error instanceof Error ? error : String(error));
+      const transientRead =
+        op !== undefined && TRANSIENT_READ_OPS.has(op) && isTransportFailure(classifiedError(error));
+      this.emitAndLogError(
+        error instanceof Error ? error : String(error),
+        undefined,
+        transientRead ? { transientRead } : undefined,
+      );
     } catch {
       /* Diagnostic listeners cannot replace the original write outcome. */
     }
@@ -3082,7 +3112,7 @@ export class RustEngineExchange extends BaseExchange {
       // A history the venue cannot give (MEXC income other than funding) is no failure to show.
       const unsupportedHistory =
         PRIVATE_HISTORY_OPS.has(command.op) && error instanceof ExchangeError && error.kind === 'unsupported';
-      if (report && !callerReports && !unsupportedHistory) this.reportCommandError(error);
+      if (report && !callerReports && !unsupportedHistory) this.reportCommandError(error, command.op);
       throw error;
     }
   };

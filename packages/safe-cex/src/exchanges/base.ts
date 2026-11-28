@@ -28,13 +28,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import {
-  classifiedError,
-  deserializeCommandError,
-  exchangeErrorTags,
-  isTransientReadFailure,
-  markErrorReported,
-} from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
@@ -2237,8 +2231,12 @@ export class BaseExchange implements Exchange {
     const structuredExtraData =
       extraData && typeof extraData === 'object' && !Array.isArray(extraData) ? extraData : {};
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
+    // Set only by a caller that knows the failure was a read; see `isTransportFailure`.
+    const transientRead = structuredExtraData.transientRead === true;
 
-    if (!suppressConsoleLog) {
+    if (!suppressConsoleLog && transientRead) {
+      diagnosticConsole.warn('exchange read failed', err);
+    } else if (!suppressConsoleLog) {
       diagnosticConsole.error('exchange error', err);
       diagnosticConsole.trace();
     }
@@ -2265,6 +2263,7 @@ export class BaseExchange implements Exchange {
           key !== 'sentryTags' &&
           key !== 'sentryExtra' &&
           key !== 'suppressConsoleLog' &&
+          key !== 'transientRead' &&
           key !== 'engineEvent' &&
           key !== 'classified',
       ),
@@ -2386,7 +2385,7 @@ export class BaseExchange implements Exchange {
     } else {
       // In main thread: report directly for a better stack trace (to the host's sink).
       // A transient read is left to the listener, as the worker path's host does.
-      if (errorObject && !isTransientReadFailure(classified)) {
+      if (errorObject && !transientRead) {
         reportException(errorObject, {
           tags: {
             exchange: this.name,

@@ -1895,12 +1895,14 @@ tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
 and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
 the kind rather than venue text.
 
-**The main-thread `emitAndLogError` sends no exception for a transient read**
-(`isTransientReadFailure`: kind `network`/`timeout`, no write command, outcome not
-`unknown`). It still emits `'error'` with `classified`, and the host logs it, just as
-the web host already treats a worker report. Before this, page-engine read timeouts
-reached Sentry ahead of the host's rule (TEALSTREET-NEXT-EGZ). A write or an unknown
-outcome may have reached the venue, so those are still reported.
+**The main-thread `emitAndLogError` sends no exception for a transient read**, and
+logs it at warning level. Only the caller can say it was a read: `RustEngineExchange.command`
+passes `{ transientRead: true }` for an op in `TRANSIENT_READ_OPS` whose failure
+`isTransportFailure` accepts (network/timeout, no write command, outcome not `unknown`).
+The `'error'` event still carries `classified` for the host to log. Before this,
+page-engine read timeouts reached Sentry ahead of the host's rule (TEALSTREET-NEXT-EGZ).
+**Never infer a read from a missing write command**: PAGE_MARKETS_MISSING and the
+startup write wait are timeout/notSent refusals with no command, and they still report.
 
 ## Proxy & Tunnel Architecture
 
