@@ -13,6 +13,9 @@ use support::credentials::Options;
 #[path = "trading/allocation.rs"]
 mod allocation;
 
+#[path = "trading/unknown_hook.rs"]
+mod unknown_hook;
+
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,

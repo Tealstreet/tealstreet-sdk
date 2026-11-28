@@ -891,6 +891,10 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(telemetry::engine_unknown_outcome)
+    }
+
     fn http_release_veto(
         &self,
         store: &safe_cex_engine::Store,
@@ -1488,7 +1492,7 @@ impl Venue for BitgetFutures {
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
             Pending::Leverage(read) => self.leverage_failed(cx, read, error),
             Pending::History(request) => self.query_http_failed(cx, *request, error),
-            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
+            Pending::Trade(request) => self.trade_http_failed(cx, *request, error),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }

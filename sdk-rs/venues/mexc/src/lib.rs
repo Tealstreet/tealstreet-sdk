@@ -8,6 +8,7 @@ mod identity;
 mod private_read;
 mod sign;
 mod trading;
+mod unknown_outcome;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
@@ -780,6 +781,9 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::telemetry)
+    }
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,

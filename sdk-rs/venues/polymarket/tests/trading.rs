@@ -170,6 +170,95 @@ fn ack(id: &str) -> String {
 }
 
 #[test]
+fn unknown_hook_native_projection_is_once_and_nx_closed() {
+    for (status, body, count) in [
+        (200, "not json", 1),
+        (503, r#"{"error":"unavailable"}"#, 1),
+        (200, r#"{"success":false,"errorMsg":"refused"}"#, 0),
+    ] {
+        let mut h = H::new();
+        h.command(Command::PlaceOrders {
+            command: 93,
+            orders: vec![order()],
+        });
+        let request = h.take("/order");
+        h.respond(request.clone(), status, body);
+        let events: Vec<_> = h
+            .events
+            .iter()
+            .filter(|e| e.code == "order.outcome_unknown")
+            .collect();
+        assert_eq!(events.len(), count);
+        assert_eq!(h.failures.len(), 1);
+        if let Some(event) = events.first() {
+            assert!(
+                event
+                    .fields
+                    .contains(&("request", request.id.0.to_string().into()))
+            );
+            assert!(event.fields.contains(&("status", status.into())));
+            let keys: Vec<_> = event.fields.iter().map(|(key, _)| *key).collect();
+            assert_eq!(
+                keys,
+                [
+                    "command",
+                    "outcome",
+                    "placedOrderIds",
+                    "unknownIndices",
+                    "request",
+                    "status"
+                ]
+            );
+        }
+        assert_eq!(h.writes(), 0);
+        h.respond(request, status, body);
+        assert_eq!(
+            h.events
+                .iter()
+                .filter(|e| e.code == "order.outcome_unknown")
+                .count(),
+            count
+        );
+    }
+}
+
+#[test]
+fn unknown_hook_native_transport_omits_status_and_hex_ids_stay_in_the_journal() {
+    let mut h = H::new();
+    let native_id = format!("0x{}", "ab".repeat(32));
+    h.command(Command::PlaceOrders {
+        command: 94,
+        orders: vec![order(), order()],
+    });
+    h.response("/order", 200, &ack(&native_id));
+    let request = h.take("/order");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "SYNTHETIC transport loss",
+    });
+    assert_eq!(
+        h.failures[0].partial.as_ref().unwrap().order_ids,
+        [native_id]
+    );
+    let events: Vec<_> = h
+        .events
+        .iter()
+        .filter(|e| e.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].fields.len(), 5);
+    assert!(events[0].fields.contains(&("placedOrderIds", "".into())));
+    assert!(events[0].fields.contains(&("unknownIndices", "1".into())));
+    assert!(
+        events[0]
+            .fields
+            .contains(&("request", request.id.0.to_string().into()))
+    );
+    assert!(!events[0].fields.iter().any(|(key, _)| *key == "status"));
+    assert_eq!(h.writes(), 0);
+}
+
+#[test]
 fn legacy_ts_above_max_sends_one_payload_and_surfaces_native_refusal() {
     // TS packages/safe-cex/src/__tests__/reference/polymarket/polymarket.exchange.ts:660,680-698.
     // Decimal toFixed followed by one postOrder, with no maximum check.
@@ -367,26 +456,22 @@ fn oversized_native_unknown_has_one_report_and_indexed_outcomes_without_resend()
                 events[0]
                     .fields
                     .iter()
-                    .any(|(key, value)| *key == "placedCount" && *value == (index as f64).into())
+                    .any(|(key, value)| *key == "placedOrderIds" && value.as_str() == Some(""))
+            );
+            assert!(events[0].fields.iter().any(|(key, value)| *key == "request"
+                && value.as_str() == Some(request.id.0.to_string().as_str())));
+            assert!(
+                events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "command" && value.as_str() == Some("command.91"))
             );
             assert!(
                 events[0]
                     .fields
                     .iter()
-                    .any(|(key, value)| *key == "unknownRequest"
-                        && value.as_str() == Some("place election-Yes"))
-            );
-            assert!(
-                events[0]
-                    .fields
-                    .iter()
-                    .any(|(key, value)| *key == "command" && *value == 91u32.into())
-            );
-            assert!(
-                events[0]
-                    .fields
-                    .iter()
-                    .any(|(key, value)| *key == "elementIndex" && *value == (index as f64).into())
+                    .any(|(key, value)| *key == "unknownIndices"
+                        && value.as_str() == Some(index.to_string().as_str()))
             );
             assert_eq!(h.writes(), 0);
             let original = error.clone();

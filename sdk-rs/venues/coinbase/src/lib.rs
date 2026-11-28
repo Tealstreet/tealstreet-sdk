@@ -15,6 +15,7 @@ mod rest;
 pub mod sign;
 mod trading;
 mod trading_drb;
+mod unknown_outcome;
 mod wire;
 
 use safe_cex_engine::book::Book;
@@ -228,6 +229,10 @@ impl Coinbase {
 }
 
 impl Venue for Coinbase {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::project)
+    }
+
     fn http_plans() -> bool {
         false
     }

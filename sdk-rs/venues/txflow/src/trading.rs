@@ -34,6 +34,9 @@ struct Job {
     waiting: Vec<(String, Option<String>)>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    telemetry_request: Option<safe_cex_engine::RequestId>,
+    telemetry_status: Option<u16>,
+    telemetry_engine_owned: bool,
 }
 struct Step {
     action: Action,
@@ -371,6 +374,9 @@ impl TxFlow {
                     ids: vec![],
                     waiting: vec![],
                     effective: false,
+                    telemetry_request: None,
+                    telemetry_status: None,
+                    telemetry_engine_owned: false,
                 });
                 self.pump_trades(cx);
             }
@@ -781,6 +787,9 @@ impl TxFlow {
         }
         self.trading.inflight = false;
         // A transport or HTTP failure may follow execution.
+        let job = self.trading.active.as_mut().unwrap();
+        job.telemetry_status = response.as_ref().ok().map(|response| response.status);
+        job.telemetry_engine_owned |= response.is_err();
         if let Err(mut error) = response
             .map_err(|error| unknown(error).kind(ErrorKind::Network))
             .and_then(|r| parse_reply(r, request.response_type))
@@ -1000,6 +1009,18 @@ impl TxFlow {
                         && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                     {
                         error.outcome = None;
+                    }
+                    // Engine-sealed managed failures report through the engine hook;
+                    // only venue-decoded uncertainty emits the native event here.
+                    if error.outcome == Some(Outcome::Unknown) && !job.telemetry_engine_owned {
+                        let event = crate::unknown_outcome::unknown_event(
+                            job.command,
+                            job.telemetry_request,
+                            job.telemetry_status,
+                            job.ids.iter().map(String::as_str),
+                            std::iter::empty(),
+                        );
+                        cx.event(event.level, event.code, event.message, event.fields);
                     }
                     self.finish_trade_owner(cx, &job, Err(error));
                 }

@@ -96,3 +96,16 @@ An unrelated subscription rejection does not retire an authenticated socket.
 The existing public socket policy remains separate. Deterministic lifecycle
 regressions are in `tests/socket_liveness.rs`; private replay tapes provide
 scripted evidence, not live account connectivity evidence.
+
+## Unknown outcome telemetry
+
+ApeX Omni opts into the engine's sealed-Unknown hook. Native-decoded Unknowns
+emit on the existing terminal path; engine-sealed write failures use only the
+hook. Request dispatch, refusal retries and protective put-back are unchanged.
+
+`order.outcome_unknown` emits only `command` (`apexomniWrite.<command ID>`), literal
+`unknown` outcome, decimal `request`, `placedOrderIds`, `unknownIndices` and an
+optional HTTP `status` in 100–599. Both lists stop at 16 entries. Native IDs are
+1–32 decimal digits and stay whole under the 512-byte log field limit; indices
+are 0–65535. URLs, query strings, bodies and signed payloads never enter the
+projection. NX FIELD_RULES #9262 must be merged and shipped before publication.

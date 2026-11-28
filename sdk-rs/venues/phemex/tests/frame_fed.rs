@@ -2,6 +2,8 @@
 //! state (settings contexts in VENUE_STATE) from a data source's frames, and
 //! each write sent in exactly its planned requests, with no read after it.
 mod support;
+#[path = "support/unknown_fields.rs"]
+mod unknown_fields;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_phemex::PhemexPerpetuals;
@@ -10,6 +12,76 @@ use support::{Options, PreparedEngine as Engine};
 
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"69000","askRp":"69001","lastRp":"69000","markRp":"69000","indexRp":"69000","openRp":"69000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
+
+#[test]
+fn unknown_hook_frame_fed_unknowns_emit_once_and_refusal_emits_zero() {
+    for mode in 0..4 {
+        let mut e = frame_fed();
+        e.apply_frame(1001., &source_snapshot(), true).unwrap();
+        e.drain_actions().for_each(drop);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 77,
+                orders: vec![order("hook")],
+            },
+        );
+        let request = requests(&actions).remove(0);
+        let status = match mode {
+            0 => Some(503),
+            1 => None,
+            _ => Some(200),
+        };
+        if let Some(status) = status {
+            e.handle(
+                1002.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: if mode == 3 {
+                            r#"{"code":11001,"msg":"balance","data":null}"#
+                        } else {
+                            r#"{"code":100,"msg":"unlisted"}"#
+                        },
+                    },
+                },
+            );
+        } else {
+            e.handle(
+                1002.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "fixture loss",
+                },
+            );
+        }
+        let actions: Vec<_> = e.drain_actions().collect();
+        let events: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), usize::from(mode != 3), "mode {mode}");
+        if let Some(event) = events.first() {
+            unknown_fields::assert_event(event, 77, request.id.0, status);
+        }
+        assert!(
+            requests(&actions).is_empty(),
+            "frame-fed: no read, suffix or retry"
+        );
+        let late = respond(&mut e, &request, &ack(&request, "123").to_string());
+        assert!(requests(&late).is_empty());
+        assert!(!late.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+        )));
+    }
+}
 
 fn requests(actions: &[Action]) -> Vec<HttpRequest> {
     actions

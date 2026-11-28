@@ -902,6 +902,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(trading::engine_unknown_telemetry)
+    }
+
     /// Its native trigger kind decides, and it refuses a trigger that fires before canceling.
     fn judges_protective_amend(
         &self,
@@ -1579,7 +1583,7 @@ impl Venue for Bingx {
             Pending::History(request) => self.history.on_http_failed(cx, request, error),
             Pending::Trade(request) => {
                 self.trading
-                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
+                    .on_http_failed(cx, self.credentials.as_ref(), request, error)
             }
             pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }

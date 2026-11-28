@@ -23,7 +23,7 @@ use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, RequestId, Response, VenueError, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -76,6 +76,13 @@ pub struct Request {
     context: Context,
     call: Call,
     resend: Resend,
+    pub(super) telemetry_request: Option<RequestId>,
+}
+
+#[derive(Clone, Copy)]
+struct NativeUnknown {
+    request_id: RequestId,
+    status: u16,
 }
 
 /// What a signature-rejected write needs to be re-signed and sent once more.
@@ -191,6 +198,8 @@ struct Job {
     /// Putting it back is under way; the replacement's refusal.
     restoring: Option<String>,
     report: Option<PlacementReport>,
+    native_unknown: Option<NativeUnknown>,
+    engine_unknown: bool,
 }
 
 struct PlacementReport {
@@ -796,20 +805,32 @@ impl BinanceFutures {
                     .as_ref()
                     .and_then(|report| report.failure.clone())
             });
-            match error {
+            let completed = match error {
                 Some(error) => {
                     let error = job.report.as_ref().map_or_else(
                         || error.clone(),
                         |report| report.journal.attach(error.clone()),
                     );
-                    let _ = cx.fail_context(&context, error);
+                    cx.fail_context(&context, error)
                 }
-                None => {
-                    let _ = cx.done_context(
-                        &context,
-                        serde_json::to_string(&job.ids).unwrap_or_default(),
-                    );
-                }
+                None => cx.done_context(
+                    &context,
+                    serde_json::to_string(&job.ids).unwrap_or_default(),
+                ),
+            };
+            // Wait for all siblings: engine-owned uncertainty seals through the
+            // hook, while native-only uncertainty publishes its companion here.
+            if completed.is_ok()
+                && !job.engine_unknown
+                && let Some(source) = job.native_unknown
+            {
+                let event = crate::unknown_outcome::native(
+                    command,
+                    source.request_id,
+                    Some(source.status),
+                    &job.ids,
+                );
+                cx.event(event.level, event.code, event.message, event.fields);
             }
             return;
         };
@@ -945,6 +966,7 @@ impl BinanceFutures {
                 context,
                 call,
                 resend,
+                telemetry_request: None,
             }),
         )
         .is_ok()
@@ -1092,11 +1114,13 @@ impl BinanceFutures {
             context,
             call,
             resend,
+            telemetry_request,
         } = request;
         let native_response = response.is_ok();
         let batch_http_success = response
             .as_ref()
             .is_ok_and(|response| (200..300).contains(&response.status));
+        let telemetry_status = response.as_ref().ok().map(|response| response.status);
         let resend_call = call.clone();
         let reporting_call = call.clone();
         let stopped = self.trading.jobs.get(&command).is_some_and(|job| job.stop);
@@ -1494,6 +1518,8 @@ impl BinanceFutures {
                 },
             };
             let metadata = RejectionReports::new(reports).unwrap_or_default();
+            let unknown = matches!(&fact, WriteFact::Failed { fact, .. }
+                if fact.error().outcome == Some(Outcome::Unknown));
             let recorded = cx.http_write_fact(&context, fact.clone(), Some(metadata));
             let recorded = if matches!(
                 recorded,
@@ -1521,10 +1547,32 @@ impl BinanceFutures {
                 }
                 Ok(_) => {}
             }
+            if unknown
+                && let (Some(request), Some(status)) = (telemetry_request, telemetry_status)
+                && let Some(job) = self.trading.jobs.get_mut(&command).filter(|job| {
+                    job.context
+                        .as_ref()
+                        .is_some_and(|root| root.owner() == context.owner())
+                })
+            {
+                job.native_unknown.get_or_insert(NativeUnknown {
+                    request_id: request,
+                    status,
+                });
+            }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        if !native_response
+            && telemetry_request.is_some()
+            && job
+                .context
+                .as_ref()
+                .is_some_and(|root| root.owner() == context.owner())
+        {
+            job.engine_unknown = true;
+        }
         if !ids.is_empty()
             && let Some(refusal) = job.restoring.take()
         {

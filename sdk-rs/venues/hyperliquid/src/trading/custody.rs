@@ -410,10 +410,13 @@ impl Hyperliquid {
         cx: &mut Cx<'_, Pending>,
         job: &Job,
         result: Result<String, VenueError>,
+        reporter: UnknownReporter,
     ) {
         let result = result.map_err(|error| {
             let error = job.journal.failure(error);
-            job.journal.report_unknown(cx, job.command, &error.message);
+            if matches!(reporter, UnknownReporter::Venue) {
+                job.journal.report_unknown(cx, job.command);
+            }
             error
         });
         let custody = job.custody.as_ref().unwrap();
@@ -471,7 +474,7 @@ impl Hyperliquid {
         }) {
             let mut job = self.trading.queue.remove(index).unwrap();
             job.custody.as_mut().unwrap().intent_timer = None;
-            self.finish_trade_owner(cx, &job, Err(intent_expired()));
+            self.finish_trade_owner(cx, &job, Err(intent_expired()), UnknownReporter::Venue);
             return true;
         }
         let Some(job) = self.trading.active.as_mut().filter(|job| {
@@ -664,7 +667,9 @@ impl Hyperliquid {
         } else if let Effect::Leverage { symbol, .. } = &request.effect {
             self.settings_reconciled(symbol);
         }
-        self.finish_trade(cx, Err(error));
+        // Released transport failures are reported by the engine hook. Signing
+        // failures before release remain NotSent and produce no Unknown event.
+        self.finish_trade_with_reporter(cx, Err(error), UnknownReporter::Engine);
     }
     pub(crate) fn unproven_trade_evidence(
         &self,

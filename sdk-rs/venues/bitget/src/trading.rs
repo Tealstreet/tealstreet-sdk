@@ -213,6 +213,9 @@ struct Job {
     retry: Option<Request>,
     /// The write call in flight, kept for an engine-sealed retirement.
     live: Option<Planned>,
+    /// Released transport uncertainty is reported by the engine's seal hook.
+    engine_unknown_event: bool,
+    telemetry_request: Option<safe_cex_engine::RequestId>,
     /// The current cancel-plan answer is exactly empty success and failure lists.
     empty_plan_ack: bool,
     /// '; <note>' appended to the projected failure (a failed protection rollback).
@@ -760,6 +763,8 @@ impl BitgetFutures {
             parked: None,
             retry: None,
             live: None,
+            engine_unknown_event: false,
+            telemetry_request: None,
             empty_plan_ack: false,
             note: None,
             original: if let Command::AmendOrder { id, .. } = &intent {
@@ -1053,6 +1058,7 @@ impl BitgetFutures {
             request.body.clone(),
         );
         let plan = job.plan.clone().expect("live Plan");
+        let command = job.id;
         self.trading.active = Some(job);
         if self
             .trading
@@ -1063,7 +1069,7 @@ impl BitgetFutures {
             let _ = cx.present_plan_failure(&plan,
                 "The Bitget replacement stop was declined, and restoring the original wasn’t confirmed. Check your open orders before adding another stop.");
         }
-        if let Err((pending, reason)) = cx.request_signed_managed(
+        match cx.request_signed_managed(
             context,
             None,
             method,
@@ -1071,9 +1077,19 @@ impl BitgetFutures {
             body,
             Box::new(recipe),
             Pending::Trade(Box::new(request)),
-        ) && let Pending::Trade(request) = pending
-        {
-            self.trade_call_failed(cx, *request, reason.venue_error(), false);
+        ) {
+            Ok(request) => {
+                if let Some(job) = self.trading.active.as_mut()
+                    && job.id == command
+                {
+                    job.telemetry_request = Some(request);
+                }
+            }
+            Err((pending, reason)) => {
+                if let Pending::Trade(request) = pending {
+                    self.trade_call_failed(cx, *request, reason.venue_error(), false);
+                }
+            }
         }
     }
 
@@ -1107,16 +1123,20 @@ impl BitgetFutures {
                 Some(note) => format!("{note}; {unknown}"),
                 None => unknown,
             });
-            cx.event(
-                Level::Warn,
-                "order.outcome_unknown",
-                UNKNOWN_TEXT,
-                vec![
-                    ("command", job.id.into()),
-                    ("placedCount", (job.ids.len() as f64).into()),
-                    ("unknownRequest", request.into()),
-                ],
-            );
+            if !job.engine_unknown_event {
+                cx.event(
+                    Level::Warn,
+                    "order.outcome_unknown",
+                    UNKNOWN_TEXT,
+                    crate::telemetry::unknown_outcome_fields(
+                        job.id,
+                        job.telemetry_request,
+                        None,
+                        &job.ids,
+                        error.elements.as_deref(),
+                    ),
+                );
+            }
         }
         // The cancel landed and nothing replaced it: lead with what the user must act on.
         if job.effective
@@ -4112,6 +4132,23 @@ impl BitgetFutures {
                 s.sell_leverage = Some(leverage);
             }
         });
+    }
+
+    pub(crate) fn trade_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        // Every managed write failure here passes through engine HttpFailed,
+        // including the collector's integrity refusal for malformed bodies.
+        if !request.call.read()
+            && let Some(job) = self.trading.active.as_mut()
+            && job.id == request.command
+        {
+            job.engine_unknown_event = true;
+        }
+        self.trade_call_failed(cx, request, error, true);
     }
 
     /// A call that failed before or after release. A released read may retry

@@ -8,6 +8,75 @@ use std::collections::{HashSet, VecDeque};
 const PENDING_LIMIT: usize = 512;
 const BOOKING_WINDOW_MS: f64 = 300_000.0;
 
+pub(crate) fn engine_unknown_outcome(
+    facts: &safe_cex_engine::EngineUnknownOutcome<'_>,
+) -> safe_cex_engine::LogEvent {
+    safe_cex_engine::LogEvent {
+        level: Level::Warn,
+        code: "order.outcome_unknown",
+        message: safe_cex_engine::UNKNOWN_OUTCOME_TEXT.into(),
+        fields: unknown_outcome_fields(
+            facts.command,
+            Some(facts.request),
+            facts.status,
+            facts
+                .error
+                .partial
+                .as_ref()
+                .map_or(&[], |p| p.order_ids.as_slice()),
+            facts.error.elements.as_deref(),
+        ),
+    }
+}
+
+// NX #9262 admits at most sixteen decimal native IDs or u16 indices per list.
+pub(crate) fn unknown_outcome_fields(
+    command: safe_cex_engine::CommandId,
+    request: Option<safe_cex_engine::RequestId>,
+    status: Option<u16>,
+    order_ids: &[String],
+    elements: Option<&safe_cex_engine::write_plan::ElementOutcomes>,
+) -> Vec<(&'static str, Value)> {
+    let placed = order_ids
+        .iter()
+        .filter(|id| (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit()))
+        .take(16)
+        .map(String::as_str)
+        .scan(0, |bytes, id| {
+            *bytes += id.len() + usize::from(*bytes > 0);
+            (*bytes <= safe_cex_engine::log::MAX_LOG_BYTES).then_some(id)
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let unknown = elements
+        .into_iter()
+        .flat_map(|elements| elements.iter())
+        .filter(|row| {
+            matches!(
+                row.result,
+                safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+            )
+        })
+        .filter(|row| row.element.index <= usize::from(u16::MAX))
+        .take(16)
+        .map(|row| row.element.index.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut fields = vec![
+        ("command", format!("command-{command}").into()),
+        ("outcome", "unknown".into()),
+        ("placedOrderIds", placed.into()),
+        ("unknownIndices", unknown.into()),
+    ];
+    if let Some(request) = request {
+        fields.push(("request", request.0.to_string().into()));
+    }
+    if let Some(status) = status.filter(|status| (100..=599).contains(status)) {
+        fields.push(("status", status.into()));
+    }
+    fields
+}
+
 // Normalize diagnostic quantities to the native lot before formatting/comparing.
 // This never changes a submitted request or an admitted store value.
 fn formatted_size(value: f64, step: f64) -> String {

@@ -27,9 +27,19 @@ Recording tests in `after_failure_parity.rs`, `write_plan_preflight.rs` and
 `spot.rs` cite the TS continuation sites and pin this exception, accepted prefixes,
 standard wording, journal rows, telemetry and absence of later writes.
 
-Engine-sealed HTTP503 Unknown retains halt, prefix IDs, journal and canonical
-message assertions. Telemetry for that path awaits a later engine hook; its
-telemetry assertion alone is deferred. Other Unknown pins require telemetry.
+The engine Unknown hook reports sealed HTTP failures and released transport loss,
+including frame-fed engines. Venue-decoded Unknown keeps its existing event;
+transport failure completion uses the engine reporter to avoid duplicate events.
+Both reporters use the NX #9262 projection: command is `command.<decimal ID>`
+(a bounded ASCII label), outcome is literally `unknown`, and the comma-separated
+placedOrderIds and unknownIndices lists are capped at 16 entries. Native order
+IDs contain 1–32 decimal digits and retain only a prefix of whole entries fitting
+the engine’s 512-byte string-field limit. Indices are integers in 0–65535. Invalid
+lists are omitted as a whole. These telemetry caps leave the complete journal intact.
+The engine hook adds only request (`^[0-9]{1,20}$`, an internal correlation ID)
+and optional numeric HTTP status in 100–599. Absent or invalid status is omitted.
+No URL, endpoint, query, body, signed payload or other field is projected.
+Hosts add the venue and account identifiers.
 
 ## Batched placements
 
@@ -71,7 +81,7 @@ report `unknown` with the native diagnostic. Cancel targets remain absent from
 created-order IDs; an empty created-ID list does not mean no cancellations applied.
 
 A decoded Unknown row publishes `We couldn’t confirm this change. Check your open orders before trying again.`
-and one independent `order.outcome_unknown` event correlated by `commandId`.
+and one independent `order.outcome_unknown` event correlated by its `command` label.
 Native error text remains available in `venueMessage`. The journal and diagnostic
 do not authorize dispatch, retries, restoration or store changes.
 Decoded cancellation facts settle the command's passive journal before terminal

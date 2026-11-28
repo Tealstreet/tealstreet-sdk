@@ -83,21 +83,43 @@ fn pin(
             .collect();
         assert_eq!(events.len(), 1, "one attributed companion event");
         assert_eq!(events[0].message, ENGINE_UNKNOWN_TEXT);
-        for (name, expected) in [("command", command as f64), ("placedCount", created as f64)] {
+        if events[0].fields.iter().any(|(key, _)| *key == "request") {
+            super::unknown_hook::nx_schema(events[0], None);
+            let ids = placed
+                .iter()
+                .take(16)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(",");
+            for (key, expected) in [
+                ("command", format!("okx-{command}")),
+                ("placedOrderIds", ids),
+            ] {
+                assert!(
+                    events[0]
+                        .fields
+                        .iter()
+                        .any(|(name, value)| *name == key
+                            && value.as_str() == Some(expected.as_str()))
+                );
+            }
+        } else {
+            for (name, expected) in [("command", command as f64), ("placedCount", created as f64)] {
+                assert!(
+                    events[0].fields.iter().any(|(key, value)| *key == name
+                        && *value == safe_cex_engine::log::Value::Num(expected)),
+                    "{name}: {:?}",
+                    events[0]
+                );
+            }
             assert!(
-                events[0].fields.iter().any(|(key, value)| *key == name
-                    && *value == safe_cex_engine::log::Value::Num(expected)),
-                "{name}: {:?}",
                 events[0]
+                    .fields
+                    .iter()
+                    .any(|(key, value)| *key == "unknownRequest"
+                        && value.as_str().is_some_and(|s| s.contains(identity)))
             );
         }
-        assert!(
-            events[0]
-                .fields
-                .iter()
-                .any(|(key, value)| *key == "unknownRequest"
-                    && value.as_str().is_some_and(|s| s.contains(identity)))
-        );
     }
     error.clone()
 }
@@ -152,7 +174,15 @@ fn placement(case: &str) {
     let first = mutation(&prepared(&mut e, 5.));
     let payload: Value = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
     let rows = payload.as_array().cloned().unwrap_or_else(|| vec![payload]);
-    let placed: Vec<_> = (0..rows.len()).map(|i| format!("placed-{i}")).collect();
+    let placed: Vec<_> = (0..rows.len())
+        .map(|i| {
+            if case == "lost" {
+                (1000 + i).to_string()
+            } else {
+                format!("placed-{i}")
+            }
+        })
+        .collect();
     let acks: Vec<_> = placed
         .iter()
         .map(|id| {
@@ -524,7 +554,8 @@ fn unknown_exception_signature_retry() {
             },
         );
         let mut out = prepared(&mut e, 6.);
-        // KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry.
+        // HTTP-proof terminals retain their engine text; unknown_hook pins
+        // their closed-schema companion separately from native reporting.
         let error = pin(&out, 1, &[], identity, status == 200, 0);
         let elements = error
             .elements

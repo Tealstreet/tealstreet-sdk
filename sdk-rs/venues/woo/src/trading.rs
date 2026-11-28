@@ -71,6 +71,29 @@ struct Job {
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     split_report: Option<crate::split_report::SplitReport>,
+    telemetry_write: Option<(safe_cex_engine::RequestId, Option<u16>)>,
+    telemetry_unknown: Option<(safe_cex_engine::RequestId, Option<u16>)>,
+}
+
+impl Job {
+    fn unknown_event(&self, now: f64, error: &VenueError) -> Option<safe_cex_engine::LogEvent> {
+        let (request, status) = self.telemetry_unknown.or(self.telemetry_write)?;
+        (error.outcome == Some(Outcome::Unknown)).then(|| {
+            crate::unknown_outcome::event(&safe_cex_engine::EngineUnknownOutcome {
+                now,
+                command: self.command,
+                request,
+                status,
+                error,
+            })
+        })
+    }
+}
+
+fn emit_unknown(cx: &mut Cx<'_, Pending>, event: Option<safe_cex_engine::LogEvent>) {
+    if let Some(event) = event {
+        cx.event(event.level, event.code, event.message, event.fields);
+    }
 }
 #[derive(Default)]
 pub struct Trading {
@@ -1012,6 +1035,8 @@ impl Woo {
                     errors: Vec::new(),
                     effective: false,
                     split_report: None,
+                    telemetry_write: None,
+                    telemetry_unknown: None,
                 });
                 self.trade_pump(cx);
             }
@@ -1054,7 +1079,9 @@ impl Woo {
                     error.message = message;
                     // Independent legs cannot prove that the whole command was refused.
                     error.outcome = unknown.then_some(Outcome::Unknown);
+                    let event = job.unknown_event(cx.now, &error);
                     cx.fail(job.command, error);
+                    emit_unknown(cx, event);
                 }
                 continue;
             };
@@ -1175,6 +1202,7 @@ impl Woo {
                     {
                         report.request_id = Some(request);
                     }
+                    self.trading.active.as_mut().unwrap().telemetry_write = Some((request, None));
                     self.trading.next_write =
                         cx.now + if method == Method::Put { 200.0 } else { 100.0 };
                     if is_algo {
@@ -1257,6 +1285,7 @@ impl Woo {
             {
                 error.outcome = None;
             }
+            let mut event = None;
             if let Some(report) = job.split_report.as_ref() {
                 if error.outcome == Some(Outcome::Unknown) {
                     cx.command_error(job.command, error.message.clone());
@@ -1264,12 +1293,21 @@ impl Woo {
                     cx.event(event.level, event.code, event.message, event.fields);
                 }
                 error = report.attach(error);
+            } else {
+                event = job.unknown_event(cx.now, &error);
             }
             cx.fail(job.command, error);
+            emit_unknown(cx, event);
         }
         self.trading.waiting = false;
     }
     fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, mut error: VenueError) {
+        if error.outcome == Some(Outcome::Unknown)
+            && let Some(job) = &mut self.trading.active
+            && job.telemetry_unknown.is_none()
+        {
+            job.telemetry_unknown = job.telemetry_write;
+        }
         if let Step::Write {
             accepted: Accepted::CancelAll,
             path,
@@ -1381,6 +1419,12 @@ impl Woo {
             && let Some(report) = self.trading.active.as_mut().unwrap().split_report.as_mut()
         {
             report.status = Some(response.status);
+        }
+        if matches!(request.step, Step::Write { .. })
+            && let Some(job) = &mut self.trading.active
+            && let Some((_, status)) = &mut job.telemetry_write
+        {
+            *status = Some(response.status);
         }
         if let Step::Touch { ref symbol, side } = request.step {
             #[derive(Deserialize)]

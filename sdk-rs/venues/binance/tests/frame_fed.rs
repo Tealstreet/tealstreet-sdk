@@ -291,6 +291,436 @@ fn an_unknown_placement_outcome_is_never_re_sent_or_followed_by_a_read() {
     );
 }
 
+#[test]
+fn engine_unknown_hook_emits_once_without_followup_writes() {
+    use safe_cex_engine::{Outcome, Value};
+    for frame_fed in [false, true] {
+        for streamed in [false, true] {
+            for status in [408, 429, 503] {
+                let mut source = local();
+                let mut h = if frame_fed {
+                    fed_from(&mut source)
+                } else {
+                    source
+                };
+                h.event(Event::Command(Command::PlaceOrders {
+                    command: 811,
+                    orders: vec![limit()],
+                }));
+                let request = h.take("/fapi/v1/order");
+                assert!(request.url.contains("signature="));
+                let body = "https://leak.test/order?signature=signed-payload&apiKey=never-log";
+                if streamed {
+                    h.event(Event::HttpStart {
+                        request: request.id,
+                        status,
+                        headers: "",
+                    });
+                    h.event(Event::HttpChunk {
+                        request: request.id,
+                        data: body.as_bytes(),
+                    });
+                    h.event(Event::HttpEnd {
+                        request: request.id,
+                    });
+                } else {
+                    h.reply(request.id, status, "", body);
+                }
+                h.reply(request.id, status, "", body);
+                let error = &h.failures.iter().find(|(id, _)| *id == 811).unwrap().1;
+                assert_eq!(error.outcome, Some(Outcome::Unknown));
+                let events: Vec<_> = h
+                    .events
+                    .iter()
+                    .filter(|event| event.code == "order.outcome_unknown")
+                    .collect();
+                assert_eq!(
+                    events.len(),
+                    1,
+                    "frame_fed={frame_fed} streamed={streamed} status={status}"
+                );
+                let event = events[0];
+                assert_eq!(event.message, safe_cex_engine::UNKNOWN_OUTCOME_TEXT);
+                assert!(
+                    event
+                        .fields
+                        .contains(&("command", Value::from("binance-811")))
+                );
+                assert!(
+                    event
+                        .fields
+                        .contains(&("request", Value::from(request.id.0.to_string())))
+                );
+                assert!(event.fields.contains(&("status", Value::from(status))));
+                assert_safe_unknown_fields(event);
+                assert!(h.requests.iter().all(|r| r.method == Method::Get));
+                if frame_fed {
+                    assert!(h.requests.is_empty(), "no frame-fed reads");
+                }
+            }
+        }
+    }
+}
+
+fn assert_safe_unknown_fields(event: &safe_cex_engine::LogEvent) {
+    let request = event
+        .fields
+        .iter()
+        .find(|(key, _)| *key == "request")
+        .unwrap()
+        .1
+        .as_str()
+        .unwrap();
+    // Exactly ^[0-9]{1,20}$, without permitting whitespace or Unicode digits.
+    assert!((1..=20).contains(&request.len()) && request.bytes().all(|b| b.is_ascii_digit()));
+    for (key, value) in &event.fields {
+        assert!(
+            [
+                "command",
+                "request",
+                "status",
+                "outcome",
+                "placedOrderIds",
+                "unknownIndices"
+            ]
+            .contains(key)
+        );
+        let text = format!("{key} {value:?}").to_ascii_lowercase();
+        for forbidden in [
+            "http",
+            "/order",
+            "?",
+            "&",
+            "=",
+            "signature",
+            "apikey",
+            "signed-payload",
+            "never-log",
+            "endpoint",
+            "query",
+            "body",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "{key} leaked {forbidden}: {value:?}"
+            );
+        }
+    }
+}
+
+fn assert_native_unknown_event(h: &Harness, request: safe_cex_engine::RequestId, status: u16) {
+    let events: Vec<_> = h
+        .events
+        .iter()
+        .filter(|event| event.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(events.len(), 1, "{:?}", h.events);
+    let event = events[0];
+    assert_safe_unknown_fields(event);
+    let mut names: Vec<_> = event.fields.iter().map(|(key, _)| *key).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "command",
+            "outcome",
+            "placedOrderIds",
+            "request",
+            "status",
+            "unknownIndices"
+        ]
+    );
+    assert!(
+        event
+            .fields
+            .contains(&("request", request.0.to_string().into()))
+    );
+    assert!(event.fields.contains(&("status", status.into())));
+    assert!(event.fields.contains(&("outcome", "unknown".into())));
+}
+
+#[test]
+fn native_unknown_hook_emits_once_with_closed_fields_in_both_feed_modes() {
+    for frame_fed in [false, true] {
+        for streamed in [false, true] {
+            for code in [-1006, -1007, 0, -2019] {
+                let mut source = local();
+                let mut h = if frame_fed {
+                    fed_from(&mut source)
+                } else {
+                    source
+                };
+                h.event(Event::Command(Command::PlaceOrders {
+                    command: 813,
+                    orders: vec![limit()],
+                }));
+                let request = h.take("/fapi/v1/order");
+                let body = if code == 0 {
+                    "{}".to_owned()
+                } else {
+                    format!(
+                        r#"{{"code":{code},"msg":"https://never-log.test/order?signature=signed-payload&apiKey=never-log"}}"#
+                    )
+                };
+                let status = if code == -2019 { 400 } else { 200 };
+                if streamed {
+                    h.event(Event::HttpStart {
+                        request: request.id,
+                        status,
+                        headers: "",
+                    });
+                    h.event(Event::HttpChunk {
+                        request: request.id,
+                        data: body.as_bytes(),
+                    });
+                    h.event(Event::HttpEnd {
+                        request: request.id,
+                    });
+                } else {
+                    h.reply(request.id, status, "", &body);
+                }
+                let error = &h.failures.iter().find(|(id, _)| *id == 813).unwrap().1;
+                assert_eq!(
+                    error.outcome,
+                    Some(if code == -2019 {
+                        safe_cex_engine::Outcome::Rejected
+                    } else {
+                        safe_cex_engine::Outcome::Unknown
+                    })
+                );
+                if code == -2019 {
+                    assert!(!h.events.iter().any(|e| e.code == "order.outcome_unknown"));
+                } else {
+                    assert_native_unknown_event(&h, request.id, status);
+                }
+                h.reply(request.id, status, "", &body);
+                assert_eq!(
+                    h.events
+                        .iter()
+                        .filter(|e| e.code == "order.outcome_unknown")
+                        .count(),
+                    usize::from(code != -2019)
+                );
+                assert!(h.requests.iter().all(|r| r.method == Method::Get));
+                if frame_fed {
+                    assert!(h.requests.is_empty());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_unknown_hook_waits_for_siblings_and_deduplicates_engine_failures() {
+    for frame_fed in [false, true] {
+        for second in ["native", "accepted", "http", "transport"] {
+            let mut source = local();
+            let mut h = if frame_fed {
+                fed_from(&mut source)
+            } else {
+                source
+            };
+            h.event(Event::Command(Command::CancelSymbolOrders {
+                command: 814,
+                symbol: "BTCUSDT".into(),
+            }));
+            let first = h.take("/fapi/v1/allOpenOrders");
+            let sibling = h.take("/fapi/v1/algoOpenOrders");
+            assert_eq!(first.method, Method::Delete);
+            assert_eq!(sibling.method, Method::Delete);
+            h.reply(
+                first.id,
+                200,
+                "",
+                r#"{"code":-1007,"msg":"synthetic uncertainty"}"#,
+            );
+            assert!(!h.events.iter().any(|e| e.code == "order.outcome_unknown"));
+            assert!(!h.failures.iter().any(|(id, _)| *id == 814));
+            match second {
+                "transport" => h.event(Event::HttpFailed {
+                    request: sibling.id,
+                    error: "synthetic transport loss",
+                }),
+                "http" => h.reply(sibling.id, 503, "", "{}"),
+                "accepted" => h.reply(sibling.id, 200, "", r#"{"code":200,"msg":"success"}"#),
+                _ => h.reply(
+                    sibling.id,
+                    200,
+                    "",
+                    r#"{"code":-1006,"msg":"synthetic uncertainty"}"#,
+                ),
+            }
+            assert_eq!(
+                h.failures
+                    .iter()
+                    .filter(|(id, error)| *id == 814
+                        && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+                    .count(),
+                1
+            );
+            let events: Vec<_> = h
+                .events
+                .iter()
+                .filter(|e| e.code == "order.outcome_unknown")
+                .collect();
+            assert_eq!(events.len(), 1, "mode={frame_fed}/{second}: {:?}", h.events);
+            assert_safe_unknown_fields(events[0]);
+            assert!(events[0].fields.contains(&("placedOrderIds", "".into())));
+            if second == "native" || second == "accepted" {
+                assert_native_unknown_event(&h, first.id, 200);
+            } else {
+                assert!(
+                    events[0]
+                        .fields
+                        .contains(&("request", sibling.id.0.to_string().into()))
+                );
+                if second == "http" {
+                    assert_native_unknown_event(&h, sibling.id, 503);
+                } else {
+                    assert!(!events[0].fields.iter().any(|(key, _)| *key == "status"));
+                }
+            }
+            h.reply(first.id, 200, "", r#"{"code":-1007,"msg":"late"}"#);
+            h.reply(sibling.id, 503, "", "{}");
+            assert_eq!(
+                h.events
+                    .iter()
+                    .filter(|e| e.code == "order.outcome_unknown")
+                    .count(),
+                1
+            );
+            assert!(h.requests.iter().all(|r| r.method == Method::Get));
+            if frame_fed {
+                assert!(h.requests.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn native_unknown_hook_preserves_only_confirmed_placement_ids() {
+    for frame_fed in [false, true] {
+        let mut source = local();
+        let mut h = if frame_fed {
+            fed_from(&mut source)
+        } else {
+            source
+        };
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 815,
+            orders: vec![limit(), limit()],
+        }));
+        let request = h.take("/fapi/v1/batchOrders");
+        h.reply(request.id, 200, "", r#"[{"orderId":123},{"code":-1007,"msg":"https://never-log.test/order?signature=signed-payload"}]"#);
+        assert_eq!(
+            h.failures
+                .iter()
+                .find(|(id, _)| *id == 815)
+                .unwrap()
+                .1
+                .outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_native_unknown_event(&h, request.id, 200);
+        let event = h
+            .events
+            .iter()
+            .find(|e| e.code == "order.outcome_unknown")
+            .unwrap();
+        assert!(event.fields.contains(&("placedOrderIds", "123".into())));
+        assert!(event.fields.contains(&("unknownIndices", "".into())));
+        assert!(h.requests.iter().all(|r| r.method == Method::Get));
+        if frame_fed {
+            assert!(h.requests.is_empty());
+        }
+    }
+}
+
+#[test]
+fn engine_transport_unknown_emits_once_and_definite_refusal_emits_none() {
+    use safe_cex_engine::Outcome;
+    for frame_fed in [false, true] {
+        for transport in [false, true] {
+            let mut source = local();
+            let mut h = if frame_fed {
+                fed_from(&mut source)
+            } else {
+                source
+            };
+            h.event(Event::Command(Command::PlaceOrders {
+                command: 812,
+                orders: vec![limit()],
+            }));
+            let request = h.take("/fapi/v1/order");
+            if transport {
+                h.event(Event::HttpFailed {
+                    request: request.id,
+                    error: "https://leak.test/order?signature=signed-payload&apiKey=never-log",
+                });
+            } else {
+                h.reply(
+                    request.id,
+                    400,
+                    "",
+                    r#"{"code":-2019,"msg":"Margin is insufficient"}"#,
+                );
+            }
+            let error = &h.failures.iter().find(|(id, _)| *id == 812).unwrap().1;
+            assert_eq!(
+                error.outcome,
+                Some(if transport {
+                    Outcome::Unknown
+                } else {
+                    Outcome::Rejected
+                })
+            );
+            let events: Vec<_> = h
+                .events
+                .iter()
+                .filter(|event| event.code == "order.outcome_unknown")
+                .collect();
+            assert_eq!(events.len(), usize::from(transport));
+            for event in events {
+                assert_safe_unknown_fields(event);
+            }
+            assert!(h.requests.iter().all(|r| r.method == Method::Get));
+            if frame_fed {
+                assert!(h.requests.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn engine_unknown_projection_discards_untrusted_error_details() {
+    use safe_cex_engine::{EngineUnknownOutcome, RequestId, Venue, VenueError};
+    let tainted = "https://leak.test/order?signature=signed-payload&apiKey=never-log";
+    let error = VenueError {
+        message: tainted.into(),
+        venue_message: Some(tainted.into()),
+        venue_code: Some(tainted.into()),
+        partial: Some(Box::new(safe_cex_engine::error::Partial {
+            order_ids: vec![tainted.into()],
+            total: None,
+            failed_index: None,
+        })),
+        ..VenueError::default()
+    };
+    let hook =
+        <safe_cex_venue_binance::BinanceFutures as Venue>::unknown_outcome_telemetry().unwrap();
+    for id in [0, u64::MAX] {
+        let event = hook(&EngineUnknownOutcome {
+            now: 123.,
+            command: 811,
+            request: RequestId(id),
+            status: None,
+            error: &error,
+        });
+        assert_safe_unknown_fields(&event);
+        assert!(!event.fields.iter().any(|(key, _)| *key == "status"));
+    }
+}
+
 /// The source's current snapshot, ingested by `fed`: stale until the source re-reads.
 fn ingest(source: &mut Harness, fed: &mut Harness) {
     let frame = source.engine.snapshot_frame(source.now).to_vec();

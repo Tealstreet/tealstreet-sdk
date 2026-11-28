@@ -50,6 +50,7 @@ pub struct Trading {
     uncertain_settings: HashMap<String, u64>,
     proof_timer: Option<TimerId>,
     proof_token: u64,
+    submission_request: Option<safe_cex_engine::RequestId>,
 }
 struct PositionWait {
     command: CommandId,
@@ -1280,7 +1281,7 @@ impl Lighter {
         }
         self.trading.active.as_mut().unwrap().effect = Some(effect.clone());
         self.trading.inflight = true;
-        if let Err((_, error)) = cx.request_signed_managed(
+        match cx.request_signed_managed(
             context,
             None,
             Method::Post,
@@ -1293,8 +1294,11 @@ impl Lighter {
                 grouped,
             })),
         ) {
-            self.trading.inflight = false;
-            self.trade_finish(cx, error.venue_error());
+            Ok(request) => self.trading.submission_request = Some(request),
+            Err((_, error)) => {
+                self.trading.inflight = false;
+                self.trade_finish(cx, error.venue_error());
+            }
         }
     }
 
@@ -1598,6 +1602,7 @@ impl Lighter {
                             uncertain(UNCERTAIN_RESULT)
                         };
                         error.presents = true;
+                        self.decoded_unknown_telemetry(cx, response.status, &error);
                         self.trade_finish(cx, error);
                         return;
                     }
@@ -1736,6 +1741,9 @@ impl Lighter {
                         });
                     } else if !self.trade_refusal(cx, &context, code.unwrap(), &error.message) {
                         return;
+                    }
+                    if error.outcome == Some(Outcome::Unknown) {
+                        self.decoded_unknown_telemetry(cx, response.status, &error);
                     }
                     self.trade_finish(cx, error);
                     return;
@@ -2103,6 +2111,18 @@ impl Lighter {
             error.message = safe_cex_engine::error::with_detail(&gone, &error.message);
         }
         error
+    }
+
+    fn decoded_unknown_telemetry(&self, cx: &mut Cx<'_, Pending>, status: u16, error: &VenueError) {
+        // Engine-sealed HTTP/transport failures never enter the submission decoder.
+        if let (Some(job), Some(request)) = (&self.trading.active, self.trading.submission_request)
+            // `trade_finish` already reports a nonempty Unknown journal once.
+            && job.unknown_journal().unknown.is_empty()
+        {
+            let event =
+                crate::telemetry::unknown(job.command, request, Some(status), error, &job.ids);
+            cx.event(event.level, event.code, event.message, event.fields);
+        }
     }
 
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {

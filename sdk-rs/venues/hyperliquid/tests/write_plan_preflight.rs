@@ -405,15 +405,14 @@ fn runtime_lost_reply_is_unknown() {
 
 #[test]
 fn runtime_server_failure_retains_complete_journal() {
-    // Engine-sealed HTTP503 retains halt/journal/canonical-message pins.
-    // Telemetry for this path awaits the engine hook approved by the lead.
+    // The engine hook now publishes the retained prefix and Unknown indices.
     runtime_failure_suffix(
         vec![separator(), order(3.), separator()],
         503,
         "service unavailable",
         "unknown",
         false,
-        false,
+        true,
     );
 }
 

@@ -8,6 +8,7 @@ mod public_trades;
 mod reads;
 pub mod sign;
 mod trading;
+mod unknown_outcome;
 mod wire;
 
 use safe_cex_engine::Level;
@@ -522,6 +523,10 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::project)
+    }
+
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[public_trades::PACING]
     }

@@ -670,6 +670,10 @@ impl Account {
             headers.push(("PARADEX-PARTNER", "TEALSTREET".into()));
         }
         let url = format!("{}{}", self.rest(), request.path);
+        let correlation = match &request.pending {
+            Pending::Trade(trade) => trade.correlation().cloned(),
+            _ => None,
+        };
         let id = if let Some(at) = request.at {
             cx.request_streamed_body(
                 request.method,
@@ -682,6 +686,10 @@ impl Account {
         } else {
             cx.request(request.method, url, headers, request.body, request.pending)
         };
+        if let Some(correlation) = correlation {
+            // Bind only the opaque physical ID after any JWT wait.
+            correlation.get_or_init(|| id);
+        }
         if let Some(step) = signing {
             sign(cx, id, step);
         }

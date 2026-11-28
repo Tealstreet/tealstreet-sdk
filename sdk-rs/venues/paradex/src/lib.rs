@@ -7,6 +7,7 @@ mod identity;
 mod public;
 mod sbe;
 pub mod sign;
+mod telemetry;
 mod trading;
 mod venue_state;
 mod wire;
@@ -90,6 +91,10 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(telemetry::engine_unknown)
+    }
+
     fn http_plans() -> bool {
         false
     }

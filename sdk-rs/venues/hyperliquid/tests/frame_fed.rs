@@ -735,3 +735,344 @@ fn a_retired_amend_role_cannot_resolve_or_release_its_successor() {
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
 }
+
+fn telemetry_page() -> Engine<Hyperliquid> {
+    let (mut source, _) = ready("disabled");
+    let frame = source.snapshot_frame(1500.0).to_vec();
+    let (mut engine, _) = page_engine();
+    engine.apply_frame(1500.0, &frame, true).unwrap();
+    engine
+}
+
+fn unknown_events(actions: &[Action]) -> Vec<&safe_cex_engine::LogEvent> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.outcome_unknown" =>
+            {
+                support::assert_unknown_projection(event);
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn frame_fed_engine_unknown_emits_one_hook_event() {
+    for status in [Some(408), Some(429), Some(503), None] {
+        let mut engine = telemetry_page();
+        let sent = place(&mut engine);
+        assert_eq!(sent.len(), 1);
+        let request = &sent[0];
+        if let Some(status) = status {
+            reply(&mut engine, request, status, "unproven");
+        } else {
+            let now = safe_cex_engine::test_support::dispatch_now(&engine);
+            engine.handle(
+                now,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "lost response",
+                },
+            );
+        }
+        let actions = prepared_now(&mut engine);
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "{status:?}: {actions:?}");
+        assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let events = unknown_events(&actions);
+        assert_eq!(events.len(), 1, "{status:?}: one engine-sealed diagnostic");
+        let event = events[0];
+        assert!(event.message.contains("Check your open orders"));
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "command")
+                .unwrap()
+                .1
+                .as_str(),
+            Some("command.7")
+        );
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "request")
+                .unwrap()
+                .1
+                .as_str(),
+            Some(request.id.0.to_string().as_str())
+        );
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "outcome")
+                .unwrap()
+                .1
+                .as_str(),
+            Some("unknown")
+        );
+        let field = |key| {
+            event
+                .fields
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value)
+        };
+        assert_eq!(
+            field("placedOrderIds").and_then(|value| value.as_str()),
+            Some("")
+        );
+        assert_eq!(
+            field("unknownIndices").and_then(|value| value.as_str()),
+            Some("0")
+        );
+        assert_eq!(
+            field("status"),
+            status.map(safe_cex_engine::log::Value::from).as_ref()
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_))),
+            "frame-fed failure cannot send reads or writes"
+        );
+        reply(
+            &mut engine,
+            request,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":99}}]}}}"#,
+        );
+        let now = safe_cex_engine::test_support::dispatch_now(&engine);
+        engine.handle(
+            now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "late failure",
+            },
+        );
+        let late = prepared_now(&mut engine);
+        assert!(unknown_events(&late).is_empty());
+        assert!(!late.iter().any(|action| matches!(
+            action,
+            Action::Http(_)
+                | Action::Notice(
+                    safe_cex_engine::Notice::CommandFailed { command: 7, .. }
+                        | safe_cex_engine::Notice::CommandDone { command: 7, .. }
+                )
+        )));
+    }
+}
+
+#[test]
+fn frame_fed_definite_refusal_emits_no_unknown_event() {
+    let mut engine = telemetry_page();
+    let sent = place(&mut engine);
+    assert_eq!(sent.len(), 1);
+    reply(
+        &mut engine,
+        &sent[0],
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order must have minimum value of $10."}]}}}"#,
+    );
+    let actions = prepared_now(&mut engine);
+    assert!(unknown_events(&actions).is_empty());
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, error }) if error.outcome != Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+
+#[test]
+fn frame_fed_venue_decoded_unknown_still_emits_once() {
+    let mut engine = telemetry_page();
+    let sent = place(&mut engine);
+    assert_eq!(sent.len(), 1);
+    reply(&mut engine, &sent[0], 200, "{}");
+    let actions = prepared_now(&mut engine);
+    assert_eq!(unknown_events(&actions).len(), 1);
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, error }) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    reply(&mut engine, &sent[0], 200, "{}");
+    assert!(unknown_events(&prepared_now(&mut engine)).is_empty());
+}
+
+#[test]
+fn frame_fed_unknown_telemetry_caps_a_batched_unknown_journal() {
+    for status in [200, 503] {
+        let mut engine = telemetry_page();
+        let order: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#,
+        )
+        .unwrap();
+        engine.handle(
+            2000.,
+            Event::Command(Command::PlaceOrders {
+                command: 7,
+                orders: vec![order; 17],
+            }),
+        );
+        let sent = requests(&mut engine);
+        assert_eq!(sent.len(), 1);
+        reply(&mut engine, &sent[0], status, "{}");
+        let actions = prepared_now(&mut engine);
+        let events = unknown_events(&actions);
+        assert_eq!(events.len(), 1);
+        let indices = events[0]
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "unknownIndices")
+            .unwrap()
+            .1
+            .as_str()
+            .unwrap();
+        // The 17 plain limits share one batched `order` action, so the unproven
+        // reply leaves every row Unknown; telemetry caps the list at 16 entries.
+        assert_eq!(
+            indices,
+            (0..16).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        let journal = failures[0].elements.as_ref().unwrap();
+        assert_eq!(journal.len(), 17);
+        assert_eq!(journal[16].element.index, 16);
+        assert!(journal.iter().all(|row| matches!(
+            row.result,
+            safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
+#[test]
+fn managed_unknown_paths_emit_once_and_refusal_emits_none() {
+    for case in ["http", "transport", "decoded", "refused"] {
+        let (mut engine, _) = ready("disabled");
+        let sent = place(&mut engine);
+        let writes: Vec<_> = sent
+            .iter()
+            .filter(|request| request.url.ends_with("/exchange"))
+            .collect();
+        assert_eq!(writes.len(), 1);
+        let request = writes[0];
+        match case {
+            "http" => reply(&mut engine, request, 503, "unproven"),
+            "transport" => {
+                let now = safe_cex_engine::test_support::dispatch_now(&engine);
+                engine.handle(
+                    now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "lost response",
+                    },
+                );
+            }
+            "decoded" => reply(&mut engine, request, 200, "{}"),
+            "refused" => reply(
+                &mut engine,
+                request,
+                200,
+                r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order must have minimum value of $10."}]}}}"#,
+            ),
+            _ => unreachable!(),
+        }
+        let actions = prepared_now(&mut engine);
+        assert_eq!(
+            unknown_events(&actions).len(),
+            usize::from(case != "refused"),
+            "{case}: {actions:?}"
+        );
+        assert!(!actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.url.ends_with("/exchange"))
+        ));
+    }
+}
+
+#[test]
+fn frame_fed_cancel_and_settings_use_the_engine_reporter_once() {
+    for operation in ["cancel", "leverage"] {
+        for status in [Some(503), None] {
+            let (mut source, socket) = ready("disabled");
+            message(
+                &mut source,
+                socket,
+                1200.,
+                r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":42,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+            );
+            let frame = source.snapshot_frame(1500.).to_vec();
+            let (mut engine, _) = page_engine();
+            engine.apply_frame(1500., &frame, true).unwrap();
+            let command = if operation == "cancel" {
+                Command::CancelOrders {
+                    command: 7,
+                    ids: vec!["42".into()],
+                }
+            } else {
+                Command::SetLeverage {
+                    command: 7,
+                    symbol: "BTC-PERP".into(),
+                    leverage: 5.,
+                    side: None,
+                }
+            };
+            engine.handle(2000., Event::Command(command));
+            let sent = requests(&mut engine);
+            assert_eq!(sent.len(), 1, "{operation}");
+            if let Some(status) = status {
+                reply(&mut engine, &sent[0], status, "unproven");
+            } else {
+                let now = safe_cex_engine::test_support::dispatch_now(&engine);
+                engine.handle(
+                    now,
+                    Event::HttpFailed {
+                        request: sent[0].id,
+                        error: "lost response",
+                    },
+                );
+            }
+            let actions = prepared_now(&mut engine);
+            assert_eq!(
+                unknown_events(&actions).len(),
+                1,
+                "{operation} {status:?}: {actions:?}"
+            );
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 7, error }) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+        }
+    }
+}

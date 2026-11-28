@@ -572,27 +572,36 @@ impl Kraken {
             let selected = self.select_http(ids, method, path)?;
             let selection = *selected.selection();
             let context = self.signing_context(cx, &pending, method, selected.credential())?;
+            let trading = matches!(&pending, Pending::Trade(_));
             if let Pending::Trade(request) = &mut pending {
                 request.context = Some(context.clone());
             }
             let recipe = selected
                 .futures_http(method, path, &form, self.options.testnet, 5000.)
                 .map_err(|_| "Invalid Kraken signing request")?;
-            cx.request_selected_managed(
-                context.clone(),
-                &selection,
-                None,
-                method,
-                recipe.url().into(),
-                recipe.body().map(str::to_owned),
-                Box::new(recipe),
-                Pending::Signing(Box::new(pending), context),
-            )
-            .map_err(|(_, reason)| reason.to_string())?;
+            let request = cx
+                .request_selected_managed(
+                    context.clone(),
+                    &selection,
+                    None,
+                    method,
+                    recipe.url().into(),
+                    recipe.body().map(str::to_owned),
+                    Box::new(recipe),
+                    Pending::Signing(Box::new(pending), context),
+                )
+                .map_err(|(_, reason)| reason.to_string())?;
+            if trading {
+                self.note_trading_request(request);
+            }
             return Ok(());
         }
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
-        cx.request(method, url, headers, body, pending);
+        let trading = matches!(&pending, Pending::Trade(_));
+        let request = cx.request(method, url, headers, body, pending);
+        if trading {
+            self.note_trading_request(request);
+        }
         Ok(())
     }
     pub(crate) fn signed_streamed(

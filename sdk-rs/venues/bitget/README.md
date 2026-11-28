@@ -92,8 +92,15 @@ never retried. This is the recorded stop-after-UNKNOWN parity exception
 Venue-authored terminal write failures retain acknowledged IDs and name the
 unconfirmed request with
 `We couldn’t confirm this change. Check your open orders before trying again.`; the companion
-`order.outcome_unknown` event reports the command, acknowledged count and
-unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
+`order.outcome_unknown` event emits once for native uncertainty or an engine-sealed
+Unknown, including frame-fed HTTP and transport failures. Its fields match NX
+#9262: `command` is `command-<ID>`, `outcome` is `unknown`, `request` is the opaque
+decimal request ID, and optional numeric `status` is limited to 100–599.
+`placedOrderIds` admits 1–32 decimal digits per ID; `unknownIndices` admits
+indices 0–65535. Both comma-separated lists retain at most 16 entries, with
+placed IDs also stopping at the engine's 512-byte field limit without splitting
+an ID. No URL, query, body or signed payload enters these fields. Engine-sealed
+failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.
 
 After a placement refusal, dispatch follows the legacy TS path: Classic

@@ -8,6 +8,8 @@ use safe_cex_engine::{
 #[path = "trading/pulled_unknown.rs"]
 mod pulled_unknown;
 mod support;
+#[path = "trading/unknown_hook.rs"]
+mod unknown_hook;
 use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
 use support::PreparedActions;

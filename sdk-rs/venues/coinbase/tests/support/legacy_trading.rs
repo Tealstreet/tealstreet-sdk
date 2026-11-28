@@ -35,6 +35,139 @@ impl Signer for DeferredSigner {
     }
 }
 
+#[path = "unknown_fields.rs"]
+mod unknown_fields;
+
+#[test]
+fn unknown_telemetry_preserves_native_prefix_ids_in_results_and_filters_opaque_ids() {
+    for accepted_id in ["9007199254740993", "e338d359-05b3-43ca-869d-c4a219f7e045"] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        s.command(Command::PlaceOrders {
+            command: 502,
+            orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0); 3],
+        });
+        let first = s.write();
+        s.reply(
+            first,
+            200,
+            &format!(r#"{{"success":true,"order_id":"{accepted_id}"}}"#),
+        );
+        let second = s.write();
+        let attempt_id = second.id;
+        s.reply(second, 200, r#"{"error":"RESOURCE_EXHAUSTED"}"#);
+        assert!(s.done(502).is_err());
+        assert_eq!(
+            s.failures[&502].partial.as_ref().unwrap().order_ids,
+            [accepted_id]
+        );
+        let events: Vec<_> = s
+            .events
+            .iter()
+            .filter(|e| e.code == "order.outcome_unknown")
+            .collect();
+        assert_eq!(events.len(), 1);
+        unknown_fields::assert_field_rules(events[0]);
+        assert!(
+            events[0]
+                .fields
+                .contains(&("request", attempt_id.0.to_string().into()))
+        );
+        assert!(events[0].fields.contains(&("unknownIndices", "1".into())));
+        let expected = if accepted_id.bytes().all(|b| b.is_ascii_digit()) {
+            accepted_id
+        } else {
+            ""
+        };
+        assert!(
+            events[0]
+                .fields
+                .contains(&("placedOrderIds", expected.into()))
+        );
+        assert_eq!(
+            s.requests
+                .iter()
+                .filter(|r| r.method == safe_cex_engine::Method::Post)
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn definite_native_refusal_emits_no_unknown_telemetry() {
+    let (mut s, attempt) = advanced_write(AdvancedWrite::Create);
+    s.reply(attempt, 200, r#"{"success":false,"error_response":{"error":"INSUFFICIENT_FUND","message":"fixture refusal"}}"#);
+    assert!(s.done(501).is_err());
+    assert_eq!(
+        s.failures[&501].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert!(s.events.iter().all(|e| e.code != "order.outcome_unknown"));
+}
+
+#[test]
+fn unknown_telemetry_covers_each_native_write_once_and_omits_transport_status() {
+    for operation in ADVANCED_WRITES {
+        for status in [Some(200), Some(408), Some(429), Some(503), None] {
+            let (mut s, attempt) = advanced_write(operation);
+            if let Some(status) = status {
+                s.reply(attempt.clone(), status, r#"{"error":"RESOURCE_EXHAUSTED","message":"https://fixture.invalid/orders?api_key=fixture&signature=body"}"#);
+            } else {
+                s.e.handle(
+                    s.now,
+                    Event::HttpFailed {
+                        request: attempt.id,
+                        error: "https://fixture.invalid/orders?api_key=fixture&signature=body",
+                    },
+                );
+            }
+            assert!(s.done(501).is_err());
+            assert_eq!(
+                s.failures[&501].outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            let events: Vec<_> = s
+                .events
+                .iter()
+                .filter(|e| e.code == "order.outcome_unknown")
+                .collect();
+            assert_eq!(events.len(), 1, "{operation:?} {status:?}");
+            unknown_fields::assert_field_rules(events[0]);
+            assert!(
+                events[0]
+                    .fields
+                    .contains(&("request", attempt.id.0.to_string().into()))
+            );
+            assert_eq!(
+                events[0]
+                    .fields
+                    .iter()
+                    .find(|(k, _)| *k == "status")
+                    .map(|(_, v)| v),
+                status
+                    .map(|s| safe_cex_engine::Value::Num(f64::from(s)))
+                    .as_ref()
+            );
+            s.reply(attempt, 200, r#"{"success":true,"order_id":"123"}"#);
+            s.collect();
+            assert_eq!(
+                s.events
+                    .iter()
+                    .filter(|e| e.code == "order.outcome_unknown")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                s.requests
+                    .iter()
+                    .filter(|r| r.method == safe_cex_engine::Method::Post)
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
 const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1"}]}"#;
 const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
 const CFM: &str = r#"{"products":[{"product_id":"BTC-CDE","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"0.01"}}]}"#;
@@ -377,6 +510,13 @@ fn advanced_unknown(
             .contains("Check Open Orders"),
         "{message}"
     );
+    let events: Vec<_> = s
+        .events
+        .iter()
+        .filter(|e| e.code == "order.outcome_unknown")
+        .collect();
+    assert_eq!(events.len(), 1, "{operation:?}, HTTP {status}");
+    unknown_fields::assert_field_rules(events[0]);
     assert_eq!(serde_json::to_value(s.e.store().orders()).unwrap(), before);
     let until = s.now + 35_000.;
     for _ in 0..1_000 {
@@ -511,6 +651,7 @@ fn advanced_genuine_http_refusals_remain_rejected() {
             assert!(s.done(501).unwrap_err().contains("fixture refusal"));
             assert_eq!(s.failures[&501].outcome, Some(Outcome::Rejected));
             assert_eq!(s.failures[&501].kind, Some(kind));
+            assert!(s.events.iter().all(|e| e.code != "order.outcome_unknown"));
         }
     }
 }
@@ -921,18 +1062,18 @@ fn above_max_partial_batch(status: u16, body: &str, unknown: bool) {
         assert_eq!(telemetry.len(), 1);
         assert_eq!(telemetry[0].message, message);
         assert_eq!(telemetry[0].level, safe_cex_engine::Level::Warn);
-        assert!(telemetry[0].fields.contains(&("command", 93_u32.into())));
+        unknown_fields::assert_field_rules(telemetry[0]);
         assert!(
             telemetry[0]
                 .fields
-                .contains(&("elementIndex", 1_u32.into()))
+                .contains(&("command", "coinbase.93".into()))
         );
         assert!(
             telemetry[0]
                 .fields
-                .contains(&("clientOrderId", "prefix-row-1".into()))
+                .contains(&("unknownIndices", "1".into()))
         );
-        assert!(telemetry[0].fields.contains(&("placedCount", 1_u32.into())));
+        assert!(telemetry[0].fields.contains(&("placedOrderIds", "".into())));
     } else {
         assert_eq!(
             failure.outcome, None,

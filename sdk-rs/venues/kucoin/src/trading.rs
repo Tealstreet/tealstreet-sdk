@@ -149,7 +149,7 @@ struct Step {
     call: Call,
 }
 pub struct Request {
-    command: CommandId,
+    pub(super) command: CommandId,
     step: Step,
     retried: bool,
     position_open: bool,
@@ -165,6 +165,8 @@ struct Job {
     metadata_started: HashSet<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    request_id: Option<safe_cex_engine::RequestId>,
+    unknown_source: Option<crate::unknown_outcome::NativeSource>,
 }
 impl Job {
     /// Keeps the first failure unless an Unknown leg supplies its own text and
@@ -931,6 +933,8 @@ impl Kucoin {
                 error: None,
                 metadata_started: HashSet::new(),
                 effective: false,
+                request_id: None,
+                unknown_source: None,
             },
         );
         self.trading.queue.push_back(id);
@@ -1025,9 +1029,24 @@ impl Kucoin {
                     {
                         error.outcome = None;
                     }
+                    if error.outcome == Some(Outcome::Unknown)
+                        && let Some(source) = job.unknown_source
+                    {
+                        source.emit(cx, command, &error, job.ids.iter().map(String::as_str));
+                    }
                     cx.fail(command, error);
                 }
             }
+        }
+    }
+
+    pub(crate) fn trading_request_issued(
+        &mut self,
+        command: CommandId,
+        request: safe_cex_engine::RequestId,
+    ) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.request_id = Some(request);
         }
     }
 
@@ -1411,6 +1430,14 @@ impl Kucoin {
                 };
             }
             cx.command_error(request.command, &error.message);
+            if error.outcome == Some(Outcome::Unknown) && job.unknown_source.is_none() {
+                job.unknown_source =
+                    job.request_id
+                        .map(|request| crate::unknown_outcome::NativeSource {
+                            request_id: request,
+                            status: (100..=599).contains(&status).then_some(status),
+                        });
+            }
             job.record(error);
             if !job.keep_going {
                 job.steps.clear();

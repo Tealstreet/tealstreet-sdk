@@ -290,7 +290,7 @@ impl MexcFutures {
             slot,
             context: context.clone(),
         }));
-        if let Err((Pending::Protective(request), error)) = cx.request_signed_managed(
+        match cx.request_signed_managed(
             context,
             None,
             method,
@@ -299,7 +299,11 @@ impl MexcFutures {
             Box::new(recipe),
             pending,
         ) {
-            self.protective_failed(cx, *request, error.venue_error());
+            Ok(request) => self.note_trading_request(command, request),
+            Err((Pending::Protective(request), error)) => {
+                self.protective_failed(cx, *request, error.venue_error());
+            }
+            Err(_) => {}
         }
     }
     pub(crate) fn protective_response(
@@ -314,6 +318,7 @@ impl MexcFutures {
         {
             return;
         }
+        self.note_trading_response(request.native.command, response.status);
         if request.context.operation() == Operation::Mutation {
             let parsed = Envelope::checked(response.body);
             let message = parsed

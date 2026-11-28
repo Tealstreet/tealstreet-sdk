@@ -101,6 +101,8 @@ struct Run {
     stop: Option<Box<StopProtect>>,
     cancelled: bool,
     restore_taken: bool,
+    request_id: safe_cex_engine::RequestId,
+    response_status: Option<u16>,
 }
 pub struct Request {
     command: CommandId,
@@ -333,6 +335,8 @@ impl Kucoin {
                 stop: None,
                 cancelled: false,
                 restore_taken: false,
+                request_id: safe_cex_engine::RequestId(0),
+                response_status: None,
             },
         );
         if !self.account_metadata_ready(cx, &symbol) {
@@ -571,7 +575,8 @@ impl Kucoin {
         if let Some(receipt) = &pending.step.receipt {
             cx.command_progress(pending.command, vec![receipt.clone()]);
         }
-        if let Err((Pending::Protective(pending), error)) = cx.request_signed_managed(
+        let command = pending.command;
+        match cx.request_signed_managed(
             pending.context.clone(),
             None,
             pending.step.method,
@@ -580,7 +585,16 @@ impl Kucoin {
             Box::new(recipe),
             Pending::Protective(pending),
         ) {
-            self.protective_failed(cx, pending, error.venue_error());
+            Ok(request) => {
+                if let Some(run) = self.trading.protective.runs.get_mut(&command) {
+                    run.request_id = request;
+                    run.response_status = None;
+                }
+            }
+            Err((Pending::Protective(pending), error)) => {
+                self.protective_failed(cx, pending, error.venue_error());
+            }
+            Err(_) => unreachable!(),
         }
     }
     pub(crate) fn protective_veto(
@@ -706,12 +720,13 @@ impl Kucoin {
         {
             return;
         }
-        let run = self
+        let mut run = self
             .trading
             .protective
             .runs
             .remove(&pending.command)
             .unwrap();
+        run.response_status = None;
         if pending.at == At::Proof {
             self.protective_proof_error(cx, &pending, run, error.message);
             return;
@@ -747,7 +762,11 @@ impl Kucoin {
             self.protective_next(cx, pending, run, At::Proof, step, 100);
         } else {
             let _ = cx.inherit_plan_uncertainty(&pending.plan);
-            let _ = cx.fail_plan(&pending.plan, unknown(format!("KuCoin cancel was sent but could not be confirmed: {message}. Check Open Orders")));
+            let error = unknown(format!(
+                "KuCoin cancel was sent but could not be confirmed: {message}. Check Open Orders"
+            ));
+            native_unknown(cx, pending.command, &run, &error);
+            let _ = cx.fail_plan(&pending.plan, error);
         }
     }
     fn protective_next(
@@ -787,6 +806,7 @@ impl Kucoin {
         let Some(mut run) = self.trading.protective.runs.remove(&pending.command) else {
             return;
         };
+        run.response_status = Some(status);
         let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
         let success =
             (200..300).contains(&status) && envelope.as_ref().is_some_and(|e| e.code == "200000");
@@ -963,6 +983,9 @@ impl Kucoin {
             } else {
                 error
             };
+            if error.outcome == Some(Outcome::Unknown) {
+                native_unknown(cx, pending.command, &run, &error);
+            }
             let _ = cx.fail_plan(&pending.plan, error);
         }
     }
@@ -1044,7 +1067,9 @@ impl Kucoin {
         if !cancelled && !fully_filled {
             if replacement.polls >= 30 {
                 let _ = cx.inherit_plan_uncertainty(&pending.plan);
-                let _ = cx.fail_plan(&pending.plan, unknown(words(&run, At::Proof)));
+                let error = unknown(words(&run, At::Proof));
+                native_unknown(cx, pending.command, &run, &error);
+                let _ = cx.fail_plan(&pending.plan, error);
                 return;
             }
             replacement.polls += 1;
@@ -1070,4 +1095,12 @@ impl Kucoin {
             .expect("the validated replacement was captured before cancellation");
         self.protective_next(cx, &pending, run, At::Place, step, 20);
     }
+}
+
+fn native_unknown(cx: &mut Cx<'_, Pending>, command: CommandId, run: &Run, error: &VenueError) {
+    crate::unknown_outcome::NativeSource {
+        request_id: run.request_id,
+        status: run.response_status,
+    }
+    .emit(cx, command, error, std::iter::empty());
 }

@@ -119,6 +119,17 @@ fn dispatched_ambiguous_ordinary_writes_are_unknown_without_resend() {
             let request = h.take(&writes[0].url);
             h.respond(request, status, body);
             assert_dispatched_unknown(&h);
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(|action| matches!(action,
+                        Action::Notice(safe_cex_engine::Notice::Event(event))
+                            if event.code == "order.outcome_unknown"
+                    ))
+                    .count(),
+                1,
+                "one native {operation} Unknown diagnostic"
+            );
         }
     }
 }
@@ -2726,6 +2737,256 @@ fn expire_cancel_proof(h: &mut Harness) {
             .contains("Check your open orders and position before adding protection")
     );
 }
+
+fn assert_protection_unknown_event(
+    h: &Harness,
+    id: safe_cex_engine::RequestId,
+    status: Option<u16>,
+) {
+    use safe_cex_engine::{Level, Notice, Value};
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    assert_eq!(order_posts(h), 0, "no replacement, put-back or retry");
+    let events: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(e)) if e.code == "order.outcome_unknown" => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1, "one independent protection diagnostic");
+    let event = events[0];
+    assert_eq!(event.level, Level::Warn);
+    assert_eq!(event.message, safe_cex_engine::UNKNOWN_OUTCOME_TEXT);
+    let mut fields = vec![
+        ("command", Value::from("paradex.13")),
+        ("outcome", "unknown".into()),
+        ("request", id.0.to_string().into()),
+        ("placedOrderIds", "".into()),
+        ("unknownIndices", "".into()),
+    ];
+    if let Some(status) = status {
+        fields.push(("status", status.into()));
+    }
+    assert_eq!(event.fields, fields, "exact NX #9262 projection");
+    let decimal = id.0.to_string();
+    assert!((1..=20).contains(&decimal.len()) && decimal.bytes().all(|b| b.is_ascii_digit()));
+    for (_, value) in &event.fields {
+        if let Some(value) = value.as_str() {
+            for forbidden in [
+                "http",
+                "://",
+                "/",
+                "?",
+                "=",
+                "&",
+                "{",
+                "}",
+                "signature",
+                "payload",
+                "SYNTHETIC",
+                "body",
+            ] {
+                assert!(!value.contains(forbidden), "unsafe field: {value}");
+            }
+        }
+    }
+}
+
+fn assert_cancel_sweep_unknown(first_status: u16, sweep_status: u16) {
+    let mut h = with_untriggered_stop();
+    h.command(Command::CancelSymbolOrders {
+        command: 13,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(stop.clone(), first_status, "");
+    let sweep = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(sweep.clone(), sweep_status, "");
+    let (id, status) = if first_status == 503 {
+        (stop.id, first_status)
+    } else {
+        (sweep.id, sweep_status)
+    };
+    assert_protection_unknown_event(&h, id, Some(status));
+    assert!(
+        !h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command: 13, .. })
+        )),
+        "an Unknown leg cannot resolve as success"
+    );
+    assert!(!h.pending.iter().any(|r| r.method != Method::Get));
+    for request in [stop, sweep] {
+        h.respond(request.clone(), 503, "late duplicate");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "late duplicate",
+            },
+        );
+        h.collect();
+    }
+    assert_protection_unknown_event(&h, id, Some(status));
+    assert!(!h.pending.iter().any(|r| r.method != Method::Get));
+}
+
+#[test]
+fn cancel_sweep_two_unknowns_share_one_diagnostic() {
+    assert_cancel_sweep_unknown(503, 503);
+}
+
+#[test]
+fn cancel_sweep_one_unknown_and_one_success_share_one_diagnostic() {
+    assert_cancel_sweep_unknown(503, 204);
+    assert_cancel_sweep_unknown(204, 503);
+}
+
+#[test]
+fn cancel_sweep_definite_refusals_emit_no_unknown_diagnostic() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::CancelSymbolOrders {
+        command: 13,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(stop.clone(), 400, r#"{"error":"INVALID_PRICE"}"#);
+    let sweep = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(sweep.clone(), 400, r#"{"error":"INVALID_PRICE"}"#);
+    for request in [stop, sweep] {
+        h.respond(request, 503, "late duplicate");
+    }
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert_eq!(order_posts(&h), 0);
+    assert!(!h.pending.iter().any(|r| r.method != Method::Get));
+    assert!(!h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code == "order.outcome_unknown")));
+}
+
+#[test]
+fn guarded_cancel_unknown_has_one_diagnostic_and_never_starts_proof() {
+    for status in [408, 429, 503] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        let id = cancel.id;
+        h.respond(
+            cancel.clone(),
+            status,
+            "https://venue.test/orders?signature=SYNTHETIC",
+        );
+        assert_protection_unknown_event(&h, id, Some(status));
+        assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history")));
+        h.respond(cancel, 204, "");
+        assert_protection_unknown_event(&h, id, Some(status));
+    }
+}
+
+#[test]
+fn cancellation_proof_unknown_has_one_correlated_diagnostic() {
+    for failure in [
+        "http",
+        "http-refusal",
+        "transport",
+        "integrity",
+        "inflight-timeout",
+        "unproven-timeout",
+    ] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        let id = read.id;
+        let expires = h.timer_at(h.now + 5_000.);
+        let status = match failure {
+            "http" | "http-refusal" => {
+                let status = if failure == "http" { 503 } else { 400 };
+                h.respond(read.clone(), status, r#"{"error":"https://venue.test/orders?signature=SYNTHETIC","body":"signed-payload"}"#);
+                Some(status)
+            }
+            "transport" => {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: id,
+                        error: "https://venue.test/orders?signature=SYNTHETIC",
+                    },
+                );
+                h.collect();
+                None
+            }
+            "integrity" => {
+                h.e.handle(
+                    h.now,
+                    Event::HttpStart {
+                        request: id,
+                        status: 200,
+                        headers: "",
+                    },
+                );
+                h.e.handle(
+                    h.now,
+                    Event::HttpChunk {
+                        request: id,
+                        data: &[0xff],
+                    },
+                );
+                h.e.handle(h.now, Event::HttpEnd { request: id });
+                h.collect();
+                None
+            }
+            _ => {
+                if failure == "unproven-timeout" {
+                    h.respond(read.clone(), 200, r#"{"results":[]}"#);
+                }
+                h.now += 5_000.;
+                h.e.handle(h.now, Event::TimerFired { timer: expires });
+                h.collect();
+                (failure == "unproven-timeout").then_some(200)
+            }
+        };
+        assert_protection_unknown_event(&h, id, status);
+        h.respond(
+            read,
+            200,
+            &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
+        );
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: id,
+                error: "late duplicate",
+            },
+        );
+        h.e.handle(h.now, Event::TimerFired { timer: expires });
+        h.collect();
+        assert_protection_unknown_event(&h, id, status);
+    }
+}
+
+#[test]
+fn guarded_cancel_definite_refusal_emits_no_unknown_or_replacement() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel.clone(), 400, r#"{"error":"INVALID_PRICE"}"#);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert_eq!(order_posts(&h), 0);
+    h.respond(cancel, 503, "late");
+    assert!(!h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code == "order.outcome_unknown")));
+}
 #[test]
 fn guarded_cancel_not_found_never_authorizes_a_replacement_or_put_back() {
     let mut h = with_untriggered_stop();
@@ -2787,6 +3048,13 @@ fn a_targeted_unfilled_cancel_proof_releases_exactly_one_replacement_even_after_
         );
         assert!(h.result(13).is_ok());
         assert_eq!(order_posts(&h), 0);
+        assert!(
+            !h.actions.iter().any(|action| matches!(action,
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.outcome_unknown"
+            )),
+            "confirmed cancellation and replacement emit no Unknown diagnostic"
+        );
     }
 }
 
@@ -3054,8 +3322,12 @@ fn cancel_proof_polls_are_bounded_and_share_one_nonrenewing_deadline() {
     h.respond(cancel, 204, "");
     for n in 0..3 {
         let read = take_method(&mut h, Method::Get, "/orders-history?");
+        let id = read.id;
         h.respond(read, 200, r#"{"results":[],"next":"more"}"#);
         assert_eq!(order_posts(&h), 0);
+        if n == 2 {
+            assert_protection_unknown_event(&h, id, Some(200));
+        }
         if n < 2 {
             let timer = h.timer_at(h.now + 1_000.);
             h.now += 1_000.;
@@ -3796,18 +4068,32 @@ fn unknown_exception_journal_and_telemetry(h: &Harness) {
             .iter()
             .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
     );
-    let report = event
+    let placed = event
         .fields
         .iter()
-        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
-        .expect("journal snapshot");
-    let report: serde_json::Value = serde_json::from_str(report).unwrap();
+        .find_map(|(key, value)| (*key == "placedOrderIds").then(|| value.as_str()).flatten())
+        .expect("NX-approved placed identities");
+    let expected: Vec<_> = error
+        .partial
+        .as_ref()
+        .unwrap()
+        .order_ids
+        .iter()
+        .filter(|id| id.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(placed, expected.join(","));
     assert_eq!(
-        report["placed"],
-        serde_json::json!(error.partial.as_ref().unwrap().order_ids)
+        event
+            .fields
+            .iter()
+            .find_map(|(key, value)| (*key == "unknownIndices").then(|| value.as_str()).flatten()),
+        Some("1")
     );
-    let unknown = report["unknown"].as_array().unwrap();
-    assert_eq!(unknown.len(), 1);
-    assert!(error.message.contains(unknown[0].as_str().unwrap()));
-    assert!(!report["notSent"].as_array().unwrap().is_empty());
+    assert!(error.message.contains("placed order IDs:"));
+    assert!(error.message.contains("unknown placements:"));
+    assert!(!event.fields.iter().any(|(key, _)| *key == "journal"));
+    assert_eq!(h.actions.iter().filter(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )).count(), 1);
 }

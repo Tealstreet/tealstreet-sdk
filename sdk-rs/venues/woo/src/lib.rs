@@ -9,6 +9,7 @@ pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod split_report;
 mod trading;
+mod unknown_outcome;
 mod wire;
 
 use safe_cex_engine::Level;
@@ -612,6 +613,10 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::event)
+    }
+
     fn http_plans() -> bool {
         false
     }

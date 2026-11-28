@@ -519,11 +519,11 @@ pub fn assert_unknown_publication(
         .collect();
     assert!(!unknown.is_empty(), "Unknown element must remain explicit");
     for row in &unknown {
+        let message = row["error"]["message"].as_str().expect("element message");
+        // Engine-sealed HTTP rows keep the engine's unproven-envelope guidance.
         assert!(
-            row["error"]["message"]
-                .as_str()
-                .expect("element message")
-                .contains(standard),
+            message.contains(standard)
+                || message.contains(safe_cex_engine::UNKNOWN_HTTP_OUTCOME_TEXT),
             "{row}"
         );
     }
@@ -545,6 +545,7 @@ pub fn assert_unknown_publication(
         .collect();
     assert_eq!(emitted.len(), 1, "one Unknown telemetry event: {events:?}");
     let event = emitted[0];
+    assert_unknown_projection(event);
     assert!(event.message.contains(standard), "{event:?}");
     let field = |key| {
         event
@@ -553,8 +554,75 @@ pub fn assert_unknown_publication(
             .find(|(name, _)| *name == key)
             .and_then(|(_, value)| value.as_str())
     };
-    assert_eq!(field("command"), Some(command.to_string().as_str()));
+    assert_eq!(
+        field("command"),
+        Some(format!("command.{command}").as_str())
+    );
     assert_eq!(field("outcome"), Some("unknown"));
     assert_eq!(field("placedOrderIds"), Some(placed.as_str()));
     assert_eq!(field("unknownIndices"), Some(indices.as_str()));
+}
+
+pub fn assert_unknown_projection(event: &safe_cex_engine::LogEvent) {
+    let command = regex::Regex::new(r"\A[a-zA-Z][a-zA-Z0-9_.-]{0,63}\z").unwrap();
+    let request = regex::Regex::new(r"^[0-9]{1,20}$").unwrap();
+    let order = regex::Regex::new(r"\A[0-9]{1,32}\z").unwrap();
+    let index = regex::Regex::new(r"\A[0-9]{1,5}\z").unwrap();
+    let forbidden = regex::Regex::new(
+        r"(?i)https?://|/exchange|/info|\?|&|=|body|payload|signature|api_key|SYNTHETIC",
+    )
+    .unwrap();
+    let mut names = std::collections::HashSet::new();
+    for (key, value) in &event.fields {
+        assert!(names.insert(key), "duplicate field");
+        assert!(
+            matches!(
+                *key,
+                "command" | "outcome" | "placedOrderIds" | "unknownIndices" | "request" | "status"
+            ),
+            "extra field"
+        );
+        assert!(!forbidden.is_match(key));
+        assert!(
+            !forbidden.is_match(&format!("{value:?}")),
+            "unsafe field {key}"
+        );
+        match *key {
+            "command" => assert!(command.is_match(value.as_str().unwrap())),
+            "request" => assert!(request.is_match(value.as_str().unwrap())),
+            "outcome" => assert_eq!(value.as_str(), Some("unknown")),
+            "placedOrderIds" | "unknownIndices" => {
+                let value = value.as_str().unwrap();
+                let entries: Vec<_> = if value.is_empty() {
+                    vec![]
+                } else {
+                    value.split(',').collect()
+                };
+                assert!(entries.len() <= 16, "NX list cap");
+                for entry in entries {
+                    if *key == "placedOrderIds" {
+                        assert!(order.is_match(entry));
+                    } else {
+                        assert!(index.is_match(entry));
+                        assert!(entry.parse::<u16>().is_ok());
+                    }
+                }
+            }
+            "status" => match value {
+                safe_cex_engine::log::Value::Num(status) => {
+                    assert!(status.fract() == 0. && (100. ..=599.).contains(status))
+                }
+                _ => panic!("status must be a number"),
+            },
+            _ => unreachable!(),
+        }
+    }
+    assert_eq!(
+        event
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "outcome")
+            .and_then(|(_, value)| value.as_str()),
+        Some("unknown")
+    );
 }

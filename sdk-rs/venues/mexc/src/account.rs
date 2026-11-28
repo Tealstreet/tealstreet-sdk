@@ -1706,6 +1706,10 @@ impl MexcFutures {
         .with_header_policy(self.options.signing_policy.header_policy());
         let url = step.url();
         let headers = vec![("Content-Type", "application/json".into())];
+        let command = match &pending {
+            Pending::Trade(request) => Some(request.command),
+            _ => None,
+        };
         let request = cx.request(
             method,
             url,
@@ -1717,6 +1721,9 @@ impl MexcFutures {
             },
             pending,
         );
+        if let Some(command) = command {
+            self.note_trading_request(command, request);
+        }
         cx.sign_http(request, Box::new(step));
     }
 }

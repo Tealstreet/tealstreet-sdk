@@ -33,6 +33,11 @@ impl Request {
         }
     }
 }
+impl Request {
+    pub(crate) fn command(&self) -> CommandId {
+        self.command
+    }
+}
 enum Step {
     Place {
         payload: Create,
@@ -66,6 +71,7 @@ struct Job {
     ids: Vec<String>,
     collect: bool,
     placement_report: Option<PlacementReport>,
+    telemetry_source: Option<(safe_cex_engine::RequestId, Option<u16>)>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     /// An INTX amend's symbol: its replacement's refusal leaves the order gone.
@@ -554,6 +560,7 @@ impl Coinbase {
             ids: vec![],
             collect: false,
             placement_report: None,
+            telemetry_source: None,
             effective: false,
             replaces: None,
         };
@@ -1465,33 +1472,6 @@ impl Coinbase {
                     error.venue_message = Some(error.message.clone().into());
                     error.message = UNKNOWN_TEXT.into();
                     error.outcome = Some(Outcome::Unknown);
-                    cx.event(
-                        Level::Warn,
-                        "order.outcome_unknown",
-                        UNKNOWN_TEXT,
-                        vec![
-                            ("command", command.into()),
-                            (
-                                "elementIndex",
-                                u32::try_from(report.next_index)
-                                    .expect("bounded batch")
-                                    .into(),
-                            ),
-                            (
-                                "clientOrderId",
-                                rows[report.next_index]
-                                    .element
-                                    .client_order_id
-                                    .clone()
-                                    .unwrap_or_default()
-                                    .into(),
-                            ),
-                            (
-                                "placedCount",
-                                u32::try_from(job.ids.len()).expect("bounded batch").into(),
-                            ),
-                        ],
-                    );
                     ElementResult::Unknown {
                         error: Box::new(error.clone()),
                     }
@@ -1526,8 +1506,38 @@ impl Coinbase {
             {
                 error.outcome = None;
             }
+            let telemetry = job
+                .telemetry_source
+                .filter(|_| error.outcome == Some(Outcome::Unknown))
+                .map(|(attempt_id, status)| {
+                    crate::unknown_outcome::project(&safe_cex_engine::EngineUnknownOutcome {
+                        now: cx.now,
+                        command,
+                        request: attempt_id,
+                        status,
+                        error: &error,
+                    })
+                });
             cx.fail(command, error);
+            if let Some(event) = telemetry {
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
             self.trading_next(cx);
+        }
+    }
+
+    pub(crate) fn trading_dispatched(
+        &mut self,
+        command: CommandId,
+        attempt_id: safe_cex_engine::RequestId,
+    ) {
+        if let Some(job) = self
+            .trading
+            .active
+            .as_mut()
+            .filter(|job| job.command == command)
+        {
+            job.telemetry_source = Some((attempt_id, None));
         }
     }
 
@@ -1584,6 +1594,14 @@ impl Coinbase {
             .is_some_and(|job| job.command == request.command)
         {
             return;
+        }
+        if let Some((_, status)) = self
+            .trading
+            .active
+            .as_mut()
+            .and_then(|job| job.telemetry_source.as_mut())
+        {
+            *status = Some(response.status);
         }
         let rate_code = native_rate_code(response.body);
         let write = request.step.is_write();

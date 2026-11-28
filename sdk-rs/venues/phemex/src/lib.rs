@@ -14,6 +14,7 @@ mod signed_candles;
 pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod trading;
+mod unknown_outcome;
 mod venue_state;
 mod wire;
 use safe_cex_engine::Level;
@@ -465,6 +466,9 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_outcome::engine_event)
+    }
     fn observe_unproven_http_response(
         &mut self,
         now: f64,

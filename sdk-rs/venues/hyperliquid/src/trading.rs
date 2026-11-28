@@ -2,7 +2,44 @@
 mod custody;
 mod protective;
 mod schedule;
+mod unknown_telemetry;
 mod write_plan;
+
+#[derive(Clone, Copy)]
+enum UnknownReporter {
+    Venue,
+    Engine,
+}
+
+pub(crate) fn engine_unknown_telemetry(
+    facts: &safe_cex_engine::EngineUnknownOutcome<'_>,
+) -> safe_cex_engine::LogEvent {
+    use safe_cex_engine::write_plan::ElementResult;
+    let placed = facts
+        .error
+        .partial
+        .iter()
+        .flat_map(|partial| partial.order_ids.iter().map(String::as_str));
+    let unknown = facts.error.elements.iter().flat_map(|elements| {
+        elements
+            .0
+            .iter()
+            .filter(|row| matches!(row.result, ElementResult::Unknown { .. }))
+            .map(|row| row.element.index)
+    });
+    let mut event = unknown_telemetry::event(facts.command, placed, unknown);
+    event
+        .fields
+        .push(("request", facts.request.0.to_string().into()));
+    if let Some(status) = facts
+        .status
+        .filter(|status: &u16| (100..=599).contains(status))
+    {
+        event.fields.push(("status", status.into()));
+    }
+    event
+}
+
 pub(crate) use custody::PACING;
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::text::JoinWith;
@@ -1618,6 +1655,15 @@ impl Hyperliquid {
         }
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        self.finish_trade_with_reporter(cx, result, UnknownReporter::Venue);
+    }
+
+    fn finish_trade_with_reporter(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        result: Result<(), VenueError>,
+        reporter: UnknownReporter,
+    ) {
         if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
         }
@@ -1674,7 +1720,7 @@ impl Hyperliquid {
                 {
                     error.outcome = Some(Outcome::Unknown);
                 }
-                self.finish_trade_owner(cx, &job, Err(error));
+                self.finish_trade_owner(cx, &job, Err(error), reporter);
                 self.pump_trades(cx);
                 return;
             }
@@ -1693,7 +1739,7 @@ impl Hyperliquid {
             } else {
                 serde_json::to_string(&job.ids).unwrap()
             };
-            self.finish_trade_owner(cx, &job, Ok(data));
+            self.finish_trade_owner(cx, &job, Ok(data), reporter);
         }
         self.pump_trades(cx);
     }

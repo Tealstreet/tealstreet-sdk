@@ -68,3 +68,17 @@ the body carries a native refusal or signature code. Such a response cannot
 authorize another physical attempt of that write or release its uncertainty
 fence. Documented signature refusals at non-ambiguous statuses keep their bounded
 retry; account and prerequisite read retries are unchanged.
+
+## Unknown-outcome telemetry
+
+Crypto.com opts into the engine's immutable Unknown-outcome hook. Native-decoded
+uncertainty retains reporting metadata on the existing owner-bound job and emits
+once when it halts the action; engine-owned failures use the terminal hook instead. Dispatch, pacing and retry decisions are unchanged.
+
+`order.outcome_unknown` projects only NX #9262's closed fields: `command`
+(`cryptocom.<command ID>`), decimal internal `request`, literal `outcome=unknown`,
+`placedOrderIds`, `unknownIndices`, and optional integer HTTP `status` (100–599).
+Both lists contain at most 16 entries; native IDs are 1–32 decimal digits and
+indices are 0–65535. Long ID lists stop at a whole-entry boundary below the
+engine's 512-byte field cap. An absent status is omitted. No URL, endpoint,
+query, body, signed payload, account name or free-form error is projected.

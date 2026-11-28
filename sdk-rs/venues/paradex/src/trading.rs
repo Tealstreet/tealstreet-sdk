@@ -19,6 +19,7 @@ use safe_cex_engine::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, OnceLock};
 
 const UNKNOWN_TEXT: &str =
     "We couldn’t confirm this change. Check your open orders before trying again.";
@@ -109,6 +110,7 @@ fn placement_receipt(payload: &Placement) -> Option<OrderIdentityReceipt> {
 #[derive(Clone)]
 enum Kind {
     Place {
+        report: Option<RequestReport>,
         expected: Vec<Option<String>>,
         /// The bracket leg this request places, `None` for an entry.
         leg: Option<&'static str>,
@@ -117,21 +119,63 @@ enum Kind {
         replaces: Option<Box<(String, OrderSide, OrderType)>>,
     },
     Amend {
+        report: Option<RequestReport>,
         id: String,
         target: Box<AmendTarget>,
     },
-    Cancel(Vec<String>),
+    Cancel {
+        report: Option<RequestReport>,
+        ids: Vec<String>,
+    },
     /// An amend's cancel of a live stop, re-checked at the final send (`StopGuard`).
-    GuardedCancel(Box<StopGuard>),
-    CancelProof,
-    Empty,
+    GuardedCancel {
+        report: Option<RequestReport>,
+        guard: Box<StopGuard>,
+    },
+    CancelProof {
+        report: Option<RequestReport>,
+    },
+    Empty {
+        report: Option<RequestReport>,
+    },
     Quotes(String),
     Leverage {
+        report: Option<RequestReport>,
         symbol: String,
         leverage: f64,
     },
 }
+#[derive(Clone)]
+struct RequestReport {
+    correlation: Arc<OnceLock<safe_cex_engine::RequestId>>,
+    status: Option<u16>,
+    index: usize,
+}
 impl Kind {
+    fn report(&self) -> Option<&RequestReport> {
+        match self {
+            Self::Place { report, .. }
+            | Self::Amend { report, .. }
+            | Self::Cancel { report, .. }
+            | Self::GuardedCancel { report, .. }
+            | Self::CancelProof { report }
+            | Self::Empty { report }
+            | Self::Leverage { report, .. } => report.as_ref(),
+            Self::Quotes(_) => None,
+        }
+    }
+    fn report_slot(&mut self) -> Option<&mut Option<RequestReport>> {
+        match self {
+            Self::Place { report, .. }
+            | Self::Amend { report, .. }
+            | Self::Cancel { report, .. }
+            | Self::GuardedCancel { report, .. }
+            | Self::CancelProof { report }
+            | Self::Empty { report }
+            | Self::Leverage { report, .. } => Some(report),
+            Self::Quotes(_) => None,
+        }
+    }
     fn placement_labels(&self) -> Vec<String> {
         match self {
             Self::Place { expected, leg, .. } => expected
@@ -159,10 +203,12 @@ struct Operation {
 }
 struct Job {
     command: CommandId,
+    placement_index: usize,
     preparing: Option<Preparation>,
     operations: VecDeque<Operation>,
     results: Vec<String>,
     errors: Vec<VenueError>,
+    unknown_reported: bool,
     attempt_all: bool,
     placement: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
@@ -175,6 +221,24 @@ struct Job {
     restoring: Option<(String, OrderSide, OrderType)>,
 }
 impl Job {
+    fn report_unknown(&mut self, cx: &mut Cx<'_, Pending>, report: &RequestReport, count: usize) {
+        if self.unknown_reported {
+            return;
+        }
+        if let Some(id) = report.correlation.get() {
+            let event = crate::telemetry::unknown_outcome_event(
+                self.command,
+                *id,
+                report.status,
+                self.results.iter().map(String::as_str),
+                report.index..report.index + count,
+            );
+            cx.event(event.level, event.code, event.message, event.fields);
+            // Multiple cancellation attempts still belong to one logical command.
+            self.unknown_reported = true;
+        }
+    }
+
     /// Joined failures retain the first Unknown leg's diagnostics and classification.
     /// Without an Unknown leg, an outcome is shared only when every failure agrees.
     fn failure(mut self) -> VenueError {
@@ -237,6 +301,9 @@ pub struct Request {
     kind: Kind,
 }
 impl Request {
+    pub(crate) fn correlation(&self) -> Option<&Arc<OnceLock<safe_cex_engine::RequestId>>> {
+        self.kind.report().map(|report| &report.correlation)
+    }
     pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
         if let Some((command, receipts)) = &self.progress {
             cx.command_progress(*command, receipts.clone());
@@ -247,7 +314,7 @@ impl Request {
     }
     pub(crate) fn stop_guard(&self) -> Option<&StopGuard> {
         match &self.kind {
-            Kind::GuardedCancel(guard) => Some(guard),
+            Kind::GuardedCancel { guard, .. } => Some(guard),
             _ => None,
         }
     }
@@ -275,6 +342,8 @@ const CANCEL_PROOF_MS: f64 = 5_000.;
 const CANCEL_PROOF_POLLS: u8 = 3;
 const CANCEL_PROOF_WINDOW_MARGIN_MS: u64 = 60_000;
 struct CancelProof {
+    last_report: RequestReport,
+    pending_report: Option<RequestReport>,
     guard: Box<StopGuard>,
     deadline: f64,
     expires: TimerId,
@@ -484,6 +553,7 @@ fn place_operations(
                 path: "/orders/batch".into(),
                 body: Some(body),
                 kind: Kind::Place {
+                    report: None,
                     expected,
                     leg: None,
                     batch: true,
@@ -539,6 +609,7 @@ fn place_operations(
             path: "/orders".into(),
             body: Some(body),
             kind: Kind::Place {
+                report: None,
                 expected,
                 leg: None,
                 batch: false,
@@ -582,6 +653,7 @@ fn place_operations(
                     path: "/orders".into(),
                     body: Some(body),
                     kind: Kind::Place {
+                        report: None,
                         expected: vec![None],
                         leg: Some(leg),
                         batch: false,
@@ -661,6 +733,7 @@ impl Trading {
                 job,
                 Job {
                     command: *command,
+                    placement_index: 0,
                     preparing: Some(Preparation {
                         orders: orders.clone(),
                         symbols,
@@ -670,6 +743,7 @@ impl Trading {
                     operations: VecDeque::new(),
                     results: vec![],
                     errors: vec![],
+                    unknown_reported: false,
                     leg_refused: false,
                     attempt_all: true,
                     placement: true,
@@ -756,7 +830,10 @@ impl Trading {
                             } else {
                                 None
                             },
-                            kind: Kind::Cancel(chunk.to_vec()),
+                            kind: Kind::Cancel {
+                                ids: chunk.to_vec(),
+                                report: None,
+                            },
                         });
                     }
                     Ok(operations)
@@ -799,7 +876,10 @@ impl Trading {
                                 method: Method::Delete,
                                 path: format!("/orders/{}", encode(&id)),
                                 body: None,
-                                kind: Kind::Cancel(vec![id]),
+                                kind: Kind::Cancel {
+                                    ids: vec![id],
+                                    report: None,
+                                },
                             })
                             .collect();
                         operations.push_back(Operation {
@@ -808,7 +888,7 @@ impl Trading {
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
                             body: None,
-                            kind: Kind::Empty,
+                            kind: Kind::Empty { report: None },
                         });
                         operations
                     }),
@@ -859,7 +939,11 @@ impl Trading {
                             })
                             .unwrap(),
                         ),
-                        kind: Kind::Leverage { symbol, leverage },
+                        kind: Kind::Leverage {
+                            symbol,
+                            leverage,
+                            report: None,
+                        },
                     }]))
                 })();
                 (command, result, false, false)
@@ -925,10 +1009,12 @@ impl Trading {
                     job,
                     Job {
                         command,
+                        placement_index: 0,
                         preparing: None,
                         operations,
                         results: Vec::new(),
                         errors: Vec::new(),
+                        unknown_reported: false,
                         leg_refused: false,
                         attempt_all,
                         placement,
@@ -999,12 +1085,12 @@ impl Trading {
             && !state
                 .operations
                 .front()
-                .is_some_and(|operation| matches!(operation.kind, Kind::CancelProof))
+                .is_some_and(|operation| matches!(operation.kind, Kind::CancelProof { .. }))
         {
             return;
         }
-        if let Some(operation) = state.operations.pop_front() {
-            if let Kind::Amend { id, target } = &operation.kind {
+        if let Some(mut operation) = state.operations.pop_front() {
+            if let Kind::Amend { id, target, .. } = &operation.kind {
                 if let Err(error) = account.begin_amend(id, (**target).clone()) {
                     // An amend job has a single operation, so nothing took effect yet.
                     let state = self.jobs.remove(&job).expect("pending amendment");
@@ -1013,9 +1099,24 @@ impl Trading {
                 }
                 self.amend_locks.insert(id.clone());
             }
-            if !matches!(operation.kind, Kind::CancelProof) {
+            if !matches!(operation.kind, Kind::CancelProof { .. }) {
                 account.bump_orders(cx);
                 account.bump_positions();
+            }
+            if let Some(report) = operation.kind.report_slot() {
+                *report = Some(RequestReport {
+                    correlation: Arc::default(),
+                    status: None,
+                    index: state.placement_index,
+                });
+            }
+            if let Kind::Place { expected, .. } = &operation.kind {
+                state.placement_index += expected.len();
+            }
+            if let Kind::CancelProof { report } = &operation.kind
+                && let Some(proof) = self.cancel_proofs.get_mut(&job)
+            {
+                proof.pending_report = report.clone();
             }
             account.request(
                 cx,
@@ -1071,11 +1172,14 @@ impl Trading {
         account: &mut Account,
         job: u64,
         guard: Box<StopGuard>,
+        report: RequestReport,
     ) {
         let expires = cx.set_timer(CANCEL_PROOF_MS);
         self.cancel_proofs.insert(
             job,
             CancelProof {
+                last_report: report,
+                pending_report: None,
                 guard,
                 deadline: cx.now + CANCEL_PROOF_MS,
                 expires,
@@ -1118,7 +1222,7 @@ impl Trading {
             method: Method::Get,
             path,
             body: None,
-            kind: Kind::CancelProof,
+            kind: Kind::CancelProof { report: None },
         });
         self.advance(cx, account, job);
     }
@@ -1145,6 +1249,15 @@ impl Trading {
             "Your {symbol} protection update wasn’t confirmed: {cause}. Check your open orders and position before adding protection."
         ));
         error.presents = true;
+        if let Some(state) = self.jobs.get_mut(&job) {
+            // An unsent proof read keeps the last physical cancel/read correlation.
+            let report = proof
+                .pending_report
+                .as_ref()
+                .filter(|report| report.correlation.get().is_some())
+                .unwrap_or(&proof.last_report);
+            state.report_unknown(cx, report, 0);
+        }
         self.clear_cancel_proof(cx, job);
         if let Some(state) = self.jobs.get_mut(&job) {
             state.operations.clear();
@@ -1228,18 +1341,39 @@ impl Trading {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         account: &mut Account,
-        request: Request,
+        mut request: Request,
         response: Response<'_>,
     ) {
-        if matches!(request.kind, Kind::CancelProof) {
+        if let Some(report) = request.kind.report_slot().and_then(Option::as_mut) {
+            report.status = Some(response.status);
+        }
+        if matches!(request.kind, Kind::CancelProof { .. }) {
+            if let Some(proof) = self.cancel_proofs.get_mut(&request.job) {
+                proof.last_report = request
+                    .kind
+                    .report()
+                    .expect("dispatched proof read")
+                    .clone();
+                proof.pending_report = None;
+            }
             self.cancel_proof_response(cx, account, request.job, response);
             return;
         }
-        if let Kind::GuardedCancel(guard) = &request.kind
+        if let Kind::GuardedCancel { guard, .. } = &request.kind
             && ((200..300).contains(&response.status) && crate::success(response).is_ok()
                 || response.status == 400 && response.body.contains("ORDER_ID_NOT_FOUND"))
         {
-            self.begin_cancel_proof(cx, account, request.job, guard.clone());
+            self.begin_cancel_proof(
+                cx,
+                account,
+                request.job,
+                guard.clone(),
+                request
+                    .kind
+                    .report()
+                    .expect("dispatched guarded cancel")
+                    .clone(),
+            );
             return;
         }
         if let Kind::Quotes(symbol) = &request.kind {
@@ -1293,7 +1427,7 @@ impl Trading {
         }
         // Plain cancel idempotency grants no replacement authority.
         let kind = &request.kind;
-        let already_gone = matches!(kind, Kind::Cancel(ids) if ids.len() == 1)
+        let already_gone = matches!(kind, Kind::Cancel { ids, .. } if ids.len() == 1)
             && response.status == 400
             && response.body.contains("ORDER_ID_NOT_FOUND");
         let result = crate::success(response).and_then(|()| match &request.kind {
@@ -1306,10 +1440,12 @@ impl Trading {
                     Ok(vec![id.clone()])
                 }
             }
-            Kind::Cancel(ids) if ids.len() == 2 => {
+            Kind::Cancel { ids, .. } if ids.len() == 2 => {
                 decode_cancels(response.body, ids).map(|()| Vec::new())
             }
-            Kind::Leverage { symbol, leverage } => {
+            Kind::Leverage {
+                symbol, leverage, ..
+            } => {
                 account.set_leverage(cx, symbol, *leverage);
                 // Frame-fed: keep this write's leverage until the source's frames agree.
                 cx.hold_setting(safe_cex_engine::setting_holds::SettingKey::Leverage(
@@ -1342,7 +1478,7 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        if matches!(request.kind, Kind::CancelProof) {
+        if matches!(request.kind, Kind::CancelProof { .. }) {
             self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
             return;
         }
@@ -1363,7 +1499,7 @@ impl Trading {
         request: Request,
         error: VenueError,
     ) {
-        if matches!(request.kind, Kind::CancelProof) {
+        if matches!(request.kind, Kind::CancelProof { .. }) {
             self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
             return;
         }
@@ -1382,7 +1518,7 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        if matches!(request.kind, Kind::CancelProof) {
+        if matches!(request.kind, Kind::CancelProof { .. }) {
             self.fail_cancel_proof(cx, account, request.job, "target cancellation read failed");
             return;
         }
@@ -1446,6 +1582,13 @@ impl Trading {
             Err(mut error) => {
                 if error.outcome == Some(Outcome::Unknown) {
                     error = ambiguous_write(error);
+                    if let Some(report) = request.kind.report() {
+                        let count = match &request.kind {
+                            Kind::Place { expected, .. } => expected.len(),
+                            _ => 0,
+                        };
+                        job.report_unknown(cx, report, count);
+                    }
                 }
                 let gone_stop = match &request.kind {
                     Kind::Place {
@@ -1505,8 +1648,7 @@ impl Trading {
                         let unknown_labels = request.kind.placement_labels();
                         let journal = serde_json::json!({
                             "placed":job.results,
-                            "unknown":unknown_labels,
-                            "notSent":job.operations.iter().flat_map(|op| op.kind.placement_labels()).collect::<Vec<_>>()
+                            "unknown":unknown_labels
                         });
                         error.message = safe_cex_engine::error::with_detail(
                             &error.message,
@@ -1514,16 +1656,6 @@ impl Trading {
                                 "placed order IDs: {}; unknown placements: {}",
                                 journal["placed"], journal["unknown"]
                             ),
-                        );
-                        cx.event(
-                            Level::Error,
-                            "order.outcome_unknown",
-                            error.message.clone(),
-                            vec![
-                                ("command", job.command.into()),
-                                ("outcome", "unknown".into()),
-                                ("journal", journal.to_string().into()),
-                            ],
                         );
                     }
                     let message = match leg {
@@ -1814,6 +1946,7 @@ impl Trading {
                 path,
                 body: Some(body),
                 kind: Kind::Amend {
+                    report: None,
                     id: id.into(),
                     target: Box::new(AmendTarget::new(
                         raw,
@@ -1905,7 +2038,10 @@ fn replace_trigger(
         method: Method::Delete,
         path: format!("/orders/{}", encode(id)),
         body: None,
-        kind: Kind::GuardedCancel(Box::new(guard)),
+        kind: Kind::GuardedCancel {
+            guard: Box::new(guard),
+            report: None,
+        },
     });
     Ok((operations, Some(restore)))
 }
@@ -1981,6 +2117,7 @@ fn restore_operation(
         path: "/orders".into(),
         body: Some(body),
         kind: Kind::Place {
+            report: None,
             expected,
             leg: Some(STOP_RESTORE),
             batch: false,

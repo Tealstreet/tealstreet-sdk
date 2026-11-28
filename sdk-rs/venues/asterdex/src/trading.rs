@@ -32,6 +32,10 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn command(&self) -> CommandId {
+        self.command
+    }
+
     /// Bounded native correlation for the engine journal: no credential or packet.
     pub(crate) fn reconciliation(
         &self,
@@ -312,6 +316,7 @@ struct Planned {
 }
 #[derive(Default)]
 struct Job {
+    telemetry_source: Option<(safe_cex_engine::RequestId, Option<u16>)>,
     plan: Option<Plan>,
     /// The next serial call's slot, from admission or the last continuation.
     slot: Option<Slot>,
@@ -544,6 +549,16 @@ struct StpResponse {
 }
 
 impl AsterDex {
+    pub(crate) fn record_trade_request(
+        &mut self,
+        command: CommandId,
+        request: safe_cex_engine::RequestId,
+    ) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.telemetry_source = Some((request, None));
+        }
+    }
+
     pub(crate) fn trade_unproven_evidence(
         &self,
         pending: &Pending,
@@ -1031,15 +1046,22 @@ impl AsterDex {
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
                 }
-                if error.outcome == Some(Outcome::Unknown) {
-                    cx.event(
-                        safe_cex_engine::Level::Warn,
-                        "write.unknown",
-                        ENGINE_UNKNOWN_TEXT,
-                        vec![("command", id.into()), ("outcome", "unknown".into())],
-                    );
+                let error = job.failure(error);
+                // Transport loss is published by the engine hook. Native
+                // decoded Unknowns reach this terminal path with an HTTP status.
+                if error.outcome == Some(Outcome::Unknown)
+                    && let Some((request, Some(status))) = job.telemetry_source
+                {
+                    let event = crate::telemetry::unknown(&safe_cex_engine::EngineUnknownOutcome {
+                        now: cx.now,
+                        command: id,
+                        request,
+                        status: Some(status),
+                        error: &error,
+                    });
+                    cx.event(event.level, event.code, event.message, event.fields);
                 }
-                cx.fail_plan(&plan, job.failure(error))
+                cx.fail_plan(&plan, error)
             }
             _ => cx.done_plan(
                 &plan,
@@ -1059,6 +1081,11 @@ impl AsterDex {
         reported: bool,
     ) {
         let command = request.command;
+        if let Some(job) = self.trading.jobs.get_mut(&command)
+            && let Some((_, status)) = &mut job.telemetry_source
+        {
+            *status = response.as_ref().ok().map(|response| response.status);
+        }
         let root = request.root.clone();
         let plan = request.plan.clone();
         let call = &request.call;

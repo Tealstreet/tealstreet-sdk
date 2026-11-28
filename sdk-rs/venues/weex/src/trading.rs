@@ -44,8 +44,28 @@ struct Job {
     replacing: Option<String>,
     journal: WritePlan,
     next_element: usize,
+    native_unknown: Option<(safe_cex_engine::RequestId, u16)>,
+    engine_unknown: bool,
 }
 impl Job {
+    fn emit_native_unknown(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        if self.engine_unknown {
+            return;
+        }
+        let Some((request, status)) = self.native_unknown.take() else {
+            return;
+        };
+        let error = self.journal.attach(unknown(UNKNOWN_OUTCOME_TEXT));
+        let event = crate::unknown_telemetry::project(&safe_cex_engine::EngineUnknownOutcome {
+            now: cx.now,
+            command,
+            request,
+            status: Some(status),
+            error: &error,
+        });
+        cx.event(event.level, event.code, event.message, event.fields);
+    }
+
     fn gone_note(&self, unknown: bool) -> Option<String> {
         self.replacing
             .as_deref()
@@ -61,6 +81,7 @@ pub(crate) struct Request {
     slot: Slot,
     context: Context,
     elements: std::ops::Range<usize>,
+    released_request: Option<safe_cex_engine::RequestId>,
 }
 struct ReplacementGuard {
     id: String,
@@ -1193,6 +1214,8 @@ impl WeexFutures {
                 replacing: None,
                 journal,
                 next_element: 0,
+                native_unknown: None,
+                engine_unknown: false,
             },
         );
         self.trade_next(cx, id);
@@ -1343,6 +1366,7 @@ impl WeexFutures {
                     slot,
                     context: context.clone(),
                     elements,
+                    released_request: None,
                 }),
                 invalid: false,
                 skipped: Vec::new(),
@@ -1361,6 +1385,7 @@ impl WeexFutures {
                 self.trade_failed(cx, request, error.venue_error());
             }
         } else {
+            job.emit_native_unknown(cx, command);
             let plan = job.plan.clone();
             let result = json(&job.native_ids);
             let refresh = job.refresh;
@@ -1391,6 +1416,8 @@ impl WeexFutures {
         );
         self.account.invalidate_orders();
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            // Released engine failures own terminal telemetry for this Plan.
+            job.engine_unknown |= request.released_request.is_some();
             for index in request.elements.clone() {
                 let _ = job
                     .journal
@@ -1514,26 +1541,16 @@ impl WeexFutures {
             // `Unknown`.
             let _ = cx.override_plan_failure_message(&request.plan, &error.message);
             cx.command_error(request.command, &error.message);
-            let placed = job
-                .journal
-                .outcomes()
-                .iter()
-                .map(|element| match &element.result {
-                    ElementResult::Placed { order_ids } => order_ids.len(),
-                    _ => 0,
-                })
-                .sum::<usize>();
-            let command = request.command;
-            cx.event(
-                Level::Warn,
-                "order.outcome_unknown",
-                UNKNOWN_OUTCOME_TEXT,
-                vec![
-                    ("command", command.into()),
-                    ("placedCount", (placed as f64).into()),
-                    ("elementIndices", json(&unknown_indices).into()),
-                ],
-            );
+            job.native_unknown.get_or_insert((
+                request
+                    .released_request
+                    .expect("response follows signing release"),
+                response.status,
+            ));
+            // Bulk cancellation keeps both families; report once at its terminal.
+            if !job.continue_on_error {
+                job.emit_native_unknown(cx, request.command);
+            }
         }
         match assessed {
             Ok(ids) => job.native_ids.extend(ids),
@@ -1973,6 +1990,10 @@ enum LateTargets {
     Other,
 }
 impl Request {
+    pub(crate) fn observe_release(&mut self, request: safe_cex_engine::RequestId) {
+        self.released_request = Some(request);
+    }
+
     pub(crate) fn unproven_evidence(
         &self,
         body: &str,

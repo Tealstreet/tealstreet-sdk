@@ -17,11 +17,27 @@ accepted prefix IDs and an indexed outcome journal: accepted rows are `placed`,
 a documented refusal is `notSent` with the venue message, and the untouched
 suffix remains `notSent`. Uncertain rows say exactly "The outcome is unknown.
 Check Open Orders", retain diagnostic text in `venueMessage` and emit an
-`order.outcome_unknown` event attributed to the command and client order ID.
+`order.outcome_unknown` event attributed to the command and internal request ID.
 `tests/trading.rs::above_max_batch_*` pins `[1,26,1]` at max 5 / step 1,
 including both refusal envelopes and a native rate-limit Unknown response.
 `tests/trading.rs::legacy_ts_above_max_create_is_one_payload_and_surfaces_venue_refusal`
 pins the six above-max cases and refusal propagation.
+
+## Unknown telemetry
+
+Coinbase registers the engine's static Unknown hook and uses the same closed
+projection for native terminal Unknowns. Advanced Trade keeps its existing
+legacy dispatch; a managed engine probe tests the hook without migrating it.
+Each terminal Unknown emits once; definite refusals emit no Unknown event.
+
+Fields match NX #9262: `command` is `coinbase.<command ID>`, `request` is only
+the internal decimal request ID (`^[0-9]{1,20}$`), and `outcome` is `unknown`.
+`placedOrderIds` admits decimal native IDs of 1–32 digits; UUIDs remain in the
+command result and are omitted from this telemetry list. `unknownIndices`
+admits indices through 65535. Lists have at most 16 entries, preserving whole
+entries below the engine's string cap. Numeric `status` is present only for
+HTTP responses in 100–599. The projection never reads URL, body, signing data,
+client IDs or diagnostic text. Tests check every emitted field for such content.
 
 ## Transport foundation
 

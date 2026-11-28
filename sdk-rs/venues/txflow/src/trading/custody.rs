@@ -320,7 +320,10 @@ impl TxFlow {
                 context,
             }),
         )
-        .map(|_| ())
+        .map(|request| {
+            job.telemetry_request = Some(request);
+            job.telemetry_status = None;
+        })
         .map_err(|(_, e)| e.venue_error())
     }
     pub(super) fn finish_trade_owner(

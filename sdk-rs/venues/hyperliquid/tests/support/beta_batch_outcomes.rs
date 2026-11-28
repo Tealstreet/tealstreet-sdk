@@ -268,8 +268,7 @@ fn cancel_batch_with_unknown_row_emits_one_independent_correlated_diagnostic() {
             events[0]
                 .fields
                 .iter()
-                .any(|(key, value)| *key == "commandId"
-                    && *value == safe_cex_engine::log::Value::Num(81.0))
+                .any(|(key, value)| *key == "command" && value.as_str() == Some("command.81"))
         );
         assert!(
             events[0]

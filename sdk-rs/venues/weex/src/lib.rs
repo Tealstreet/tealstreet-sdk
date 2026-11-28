@@ -14,6 +14,7 @@ mod paths;
 mod rate;
 mod socket_codec;
 mod trading;
+mod unknown_telemetry;
 mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::backoff::Backoff;
@@ -748,6 +749,22 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_telemetry::project)
+    }
+
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        _release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http { request, pending } = target
+            && let Task::Trade(trade) = &mut pending.task
+        {
+            trade.observe_release(request);
+        }
+    }
+
     fn observe_unproven_http_response(
         &mut self,
         now: f64,

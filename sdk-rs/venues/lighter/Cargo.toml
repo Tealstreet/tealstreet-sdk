@@ -15,5 +15,6 @@ zeroize.workspace = true
 workspace = true
 
 [dev-dependencies]
+regex = "1.13.1"
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 safe-cex-crypto = { workspace = true, features = ["schnorr"] }

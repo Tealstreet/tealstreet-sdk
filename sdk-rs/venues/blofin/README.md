@@ -1,5 +1,19 @@
 # BloFin socket liveness
 
+BloFin's static Unknown-outcome hook emits one `order.outcome_unknown` event for
+engine-sealed uncertainty, including frame-fed delivery and transport loss.
+Native-decoded Unknown replies use the same projection. These paths are separate;
+neither telemetry path changes classification, dispatch, retry or put-back.
+
+The projection matches NX #9262's closed fields: `command` is
+`blofin-<numeric command ID>`, `outcome` is `unknown`, and `request` is the internal
+decimal request ID (1–20 digits). `placedOrderIds` contains only 1–32 digit native
+IDs; `unknownIndices` contains only recorded Unknown indices in 0–65535. Both are
+comma-separated lists capped at 16 entries; whole IDs also stay within the engine's
+512-byte string bound. Empty lists mean no such detail was retained. Optional
+numeric `status` is emitted only in 100–599. No other fields, native diagnostic
+text, URL, endpoint, query, body or signed payload enter this projection.
+
 Both feeds use the engine-managed lifecycle with independent epochs and retries.
 Public keeps connect 20 s, idle 20 s, ping 5 s and backoff cap 16 s. Private keeps a 10 s
 connection deadline, separate 10 s authentication deadline, ping 5 s and idle 20 s.

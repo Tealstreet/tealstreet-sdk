@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 #[path = "support/account.rs"]
 mod account_support;
 use account_support::{Plain, failures};
+#[path = "support/unknown_outcome.rs"]
+mod unknown_support;
 const NOW: f64 = 1_800_000_000_000.0;
 // Ordinary controls model an explicitly confirmed base-size market.
 // Missing metadata is exercised separately and must never imply this value.
@@ -731,6 +733,124 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
             Some(safe_cex_engine::ErrorKind::Network),
             Some(Outcome::Unknown)
         )
+    );
+}
+
+#[test]
+fn unknown_telemetry_native_decode_transport_and_refusal_are_once_only() {
+    for (status, body, expected) in [
+        (
+            200,
+            "hostile https://venue.test/exchange?signature=payload body={}",
+            Some(Outcome::Unknown),
+        ),
+        (503, "hostile body={}", Some(Outcome::Unknown)),
+        (
+            200,
+            r#"{"status":"err","message":"hostile?signature=payload"}"#,
+            Some(Outcome::Rejected),
+        ),
+    ] {
+        let mut e = engine();
+        place(&mut e, 77, vec![limit("hostile?signature=payload")]);
+        let r = write(&mut e);
+        ack(&mut e, &r, status, body);
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 77, error }) if error.outcome == expected)));
+        if expected == Some(Outcome::Unknown) {
+            unknown_support::assert_unknown_event(&actions, Some(r.id), 77);
+            let observed_status = unknown_support::unknown_events(&actions)[0]
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "status")
+                .map(|(_, value)| value.clone());
+            // Managed delivery seals 503 in the engine, whose hook carries the status.
+            assert_eq!(observed_status, Some(u32::from(status).into()));
+        } else {
+            assert!(unknown_support::unknown_events(&actions).is_empty());
+        }
+        ack(&mut e, &r, status, body);
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: r.id,
+                error: "late hostile?signature=payload",
+            },
+        );
+        assert!(unknown_support::unknown_events(&e.drain_plain().collect::<Vec<_>>()).is_empty());
+    }
+    let mut e = engine();
+    place(&mut e, 78, vec![limit("lost")]);
+    let r = write(&mut e);
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: r.id,
+            error: "hostile https://venue.test/exchange?signature=payload body={}",
+        },
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    unknown_support::assert_unknown_event(&actions, Some(r.id), 78);
+    assert!(
+        !unknown_support::unknown_events(&actions)[0]
+            .fields
+            .iter()
+            .any(|(key, _)| *key == "status")
+    );
+}
+
+#[test]
+fn unknown_telemetry_waits_for_identity_reconciliation_to_finish() {
+    let mut e = engine();
+    place(&mut e, 79, vec![limit("unresolved")]);
+    let r = write(&mut e);
+    ack(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
+    );
+    let mut actions = e.drain_plain().collect::<Vec<_>>();
+    for attempt in 1..=8 {
+        assert!(unknown_support::unknown_events(&actions).is_empty());
+        let now = NOW + f64::from(attempt) * 300.;
+        let timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+                _ => None,
+            })
+            .expect("bounded identity reconciliation timer");
+        e.handle(now, Event::TimerFired { timer });
+        actions = e.drain_plain().collect();
+    }
+    unknown_support::assert_unknown_event(&actions, Some(r.id), 79);
+    assert!(
+        unknown_support::unknown_events(&actions)[0]
+            .fields
+            .contains(&("status", 200u32.into()))
+    );
+    assert!(
+        unknown_support::unknown_events(&actions)[0]
+            .fields
+            .contains(&("placedOrderIds", "".into()))
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    let mut e = engine();
+    let mut invalid = limit("not-sent");
+    invalid.amount = 0.;
+    place(&mut e, 80, vec![invalid]);
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(unknown_support::unknown_events(&actions).is_empty());
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 80, error }) if error.outcome == Some(Outcome::NotSent))));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
 }
 #[test]

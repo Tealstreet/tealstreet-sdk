@@ -5,7 +5,9 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, Identities, KeyRef, SignError, SignFuture, SignRequest, SignResult,
     Signer,
 };
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Outcome, Response,
+};
 use safe_cex_venue_woo::{Options, Woo};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -405,6 +407,471 @@ fn ordinary_and_protective_cancel_amend_keep_wire_and_failure_boundaries() {
             let actions = safe_cex_engine::test_support::prepared_actions(&mut refused, NOW);
             assert_eq!(error(&actions).outcome, Some(Outcome::NotSent));
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        }
+    }
+}
+
+fn unknown_events(actions: &[Action]) -> Vec<&safe_cex_engine::LogEvent> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown" => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_nx_unknown_fields(
+    event: &safe_cex_engine::LogEvent,
+    command_id: u32,
+    request_id: safe_cex_engine::RequestId,
+    status: Option<u16>,
+) {
+    use safe_cex_engine::log::Value;
+    let mut names = event.fields.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+    names.sort_unstable();
+    let mut expected = vec![
+        "command",
+        "outcome",
+        "placedOrderIds",
+        "request",
+        "unknownIndices",
+    ];
+    if status.is_some() {
+        expected.push("status");
+    }
+    expected.sort_unstable();
+    assert_eq!(names, expected, "NX #9262 accepts exactly these fields");
+    let field = |key| {
+        &event
+            .fields
+            .iter()
+            .find(|(name, _)| *name == key)
+            .unwrap()
+            .1
+    };
+    let request = field("request")
+        .as_str()
+        .expect("decimal request ID string");
+    // REQUIRED PIN: ^[0-9]{1,20}$, never the signed request URL.
+    assert!((1..=20).contains(&request.len()) && request.bytes().all(|b| b.is_ascii_digit()));
+    assert_eq!(request, request_id.0.to_string());
+    assert_eq!(field("outcome").as_str(), Some("unknown"));
+    let command = field("command").as_str().unwrap();
+    assert!((1..=64).contains(&command.len()) && command.as_bytes()[0].is_ascii_alphabetic());
+    assert!(
+        command
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+    );
+    assert_eq!(command, format!("woo.{command_id}"));
+    if let Some(status) = status {
+        assert_eq!(*field("status"), Value::Num(status.into()));
+    }
+    for (key, value) in &event.fields {
+        assert!(!["url", "endpoint", "query", "body", "signature", "payload"].contains(key));
+        if let Some(text) = value.as_str() {
+            let lower = text.to_ascii_lowercase();
+            for poison in [
+                "://",
+                "/",
+                "?",
+                "=",
+                "&",
+                "signature",
+                "payload",
+                "body",
+                "secret",
+                "api_key",
+            ] {
+                assert!(!lower.contains(poison), "unsafe content in {key}: {poison}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_legacy_write_and_refusal_are_exactly_once() {
+    assert_unknown_hook_cases(&[
+        (Some(503), "response-body-canary", 1),
+        (Some(408), "response-body-canary", 1),
+        (Some(429), "response-body-canary", 1),
+        (None, "transport-signature-canary", 1),
+        (
+            Some(400),
+            r#"{"success":false,"code":-1005,"message":"definite refusal"}"#,
+            0,
+        ),
+    ]);
+}
+
+#[test]
+fn unknown_hook_native_decoded_has_one_event_without_duplicate() {
+    assert_unknown_hook_cases(&[(
+        Some(200),
+        r#"{"success":false,"code":-1012,"message":"native unknown"}"#,
+        1,
+    )]);
+}
+
+fn assert_unknown_hook_cases(cases: &[(Option<u16>, &str, usize)]) {
+    for frame_fed in [false, true] {
+        for &(status, body, event_count) in cases {
+            let (mut e, _) = engine(true, false);
+            if frame_fed {
+                e.set_frame_fed().unwrap();
+            }
+            let sent = request(&place(&mut e, false));
+            let event = if let Some(status) = status {
+                Event::HttpResponse {
+                    request: sent.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                }
+            } else {
+                Event::HttpFailed {
+                    request: sent.id,
+                    error: body,
+                }
+            };
+            e.handle(NOW + 1., event);
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.);
+            let events = unknown_events(&actions);
+            assert_eq!(
+                events.len(),
+                event_count,
+                "frame={frame_fed}, status={status:?}"
+            );
+            if let Some(event) = events.first() {
+                assert_nx_unknown_fields(event, 1, sent.id, status);
+            }
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+            );
+            e.handle(
+                NOW + 2.,
+                Event::HttpResponse {
+                    request: sent.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"success":true,"order_id":123}"#,
+                    },
+                },
+            );
+            let late = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 2.);
+            assert!(
+                unknown_events(&late).is_empty(),
+                "late reply cannot duplicate telemetry"
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_hook_projection_matches_nx_bounds_caps_and_secret_exclusion() {
+    use safe_cex_engine::write_plan::{Element, ElementOutcome, ElementOutcomes, ElementResult};
+    use safe_cex_engine::{EngineUnknownOutcome, RequestId, Venue, VenueError};
+    let hook =
+        <Woo as Venue>::unknown_outcome_telemetry().expect("WOO opts into engine-sealed telemetry");
+    let poison = "https://signed.invalid/order?api_key=fixture&signature=fixture-body-payload";
+    let ids = [poison.into(), "9".repeat(33), "١".into(), "".into()]
+        .into_iter()
+        .chain((0..20).map(|i| format!("{i:020}")))
+        .collect::<Vec<_>>();
+    let mut error = VenueError::new(poison)
+        .venue_message(poison)
+        .partial(&ids, 32, usize::MAX);
+    error.elements = Some(Box::new(ElementOutcomes(
+        (0..20)
+            .map(|index| ElementOutcome {
+                element: Element {
+                    index,
+                    client_order_id: Some(poison.into()),
+                    role: None,
+                },
+                result: ElementResult::Unknown {
+                    error: Box::new(VenueError::new(poison).outcome(Outcome::Unknown)),
+                },
+            })
+            .collect(),
+    )));
+    for status in [
+        None,
+        Some(0),
+        Some(99),
+        Some(100),
+        Some(599),
+        Some(600),
+        Some(u16::MAX),
+    ] {
+        let event = hook(&EngineUnknownOutcome {
+            now: NOW,
+            command: u32::MAX,
+            request: RequestId(u64::MAX),
+            status,
+            error: &error,
+        });
+        assert_eq!(event.code, "order.outcome_unknown");
+        assert_eq!(event.level, safe_cex_engine::Level::Warn);
+        assert_eq!(event.message, safe_cex_engine::UNKNOWN_OUTCOME_TEXT);
+        assert_nx_unknown_fields(
+            &event,
+            u32::MAX,
+            RequestId(u64::MAX),
+            status.filter(|s| (100..=599).contains(s)),
+        );
+        let value = |key| {
+            event
+                .fields
+                .iter()
+                .find(|(name, _)| *name == key)
+                .unwrap()
+                .1
+                .as_str()
+                .unwrap()
+        };
+        let placed = value("placedOrderIds").split(',').collect::<Vec<_>>();
+        assert_eq!(placed.len(), 16, "NX #9262 list cap");
+        assert_eq!(
+            placed,
+            (0..16).map(|i| format!("{i:020}")).collect::<Vec<_>>()
+        );
+        assert!(
+            placed
+                .iter()
+                .all(|id| (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit()))
+        );
+        let indices = value("unknownIndices")
+            .split(',')
+            .map(|i| i.parse::<u16>().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(indices, (0..16).collect::<Vec<_>>());
+    }
+    error.elements = Some(Box::new(ElementOutcomes(
+        [65536, usize::MAX, 65535, 0]
+            .into_iter()
+            .map(|index| ElementOutcome {
+                element: Element {
+                    index,
+                    client_order_id: None,
+                    role: None,
+                },
+                result: ElementResult::Unknown {
+                    error: Box::new(VenueError::new(poison)),
+                },
+            })
+            .collect(),
+    )));
+    let project = |error: &VenueError| {
+        hook(&EngineUnknownOutcome {
+            now: NOW,
+            command: 1,
+            request: RequestId(0),
+            status: None,
+            error,
+        })
+    };
+    let event = project(&error);
+    assert_nx_unknown_fields(&event, 1, RequestId(0), None);
+    assert_eq!(
+        event
+            .fields
+            .iter()
+            .find(|(k, _)| *k == "unknownIndices")
+            .unwrap()
+            .1
+            .as_str(),
+        Some("65535,0")
+    );
+    error.elements = None;
+    let event = project(&error);
+    assert_eq!(
+        event
+            .fields
+            .iter()
+            .find(|(k, _)| *k == "unknownIndices")
+            .unwrap()
+            .1
+            .as_str(),
+        Some("")
+    );
+    let long_ids = vec!["9".repeat(32); 20];
+    error = error.partial(&long_ids, 20, 0);
+    let event = project(&error);
+    let ids = event
+        .fields
+        .iter()
+        .find(|(k, _)| *k == "placedOrderIds")
+        .unwrap()
+        .1
+        .as_str()
+        .unwrap();
+    assert!(
+        ids.len() <= safe_cex_engine::log::MAX_LOG_BYTES,
+        "engine must not truncate a valid list into an invalid NX value"
+    );
+    assert_eq!(ids.split(',').count(), 15);
+}
+
+// WOO still uses legacy HTTP. Exercise its registered static projection at an
+// explicit managed engine boundary without changing WOO's native dispatch.
+struct ManagedWooHook;
+impl safe_cex_engine::Venue for ManagedWooHook {
+    type Pending = safe_cex_engine::request_context::Context;
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        <Woo as safe_cex_engine::Venue>::unknown_outcome_telemetry()
+    }
+    fn start(&mut self, _: &mut safe_cex_engine::Cx<'_, Self::Pending>) {}
+    fn on_open(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: safe_cex_engine::SocketId,
+    ) {
+    }
+    fn on_message(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: safe_cex_engine::SocketId,
+        _: &str,
+    ) {
+    }
+    fn on_close(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: safe_cex_engine::SocketId,
+        _: u16,
+    ) {
+    }
+    fn on_timer(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: safe_cex_engine::TimerId,
+    ) {
+    }
+    fn on_request_failed(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: Self::Pending,
+        _: &str,
+    ) {
+        panic!("managed failure uses typed callback");
+    }
+    fn on_response(
+        &mut self,
+        _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        _: Self::Pending,
+        _: Response<'_>,
+    ) {
+        panic!("engine-sealed Unknown bypasses decoder");
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        context: Self::Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.fail_context(&context, error).unwrap();
+    }
+    fn capture_http_reconciliation(
+        &self,
+        _: &Self::Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        safe_cex_engine::request_context::ReconciliationData::new("woo-hook-fixture".into())
+    }
+    fn on_command(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, _: Command) {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+        let context = cx
+            .admit_http_command(Policy {
+                operation: Operation::Mutation,
+                credential: None,
+                timeout_ms: 1000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            })
+            .unwrap();
+        cx.request_managed(
+            context.clone(),
+            None,
+            Method::Post,
+            "https://signed.invalid/order?api_key=fixture&signature=fixture".into(),
+            Some("body-payload-canary".into()),
+            context,
+        )
+        .unwrap();
+    }
+    fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+#[test]
+fn unknown_hook_engine_sealed_boundary_emits_once_with_woo_projection() {
+    for frame_fed in [false, true] {
+        for status in [Some(408), Some(429), Some(503), None] {
+            let mut e = safe_cex_engine::test_support::seeded_engine(ManagedWooHook);
+            let (seed, _) = support::started();
+            e.store_mut().set_markets(seed.store().markets().to_vec());
+            if frame_fed {
+                e.set_frame_fed().unwrap();
+            }
+            e.handle(
+                NOW,
+                Event::Command(Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![],
+                }),
+            );
+            let sent = request(&safe_cex_engine::test_support::prepared_actions(
+                &mut e, NOW,
+            ));
+            let event = match status {
+                Some(status) => Event::HttpResponse {
+                    request: sent.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "response-signature-canary",
+                    },
+                },
+                None => Event::HttpFailed {
+                    request: sent.id,
+                    error: "body-payload-canary",
+                },
+            };
+            e.handle(NOW + 1., event);
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.);
+            let events = unknown_events(&actions);
+            assert_eq!(events.len(), 1);
+            assert_nx_unknown_fields(events[0], 1, sent.id, status);
+            assert_eq!(error(&actions).outcome, Some(Outcome::Unknown));
+            e.handle(
+                NOW + 2.,
+                Event::HttpFailed {
+                    request: sent.id,
+                    error: "late",
+                },
+            );
+            assert!(
+                unknown_events(&safe_cex_engine::test_support::prepared_actions(
+                    &mut e,
+                    NOW + 2.
+                ))
+                .is_empty()
+            );
         }
     }
 }

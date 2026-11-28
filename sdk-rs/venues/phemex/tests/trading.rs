@@ -1,6 +1,10 @@
 // Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Documented g-API payloads and mutation lifecycle regressions.
 mod support;
+#[path = "support/unknown_fields.rs"]
+mod unknown_fields;
+#[path = "trading/unknown_outcome.rs"]
+mod unknown_outcome;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
 use safe_cex_venue_phemex::PhemexPerpetuals;
@@ -823,9 +827,10 @@ fn assert_split_unknown(unknown: usize, body: Value) {
             .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
     );
     assert!(
-        events[0].fields.iter().any(
-            |(key, value)| *key == "command" && *value == safe_cex_engine::log::Value::Num(93.)
-        )
+        events[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "command" && value.as_str() == Some("phemex.93"))
     );
     for (timer, at_ms) in actions.iter().filter_map(|a| match a {
         Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),

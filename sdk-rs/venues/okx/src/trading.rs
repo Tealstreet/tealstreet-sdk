@@ -2637,48 +2637,52 @@ impl Okx {
                 Some(note) => format!("{note}; {unknown}"),
                 None => unknown,
             });
-            let indexed_unknown = error.elements.as_ref().and_then(|elements| {
-                elements
-                    .0
-                    .iter()
-                    .find(|element| matches!(element.result, ElementResult::Unknown { .. }))
-            });
-            let identity =
-                reporting_identity(step, indexed_unknown.map(|element| element.element.index));
-            let mut fields = vec![
-                ("command", command.into()),
-                (
-                    "placedCount",
-                    job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
-                ),
-                // Put the unconfirmed identity before the body so the
-                // engine's 512-byte log cap cannot hide a later batch row.
-                (
-                    "unknownRequest",
-                    match &identity {
-                        Some(identity) => format!("{identity}; {}", step.body),
-                        None => step.body.clone(),
+            // Replyless failures are reported once by the engine's #3359 hook.
+            // Native decoded replies keep their existing companion event.
+            if current.is_some() {
+                let indexed_unknown = error.elements.as_ref().and_then(|elements| {
+                    elements
+                        .0
+                        .iter()
+                        .find(|element| matches!(element.result, ElementResult::Unknown { .. }))
+                });
+                let identity =
+                    reporting_identity(step, indexed_unknown.map(|element| element.element.index));
+                let mut fields = vec![
+                    ("command", command.into()),
+                    (
+                        "placedCount",
+                        job.ids.iter().map(|_| 1.0).sum::<f64>().into(),
+                    ),
+                    // Put the unconfirmed identity before the body so the
+                    // engine's 512-byte log cap cannot hide a later batch row.
+                    (
+                        "unknownRequest",
+                        match &identity {
+                            Some(identity) => format!("{identity}; {}", step.body),
+                            None => step.body.clone(),
+                        }
+                        .into(),
+                    ),
+                ];
+                if let Some(element) = indexed_unknown
+                    && let ElementResult::Unknown { error } = &element.result
+                {
+                    fields.push(("index", (element.element.index as f64).into()));
+                    if let Some(identity) = identity {
+                        fields.push(("targetOrderId", identity.into()));
                     }
-                    .into(),
-                ),
-            ];
-            if let Some(element) = indexed_unknown
-                && let ElementResult::Unknown { error } = &element.result
-            {
-                fields.push(("index", (element.element.index as f64).into()));
-                if let Some(identity) = identity {
-                    fields.push(("targetOrderId", identity.into()));
+                    if let Some(code) = &error.venue_code {
+                        fields.push(("venueCode", code.to_string().into()));
+                    }
                 }
-                if let Some(code) = &error.venue_code {
-                    fields.push(("venueCode", code.to_string().into()));
-                }
+                cx.event(
+                    Level::Warn,
+                    "order.outcome_unknown",
+                    UNKNOWN_OUTCOME_TEXT,
+                    fields,
+                );
             }
-            cx.event(
-                Level::Warn,
-                "order.outcome_unknown",
-                UNKNOWN_OUTCOME_TEXT,
-                fields,
-            );
         }
         // A sibling rests: the caller must be told even though this call failed.
         if !job.ids.is_empty() {

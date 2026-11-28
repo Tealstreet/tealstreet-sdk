@@ -81,7 +81,8 @@ struct Job {
     writes: Option<WritePlan>,
     next_write: usize,
     pending_write: Option<usize>,
-    unknown_request: Option<String>,
+    request_id: Option<safe_cex_engine::RequestId>,
+    status: Option<u16>,
 }
 impl Job {
     // Optional reporting never authorizes, blocks or repeats a native write.
@@ -397,7 +398,6 @@ impl Polymarket {
             match result {
                 Ok(result) => cx.done(command, result),
                 Err(mut error) => {
-                    let pending = job.pending_write;
                     let unknown = error.outcome == Some(Outcome::Unknown);
                     job.record(
                         cx,
@@ -413,26 +413,6 @@ impl Polymarket {
                     );
                     if unknown {
                         cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
-                        let mut fields = vec![
-                            ("command", command.into()),
-                            ("placedCount", (job.ids.len() as f64).into()),
-                            (
-                                "unknownRequest",
-                                job.unknown_request
-                                    .clone()
-                                    .unwrap_or_else(|| "replacement state read".into())
-                                    .into(),
-                            ),
-                        ];
-                        if let Some(index) = pending {
-                            fields.push(("elementIndex", (index as f64).into()));
-                        }
-                        cx.event(
-                            safe_cex_engine::Level::Warn,
-                            "order.outcome_unknown",
-                            UNKNOWN_OUTCOME_TEXT,
-                            fields,
-                        );
                     }
                     // A later refusal after a step took effect cannot mean nothing happened.
                     if (job.effective || !job.ids.is_empty())
@@ -443,16 +423,21 @@ impl Polymarket {
                     if let Some(writes) = &job.writes {
                         error = writes.attach(error);
                     }
+                    if unknown && let Some(request) = job.request_id {
+                        let event = crate::telemetry::unknown(
+                            command, request, job.status, &error, &job.ids,
+                        );
+                        cx.event(event.level, event.code, event.message, event.fields);
+                    }
                     cx.fail(command, error.partial(&job.ids, job.total, job.ids.len()));
                 }
             }
         }
     }
-    fn reporting_write(&mut self, command: CommandId, identity: String) {
+    fn reporting_write(&mut self, command: CommandId) {
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.pending_write = Some(job.next_write);
             job.next_write += 1;
-            job.unknown_request = Some(identity);
         }
     }
     fn reporting_applied(
@@ -463,7 +448,6 @@ impl Polymarket {
     ) {
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.record(cx, result);
-            job.unknown_request = None;
         }
     }
     fn trading_next(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -480,19 +464,19 @@ impl Polymarket {
             self.trading_finish(cx, command, result);
             return;
         };
-        self.reporting_write(command, format!("place {}", placement.options.symbol));
+        self.reporting_write(command);
         // Market tick/activation may change while an earlier batch element is in flight.
         let result = self.prepare(cx, placement.options).and_then(|placement| {
             let body = self.placement_body(cx, &placement)?;
-            self.signed_request(
+            self.trading_request(
                 cx,
                 Method::Post,
                 "/order",
                 Some(body),
-                Pending::Trade(Request::Place {
+                Request::Place {
                     command,
                     placement: Box::new(placement),
-                }),
+                },
             )
             .map(|_| ())
         });
@@ -551,7 +535,8 @@ impl Polymarket {
                 writes: Some(WritePlan::new(elements)),
                 next_write: 0,
                 pending_write: None,
-                unknown_request: None,
+                request_id: None,
+                status: None,
             },
         );
         Ok(())
@@ -613,16 +598,16 @@ impl Polymarket {
                         return Ok(());
                     }
                     let body = serde_json::to_string(&ids).map_err(|e| e.to_string())?;
-                    self.reporting_write(command, format!("cancel {}", ids.join(",")));
-                    self.signed_request(
+                    self.reporting_write(command);
+                    self.trading_request(
                         cx,
                         Method::Delete,
                         "/orders",
                         Some(body),
-                        Pending::Trade(Request::Cancel {
+                        Request::Cancel {
                             command,
                             scope: CancelScope::Ids(ids),
-                        }),
+                        },
                     )?;
                 }
                 Command::CancelSymbolOrders { command, symbol } => {
@@ -641,16 +626,16 @@ impl Polymarket {
                             HashSet::new(),
                             Some(String::new()),
                         )?;
-                        self.reporting_write(command, "cancel all".into());
-                        self.signed_request(
+                        self.reporting_write(command);
+                        self.trading_request(
                             cx,
                             Method::Delete,
                             "/cancel-all",
                             None,
-                            Pending::Trade(Request::Cancel {
+                            Request::Cancel {
                                 command,
                                 scope: CancelScope::All { expected },
-                            }),
+                            },
                         )?;
                         return Ok(());
                     }
@@ -680,16 +665,16 @@ impl Polymarket {
                     }
                     let body = serde_json::to_string(&Scope { asset_id: &token })
                         .map_err(|e| e.to_string())?;
-                    self.reporting_write(command, format!("cancel {symbol}"));
-                    self.signed_request(
+                    self.reporting_write(command);
+                    self.trading_request(
                         cx,
                         Method::Delete,
                         "/cancel-market-orders",
                         Some(body),
-                        Pending::Trade(Request::Cancel {
+                        Request::Cancel {
                             command,
                             scope: CancelScope::Token { symbol, expected },
-                        }),
+                        },
                     )?;
                 }
                 Command::AmendOrder {
@@ -759,13 +744,13 @@ impl Polymarket {
                     let body =
                         serde_json::to_string(&Cancel { id: &id }).map_err(|e| e.to_string())?;
                     let filled = old.filled.max(self.account_filled(&id));
-                    self.reporting_write(command, format!("cancel {id}"));
-                    self.signed_request(
+                    self.reporting_write(command);
+                    self.trading_request(
                         cx,
                         Method::Delete,
                         "/order",
                         Some(body),
-                        Pending::Trade(Request::ReplaceCancel {
+                        Request::ReplaceCancel {
                             command,
                             replacement: Box::new(Replacement {
                                 old,
@@ -773,7 +758,7 @@ impl Polymarket {
                                 filled,
                                 reads: 0,
                             }),
-                        }),
+                        },
                     )?;
                 }
                 _ => unreachable!(),
@@ -788,6 +773,23 @@ impl Polymarket {
             }
         }
     }
+    fn trading_request(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        body: Option<String>,
+        pending: Request,
+    ) -> Result<safe_cex_engine::RequestId, String> {
+        let command = pending.command();
+        let request_id = self.signed_request(cx, method, path, body, Pending::Trade(pending))?;
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.request_id = Some(request_id);
+            job.status = None;
+        }
+        Ok(request_id)
+    }
+
     fn replace_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -795,15 +797,15 @@ impl Polymarket {
         replacement: Box<Replacement>,
     ) -> Result<(), String> {
         let path = format!("/data/order/{}", encode(&replacement.old.id));
-        self.signed_request(
+        self.trading_request(
             cx,
             Method::Get,
             &path,
             None,
-            Pending::Trade(Request::ReplaceRead {
+            Request::ReplaceRead {
                 command,
                 replacement,
-            }),
+            },
         )
         .map(|_| ())
     }
@@ -816,9 +818,10 @@ impl Polymarket {
         let command = request.command();
         let placing = matches!(request, Request::Place { .. });
         let write = !matches!(request, Request::ReplaceRead { .. });
-        if !self.trading.jobs.contains_key(&command) {
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
-        }
+        };
+        job.status = Some(response.status);
         // Set before a step whose failure happens before any request is sent.
         let mut before_send = false;
         let mut refused = false;

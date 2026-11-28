@@ -90,10 +90,17 @@ comments cite the legacy TS continuation each exception overrides. Placement
 pins check placed, Unknown and unsent journal elements; cancellations retain
 the deliberate optional-placement-journal omission and the engine's call facts.
 
-KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
-408/429/5xx pins still assert the stop, Unknown outcome and the engine's canonical
-text; only their telemetry assertion is deferred. No shared engine code is
-changed to add this venue companion event.
+Engine-sealed Unknowns use the static #3359 hook, including HTTP 408/429/5xx,
+streamed replies, frame-fed delivery and released transport failures. The hook
+emits one event; replyless failures retain their diagnostic and terminal without
+also emitting the venue-decoded companion. Native decoded Unknowns retain their
+existing single event and definite refusals emit none.
+
+The hook uses NX #9262's closed field set: decimal `request`, bounded
+`command` label, literal `outcome=unknown`, decimal `placedOrderIds`, bounded
+`unknownIndices`, and optional HTTP `status` in 100–599. Lists contain at most
+16 entries and stay within the engine's string cap. Messages, URLs, endpoints,
+queries, bodies, signatures and client IDs never enter this projection.
 
 ## Stop-entry brackets (AGT-115)
 

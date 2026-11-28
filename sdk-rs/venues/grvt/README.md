@@ -22,3 +22,24 @@ Dispatch is unchanged: a definite refusal stops the serial batch, as in
 accepts a reply without identity at `grvt.exchange.ts:1622-1643`; Rust's existing
 stop on that Unknown follows `docs/plans/SPLIT_PLAN_INVARIANT.md` exception 1.
 Amendment and protective put-back paths are unchanged (exception 2).
+
+# Unknown outcome telemetry
+
+GRVT registers the engine Unknown hook and emits the same `order.outcome_unknown`
+event at terminal native trading failures. Trade requests currently use the legacy
+request API, which has no managed delivery and cannot invoke the engine hook.
+Managed engine sealing and native decoding therefore each emit once, without
+changing requests, retry decisions, reconciliation text or completion outcomes.
+Venue and account attribution comes from the host context.
+
+The NX #9262 projection contains only `command` (`command.<decimal ID>`), literal
+`outcome: "unknown"`, optional `placedOrderIds` and `unknownIndices`, plus decimal
+`request` and optional numeric `status` for engine-sealed failures. Request IDs
+match `^[0-9]{1,20}$`; status is omitted unless it is in 100..=599. Lists retain at
+most 16 entries; placed IDs also retain only a prefix of whole entries fitting
+the engine’s 512-byte string-field limit. Order IDs must be 1..=32 decimal digits
+and indices must fit u16.
+Invalid lists are omitted as a whole. Native placement IDs are GRVT's existing
+command-result client identities; native failures have no element journal and
+emit an empty index list. The full caller-visible evidence is unchanged. URLs,
+endpoints, queries, bodies, signed payloads and native error text are excluded.

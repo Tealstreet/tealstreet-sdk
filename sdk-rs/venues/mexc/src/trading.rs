@@ -8,7 +8,8 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, RequestId, Response, TimerId, VenueError,
+    num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -100,6 +101,9 @@ pub struct Job {
     replaces: Option<String>,
     protection: Option<Box<protection::Edit>>,
     managed: Option<managed::Run>,
+    telemetry_request: Option<RequestId>,
+    telemetry_status: Option<u16>,
+    telemetry_native_response: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -1130,6 +1134,9 @@ impl MexcFutures {
                 replaces,
                 protection,
                 managed,
+                telemetry_request: None,
+                telemetry_status: None,
+                telemetry_native_response: false,
             });
             self.advance_trade(cx);
         }
@@ -1289,6 +1296,29 @@ impl MexcFutures {
             self.advance_trade(cx);
         }
     }
+    pub(crate) fn note_trading_request(&mut self, command: CommandId, request: RequestId) {
+        if let Some(job) = self
+            .trading
+            .active
+            .as_mut()
+            .filter(|job| job.command == command)
+        {
+            job.telemetry_request = Some(request);
+            job.telemetry_status = None;
+            job.telemetry_native_response = false;
+        }
+    }
+    pub(crate) fn note_trading_response(&mut self, command: CommandId, status: u16) {
+        if let Some(job) = self
+            .trading
+            .active
+            .as_mut()
+            .filter(|job| job.command == command)
+        {
+            job.telemetry_status = Some(status);
+            job.telemetry_native_response = true;
+        }
+    }
     pub fn trade_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1339,6 +1369,20 @@ impl MexcFutures {
                 error.outcome = None;
             }
             let failed_index = job.failed_index.unwrap_or(job.ids.len());
+            // Managed transport failures emit through the engine hook; only a
+            // native response belongs to this emitter on the managed lane.
+            if error.outcome == Some(Outcome::Unknown)
+                && (job.managed.is_none() || job.telemetry_native_response)
+                && let Some(request) = job.telemetry_request
+            {
+                let event = crate::unknown_outcome::native(
+                    command,
+                    request,
+                    job.telemetry_status,
+                    &job.ids,
+                );
+                cx.event(event.level, event.code, event.message, event.fields);
+            }
             if let Some(run) = job.managed {
                 Self::finish_protective(
                     cx,
@@ -1618,6 +1662,7 @@ impl MexcFutures {
         {
             return;
         }
+        self.note_trading_response(request.command, response.status);
         if let Call::ProtectiveRead {
             page,
             after_cancel,

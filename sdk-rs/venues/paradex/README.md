@@ -38,9 +38,20 @@ a refused TP skips its SL, while the next independent entry can still be sent.
 An Unknown placement halts all remaining writes for that action, the approved
 stop-after-UNKNOWN parity exception. Its failure includes
 "We couldn’t confirm this change. Check your open orders before trying again.", accepted IDs and uncertain placements.
-The `order.outcome_unknown` event records the existing outcome journal and
-withheld writes; native diagnostics remain separate. No uncertain write is
-replayed. Leverage requests carry a JSON integer.
+The `order.outcome_unknown` event uses the static engine seal hook and the same
+closed projection for native-decoded failures. Its only fields are a bounded
+`paradex.<command>` label, literal `unknown` outcome, decimal request ID, placed
+IDs, unknown indices and optional HTTP status (100–599). Both comma-separated
+lists cap at 16 entries; whole entries also stay within the engine's byte cap.
+Only 1–32 digit placed IDs and indices 0–65535 enter telemetry. Other identities
+remain in the caller's error; URLs, client labels and signed payloads never enter
+the event. Legacy trading dispatch is unchanged. No uncertain write is replayed.
+Native cancellations and failed cancellation proofs use this same diagnostic.
+Multi-operation cancellation commands report only their first Unknown, retaining
+that physical request's correlation while attempting every remaining cancel.
+Proof failures identify the latest physical proof read, or the preceding cancel
+when no proof read was sent; transport failures omit status.
+Leverage requests carry a JSON integer.
 After an amendment, another amendment requires coherent native order evidence;
 an old replica response cannot restore the previous signed price, size or trigger.
 

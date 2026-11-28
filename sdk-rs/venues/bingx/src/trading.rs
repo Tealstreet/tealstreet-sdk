@@ -158,6 +158,117 @@ struct Run {
     next: Option<Slot>,
     native_ids: Vec<String>,
     error: Option<VenueError>,
+    native_unknown: Option<u16>,
+    engine_unknown: bool,
+}
+
+const UNKNOWN_LIST_CAP: usize = 16;
+
+fn bounded_unknown_list<T: AsRef<str>>(entries: impl Iterator<Item = T>) -> String {
+    let mut list = String::new();
+    for entry in entries.take(UNKNOWN_LIST_CAP) {
+        let entry = entry.as_ref();
+        let separator = usize::from(!list.is_empty());
+        if list.len() + separator + entry.len() > safe_cex_engine::log::MAX_LOG_BYTES {
+            break;
+        }
+        if separator != 0 {
+            list.push(',');
+        }
+        list.push_str(entry);
+    }
+    list
+}
+
+fn unknown_indices(error: &VenueError) -> impl Iterator<Item = usize> + '_ {
+    error
+        .elements
+        .iter()
+        .flat_map(|elements| elements.iter())
+        .filter_map(|element| {
+            matches!(
+                element.result,
+                safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+            )
+            .then_some(element.element.index)
+        })
+}
+
+fn unknown_event<'a>(
+    command: CommandId,
+    request: Option<safe_cex_engine::RequestId>,
+    status: Option<u16>,
+    order_ids: impl Iterator<Item = &'a str>,
+    indices: impl Iterator<Item = usize>,
+) -> safe_cex_engine::LogEvent {
+    let order_ids =
+        bounded_unknown_list(order_ids.filter(|id| {
+            (1..=32).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_digit())
+        }));
+    let indices = bounded_unknown_list(
+        indices
+            .filter(|index| u16::try_from(*index).is_ok())
+            .map(|index| index.to_string()),
+    );
+    let mut fields = vec![
+        ("command", format!("bingx-perp-{command}").into()),
+        ("outcome", "unknown".into()),
+        ("placedOrderIds", order_ids.into()),
+        ("unknownIndices", indices.into()),
+    ];
+    if let Some(request) = request {
+        fields.push(("request", request.0.to_string().into()));
+    }
+    if let Some(status) = status.filter(|status| (100..=599).contains(status)) {
+        fields.push(("status", u32::from(status).into()));
+    }
+    safe_cex_engine::LogEvent {
+        level: safe_cex_engine::Level::Warn,
+        code: "order.outcome_unknown",
+        message: safe_cex_engine::UNKNOWN_OUTCOME_TEXT.into(),
+        fields,
+    }
+}
+
+pub fn engine_unknown_telemetry(
+    facts: &safe_cex_engine::EngineUnknownOutcome<'_>,
+) -> safe_cex_engine::LogEvent {
+    unknown_event(
+        facts.command,
+        Some(facts.request),
+        facts.status,
+        facts
+            .error
+            .partial
+            .iter()
+            .flat_map(|partial| partial.order_ids.iter())
+            .map(String::as_str),
+        unknown_indices(facts.error),
+    )
+}
+
+impl Run {
+    fn emit_native_unknown(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        sealed: &VenueError,
+    ) {
+        // Engine-owned uncertainty wins, including a later independent sibling.
+        // Keep this on the existing owner generation and emit only after sealing.
+        if let Some(status) = self.native_unknown.take()
+            && !self.engine_unknown
+        {
+            let event = unknown_event(
+                command,
+                None,
+                Some(status),
+                self.native_ids.iter().map(String::as_str),
+                unknown_indices(sealed),
+            );
+            cx.event(event.level, event.code, event.message, event.fields);
+        }
+    }
 }
 /// Earlier writes that a later failure cannot roll back.
 fn partial_failure_note(run: &Run, request: &Request, may_be_live: bool) -> Option<String> {
@@ -678,6 +789,8 @@ impl Trading {
                     next,
                     native_ids: Vec::new(),
                     error: None,
+                    native_unknown: None,
+                    engine_unknown: false,
                 },
             );
             self.advance(cx, credentials, id);
@@ -704,7 +817,9 @@ impl Trading {
                 .clone()
                 .unwrap_or_else(|| unknown("BingX write failed"));
             let error = run.writes.failure(error);
-            let _ = cx.fail_plan(&plan, error);
+            if cx.fail_plan(&plan, error.clone()).is_ok() {
+                run.emit_native_unknown(cx, command, &error);
+            }
             return;
         }
         if let Some(step) = run.job.steps.pop_front() {
@@ -804,7 +919,9 @@ impl Trading {
             let plan = run.plan.clone();
             if let Some(error) = run.error.clone() {
                 let error = run.writes.failure(error);
-                let _ = cx.fail_plan(&plan, error);
+                if cx.fail_plan(&plan, error.clone()).is_ok() {
+                    run.emit_native_unknown(cx, command, &error);
+                }
                 return;
             }
             let result = serde_json::to_string(&run.native_ids).unwrap_or_default();
@@ -856,6 +973,21 @@ impl Trading {
         }
     }
 
+    pub fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        request: Request,
+        error: VenueError,
+    ) {
+        if let Some(run) = self.jobs.get_mut(&request.command)
+            && run.plan.owner() == request.plan.owner()
+        {
+            run.engine_unknown = true;
+        }
+        self.on_sign_failed(cx, credentials, request, error);
+    }
+
     pub fn on_sign_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -893,12 +1025,16 @@ impl Trading {
                 .is_ok()
         {
             self.advance(cx, credentials, request.command);
-        } else if let Some(note) = note {
-            let error = run.writes.failure(error);
-            let _ = cx.fail_plan_noted(&request.plan, error, &note);
         } else {
             let error = run.writes.failure(error);
-            let _ = cx.fail_plan(&request.plan, error);
+            let sealed = if let Some(note) = note {
+                cx.fail_plan_noted(&request.plan, error.clone(), &note)
+            } else {
+                cx.fail_plan(&request.plan, error.clone())
+            };
+            if sealed.is_ok() {
+                run.emit_native_unknown(cx, request.command, &error);
+            }
         }
     }
 
@@ -1346,6 +1482,9 @@ impl Trading {
                 }
             }
             Err(error) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    run.native_unknown.get_or_insert(response.status);
+                }
                 let definite = error.outcome == Some(Outcome::Rejected) && !rate_limited;
                 let error = if run.job.cancelled {
                     run.job.protection_error(error, false)
@@ -1385,7 +1524,9 @@ impl Trading {
             let error = run
                 .writes
                 .failure(run.error.clone().unwrap_or_else(|| unknown(UNKNOWN_WORDS)));
-            let _ = cx.fail_plan(&request.plan, error);
+            if cx.fail_plan(&request.plan, error.clone()).is_ok() {
+                run.emit_native_unknown(cx, request.command, &error);
+            }
             return;
         }
         let settled = if !run.job.continue_on_error

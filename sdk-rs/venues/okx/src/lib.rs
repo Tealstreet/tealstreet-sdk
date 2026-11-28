@@ -8,6 +8,7 @@ mod history;
 mod sign;
 mod socket_codec;
 mod trading;
+mod unknown_telemetry;
 mod wire;
 
 use safe_cex_engine::Level;
@@ -861,6 +862,10 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn unknown_outcome_telemetry() -> Option<safe_cex_engine::UnknownOutcomeTelemetry> {
+        Some(unknown_telemetry::project)
+    }
+
     fn http_release_veto(
         &self,
         store: &safe_cex_engine::Store,

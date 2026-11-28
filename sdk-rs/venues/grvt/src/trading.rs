@@ -11,8 +11,8 @@ use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::write_plan::{Element, ElementResult, LegRole, WritePlan};
 use safe_cex_engine::{
-    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Level,
-    Outcome, Response, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
+    Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -1563,24 +1563,7 @@ impl Grvt {
                             error.venue_message = Some(error.message.clone().into());
                             error.message = UNKNOWN_TEXT.into();
                             error.outcome = Some(Outcome::Unknown);
-                            cx.event(
-                                Level::Warn,
-                                "order.outcome_unknown",
-                                UNKNOWN_TEXT,
-                                vec![
-                                    ("command", plan.command.into()),
-                                    ("elementIndex", report.next_index.to_string().into()),
-                                    (
-                                        "clientOrderId",
-                                        rows[report.next_index]
-                                            .element
-                                            .client_order_id
-                                            .clone()
-                                            .unwrap_or_default()
-                                            .into(),
-                                    ),
-                                ],
-                            );
+                            // The terminal Unknown reports once through the closed projection.
                             ElementResult::Unknown {
                                 error: Box::new(error.clone()),
                             }
@@ -1600,6 +1583,11 @@ impl Grvt {
                     plan.effective || !plan.created.is_empty() || !plan.cancel_attempts.is_empty();
                 if affected && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
                     error.outcome = None;
+                }
+                if error.outcome == Some(Outcome::Unknown) {
+                    // Legacy trade requests have no managed delivery, so the engine hook is inert.
+                    let event = crate::unknown_telemetry::native(plan.command, &plan.created);
+                    cx.event(event.level, event.code, event.message, event.fields);
                 }
                 cx.fail(plan.command, error);
             }
