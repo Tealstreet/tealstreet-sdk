@@ -3494,6 +3494,8 @@ mod tests {
     include!("request_context_planned_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("execution_planned_tests.rs");
+    #[cfg(feature = "serial-plans")]
+    include!("execution_row_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_reconciliation_tests.rs");
     #[cfg(feature = "http-plans")]

@@ -397,6 +397,25 @@ impl ContextRegistry {
         }
         Ok(body)
     }
+
+    /// A row-attributed adoption target's policy, only while none of its
+    /// calls has been issued: adopted rows must all be in its first write.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn unissued_plan_policy(
+        &self,
+        handle: &Plan,
+        now: f64,
+    ) -> Result<PlanPolicy, Error> {
+        let body = self.validate_plan(handle, now)?;
+        if body
+            .entries
+            .iter()
+            .any(|entry| entry.credit != Credit::Unissued || entry.call.is_some())
+        {
+            return Err(Error::State);
+        }
+        Ok(body.policy.clone())
+    }
 }
 
 impl<P> Cx<'_, P> {
@@ -1560,6 +1579,18 @@ impl<P> Cx<'_, P> {
     pub fn done_plan(&mut self, plan: &Plan, result: String) -> Result<(), Error> {
         self.validate_preflight_ready_owner(plan.owner())?;
         self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        // A row-attributed success names each observer's rows (`done_row_plan`).
+        #[cfg(feature = "serial-plans")]
+        if self
+            .io
+            .core
+            .request_contexts
+            .planned_observer_rows(plan)
+            .is_some()
+            && !self.io.core.request_contexts.row_success_staged(plan)
+        {
+            return Err(Error::Invalid);
+        }
         let body = self
             .io
             .core
@@ -2741,15 +2772,58 @@ impl crate::engine::CoreCx<'_> {
                 .ok_or(Error::Capacity)?;
             // One reservation covers the notices and the owner's cleanup.
             prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
-            for _ in 0..observers {
+            // A row-attributed execution seals each observer with its own rows.
+            #[cfg(feature = "serial-plans")]
+            let rows = self
+                .io
+                .core
+                .request_contexts
+                .planned_observer_rows(plan)
+                .filter(|(layout, _)| layout.len() == observers);
+            #[cfg(feature = "serial-plans")]
+            let success = rows
+                .as_ref()
+                .and_then(|_| self.io.core.request_contexts.take_row_success(plan));
+            for index in 0..observers {
+                #[cfg(feature = "serial-plans")]
+                let terminal = match &rows {
+                    Some((layout, total)) => crate::execution_rows::project(
+                        &projection,
+                        success.as_deref(),
+                        layout[index].clone(),
+                        *total,
+                    ),
+                    None => projection.clone(),
+                };
+                #[cfg(not(feature = "serial-plans"))]
+                let terminal = {
+                    let _ = index;
+                    projection.clone()
+                };
                 let mut reports = Vec::new();
-                if projection.is_err() {
+                if let Err(error) = &terminal {
+                    // A sliced terminal keeps only reports naming its own rows.
+                    let own = |report: &String| {
+                        terminal == projection
+                            || error.elements.as_deref().is_some_and(|rows| {
+                                rows.iter().any(|row| match &row.result {
+                                    crate::write_plan::ElementResult::NotSent {
+                                        error: Some(error),
+                                    }
+                                    | crate::write_plan::ElementResult::Unknown { error } => {
+                                        report.contains(error.message.as_str())
+                                            || error.message.contains(report.as_str())
+                                    }
+                                    _ => false,
+                                })
+                            })
+                    };
                     reports
                         .try_reserve_exact(prepared.reports.len())
                         .map_err(|_| Error::Capacity)?;
-                    reports.extend(prepared.reports.iter().cloned());
+                    reports.extend(prepared.reports.iter().filter(|r| own(r)).cloned());
                 }
-                prepared.fanout.push((projection.clone(), reports));
+                prepared.fanout.push((terminal, reports));
             }
         }
         Ok(prepared)

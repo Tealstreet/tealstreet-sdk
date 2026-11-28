@@ -46,6 +46,12 @@ impl Custody {
         self.preflight.owner()
     }
 }
+/// Plain placements of separate commands sharing one `na` order action (AGT-145).
+/// The engine seals each command with its own rows' outcomes.
+pub(super) struct Batch {
+    /// Each command's rows of the action, the founding job's first.
+    pub(super) members: Vec<(CommandId, std::ops::Range<usize>)>,
+}
 
 impl Hyperliquid {
     pub(crate) fn sealed_agent(&self) -> Option<String> {
@@ -265,6 +271,134 @@ impl Hyperliquid {
             self.pump_trades(cx);
         }
     }
+    /// Before a plain placement's first write, adopt the plain placements
+    /// queued directly behind it into the same order action. Only commands
+    /// already waiting join: nothing is held back for later arrivals.
+    pub(super) fn batch_queued_placements(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(job) = self.trading.active.as_ref() else {
+            return;
+        };
+        let Some((class, founder_rows)) = self.batchable(cx, job) else {
+            return;
+        };
+        let custody = job.custody.as_ref().unwrap();
+        if custody.plan.is_some() || custody.intent_expired {
+            return;
+        }
+        // The founder's deadline gates the shared release, so a follower
+        // must not have an earlier one.
+        let deadline = custody.intent_deadline;
+        let mut total = founder_rows;
+        let mut candidates = 0;
+        for queued in &self.trading.queue {
+            let parked = queued.custody.as_ref().is_some_and(|custody| {
+                !custody.ready
+                    && custody.plan.is_none()
+                    && !custody.intent_expired
+                    && custody.intent_deadline >= deadline
+            });
+            match self.batchable(cx, queued) {
+                Some((other, rows)) if parked && other == class && total + rows <= MAX_BATCH => {
+                    total += rows;
+                    candidates += 1;
+                }
+                _ => break,
+            }
+        }
+        if candidates == 0 {
+            return;
+        }
+        let Ok(authority) = self
+            .credentials
+            .select(CredentialRole::Mutation)
+            .map(|(selection, identity)| selection.authority(identity))
+        else {
+            return;
+        };
+        let job = self.trading.active.as_mut().unwrap();
+        let founder = job.command;
+        let custody = job.custody.as_mut().unwrap();
+        // A refusal is atomic: the founder then admits its own Plan as before.
+        let Ok((plan, slot, _, _)) = cx.begin_serial_row_execution(
+            &custody.preflight,
+            call(),
+            SerialPolicy {
+                credential: Some(authority),
+                pacing: None,
+                refusals_complete: false,
+            },
+            &founder.to_string(),
+            founder_rows,
+        ) else {
+            return;
+        };
+        custody.plan = Some(plan.clone());
+        custody.slot = Some(slot);
+        let mut orders = batch_orders(job.steps.pop_front());
+        let mut members = vec![(founder, 0..founder_rows)];
+        for _ in 0..candidates {
+            let follower = self.trading.queue.front().unwrap();
+            let rows = orders.len()..orders.len() + batch_rows(follower);
+            if cx
+                .adopt_planned_observer(
+                    &plan,
+                    &follower.custody.as_ref().unwrap().preflight,
+                    &follower.command.to_string(),
+                    rows.clone(),
+                )
+                .is_err()
+            {
+                break;
+            }
+            let mut follower = self.trading.queue.pop_front().unwrap();
+            // The engine now completes it; its own wait no longer applies.
+            if let Some(timer) = follower
+                .custody
+                .as_mut()
+                .and_then(|custody| custody.intent_timer.take())
+            {
+                cx.clear_timer(timer);
+            }
+            members.push((follower.command, rows));
+            orders.extend(batch_orders(follower.steps.pop_front()));
+        }
+        let job = self.trading.active.as_mut().unwrap();
+        job.steps = VecDeque::from([Step::Places(orders)]);
+        job.journal = write_plan::Journal::new(&job.steps);
+        job.batch = Some(Batch { members });
+    }
+    /// A job whose only remaining write is plain orders on one DEX, each one
+    /// valid `na` row: its DEX class and row count.
+    fn batchable(&self, cx: &Cx<'_, Pending>, job: &Job) -> Option<(u32, usize)> {
+        if job.custody.is_none()
+            || job.batch.is_some()
+            || job.effective
+            || job.amend_source.is_some()
+            || job.protection.is_some()
+            || job.replacement.is_some()
+            || job.replacing_stop.is_some()
+            || job.replacing_order.is_some()
+            || job.steps.len() != 1
+        {
+            return None;
+        }
+        let orders = match job.steps.front()? {
+            Step::Place(order) => std::slice::from_ref(order),
+            Step::Places(orders) => orders.as_slice(),
+            _ => return None,
+        };
+        let class = self.batch_class(orders.first()?)?;
+        // A row that cannot be built would refuse the whole action: it goes alone.
+        orders
+            .iter()
+            .all(|order| {
+                self.batch_class(order) == Some(class)
+                    && self
+                        .wires(cx, order)
+                        .is_ok_and(|(wires, grouping)| grouping == "na" && wires.len() == 1)
+            })
+            .then_some((class, orders.len()))
+    }
     pub(super) fn submit_trade(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -413,7 +547,15 @@ impl Hyperliquid {
     ) {
         let result = result.map_err(|error| {
             let error = job.journal.failure(error);
-            job.journal.report_unknown(cx, job.command, &error.message);
+            match &job.batch {
+                Some(batch) => {
+                    for (member, rows) in &batch.members {
+                        job.journal
+                            .report_unknown_rows(cx, *member, rows.clone(), &error.message);
+                    }
+                }
+                None => job.journal.report_unknown(cx, job.command, &error.message),
+            }
             error
         });
         let custody = job.custody.as_ref().unwrap();
@@ -435,7 +577,10 @@ impl Hyperliquid {
                         let _ = cx.fail_plan(plan, error.venue_error());
                         return;
                     }
-                    let _ = cx.done_plan(plan, data);
+                    let _ = match &job.batch {
+                        Some(_) => cx.done_row_plan(plan, job.journal.row_outcomes()),
+                        None => cx.done_plan(plan, data),
+                    };
                 }
             }
         } else {
@@ -509,7 +654,11 @@ impl Hyperliquid {
             .active
             .as_ref()
             .and_then(|job| job.custody.as_ref())
-            .is_some_and(|c| retired.matches_preflight(&c.preflight))
+            .is_some_and(|c| {
+                retired.matches_preflight(&c.preflight)
+                    // A batch's Plan is execution-owned and retires on its own.
+                    || c.plan.as_ref().is_some_and(|plan| retired.matches_plan(plan))
+            })
         {
             if let Some(timer) = self
                 .trading
@@ -1112,4 +1261,19 @@ pub(super) fn known_protective_refusal(message: &str) -> bool {
     ) || BATCH.rows.iter().any(
         |row| matches!(row.key, safe_cex_engine::classify::Key::Message(text) if text == message),
     )
+}
+
+fn batch_rows(job: &Job) -> usize {
+    match job.steps.front() {
+        Some(Step::Places(orders)) => orders.len(),
+        _ => 1,
+    }
+}
+
+fn batch_orders(step: Option<Step>) -> Vec<PlaceOrderOpts> {
+    match step {
+        Some(Step::Place(order)) => vec![order],
+        Some(Step::Places(orders)) => orders,
+        _ => unreachable!("batchable jobs hold one placement step"),
+    }
 }

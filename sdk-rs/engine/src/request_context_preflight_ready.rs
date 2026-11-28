@@ -23,6 +23,46 @@ impl ContextRegistry {
         self.preflight_state(handle)
             .is_ok_and(|state| matches!(state.activation, Activation::Parked | Activation::Queued))
     }
+    /// A parked write Preflight that holds nothing and has no caller cap: the
+    /// only kind a row-attributed execution may adopt. Returns its write credential.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn adoptable_preflight(
+        &self,
+        handle: &Preflight,
+    ) -> Result<Option<crate::request_context::Credential>, Error> {
+        let state = self.preflight_state(handle)?;
+        if !matches!(state.activation, Activation::Parked | Activation::Queued)
+            || !state.call.is_empty()
+            || state.handoff.is_some()
+            || state.session_parked
+        {
+            return Err(Error::Revoked);
+        }
+        if state.policy.purpose != PreflightPurpose::WriteAfterReads || state.receipt_cap.is_some()
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(state.policy.write_credential.clone())
+    }
+
+    /// Forget an adopted Preflight's park: its queued wake and engine bound.
+    /// The caller clears the returned host timer.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn release_adopted_preflight(
+        &mut self,
+        handle: &Preflight,
+    ) -> Option<crate::TimerId> {
+        let owner = handle.owner();
+        self.preflight_ready
+            .retain(|queued| queued.owner() != owner);
+        #[cfg(feature = "condition-waits")]
+        {
+            self.take_preflight_condition(handle)
+        }
+        #[cfg(not(feature = "condition-waits"))]
+        None
+    }
+
     pub(in crate::engine) fn end_preflight_admission(&mut self) {
         while let Some(handle) = self.preflight_initial.pop() {
             if let Ok(state) = self.preflight_state_mut(&handle)

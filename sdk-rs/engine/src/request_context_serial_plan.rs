@@ -182,6 +182,10 @@ impl crate::engine::IoCore {
     }
 }
 
+/// A serial Plan, its first Slot and, when physical, its execution identity
+/// and founder root.
+pub(in crate::engine) type OwnedSerialAdmission = (Plan, Slot, Option<(u64, Context)>);
+
 impl<P> Cx<'_, P> {
     /// Admit a streamed serial Plan with its first call from a WriteAfterReads
     /// Preflight with a write credential.
@@ -191,6 +195,19 @@ impl<P> Cx<'_, P> {
         first: SerialCall,
         policy: SerialPolicy,
     ) -> Result<(Plan, Slot), Error> {
+        self.admit_serial_plan_owned(preflight, first, policy, false)
+            .map(|(plan, slot, _)| (plan, slot))
+    }
+
+    /// `physical` admits the Plan under a new execution identity, returning
+    /// that identity and the founder's observer root (`admit_plan_root`).
+    pub(in crate::engine) fn admit_serial_plan_owned(
+        &mut self,
+        preflight: &Preflight,
+        first: SerialCall,
+        policy: SerialPolicy,
+        physical: bool,
+    ) -> Result<OwnedSerialAdmission, Error> {
         if self
             .io
             .core
@@ -252,7 +269,7 @@ impl<P> Cx<'_, P> {
             attempts: first.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
         });
-        let (plan, _) = self.core().admit_plan_root(
+        let (plan, moved) = self.core().admit_plan_root(
             preflight,
             PreparedAdmission {
                 schedule,
@@ -270,7 +287,7 @@ impl<P> Cx<'_, P> {
                 #[cfg(feature = "session-bearer")]
                 session: None,
             },
-            false,
+            physical,
             Some(Serial {
                 refusals_complete: policy.refusals_complete,
                 call: first,
@@ -301,7 +318,7 @@ impl<P> Cx<'_, P> {
             .available()
             .next()
             .expect("first serial call");
-        Ok((plan, slot))
+        Ok((plan, slot, moved))
     }
 
     /// In the current call's exact DATA custody: settle it and admit the next

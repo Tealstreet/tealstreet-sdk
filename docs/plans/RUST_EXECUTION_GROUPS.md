@@ -827,3 +827,54 @@ followers receive the Plan result.
 
 The reconciliation REDs (`request_context_reconciliation_tests.rs`,
 `33f92d40391`) stay committed and ignored until their runtime clears API fit.
+
+## Row-attributed planned executions (AGT-145)
+
+This extends the Plan-backed execution above for one consumer: Hyperliquid
+sends separate queued plain-placement commands as one `na` order action. Every
+observer owns declared rows of that one write, so this does not relax the rule
+that arbitrary subsets must not infer leg attribution. The venue declares the
+rows when each observer is admitted, before anything is issued, and the engine
+projects only those rows.
+
+- **Begin:** `Cx::begin_serial_row_execution(preflight, first, policy, key, rows)`
+  is `admit_serial_plan` with a physical owner, the same transaction as
+  `begin_planned_execution`. The founder owns rows `0..rows`. It refuses a
+  receipt-capped founder, and a founder with inherited uncertainty.
+- **Adopt:** `Cx::adopt_planned_observer(plan, follower, key, rows)` runs in the
+  founder's custody, before the Plan's first call is issued. Once a call has
+  been issued it is refused (`State`). The follower's exact Preflight must be
+  parked and hold nothing: no read, handoff, Session park or caller cap. It must
+  be a WriteAfterReads Preflight with the Plan's credential and the founder's
+  intent, and its command may have no writes, pending work or inherited
+  uncertainty. Its rows must directly follow the last declared range.
+- **Adopt, effect:** the Preflight's queued wake and engine bound are dropped,
+  and its command becomes an entry-owned observer root bounded by the Plan
+  root, exactly like the founder. Any refusal changes nothing, and the follower
+  stays parked under its venue's custody. A row-attributed group refuses
+  `join_execution`.
+- **Seal:** this uses the same `prepare_plan_terminal` funnel. Each surviving
+  observer takes `execution_rows::project` of the one terminal over its own
+  rows:
+  - A success needs `Cx::done_row_plan(plan, rows)`, the venue's complete per-row
+    outcomes, each accepted. Plain `done_plan` is refused for a row Plan. Each
+    observer's payload is the JSON array of its own rows' order IDs.
+  - A failure whose error carries a complete element journal is sliced. A row is
+    unsent only if the venue recorded a native refusal (`Rejected`) for it, or if
+    the whole terminal is itself NotSent or Rejected. Any other unsettled row
+    makes that observer Unknown. An observer with placed and refused rows is
+    Unknown and keeps its partial IDs.
+  - A failure without a complete element journal (a lost, short or unparseable
+    reply, or an engine expiry) reaches every observer whole, as an unattributed
+    seal does. A released write therefore stays Unknown for everyone.
+  - Rejection reports reach a sliced observer only when they name its own
+    rows.
+- **Unchanged:** early observer seals (expiry or detach before the Plan seal)
+  keep the non-consuming projection, so they are Unknown while a peer remains.
+  Order-lock marking at release and orphan handling are unchanged.
+
+Controls: `execution_row_tests.rs` (adoption refusals, a late adoption, per-row
+success, one refused row, lost reply) and `execution_rows_tests.rs` (the pure
+projection). Venue adoption is pinned by Hyperliquid's
+`tests/cross_command_batch.rs`.
+

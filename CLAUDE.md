@@ -56,6 +56,11 @@ A reduce-only or `close` order carrying a non-zero stop-loss or take-profit is r
 (`PlaceOrderOpts::reduce_only_with_attached_legs`, AGT-120). The TS reference mirrors it in
 every `placeOrder`/`placeOrders` with `reduceOnlyWithAttachedLegs`.
 
+Hyperliquid plain placement commands already queued behind a placement's write join
+that `na` action as row-attributed execution observers; each is sealed with only its
+own declared rows, and nothing waits for later arrivals. See
+`sdk-rs/venues/hyperliquid/README.md` "Separate commands in one action" (AGT-145).
+
 Lighter placements complete only on venue proof (an `accountOrders` row or a
 failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
 modify, completed only by its executed `tx`. A failed or unproven transaction

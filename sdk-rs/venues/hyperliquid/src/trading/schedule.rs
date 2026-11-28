@@ -64,6 +64,7 @@ impl Hyperliquid {
                 replacing_order: None,
                 stop_note: None,
                 protection: None,
+                batch: None,
             },
         );
     }

@@ -90,6 +90,8 @@ struct Job {
     /// What the failure must add: a Plan's text is projected from its recorded fact.
     stop_note: Option<String>,
     protection: Option<Box<protective::Amend>>,
+    /// Queued plain placements sharing this job's one order action.
+    batch: Option<custody::Batch>,
 }
 enum Step {
     ScheduleCancel {
@@ -613,6 +615,7 @@ impl Hyperliquid {
                 replacing_order,
                 stop_note: None,
                 protection: None,
+                batch: None,
             },
         );
     }
@@ -961,6 +964,7 @@ impl Hyperliquid {
             return;
         }
 
+        self.batch_queued_placements(cx);
         let step = self
             .trading
             .active
@@ -1055,20 +1059,36 @@ impl Hyperliquid {
         command: CommandId,
         effect: &Effect,
     ) {
-        if let Effect::Place(records) = effect {
-            cx.command_progress(
-                command,
-                records
-                    .iter()
-                    .filter_map(|record| {
-                        Some(OrderIdentityReceipt {
-                            symbol: record.order.symbol.clone(),
-                            kind: OrderIdentityKind::ClientOrderId,
-                            identity: record.order.client_order_id.clone()?,
-                        })
+        let Effect::Place(records) = effect else {
+            return;
+        };
+        let receipts = |records: &[Placement]| {
+            records
+                .iter()
+                .filter_map(|record| {
+                    Some(OrderIdentityReceipt {
+                        symbol: record.order.symbol.clone(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: record.order.client_order_id.clone()?,
                     })
-                    .collect(),
-            );
+                })
+                .collect()
+        };
+        match self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.batch.as_ref())
+        {
+            // Each batched command learns only its own orders' identities.
+            Some(batch) => {
+                for (member, rows) in &batch.members {
+                    if let Some(own) = records.get(rows.clone()) {
+                        cx.command_progress(*member, receipts(own));
+                    }
+                }
+            }
+            None => cx.command_progress(command, receipts(records)),
         }
     }
     fn prepare_write(

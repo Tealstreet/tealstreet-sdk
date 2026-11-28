@@ -49,6 +49,7 @@ impl Venue for RetirementProbe {
             replacing_order: None,
             stop_note: None,
             protection: None,
+            batch: None,
         };
         if self.0.trading.active.is_none() {
             self.0.trading.active = Some(job);

@@ -8,6 +8,7 @@ fn member(command: CommandId, generation: u64, deadline: f64, key: &str) -> Memb
         operation: Operation::Read,
         deadline,
         key: key.into(),
+        rows: None,
     }
 }
 

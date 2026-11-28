@@ -11,6 +11,10 @@ pub(super) struct Executions {
     observers: std::collections::HashMap<CommandId, Observer>,
     /// Background read Context rooting each background execution.
     backgrounds: crate::IdMap<u64, Context>,
+    /// A row-attributed Plan's per-row success, staged by `done_row_plan`
+    /// for its own seal only.
+    #[cfg(feature = "serial-plans")]
+    row_success: Option<(u64, Vec<crate::write_plan::ElementOutcome>)>,
 }
 
 fn root_identity(context: &Context) -> Option<u64> {
@@ -131,6 +135,7 @@ impl ContextRegistry {
             operation: root.operation(),
             deadline: root.deadline(),
             key: key.to_owned(),
+            rows: None,
         })
     }
 
@@ -516,6 +521,7 @@ impl ContextRegistry {
         policy: &crate::request_context::PlanPolicy,
         founder: &Context,
         key: &str,
+        rows: Option<std::ops::Range<usize>>,
         now: f64,
     ) -> Result<Context, Error> {
         let Owner::Execution {
@@ -542,6 +548,7 @@ impl ContextRegistry {
             operation: founder.operation(),
             deadline: founder.deadline(),
             key: key.to_owned(),
+            rows,
         };
         let (execution, observer) = self.executions.groups.begin(
             Root::Planned {
@@ -686,6 +693,177 @@ impl ContextRegistry {
         self.executions.roots.len()
     }
 
+    /// Every check adopting `follower` into a row-attributed planned
+    /// execution makes, without state: its member and the Plan's policy.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn adoptable_observer(
+        &self,
+        plan: &crate::request_context::Plan,
+        follower: &crate::request_context::Preflight,
+        key: &str,
+        rows: std::ops::Range<usize>,
+        now: f64,
+    ) -> Result<(Execution, Member, crate::request_context::PlanPolicy), Error> {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return Err(Error::Invalid);
+        };
+        let execution = *self.executions.roots.get(&identity).ok_or(Error::Revoked)?;
+        let policy = self.unissued_plan_policy(plan, now)?;
+        if self.adoptable_preflight(follower)? != policy.credential {
+            return Err(Error::Invalid);
+        }
+        let Owner::Command { id, generation } = follower.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
+        let physical = self.physical.get(&identity).ok_or(Error::Revoked)?;
+        // A follower carries no earlier evidence: its projection is its rows alone.
+        if owner.inherited_uncertain
+            || owner.writes.is_some()
+            || owner.pending > 0
+            || owner.deliveries > 0
+            || owner.waits > 0
+        {
+            return Err(Error::State);
+        }
+        if owner.intent != physical.intent {
+            return Err(Error::Invalid);
+        }
+        if self
+            .contexts
+            .len()
+            .checked_add(self.reserved_context_count())
+            .and_then(|count| count.checked_add(1))
+            .is_none_or(|count| count > CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
+        let member = Member {
+            command: id,
+            generation,
+            operation: policy.operation,
+            deadline: plan.deadline(),
+            key: key.to_owned(),
+            rows: Some(rows),
+        };
+        self.executions.groups.adoptable(execution, &member, now)?;
+        Ok((execution, member, policy))
+    }
+
+    /// Move `follower`'s exact parked Preflight into an entry-owned observer
+    /// root bounded by the Plan root, as the founder's is. Returns that root
+    /// and the Preflight's cleared engine bound timer.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn adopt_observer(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        follower: &crate::request_context::Preflight,
+        key: &str,
+        rows: std::ops::Range<usize>,
+        leg: u64,
+        now: f64,
+    ) -> Result<(Context, Option<crate::TimerId>), Error> {
+        let (execution, member, policy) =
+            self.adoptable_observer(plan, follower, key, rows, now)?;
+        let mut root = Context::new(
+            follower.owner(),
+            leg,
+            policy.operation,
+            policy.credential,
+            now,
+            plan.deadline(),
+            policy.pacing,
+        )?
+        .with_retry(policy.retry)?;
+        self.contexts.try_reserve(1).map_err(|_| Error::Capacity)?;
+        self.executions
+            .observers
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
+        root.bind_issuer(&self.issuer);
+        let timer = self.release_adopted_preflight(follower);
+        let command = member.command;
+        let observer = self
+            .executions
+            .groups
+            .adopt(execution, member, now)
+            .expect("adoptable above");
+        let owner = self.commands.get_mut(&command).expect("adoptable above");
+        owner.phase = CommandPhase::Context {
+            root: root.clone(),
+            entry_owned: true,
+            tracked: false,
+            expired: false,
+        };
+        owner.last_deadline = plan.deadline();
+        self.contexts.insert(root.leg(), root.clone());
+        self.executions.observers.insert(command, observer);
+        Ok((root, timer))
+    }
+
+    /// A row-attributed physical Plan's surviving observers' rows, in seal
+    /// order, and the total rows of its one write.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn planned_observer_rows(
+        &self,
+        plan: &crate::request_context::Plan,
+    ) -> Option<(Vec<std::ops::Range<usize>>, usize)> {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return None;
+        };
+        let execution = *self.executions.roots.get(&identity)?;
+        Some((
+            self.executions.groups.observer_rows(execution)?,
+            self.executions.groups.declared_rows(execution)?,
+        ))
+    }
+
+    /// An earlier attempt of this command's intent may have reached the venue.
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn inherits_uncertainty(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| owner.inherited_uncertain)
+    }
+
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn stage_row_success(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        rows: Option<Vec<crate::write_plan::ElementOutcome>>,
+    ) {
+        self.executions.row_success = match (plan.owner(), rows) {
+            (Owner::Execution { generation }, Some(rows)) => Some((generation, rows)),
+            _ => None,
+        };
+    }
+
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn row_success_staged(
+        &self,
+        plan: &crate::request_context::Plan,
+    ) -> bool {
+        matches!((plan.owner(), &self.executions.row_success),
+            (Owner::Execution { generation }, Some((staged, _))) if generation == *staged)
+    }
+
+    #[cfg(feature = "serial-plans")]
+    pub(in crate::engine) fn take_row_success(
+        &mut self,
+        plan: &crate::request_context::Plan,
+    ) -> Option<Vec<crate::write_plan::ElementOutcome>> {
+        if !self.row_success_staged(plan) {
+            return None;
+        }
+        self.executions.row_success.take().map(|(_, rows)| rows)
+    }
+
     pub(super) fn forget_observer(&mut self, command: CommandId) {
         self.executions.observers.remove(&command);
     }
@@ -711,6 +889,7 @@ mod tests {
             operation: Operation::Read,
             deadline,
             key: String::new(),
+            rows: None,
         }
     }
 
