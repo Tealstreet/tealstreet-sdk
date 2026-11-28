@@ -1479,15 +1479,19 @@ impl BybitLinear {
             self.public.tickers_capped = true;
             // Every Hyro catalogue exceeds its 32-topic connection, so the cap
             // is expected there rather than a warning.
-            cx.notice(
-                if self.variant.is_hyro() {
-                    Level::Info
-                } else {
-                    Level::Warn
-                },
-                code::SUBSCRIPTION_REJECTED,
-                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
-            );
+            if self.variant.is_hyro() {
+                cx.notice(
+                    Level::Info,
+                    code::SUBSCRIPTION_REJECTED,
+                    "HyroTrader streams at most 32 public topics per connection; tickers for symbols not in use are not streamed",
+                );
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+                );
+            }
         }
         if let Err(error) = cx.set_socket_interests(feed, interests) {
             self.socket_failed(cx, error);

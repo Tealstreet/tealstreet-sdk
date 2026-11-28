@@ -671,7 +671,7 @@ fn hyro_public_feed_never_asks_one_connection_for_more_than_32_topics() {
     let notices: Vec<_> = h
         .logs
         .iter()
-        .filter(|m| m.contains("exceed the socket interest limit"))
+        .filter(|m| m.contains("at most 32 public topics"))
         .collect();
     assert_eq!(notices.len(), 1, "{:?}", h.logs);
 }
