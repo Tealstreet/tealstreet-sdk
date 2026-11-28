@@ -115,6 +115,20 @@ readiness has a 30 s cap inside the original deadline. Timeout errors name the
 class, budget and elapsed milliseconds. Transport recovery never replays a sent
 HTTP write.
 
+**Venue IP bans are shared by every account in the process**
+(`transport/egress_bans.rs`, TEALSTREET-NEXT-EH0). A direct send's 418, or a 429
+carrying Binance's IP-weight code `-1003`, records its egress: the venue host and
+the proxy host it went through. The ban ends at the body's `banned until <ms>`,
+else at `Retry-After`, else after two minutes, capped at a day. A `-1015` 429 is
+one key's order limit and records nothing. While a ban holds, a GET to that egress
+is answered here with the venue's own status and body, a live `retry-after` and
+`x-tealstreet-egress-hold: 1`, so the venue's rate-limit handling runs unchanged.
+Writes always go. This machine's own address holds on any ban. A proxy pool holds
+only when at least three of its named IPs refuse at once, and then only until the
+first of them frees up: its load balancer picks a node per request, and each fleet
+proxy holds its own refused IP. A pool refusal that names no IP is not
+attributable and is dropped. Tunnelled sends are left to the tunnel's own policy.
+
 Private socket relays hide tunnel authentication and report open only after the
 upstream is ready, under a 15-second deadline. Per-feed silent connections
 advance the sticky candidate chain, matching the SDK's `WsDirectFallback`.
@@ -221,9 +235,7 @@ Connect to `/accounts/<id>` with `Authorization: Bearer <account-token>`. Browse
 clients, whose WebSocket API cannot set that header, send subprotocols:
 
 ```ts
-const ws = new WebSocket(url + '/accounts/binance', [
-  'safe-cex-frame.v1', 'bearer.' + accountToken,
-]);
+const ws = new WebSocket(url + '/accounts/binance', ['safe-cex-frame.v1', 'bearer.' + accountToken]);
 ws.binaryType = 'arraybuffer';
 ```
 
