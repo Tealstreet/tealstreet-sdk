@@ -977,49 +977,117 @@ async fn hyrotrader_hosted_submit_omits_unsupported_caller_id() {
     hosted_submit_without_caller_id("hyrotrader").await;
 }
 
+/// Top-level keys a typed placement's order audit line may carry; anything
+/// else means a field escaped the audit allowlist.
+const PLACEMENT_AUDIT_KEYS: [&str; 12] = [
+    "level",
+    "service",
+    "msg",
+    "user",
+    "account",
+    "venue",
+    "origin",
+    "op",
+    "orders",
+    "result",
+    "result_shape",
+    "stages_us",
+];
+
+/// Submits one placement, settles it `placed` or `unknown`, and returns its
+/// single order audit line after checking its stages and allowlisted keys.
+async fn audited_submit(venue: &str, unknown: bool) -> Value {
+    let registry = crate::accounts::tests::registry();
+    let tape = Tape {
+        hold: unknown,
+        ..Default::default()
+    };
+    let account = delegated_account(&registry, "A", venue, tape.clone());
+    let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+    crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+    submit(&mut session, 0, None).await;
+    if unknown {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while tape.waiting.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tape.finish_unknown();
+    }
+    let outcome = order_frame(&mut sent, "order.outcome").await;
+    assert_eq!(
+        outcome["d"]["outcome"],
+        if unknown { "unknown" } else { "placed" }
+    );
+    let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
+    let audits: Vec<Value> = lines
+        .iter()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["msg"] == "order audit")
+        .collect();
+    assert_eq!(audits.len(), 1, "one audit line per settled command");
+    let line = audits[0].clone();
+    for key in line.as_object().unwrap().keys() {
+        assert!(
+            PLACEMENT_AUDIT_KEYS.contains(&key.as_str()),
+            "{key} is not allowlisted: {line}"
+        );
+    }
+    let text = line.to_string();
+    for frame_only in [
+        "intentId",
+        "fingerprint",
+        "ageMs",
+        "params",
+        "synthetic-key",
+    ] {
+        assert!(!text.contains(frame_only), "{frame_only} in audit: {text}");
+    }
+    let stages = line["stages_us"]
+        .as_object()
+        .expect("settled command carries stage offsets");
+    for stage in stages.keys() {
+        assert!(
+            crate::audit::STAGES.contains(&stage.as_str()),
+            "{stage} is not a stage: {stages:?}"
+        );
+    }
+    for stage in ["received", "admitted", "queued", "sent", "replied"] {
+        assert!(stages[stage].is_u64(), "{stage} stamped: {stages:?}");
+    }
+    assert_eq!(stages["received"], 0);
+    let offsets: Vec<u64> = crate::audit::STAGES
+        .iter()
+        .filter_map(|stage| stages.get(*stage).map(|offset| offset.as_u64().unwrap()))
+        .collect();
+    assert!(
+        offsets.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{offsets:?}"
+    );
+    session.close();
+    registry.dispose(&account, Disposal::PageDisposed);
+    line
+}
+
 #[tokio::test]
 async fn order_frames_audit_line_carries_monotonic_stage_offsets() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let registry = crate::accounts::tests::registry();
-            let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "bybit", tape.clone());
-            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-            crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
-            submit(&mut session, 0, None).await;
-            let outcome = order_frame(&mut sent, "order.outcome").await;
-            assert_eq!(outcome["d"]["outcome"], "placed");
-            let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
-            let audits: Vec<Value> = lines
-                .iter()
-                .map(|line| serde_json::from_str::<Value>(line).unwrap())
-                .filter(|line| line["msg"] == "order audit")
-                .collect();
-            assert_eq!(audits.len(), 1, "one audit line per settled command");
-            let stages = audits[0]["stages_us"]
-                .as_object()
-                .expect("settled command carries stage offsets");
-            for stage in [
-                "received",
-                "admitted",
-                "queued",
-                "sent",
-                "responded",
-                "replied",
-            ] {
-                assert!(stages[stage].is_u64(), "{stage} stamped: {stages:?}");
-            }
-            assert_eq!(stages["received"], 0);
-            let offsets: Vec<u64> = crate::audit::STAGES
-                .iter()
-                .map(|stage| stages[*stage].as_u64().unwrap())
-                .collect();
-            assert!(
-                offsets.windows(2).all(|pair| pair[0] <= pair[1]),
-                "{offsets:?}"
-            );
-            session.close();
-            registry.dispose(&account, Disposal::PageDisposed);
+            let line = audited_submit("bybit", false).await;
+            assert!(line["stages_us"]["responded"].is_u64(), "{line}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn order_frames_unknown_audit_line_carries_monotonic_stage_offsets() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // The write reached I/O before its answer proved unusable, so `sent`
+            // is required; `responded`, when stamped, is still ordered.
+            audited_submit("bybit", true).await;
         })
         .await;
 }
