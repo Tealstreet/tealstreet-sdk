@@ -296,3 +296,55 @@ describe('a start, resume or pause', () => {
     expect(listeners.size).toBe(0);
   });
 });
+
+describe('chaser controls across an owner replacement', () => {
+  it.each(['resend', 'start confirmation', 'missing completion', 'late outcome'] as const)(
+    'retires A with a pending %s while B controls the same symbol and chase id',
+    (phase) => {
+      const a = setup();
+      a.update({ activeChasers: [chaser('same-id')] });
+      if (phase === 'missing completion') a.update({ activeChasers: [] });
+      else if (phase === 'start confirmation') {
+        a.watch.observe('chaser:start', { symbol: 'BTCUSDT', side: OrderSide.Buy });
+      } else {
+        a.watch.observe('chaser:terminate', 'same-id');
+        if (phase === 'late outcome') {
+          vi.advanceTimersByTime(60_000);
+          a.update({ activeChasers: [] });
+        }
+      }
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      a.watch.dispose();
+      const aSent = [...a.sent];
+      const aTold = [...a.told];
+      const b = setup();
+      try {
+        b.update({ activeChasers: [chaser('same-id')] });
+        // No operation from A is replayed into the replacement account.
+        vi.advanceTimersByTime(120_000);
+        expect(a.sent).toEqual(aSent);
+        expect(a.told).toEqual(aTold);
+        expect(a.listeners.size).toBe(0);
+        expect(b.sent).toEqual([]);
+        expect(b.told).toEqual([]);
+        expect(b.rows.activeChasers).toEqual([chaser('same-id')]);
+
+        // B's own stop still retries and confirms normally after A retires.
+        b.watch.observe('chaser:terminate', 'same-id');
+        vi.advanceTimersByTime(15_000);
+        expect(b.sent).toEqual(Array.from({ length: 3 }, () => ['chaser:terminate', 'same-id']));
+        expect(b.told).toEqual(['Still trying to stop Chase.']);
+        b.update({ activeChasers: [] });
+        b.watch.chaseCompleted({ id: 'same-id', symbol: 'BTCUSDT', size: 1, filled: 0.4 });
+        vi.advanceTimersByTime(120_000);
+        expect(b.told.at(-1)).toBe('Chase on BTCUSDT stopped after filling 0.4 of 1.');
+        expect(b.sent).toHaveLength(3);
+        expect(a.sent).toEqual(aSent);
+        expect(a.told).toEqual(aTold);
+      } finally {
+        b.watch.dispose();
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+});
