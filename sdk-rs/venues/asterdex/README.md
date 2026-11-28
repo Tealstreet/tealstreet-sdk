@@ -71,10 +71,11 @@ A V3 account signature refusal terminates unfinished credential validation.
 Aster removed the V1 futures API from its docs on 2026-11-02 and now answers the
 V1 order routes (`openOrders`, GET/POST/DELETE `order`, `batchOrders`,
 `allOpenOrders`) with an HTML 404, while V1 `account`, `positionRisk` and
-settings routes still answer. An envelope-less 404 on a V1 startup read
-therefore reports `AuthInvalid` at once, naming the V3 API wallet key as the
-replacement, instead of retrying until the host's start deadline (Sentry
-TEALSTREET-NEXT-C0W/EGX). V3 404s keep their ordinary retry.
+settings routes still answer. An envelope-less 404 on the V1 `openOrders`
+startup read therefore reports `AuthInvalid` at once, naming the V3 API wallet
+key as the replacement, instead of retrying until the host's start deadline
+(Sentry TEALSTREET-NEXT-C0W/EGX). A 404 on any other V1 read, whose route
+still serves, and every V3 404 keep their ordinary retry.
 Known signature refusals (`-1022`, or `-1000` with `Signature check failed`)
 report `Aster API key signature rejected: re-create the key (V3)`. Position-mode
 refusal is terminal for that account configuration: no retry timer is armed,

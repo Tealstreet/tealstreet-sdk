@@ -904,15 +904,13 @@ impl AsterDex {
                         }
                         Some(SIGNATURE_REJECTED.into())
                     } else {
-                        // Aster removed its V1 order routes (HTML 404, no envelope): this key
-                        // can never load, so end startup with the cause rather than retry.
+                        // Aster removed only its V1 order routes (HTML 404, no envelope): the
+                        // orders read can never load, so end startup with the cause. V1 balance,
+                        // position and settings routes still serve, so their 404s keep retrying.
                         if code == 0
                             && r.status == 404
                             && self.version == crate::sign::Version::V1
-                            && !matches!(
-                                request,
-                                Request::ListenKey { .. } | Request::Keepalive { .. }
-                            )
+                            && matches!(request, Request::Orders { .. })
                         {
                             cx.startup_read_refused(
                                 &safe_cex_engine::VenueError::new(V1_ROUTE_RETIRED)
