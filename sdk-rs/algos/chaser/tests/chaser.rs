@@ -39,6 +39,8 @@ struct FakePort {
     cancel_answer_ms: Cell<u64>,
     /// Every placement answers, and its row lands, only after this long.
     place_answer_ms: Cell<u64>,
+    /// Final REST fills can remain in flight while another account starts.
+    query_answer_ms: Cell<u64>,
     /// A placement's row is not in the store when it answers.
     rows_lag: Cell<bool>,
     /// Cancels answer done but leave the row as it was: Bybit 110001 for an
@@ -73,6 +75,8 @@ impl AccountPort for FakePort {
             self.cancel_answer_ms.get()
         } else if matches!(command, Command::PlaceOrders { .. }) {
             self.place_answer_ms.get()
+        } else if matches!(command, Command::Query { .. }) {
+            self.query_answer_ms.get()
         } else {
             0
         };
@@ -114,6 +118,7 @@ impl FakePort {
             unanswered: RefCell::new(None),
             cancel_answer_ms: Cell::new(0),
             place_answer_ms: Cell::new(0),
+            query_answer_ms: Cell::new(0),
             rows_lag: Cell::new(false),
             cancels_find_nothing: Cell::new(false),
         })
@@ -2797,6 +2802,119 @@ async fn shutdown_then_dispose_leaves_no_live_order() {
         assert_eq!(cancelled, vec!["o1".to_string(), "o2".to_string()]);
         assert_eq!(port.completes().len(), 2);
         assert!(factory.book().active_chasers().is_empty());
+    })
+    .await;
+}
+
+/// A and B deliberately reuse the venue, symbol, client id and native order id.
+/// Their immutable AccountPorts are the owner boundary, not those display ids.
+#[tokio::test(start_paused = true)]
+async fn two_owner_switch_during_placement_keeps_retiring_cancels_on_a() {
+    local(async {
+        let a = FakePort::new("bybit");
+        a.accept_placements();
+        a.place_answer_ms.set(2_000);
+        let (a_factory, a_cx) = start(&a, BUY_ONE);
+        settle(100).await;
+        assert_eq!(a.placements().len(), 1);
+        assert!(a.completes().is_empty(), "A's placement has not answered");
+        let retiring = a_factory.book().clone();
+        let retirement = tokio::task::spawn_local(async move {
+            retiring.shutdown("owner A logged out").await;
+        });
+        settle(100).await;
+        assert!(!retirement.is_finished());
+
+        let b = FakePort::new("bybit");
+        b.accept_placements();
+        let (b_factory, b_cx) = start(&b, BUY_ONE);
+        settle(1_100).await;
+        assert_eq!(b.placements(), vec![(100.0, 1.0)]);
+        let b_id = b_factory.book().active_chasers()[0].id.clone();
+        let b_events = b.emitted.borrow().clone();
+        settle(2_000).await;
+        retirement.await.unwrap();
+        a_cx.scope.dispose();
+
+        assert_eq!(a.placements().len(), 1, "A must never replace after logout");
+        assert_eq!(a.cancels(), vec!["o1".to_string()]);
+        assert_eq!(a.completes().len(), 1);
+        assert!(a_factory.book().active_chasers().is_empty());
+        assert!(b.cancels().is_empty(), "even B's o1 must stay untouched");
+        assert_eq!(
+            *b.emitted.borrow(),
+            b_events,
+            "no A completion or notice on B"
+        );
+        assert_eq!(b_factory.book().active_chasers().len(), 1);
+        assert_eq!(b_factory.book().active_chasers()[0].id, b_id);
+        assert!(b.errors().is_empty());
+
+        // The replacement account can still reprice its own order.
+        b.set_ticker(101.0, 101.5);
+        settle(1_200).await;
+        assert_eq!(b.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
+        assert_eq!(b.cancels(), vec!["o1".to_string()]);
+        assert_eq!(a.placements().len(), 1);
+        assert_eq!(a.cancels(), vec!["o1".to_string()]);
+        b_factory.book().shutdown("test complete").await;
+        b_cx.scope.dispose();
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_owner_switch_during_final_fills_keeps_a_result_off_b() {
+    local(async {
+        let a = FakePort::new("hyperliquid");
+        accept_with_fills(&a, Ok(r#"[{"orderId":"o1","qty":0.4}]"#));
+        let (a_factory, a_cx) = start(&a, BUY_ONE);
+        settle(1_100).await;
+        a.query_answer_ms.set(2_000);
+        let retiring = a_factory.book().clone();
+        let retirement = tokio::task::spawn_local(async move {
+            retiring.shutdown("owner A logged out").await;
+        });
+        settle(100).await;
+        assert!(
+            a.commands
+                .borrow()
+                .iter()
+                .any(|command| matches!(command, Command::Query { .. }))
+        );
+        assert!(a.completes().is_empty(), "final fills are still in flight");
+        assert!(!retirement.is_finished());
+
+        let b = FakePort::new("hyperliquid");
+        accept_with_fills(&b, Ok("[]"));
+        let (b_factory, b_cx) = start(&b, BUY_ONE);
+        settle(1_100).await;
+        let b_events = b.emitted.borrow().clone();
+        let b_id = b_factory.book().active_chasers()[0].id.clone();
+        settle(3_000).await;
+        retirement.await.unwrap();
+        a_cx.scope.dispose();
+
+        assert_eq!(a.completes().len(), 1);
+        assert_eq!(a.completes()[0]["filled"], 0.4);
+        assert_eq!(a.cancels(), vec!["o1".to_string()]);
+        assert!(a_factory.book().active_chasers().is_empty());
+        assert_eq!(b.placements(), vec![(100.0, 1.0)]);
+        assert!(b.cancels().is_empty());
+        assert_eq!(
+            *b.emitted.borrow(),
+            b_events,
+            "A's fill/end stays on A's port"
+        );
+        assert_eq!(b_factory.book().active_chasers().len(), 1);
+        assert_eq!(b_factory.book().active_chasers()[0].id, b_id);
+        assert!(b.errors().is_empty());
+
+        b_factory.book().shutdown("B's own stop").await;
+        assert_eq!(b.completes().len(), 1);
+        assert_eq!(b.completes()[0]["filled"], 0.0);
+        assert_eq!(a.completes().len(), 1);
+        b_cx.scope.dispose();
     })
     .await;
 }

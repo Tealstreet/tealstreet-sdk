@@ -10,7 +10,7 @@ use super::{
     Call, Job, LocalWrite, Planned, check_client_order_ids, describe, is_virtual, mark_canceled,
     not_sent, trade_command_id, validate_stop_triggers,
 };
-use crate::sign::{self, Query};
+use crate::sign::Query;
 use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
     self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
@@ -752,8 +752,7 @@ impl BybitLinear {
             url.push('?');
             url.push_str(&payload);
         }
-        let step = sign::Http::new(identity.clone(), payload.clone(), self.recv_window)
-            .with_header_policy(self.signing_policy.header_policy());
+        let step = self.http_signer(identity.clone(), payload.clone());
         let body = (method != Method::Get).then(|| payload.clone());
         let pending = Pending {
             category: self.category,

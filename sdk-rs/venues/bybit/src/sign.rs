@@ -30,6 +30,7 @@ pub(crate) struct Http {
     window: u32,
     stamp: String,
     header_policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
+    broker_referer: bool,
 }
 impl Http {
     pub fn new(credentials: Credentials, payload: String, window: Option<u32>) -> Self {
@@ -39,7 +40,13 @@ impl Http {
             window: window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS),
             stamp: String::new(),
             header_policy: Default::default(),
+            broker_referer: true,
         }
+    }
+    /// Signs without Bybit's broker attribution header.
+    pub fn without_broker_referer(mut self) -> Self {
+        self.broker_referer = false;
+        self
     }
 }
 impl Http {
@@ -88,9 +95,12 @@ impl SignStep for Http {
             ("X-BAPI-TIMESTAMP", self.stamp.clone()),
             ("X-BAPI-RECV-WINDOW", self.window.to_string()),
             ("X-BAPI-SIGN", safe_cex_crypto::hex(mac)),
-            ("X-Referer", BROKER_ID.into()),
-            ("Content-Type", "application/json".into()),
         ];
+        if self.broker_referer {
+            http.headers.push(("X-Referer", BROKER_ID.into()));
+        }
+        http.headers
+            .push(("Content-Type", "application/json".into()));
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {

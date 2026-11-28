@@ -17,7 +17,7 @@ use safe_cex_engine::engine::{Command, CommandId};
 use safe_cex_engine::error::VenueError;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::LocalSet;
 
 #[derive(Default)]
@@ -29,6 +29,7 @@ struct Port {
     fail: Cell<bool>,
     fail_outcome: Cell<Option<safe_cex_engine::error::Outcome>>,
     answer_ms: Cell<u64>,
+    held_answer: RefCell<Option<oneshot::Receiver<()>>>,
 }
 
 impl AccountPort for Port {
@@ -47,7 +48,11 @@ impl AccountPort for Port {
         let fail = self.fail.get();
         let outcome = self.fail_outcome.get();
         let answer_ms = self.answer_ms.get();
+        let held_answer = self.held_answer.borrow_mut().take();
         Box::pin(async move {
+            if let Some(answer) = held_answer {
+                answer.await.unwrap();
+            }
             tokio::time::sleep(Duration::from_millis(answer_ms)).await;
             if fail {
                 Err(VenueError {
@@ -73,6 +78,8 @@ impl AccountPort for Port {
 #[derive(Default)]
 struct Chasers {
     started: RefCell<Vec<ChaserRequest>>,
+    progress: Cell<Option<ChaserProgress>>,
+    removed: RefCell<Vec<String>>,
 }
 
 impl TwapChasers for Chasers {
@@ -82,9 +89,39 @@ impl TwapChasers for Chasers {
         Ok(())
     }
     fn progress(&self, _chaser_id: &str) -> Option<ChaserProgress> {
-        None
+        self.progress.get()
     }
-    fn remove(&self, _cx: &AlgoCx, _chaser_id: &str) {}
+    fn remove(&self, _cx: &AlgoCx, chaser_id: &str) {
+        self.removed.borrow_mut().push(chaser_id.to_owned());
+    }
+}
+
+struct Owner {
+    port: Rc<Port>,
+    cx: AlgoCx,
+    factory: TwapFactory,
+}
+
+impl Owner {
+    fn new(chasers: Rc<Chasers>) -> Self {
+        let port = Rc::new(Port::default());
+        let cx = AlgoCx::new(port.clone(), Scope::new());
+        // Different logins can reuse the same account name.
+        let factory = TwapFactory::new("a", cx.clone(), chasers);
+        Self { port, cx, factory }
+    }
+
+    fn start(&self, extra: Value) {
+        self.factory
+            .handle("twap:start", &twap_options(extra), &self.cx)
+            .unwrap();
+    }
+
+    fn hold_next_answer(&self) -> oneshot::Sender<()> {
+        let (answer, pending) = oneshot::channel();
+        *self.port.held_answer.borrow_mut() = Some(pending);
+        answer
+    }
 }
 
 fn twap_options(extra: Value) -> String {
@@ -666,6 +703,154 @@ async fn runs_slices_on_the_interval_and_reports_state() {
             let emits = port.emits.borrow();
             let (op, last) = emits.last().unwrap();
             assert_eq!((op.as_str(), last), ("twap:stateUpdate", &json!({})));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn owner_switch_during_slice_timer_drops_the_old_schedule() {
+    LocalSet::new()
+        .run_until(async {
+            let old = Owner::new(Rc::new(Chasers::default()));
+            old.start(json!({}));
+            settle().await;
+            assert_eq!(placed_amounts(&old.port), [0.5]);
+            assert_eq!(old.factory.active_twaps("a")[0]["ordersExecuted"], 1);
+
+            tokio::time::advance(Duration::from_secs(10)).await;
+            settle().await;
+            let current = Owner::new(Rc::new(Chasers::default()));
+            old.cx.scope.dispose();
+            current.start(json!({ "size": 4, "duration": 2 }));
+            settle().await;
+            let old_state = old.factory.active_twaps("a");
+            let old_emits = old.port.emits.borrow().clone();
+            let current_emits = current.port.emits.borrow().clone();
+            assert_eq!(placed_amounts(&current.port), [2.0]);
+
+            tokio::time::advance(Duration::from_secs(21)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&old.port), [0.5]);
+            assert_eq!(old.factory.active_twaps("a"), old_state);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(placed_amounts(&current.port), [2.0]);
+            assert_eq!(*current.port.emits.borrow(), current_emits);
+
+            tokio::time::advance(Duration::from_secs(40)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&old.port), [0.5]);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(placed_amounts(&current.port), [2.0, 2.0]);
+            assert!(current.factory.active_twaps("a").is_empty());
+            current.cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn owner_switch_during_placement_drops_the_old_completion() {
+    LocalSet::new()
+        .run_until(async {
+            let old = Owner::new(Rc::new(Chasers::default()));
+            let old_answer = old.hold_next_answer();
+            old.start(json!({}));
+            settle().await;
+            assert_eq!(placed_amounts(&old.port), [0.5]);
+            assert_eq!(old.factory.pending_placements(), 1);
+            assert_eq!(old.factory.active_twaps("a")[0]["ordersExecuted"], 0);
+
+            let current = Owner::new(Rc::new(Chasers::default()));
+            let current_answer = current.hold_next_answer();
+            current.start(json!({ "size": 4 }));
+            settle().await;
+            assert_eq!(current.factory.pending_placements(), 1);
+            let old_state = old.factory.active_twaps("a");
+            let old_emits = old.port.emits.borrow().clone();
+            let current_state = current.factory.active_twaps("a");
+            let current_emits = current.port.emits.borrow().clone();
+
+            // Queue a late reply before the executor polls the aborted task.
+            old.cx.scope.dispose();
+            old_answer.send(()).unwrap();
+            settle().await;
+            assert_eq!(old.factory.active_twaps("a"), old_state);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(current.factory.active_twaps("a"), current_state);
+            assert_eq!(*current.port.emits.borrow(), current_emits);
+            assert_eq!(current.factory.pending_placements(), 1);
+            assert_eq!(placed_amounts(&current.port), [2.0]);
+
+            current_answer.send(()).unwrap();
+            settle().await;
+            assert_eq!(current.factory.pending_placements(), 0);
+            assert_eq!(current.factory.active_twaps("a")[0]["ordersExecuted"], 1);
+            tokio::time::advance(Duration::from_secs(31)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&old.port), [0.5]);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(placed_amounts(&current.port), [2.0, 2.0]);
+            assert!(current.factory.active_twaps("a").is_empty());
+            current.cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn owner_switch_during_timeout_cancel_drops_the_old_market_remainder() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let chasers = Rc::new(Chasers::default());
+            chasers.progress.set(Some(ChaserProgress {
+                remaining_size: 0.5,
+                ..ChaserProgress::default()
+            }));
+            let old = Owner::new(chasers.clone());
+            old.start(json!({
+                "useChaserOrders": true, "timeoutPct": 50, "timeoutAction": "market"
+            }));
+            settle().await;
+            let chaser_id = chasers.started.borrow()[0].id.clone();
+            tokio::time::advance(Duration::from_millis(15_001)).await;
+            settle().await;
+            assert_eq!(*chasers.removed.borrow(), [chaser_id]);
+            assert!(placed_amounts(&old.port).is_empty());
+
+            let current_chasers = Rc::new(Chasers::default());
+            let current = Owner::new(current_chasers.clone());
+            current.start(json!({ "size": 4 }));
+            settle().await;
+            old.cx.scope.dispose();
+            let old_state = old.factory.active_twaps("a");
+            let old_emits = old.port.emits.borrow().clone();
+            let current_state = current.factory.active_twaps("a");
+            let current_emits = current.port.emits.borrow().clone();
+            chasers.progress.set(Some(ChaserProgress {
+                remaining_size: 0.25,
+                stopped: true,
+                ended: true,
+                order_may_be_open: false,
+            }));
+            tokio::time::advance(Duration::from_millis(251)).await;
+            settle().await;
+            assert!(placed_amounts(&old.port).is_empty());
+            assert_eq!(old.factory.active_twaps("a"), old_state);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(chasers.started.borrow().len(), 1);
+            assert_eq!(chasers.removed.borrow().len(), 1);
+            assert_eq!(placed_amounts(&current.port), [2.0]);
+            assert_eq!(current.factory.active_twaps("a"), current_state);
+            assert_eq!(*current.port.emits.borrow(), current_emits);
+            assert!(current_chasers.removed.borrow().is_empty());
+
+            tokio::time::advance(Duration::from_secs(31)).await;
+            settle().await;
+            assert!(placed_amounts(&old.port).is_empty());
+            assert_eq!(chasers.started.borrow().len(), 1);
+            assert_eq!(*old.port.emits.borrow(), old_emits);
+            assert_eq!(placed_amounts(&current.port), [2.0, 2.0]);
+            assert!(current.factory.active_twaps("a").is_empty());
+            current.cx.scope.dispose();
         })
         .await;
 }

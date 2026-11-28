@@ -1,5 +1,6 @@
 import type { Exchange } from '../../exchanges/base';
 import type { TwapLockManager } from './twapLock';
+import type { TwapOwner } from './TwapOwner';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -226,5 +227,114 @@ describe('RustTwapOwnership when the engine dies', () => {
   it('posts nothing when no TWAP was persisted', () => {
     ownership.finish();
     expect(posts).toEqual([]);
+  });
+});
+
+describe.each(['acct-B', 'acct'])('replacement owner on account %s', (accountName) => {
+  it.each([
+    ['restore lock', 'dispose'],
+    ['restore lock', 'finish'],
+    ['slice lookup', 'dispose'],
+    ['slice lookup', 'finish'],
+    ['started lock', 'dispose'],
+    ['started lock', 'finish'],
+  ] as const)('drops A after %s resolves following %s while B remains live', async (phase, teardown) => {
+    let current: TwapOwner = { ownerId: 'A', generation: 1 };
+    const createOwner = (ownerId: string, account: string) => {
+      const emit = vi.fn();
+      const findOrderByClientOrderId = vi.fn().mockResolvedValue({ found: true, order: { id: `${ownerId}-order` } });
+      const post = vi.fn();
+      const send = vi.fn((op: string, data: any) => {
+        if (op === 'twap:state') instance.receive(persisted(...data));
+      });
+      const instance = new RustTwapOwnership(
+        { emitter: { emit }, findOrderByClientOrderId } as unknown as Exchange,
+        send,
+        post,
+        () => current,
+      );
+      const restore = (id: string, inFlight = false) => ({
+        ...row(id),
+        ownerId,
+        options: { ...options, accountName: account },
+        state: {
+          ...row(id).state,
+          accountName: account,
+          ...(inFlight ? { inFlight: { size: 0.25, clientOrderId: `${ownerId}-client` } } : {}),
+        },
+      });
+      return { instance, send, post, emit, findOrderByClientOrderId, restore };
+    };
+    let grantLock!: () => void;
+    const lockGate = new Promise<void>((resolve) => {
+      grantLock = resolve;
+    });
+    let settleLookup!: (value: { found: false; definitive: true }) => void;
+    const lookupGate = new Promise<{ found: false; definitive: true }>((resolve) => {
+      settleLookup = resolve;
+    });
+    let lateLockGranted = false;
+    const a = createOwner('A', 'acct');
+    if (phase === 'slice lookup') a.findOrderByClientOrderId.mockReturnValue(lookupGate);
+    else {
+      setTwapLockManager({
+        async request(name, lockOptions, callback) {
+          await lockGate;
+          return locksFor('A').request(name, lockOptions, (lock) => {
+            lateLockGranted = lock !== null;
+            return callback(lock);
+          });
+        },
+      });
+    }
+    const aRow = a.restore('retained', phase === 'slice lookup');
+    if (phase === 'started lock') a.instance.receive(persisted(aRow));
+    else a.instance.handle('twap:state', [aRow]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(a.send).not.toHaveBeenCalled();
+    if (phase === 'slice lookup') {
+      expect(a.findOrderByClientOrderId).toHaveBeenCalledWith('BTCUSDT', 'A-client');
+      expect(held.has(twapLockName('acct', 'retained'))).toBe(true);
+    }
+
+    a.instance[teardown]();
+    current = { ownerId: 'B', generation: 2 };
+    setTwapLockManager(locksFor('B'));
+    const b = createOwner('B', accountName);
+    try {
+      b.instance.handle('twap:state', [b.restore('live-B', true)]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.findOrderByClientOrderId).toHaveBeenCalledWith('BTCUSDT', 'B-client');
+      expect(b.send).toHaveBeenCalledTimes(1);
+      expect(held.get(twapLockName(accountName, 'live-B'))).toBe('B');
+      const aPosts = a.post.mock.calls.length;
+      const bPosts = b.post.mock.calls.length;
+
+      // Resolve the exact old callback/promise only after B's own restore works.
+      grantLock();
+      settleLookup({ found: false, definitive: true });
+      await vi.advanceTimersByTimeAsync(TWAP_RESTORE_LOCK_WAIT_MS + 500);
+      if (phase !== 'slice lookup') expect(lateLockGranted).toBe(true);
+      expect(a.send).not.toHaveBeenCalled();
+      expect(a.post).toHaveBeenCalledTimes(aPosts);
+      expect(a.emit).not.toHaveBeenCalled();
+      expect(b.send).toHaveBeenCalledTimes(1);
+      expect(b.post).toHaveBeenCalledTimes(bPosts);
+      expect(b.emit).not.toHaveBeenCalled();
+      expect(held.has(twapLockName('acct', 'retained'))).toBe(false);
+      expect(held.get(twapLockName(accountName, 'live-B'))).toBe('B');
+
+      // Reuse the old row id too: A's late release must not strand the lock.
+      b.instance.handle('twap:state', [b.restore('retained')]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.send).toHaveBeenCalledTimes(2);
+      expect(b.send.mock.calls[1][1][0]).toMatchObject({ id: 'retained', ownerId: 'B' });
+      expect(held.get(twapLockName(accountName, 'retained'))).toBe('B');
+    } finally {
+      a.instance.dispose();
+      b.instance.dispose();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(held.size).toBe(0);
   });
 });

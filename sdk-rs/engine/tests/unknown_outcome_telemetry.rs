@@ -186,9 +186,19 @@ fn status_reply(
     status: u16,
     split: bool,
 ) -> Vec<Action> {
+    status_reply_at(engine, request, status, split, 6.)
+}
+
+fn status_reply_at(
+    engine: &mut Engine<impl Venue>,
+    request: RequestId,
+    status: u16,
+    split: bool,
+    now: f64,
+) -> Vec<Action> {
     if split {
         engine.handle(
-            3.,
+            now - 3.,
             Event::HttpStart {
                 request,
                 status,
@@ -196,16 +206,16 @@ fn status_reply(
             },
         );
         engine.handle(
-            4.,
+            now - 2.,
             Event::HttpChunk {
                 request,
                 data: b"unproven",
             },
         );
-        engine.handle(6., Event::HttpEnd { request });
+        engine.handle(now, Event::HttpEnd { request });
     } else {
         engine.handle(
-            6.,
+            now,
             Event::HttpResponse {
                 request,
                 response: Response {
@@ -351,6 +361,8 @@ mod independent {
         physical: bool,
         plan: Option<Plan>,
         settled: usize,
+        retire_on_timer: bool,
+        retire_timer: Option<TimerId>,
     }
     impl Venue for Batch {
         type Pending = (Context, Slot);
@@ -359,6 +371,7 @@ mod independent {
         }
         fn start(&mut self, _: &mut Cx<'_, Self::Pending>) {}
         fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, _: Command) {
+            self.settled = 0;
             let credential = Some(safe_cex_engine::request_context::Credential {
                 slot: safe_cex_engine::CredentialSlot::Primary,
                 reference: safe_cex_engine::signing::KeyRef("fixture".into()),
@@ -414,6 +427,9 @@ mod independent {
                     (context, slot),
                 )
                 .unwrap();
+            }
+            if self.retire_on_timer && self.plan.is_none() {
+                self.retire_timer = Some(cx.set_timer(6.));
             }
             self.plan = Some(plan);
         }
@@ -473,7 +489,12 @@ mod independent {
         fn on_open(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId) {}
         fn on_close(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId, _: u16) {}
         fn on_message(&mut self, _: &mut Cx<'_, Self::Pending>, _: SocketId, _: &str) {}
-        fn on_timer(&mut self, _: &mut Cx<'_, Self::Pending>, _: TimerId) {}
+        fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId) {
+            // Test-only owner retirement while a sibling response is still held.
+            assert_eq!(Some(timer), self.retire_timer.take());
+            cx.fail_plan(self.plan.as_ref().unwrap(), "owner A retired")
+                .unwrap();
+        }
         fn book(&self, _: &str) -> Option<&Book> {
             None
         }
@@ -489,6 +510,51 @@ mod independent {
                     .unwrap();
             }
         }
+    }
+    fn release_batch(engine: &mut Engine<Batch>, now: f64) -> Vec<RequestId> {
+        let mut queue =
+            std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+        let mut requests = Vec::new();
+        while let Some(action) = queue.pop_front() {
+            use safe_cex_engine::request_context::{HttpAction, Prepared};
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => engine.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: preparation.attempt().request.0,
+                            expires_at: None,
+                        },
+                    ),
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(matches!(
+                            engine.claim_http(now, permit).unwrap(),
+                            safe_cex_engine::request_context::Claim::Released(_)
+                        ));
+                        requests.push(request.id);
+                    }
+                    _ => panic!("unexpected managed action"),
+                },
+                Action::Sign { attempt, work, .. } => engine.handle(
+                    now,
+                    Event::Signed {
+                        attempt,
+                        result: Ok(safe_cex_engine::signing::SignResult {
+                            values: vec![b"fixture".to_vec()],
+                            receipt: work.receipt,
+                            headers: vec![],
+                        }),
+                    },
+                ),
+                _ => {}
+            }
+            queue.extend(engine.drain_actions());
+        }
+        assert_eq!(requests.len(), 2, "both writes must already be sent");
+        requests
     }
     fn run(
         second_status: u16,
@@ -509,48 +575,7 @@ mod independent {
                 orders: vec![],
             }),
         );
-        let mut queue =
-            std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
-        let mut requests = Vec::new();
-        while let Some(action) = queue.pop_front() {
-            use safe_cex_engine::request_context::{HttpAction, Prepared};
-            match action {
-                Action::ManagedHttp(action) => match *action {
-                    HttpAction::Prepare { preparation, .. } => engine.http_prepared(
-                        2.,
-                        preparation,
-                        Prepared {
-                            id: preparation.attempt().request.0,
-                            expires_at: None,
-                        },
-                    ),
-                    HttpAction::Bind {
-                        permit, request, ..
-                    } => {
-                        assert!(matches!(
-                            engine.claim_http(2., permit).unwrap(),
-                            safe_cex_engine::request_context::Claim::Released(_)
-                        ));
-                        requests.push(request.id);
-                    }
-                    _ => panic!("unexpected managed action"),
-                },
-                Action::Sign { attempt, work, .. } => engine.handle(
-                    2.,
-                    Event::Signed {
-                        attempt,
-                        result: Ok(safe_cex_engine::signing::SignResult {
-                            values: vec![b"fixture".to_vec()],
-                            receipt: work.receipt,
-                            headers: vec![],
-                        }),
-                    },
-                ),
-                _ => {}
-            }
-            queue.extend(engine.drain_actions());
-        }
-        assert_eq!(requests.len(), 2, "both writes must already be sent");
+        let requests = release_batch(&mut engine, 2.);
         let first = if transport {
             engine.handle(
                 6.,
@@ -606,6 +631,98 @@ mod independent {
                     failure(&actions).partial.as_ref().unwrap().order_ids,
                     ["accepted"]
                 );
+            }
+        }
+    }
+    #[test]
+    fn deferred_unknown_stays_with_retired_owner_when_command_id_is_reused() {
+        // These are command-generation owners within a fixed Engine, not a
+        // mutable login/provider: reusing the public ID must not reuse A's facts.
+        for split in [false, true] {
+            for (physical, b_status) in [(false, 200), (true, 200), (false, 503), (true, 503)] {
+                let mut engine = support::seeded_engine(Batch {
+                    physical,
+                    retire_on_timer: true,
+                    ..Batch::default()
+                });
+                engine.start(0.);
+                engine.drain_actions().for_each(drop);
+                let command = || {
+                    Event::Command(Command::PlaceOrders {
+                        command: 7,
+                        orders: vec![],
+                    })
+                };
+                engine.handle(1., command());
+                let a = release_batch(&mut engine, 2.);
+                let a_owner = engine.venue().plan.as_ref().unwrap().owner();
+                let deferred = status_reply(&mut engine, a[0], 503, split);
+                assert!(events(&deferred).is_empty(), "A is not terminal yet");
+                assert_eq!(engine.venue().settled, 1);
+                assert!(!deferred.iter().any(|action| matches!(
+                    action,
+                    Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                )));
+
+                let timer = engine.venue().retire_timer.unwrap();
+                engine.handle(7., Event::TimerFired { timer });
+                let retired: Vec<_> = engine.drain_actions().collect();
+                assert_eq!(failure(&retired).outcome, Some(Outcome::Unknown));
+                let a_events = events(&retired);
+                assert_eq!(a_events.len(), 1);
+                for (key, value) in [
+                    ("command", Value::Num(7.)),
+                    ("request", a[0].0.to_string().into()),
+                    ("status", Value::Num(503.)),
+                    ("now", Value::Num(7.)),
+                ] {
+                    assert!(a_events[0].fields.contains(&(key, value)));
+                }
+
+                engine.handle(8., command());
+                let b = release_batch(&mut engine, 9.);
+                assert!(a.iter().all(|old| !b.contains(old)));
+                assert_ne!(engine.venue().plan.as_ref().unwrap().owner(), a_owner);
+                // A's held sibling and duplicate failure arrive while B is live.
+                for (index, (&request, status)) in a.iter().zip([503, 200]).enumerate() {
+                    assert!(
+                        status_reply_at(
+                            &mut engine,
+                            request,
+                            status,
+                            split,
+                            13. + index as f64 * 3.
+                        )
+                        .is_empty()
+                    );
+                }
+                assert_eq!(engine.venue().settled, 0, "old replies cannot enter B");
+                assert!(events(&status_reply_at(&mut engine, b[0], 200, split, 19.)).is_empty());
+                assert_eq!(engine.venue().settled, 1);
+                let terminal = status_reply_at(&mut engine, b[1], b_status, split, 22.);
+                let b_events = events(&terminal);
+                if b_status == 503 {
+                    assert_eq!(failure(&terminal).outcome, Some(Outcome::Unknown));
+                    assert_eq!(b_events.len(), 1);
+                    for (key, value) in [
+                        ("command", Value::Num(7.)),
+                        ("request", b[1].0.to_string().into()),
+                        ("status", Value::Num(503.)),
+                        ("now", Value::Num(22.)),
+                    ] {
+                        assert!(b_events[0].fields.contains(&(key, value)));
+                    }
+                } else {
+                    assert!(b_events.is_empty(), "B cannot inherit A's source");
+                    assert_ne!(failure(&terminal).outcome, Some(Outcome::Unknown));
+                }
+                assert_eq!(engine.venue().settled, 2);
+                for (index, &request) in a.iter().chain(&b).enumerate() {
+                    assert!(
+                        status_reply_at(&mut engine, request, 503, split, 25. + index as f64 * 3.)
+                            .is_empty()
+                    );
+                }
             }
         }
     }

@@ -308,6 +308,72 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
+  it('drops retired A recovery errors after the realm switches to B during the worker read', async () => {
+    let currentOwner = 'A';
+    const reports: Array<{ owner: string; error: unknown }> = [];
+    vi.mocked(console.error).mockImplementation((message, error) => {
+      if (message === 'Engine frame recovery failed') reports.push({ owner: currentOwner, error });
+    });
+    const a = new BaseExchange('binance', { key: '', secret: '' }, new FrameStore());
+    const aBridge = vi.fn();
+    a.on('callMethod', aBridge);
+    let b: BaseExchange | undefined;
+    try {
+      a.applyWorkerFrame(new ArrayBuffer(0));
+      await settle();
+      expect(aBridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: 'fetchEngineSnapshot' }));
+
+      a.dispose();
+      currentOwner = 'B';
+      b = new BaseExchange('binance', { key: '', secret: '' }, new FrameStore());
+      const bBridge = vi.fn();
+      b.on('callMethod', bBridge);
+      await settle();
+      expect(reports).toEqual([]);
+      expect(bBridge).not.toHaveBeenCalled();
+
+      b.applyWorkerFrame(new ArrayBuffer(0));
+      await settle();
+      expect(bBridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: 'fetchEngineSnapshot' }));
+      b.emitter.emit('callMethod:done', {
+        requestId: bBridge.mock.calls[0][0].requestId,
+        success: true,
+        result: bundle(fixture({ fills: 0, total: 200 })),
+      });
+      await settle();
+      expect(b.store.balance.total).toBe(200);
+      expect(reports).toEqual([]);
+    } finally {
+      if (!a.isDisposed) a.dispose();
+      b?.dispose();
+    }
+  });
+
+  it('still reports recovery failures while the captured owner is live', async () => {
+    const a = new BaseExchange('binance', { key: '', secret: '' }, new FrameStore());
+    const bridge = vi.fn();
+    a.on('callMethod', bridge);
+    try {
+      a.applyWorkerFrame(new ArrayBuffer(0));
+      await settle();
+      expect(bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: 'fetchEngineSnapshot' }));
+      a.emitter.emit('callMethod:done', {
+        requestId: bridge.mock.calls[0][0].requestId,
+        success: false,
+        result: { message: 'A recovery failed' },
+      });
+      await settle();
+      const reports = vi
+        .mocked(console.error)
+        .mock.calls.filter(([message]) => message === 'Engine frame recovery failed');
+      expect(reports).toEqual([
+        ['Engine frame recovery failed', expect.objectContaining({ message: 'A recovery failed' })],
+      ]);
+    } finally {
+      a.dispose();
+    }
+  });
+
   it('does not recursively resnapshot a malformed recovery in either realm', async () => {
     const worker = new RustEngineExchange('binance', { key: '', secret: '' }, new FrameStore());
     const snapshot = vi.fn(() => new ArrayBuffer(0));
