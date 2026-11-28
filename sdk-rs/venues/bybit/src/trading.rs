@@ -2146,7 +2146,8 @@ impl BybitLinear {
         };
         if let Ok(body) = serde_json::to_string(&wire)
             && let Ok(row) = serde_json::from_str::<OrderRow>(&body)
-            && let Some(mapped) = crate::account::map_order(&row, cx.store, cx.now)
+            && let Some(mapped) =
+                crate::account::map_order(&row, cx.store, cx.now, self.variant.is_hyro())
         {
             for order in mapped.orders {
                 cx.store.upsert_order(order);

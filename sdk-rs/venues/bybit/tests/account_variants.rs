@@ -1468,6 +1468,345 @@ fn hyro_uncertain_or_foreign_handshake_frames_never_claim_typed_rejection() {
     }
 }
 
+/// Hyro's `/v5/order/realtime` row for an untriggered market stop, as the live
+/// simulator returned it on 2026-11-28 (TEAL-21): `price` and `avgPrice` are
+/// empty strings, and `triggerDirection`, `closeOnTrigger` and `cumExecValue`
+/// are absent. Bybit sends `"0"` for the price.
+const HYRO_UNTRIGGERED_STOP: &str = r#"{"activePrice":"","avgPrice":"","createType":"CreateByStopOrder","createdTime":"1795837720889","cumExecFee":"0","cumExecQty":"0","feeRateBps":0,"leavesQty":"0.001","liquidityType":"None","ocoGroupId":"","orderId":"62bcbd3f-8ec5-4d14-8b0a-764f255b5b47","orderLinkId":"probe-stop-1795837720543","orderStatus":"Untriggered","orderType":"Market","positionIdx":0,"price":"","qty":"0.001","reduceOnly":false,"rejectReason":"EC_NoError","side":"Buy","statusReason":"","stopLoss":"","stopOrderType":"Stop","symbol":"BTCUSDT","takeProfit":"","timeInForce":"GTC","tpslMode":"","trailingActive":false,"trailingPeakPrice":"","trailingStop":"","triggerBy":"LastPrice","triggerPrice":"65920","updatedTime":"1795837720889"}"#;
+
+/// The position stop-loss Hyro holds after a StopLoss on an open long; it too
+/// reports `"price":""`.
+fn hyro_partial_stop_loss() -> String {
+    HYRO_UNTRIGGERED_STOP
+        .replace("62bcbd3f-8ec5-4d14-8b0a-764f255b5b47", "hyro-partial-sl")
+        .replace("CreateByStopOrder", "CreateByPartialStopLoss")
+        .replace(r#""reduceOnly":false"#, r#""reduceOnly":true"#)
+        .replace(r#""side":"Buy""#, r#""side":"Sell""#)
+        .replace(
+            r#""stopOrderType":"Stop""#,
+            r#""stopOrderType":"PartialStopLoss""#,
+        )
+        .replace(r#""tpslMode":"""#, r#""tpslMode":"Partial""#)
+        .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"45000""#)
+}
+
+fn hyro_orders(rows: &[&str]) -> String {
+    format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"category":"linear","list":[{}],"nextPageCursor":""}}}}"#,
+        rows.join(",")
+    )
+}
+
+/// Before TEAL-21 the empty price made the whole snapshot "malformed": the
+/// account looped reconnecting and refused every write, the stop's own cancel
+/// and the position's close included.
+#[test]
+fn hyro_untriggered_stop_with_empty_price_loads_as_a_conditional_order() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond(
+        "/v5/order/realtime",
+        200,
+        &hyro_orders(&[HYRO_UNTRIGGERED_STOP]),
+    );
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().orders, "{:?}", h.logs);
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+    let stop = h
+        .engine
+        .store()
+        .order("62bcbd3f-8ec5-4d14-8b0a-764f255b5b47")
+        .expect("the stop is in the store");
+    assert_eq!(stop.kind, safe_cex_engine::model::OrderType::Conditional);
+    assert_eq!(stop.price, 65920.0);
+    assert_eq!(stop.remaining, 0.001);
+}
+
+#[test]
+fn hyro_partial_stop_loss_with_empty_price_loads_as_a_protective_stop() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = hyro_partial_stop_loss();
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+    let stop = h
+        .engine
+        .store()
+        .order("hyro-partial-sl")
+        .expect("the stop-loss is in the store");
+    assert_eq!(stop.kind, safe_cex_engine::model::OrderType::StopLoss);
+    assert_eq!(stop.price, 45000.0);
+}
+
+#[test]
+fn hyro_stop_with_empty_price_on_the_order_stream_is_kept() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{HYRO_UNTRIGGERED_STOP}]}}"#),
+    );
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+    assert!(
+        h.engine
+            .store()
+            .order("62bcbd3f-8ec5-4d14-8b0a-764f255b5b47")
+            .is_some()
+    );
+}
+
+/// Only an empty price is admitted: one that is present but not a number still
+/// refuses the snapshot rather than inventing a price.
+#[test]
+fn hyro_garbage_order_price_still_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP.replace(r#""price":"""#, r#""price":"abc""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+/// A live stop-limit executes at its own price, so an empty one is refused
+/// even beside a positive trigger: the trigger would stand in for the limit
+/// and an edit would drop it (CodeRabbit on #3838).
+#[test]
+fn hyro_live_stop_limit_with_empty_price_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP.replace(r#""orderType":"Market""#, r#""orderType":"Limit""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+/// An empty price is admitted only beside a positive trigger. A zero-priced
+/// stop would be "restored" as `stopLoss:"0"` by a refused protective edit,
+/// clearing the position's protection (TEAL-21 review).
+#[test]
+fn hyro_stop_with_empty_price_and_zero_trigger_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row =
+        hyro_partial_stop_loss().replace(r#""triggerPrice":"45000""#, r#""triggerPrice":"0""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+/// A zero trigger is refused even when the price is a literal "0".
+#[test]
+fn hyro_stop_priced_at_zero_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = hyro_partial_stop_loss()
+        .replace(r#""price":"""#, r#""price":"0""#)
+        .replace(r#""triggerPrice":"45000""#, r#""triggerPrice":"0""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+#[test]
+fn hyro_stop_with_empty_price_and_zero_trigger_on_the_stream_is_refused() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP.replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
+/// A terminal row loads in the snapshot, and on the stream it ends the live
+/// stop seeded first under the same id (review of #3838: a handler that drops
+/// the row must fail here, so the stream leg never starts from an empty store).
+fn assert_hyro_terminal_stop_applied(row: &str) -> f64 {
+    const ID: &str = "62bcbd3f-8ec5-4d14-8b0a-764f255b5b47";
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().loaded().orders, "{:?}", h.logs);
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{HYRO_UNTRIGGERED_STOP}]}}"#),
+    );
+    let live = h.engine.store().order(ID).expect("the live stop is seeded");
+    assert_eq!(live.status, safe_cex_engine::model::OrderStatus::Open);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(
+        h.closed.is_empty(),
+        "the private session stays up: {:?}",
+        h.logs
+    );
+    let ended = h.engine.store().order(ID).expect("the stop is still known");
+    assert_eq!(ended.status, safe_cex_engine::model::OrderStatus::Canceled);
+    assert!(ended.price.is_finite(), "{}", ended.price);
+    ended.price
+}
+
+fn hyro_deactivated_stop() -> String {
+    HYRO_UNTRIGGERED_STOP.replace(
+        r#""orderStatus":"Untriggered""#,
+        r#""orderStatus":"Deactivated""#,
+    )
+}
+
+/// Terminal stop rows keep master's admission: a Deactivated stop priced "0"
+/// with no trigger is applied, not treated as malformed (review of #3838: the
+/// zero-price guard covers live orders only, or it freezes the account again).
+#[test]
+fn hyro_terminal_zero_priced_stop_row_is_still_applied() {
+    assert_hyro_terminal_stop_applied(
+        &hyro_deactivated_stop()
+            .replace(r#""price":"""#, r#""price":"0""#)
+            .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#),
+    );
+}
+
+/// A Hyro-shaped terminal stop (price "" and trigger "0") is applied, never
+/// treated as malformed: only live rows need a positive trigger, and freezing
+/// the account over a finished order is the bug TEAL-21 fixed (review of #3838).
+#[test]
+fn hyro_terminal_stop_with_empty_price_and_zero_trigger_is_applied() {
+    // Trigger "0" is a present wire price, so the finished row maps at zero;
+    // only an absent price keeps the stored one.
+    let ended = assert_hyro_terminal_stop_applied(
+        &hyro_deactivated_stop().replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#),
+    );
+    assert_eq!(ended, 0.0);
+}
+
+/// With price and trigger both empty there is no number to map, and the NaN
+/// price used to refuse the mapped order: a finished row froze the account
+/// again (CodeRabbit on #3838).
+#[test]
+fn hyro_terminal_stop_with_empty_price_and_empty_trigger_is_applied() {
+    // The seeded live stop's price survives: nothing on the row replaces it
+    // (CodeRabbit on #3838: a finite check alone accepts a lost price as 0).
+    let ended = assert_hyro_terminal_stop_applied(
+        &hyro_deactivated_stop().replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#),
+    );
+    assert_eq!(ended, 65920.0);
+}
+
+/// Triggered and PendingCancel rows are not resting orders (the engine maps
+/// them to Closed and Canceled), so an empty price and trigger there must not
+/// map to NaN and close the session; the row handler leaves the stored stop,
+/// and its price, as they were (delta review B on #3838).
+#[test]
+fn hyro_triggered_and_pending_cancel_stops_with_no_price_keep_the_session() {
+    const ID: &str = "62bcbd3f-8ec5-4d14-8b0a-764f255b5b47";
+    for status in ["Triggered", "PendingCancel"] {
+        let row = HYRO_UNTRIGGERED_STOP
+            .replace(
+                r#""orderStatus":"Untriggered""#,
+                &format!(r#""orderStatus":"{status}""#),
+            )
+            .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"""#);
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+        h.respond("/v5/position/list", 200, POSITIONS);
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+        assert!(h.engine.store().loaded().orders, "{status}: {:?}", h.logs);
+        assert!(h.closed.is_empty(), "{status}: {:?}", h.logs);
+
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{HYRO_UNTRIGGERED_STOP}]}}"#),
+        );
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        assert!(h.closed.is_empty(), "{status}: {:?}", h.logs);
+        let stop = h.engine.store().order(ID).expect("the stop is still known");
+        assert_eq!(stop.price, 65920.0, "{status}");
+    }
+}
+
+/// The no-price fallback is Hyro's alone: Bybit sends "0", so a Bybit row
+/// with an empty price is rejected as before, finished or not (CodeRabbit on
+/// #3838).
+#[test]
+fn bybit_finished_order_with_empty_price_is_still_rejected() {
+    let row = r#"{"symbol":"BTCUSDT","orderId":"empty-price","side":"Buy","orderType":"Limit","orderStatus":"Filled","price":"","qty":"1","leavesQty":"0","cumExecQty":"1"}"#;
+    let mut h = startup(Variant::Linear);
+    authenticate(&mut h);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[row]));
+    assert!(h.engine.store().order("empty-price").is_none());
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().order("empty-price").is_none());
+}
+
+/// A live stop priced "0" with trigger "0" passes the row gate (its price is
+/// present) and must be refused by the stream's mapped-order guard: it would
+/// be restored as `stopLoss:"0"` (review of #3838; pins `valid_hyro_mapped`
+/// on the `order` topic).
+#[test]
+fn hyro_live_stop_priced_at_zero_on_the_stream_is_refused() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP
+        .replace(r#""price":"""#, r#""price":"0""#)
+        .replace(r#""triggerPrice":"65920""#, r#""triggerPrice":"0""#);
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
 /// Hyro's signed snapshot reads omit Bybit's broker `X-Referer`, which its
 /// CORS allowlist refuses in a browser (TEAL-22); Bybit's keep it.
 #[test]

@@ -374,6 +374,20 @@ fn valid_order(order: &Order) -> bool {
         .all(|v| v.is_finite() && v >= 0.0)
 }
 
+/// A live Hyro trigger order priced at zero would be restored as
+/// `stopLoss:"0"` by a refused protective edit, clearing the position's
+/// protection (TEAL-21). Terminal rows are never edited, so they keep the
+/// plain numeric check: refusing one would freeze the account instead.
+pub(crate) fn valid_hyro_mapped(order: &Order) -> bool {
+    valid_order(order)
+        && !(!matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+            && matches!(
+                order.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+            && order.price <= 0.0)
+}
+
 fn optional_numeric(value: &Option<Str<'_>>) -> bool {
     present(value).is_none_or(|value| float(value).is_finite())
 }
@@ -389,9 +403,15 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         && present(&row.category).is_none_or(|category| category == "linear")
         && !row.order_id.is_empty()
         && order_status(&row.order_status).is_some()
-        && [&row.qty, &row.price]
-            .into_iter()
-            .all(|value| float_of(value).is_finite())
+        && float_of(&row.qty).is_finite()
+        // Hyro reports `"price":""` on untriggered stops and position stops,
+        // where Bybit sends "0"; a live one is then priced by a positive
+        // trigger (TEAL-21), unless it is a stop-limit, which needs its own
+        // price. Terminal rows are never edited, so need neither.
+        && optional_numeric(&row.price)
+        && (present(&row.price).is_some()
+            || (float_of(&row.trigger_price) > 0.0 && present(&row.order_type) != Some("Limit"))
+            || order_status(&row.order_status) != Some(OrderStatus::Open))
         && [
             &row.cum_exec_qty,
             &row.cum_exec_value,
@@ -677,7 +697,7 @@ fn unsupported_detail(o: &OrderRow<'_>) -> String {
     )
 }
 
-pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
+pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64, hyro: bool) -> Option<Mapped> {
     let stop_order_type = present(&o.stop_order_type);
     let tpsl_mode = present(&o.tpsl_mode);
     let position_bound = matches!(tpsl_mode, Some("Full" | "Partial"));
@@ -712,10 +732,14 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         }
     });
     let price_text = if is_stop {
-        trigger_price.or(o.price.as_deref())
+        trigger_price.or(present(&o.price))
     } else {
-        o.price.as_deref()
+        present(&o.price)
     };
+    let terminal = matches!(
+        o.order_status.as_ref(),
+        "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
+    );
     let wire_type = from_create_type.or(spot_tpsl_kind).or(if is_stop {
         stop_order_type
     } else {
@@ -785,7 +809,19 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         symbol: o.symbol.to_string(),
         kind,
         side,
-        price: price_text.map_or(f64::NAN, float),
+        // Hyro can send a stop that is no longer resting (finished, Triggered or
+        // PendingCancel) with price and trigger both empty (#3838 review); it
+        // keeps its known price rather than freezing. A live one stays NaN, and
+        // Bybit, which sends "0", keeps refusing an empty price.
+        price: match price_text {
+            Some(text) => float(text),
+            None if hyro
+                && order_status(&o.order_status).is_some_and(|s| s != OrderStatus::Open) =>
+            {
+                store.order(&o.order_id).map_or(0.0, |known| known.price)
+            }
+            None => f64::NAN,
+        },
         amount,
         filled,
         remaining: if inverse {
@@ -849,10 +885,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         position_bound,
         trailing_profit: wire_type == "TrailingProfit",
         unpriced_tpsl,
-        terminal: matches!(
-            o.order_status.as_ref(),
-            "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
-        ),
+        terminal,
         fill_cursor: Cursor::seed_with_average(
             filled,
             finite(float_of(&o.cum_exec_value)),
@@ -2222,7 +2255,7 @@ impl BybitLinear {
                     {
                         continue;
                     }
-                    let mapped = map_order(&row, cx.store, cx.now);
+                    let mapped = map_order(&row, cx.store, cx.now, self.variant.is_hyro());
                     if !admitted_order_numbers(&row, false)
                         || mapped
                             .as_ref()
@@ -2251,9 +2284,10 @@ impl BybitLinear {
                     if self.variant.is_hyro()
                         && frame.data.iter().any(|row| {
                             !valid_hyro_order(row)
-                                || map_order(row, cx.store, cx.now).is_none_or(|mapped| {
-                                    mapped.orders.iter().any(|order| !valid_order(order))
-                                })
+                                || map_order(row, cx.store, cx.now, self.variant.is_hyro())
+                                    .is_none_or(|mapped| {
+                                        mapped.orders.iter().any(|order| !valid_hyro_mapped(order))
+                                    })
                         })
                     {
                         self.fail_hyro(cx, "malformed private order event");
@@ -2481,7 +2515,7 @@ impl BybitLinear {
         if status == "PartiallyFilled" && or_zero(&row.price) <= 0.0 && or_zero(&row.qty) <= 0.0 {
             return;
         }
-        let Some(mapped) = map_order(row, cx.store, cx.now) else {
+        let Some(mapped) = map_order(row, cx.store, cx.now, self.variant.is_hyro()) else {
             return;
         };
         self.apply_order_row(cx, row, mapped);
@@ -2752,7 +2786,7 @@ impl BybitLinear {
                 if !self.read_row_trades(&row.category, &row.symbol) {
                     return;
                 }
-                let mapped = map_order(&row, cx.store, cx.now);
+                let mapped = map_order(&row, cx.store, cx.now, self.variant.is_hyro());
                 let well_formed = admitted_order_numbers(&row, self.variant.is_hyro());
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.
@@ -2761,8 +2795,13 @@ impl BybitLinear {
                     unsupported.push((row.order_id.to_string(), unsupported_detail(&row)));
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
-                        mapped.orders.iter().any(|order| !valid_order(order))
-                            || (self.variant.is_hyro() && mapped.fill_cursor.is_none())
+                        mapped.orders.iter().any(|order| {
+                            if self.variant.is_hyro() {
+                                !valid_hyro_mapped(order)
+                            } else {
+                                !valid_order(order)
+                            }
+                        }) || (self.variant.is_hyro() && mapped.fill_cursor.is_none())
                     })
                 {
                     if self.variant.is_hyro() {
