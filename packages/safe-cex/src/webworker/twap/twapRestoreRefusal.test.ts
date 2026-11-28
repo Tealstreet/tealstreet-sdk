@@ -71,5 +71,8 @@ describe('twapRestoreRefusal with resting limit slices', () => {
       '. Its limit orders are still open: sell 0.2 at 100 (order o1)',
     );
     expect(restingSlicesNote(state())).toBe('');
+    expect(restingSlicesNote(state({ limitSlices: [{ orderIds: ['o2'], price: 0, size: 0.1 }] }))).toBe(
+      '. Its limit orders are still open: buy 0.1 (order o2)',
+    );
   });
 });

@@ -822,20 +822,25 @@ fn report_orphaned_limit(
         Err(failure) => crate::retained_order_ids(failure),
     };
     let symbol = &request.symbol;
+    let unresolved = outcome
+        .as_ref()
+        .is_err_and(|failure| !crate::known_refusal(failure));
     let message = if !ids.is_empty() {
         let slice = LimitSlice {
             order_ids: ids,
             price,
             size: request.amount,
         };
+        let rest = if unresolved {
+            " The rest of it couldn’t be confirmed. Check your open orders before trying again."
+        } else {
+            ""
+        };
         format!(
-            "TWAP {symbol}’s limit order placed as the account connection changed is still open: {}.",
+            "TWAP {symbol}’s limit order placed as the account connection changed is still open: {}.{rest}",
             crate::describe_slices(request.side, &[slice])
         )
-    } else if outcome
-        .as_ref()
-        .is_err_and(|failure| !crate::known_refusal(failure))
-    {
+    } else if unresolved {
         format!(
             "We couldn’t confirm whether TWAP {symbol}’s {} {} limit order at {price} was placed as the account connection changed. Check your open orders before trying again.",
             match request.side {

@@ -150,6 +150,13 @@ pub struct InFlightSlice {
     /// The caller id the slice order carried, for a restore to look it up by.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_order_id: Option<String>,
+    /// A limit slice's price, so a restore that finds its order can name it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "js_option_number"
+    )]
+    pub price: Option<f64>,
 }
 
 /// A trusted host snapshot, independent of account names and restore payloads.

@@ -60,6 +60,8 @@ export const restingSlicesNote = (state: TwapState | undefined): string => {
   const slices = state?.limitSlices;
   if (!state || !slices?.length) return '';
   const side = state.side === OrderSide.Sell ? 'sell' : 'buy';
-  const named = slices.map((slice) => `${side} ${slice.size} at ${slice.price} (order ${slice.orderIds.join(', ')})`);
+  const named = slices.map(
+    (slice) => `${side} ${slice.size}${slice.price > 0 ? ` at ${slice.price}` : ''} (order ${slice.orderIds.join(', ')})`,
+  );
   return `. Its limit orders are still open: ${named.join('; ')}`;
 };

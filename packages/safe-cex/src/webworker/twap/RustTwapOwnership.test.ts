@@ -177,7 +177,7 @@ describe('RustTwapOwnership restore', () => {
   });
 
   it('adopts a found in-flight limit slice so the TWAP cancels it at its end', async () => {
-    lookup.mockResolvedValue({ found: true, order: { id: 'o9', price: 100 } });
+    lookup.mockResolvedValue({ found: true, order: { id: 'o9', price: 100, type: 'limit' } });
     const limit = {
       ...row('t1', { ordersSizes: [], inFlight: { size: 0.25, clientOrderId: 'c1' } }),
       options: { ...options, useLimitOrders: true },
@@ -195,11 +195,78 @@ describe('RustTwapOwnership restore', () => {
     ownership.handle('twap:state', [row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' }, limitSlices })]);
     await vi.advanceTimersByTimeAsync(0);
     ownership.handle('twap:stop', 't1');
-    expect(posts.at(-1)).not.toHaveProperty('t1.stopped');
+    expect(posts.at(-1)).toHaveProperty('t1.stopped', true);
     releaseLookup({ found: false, definitive: true });
     await vi.advanceTimersByTimeAsync(0);
     expect(sent.map(({ op }) => op)).toEqual(['twap:state', 'twap:stop']);
     expect(sent[0].data[0].state).toMatchObject({ status: TwapStatus.Paused, limitSlices });
+    expect(sent[0].data[0]).not.toHaveProperty('stopped');
+  });
+
+  it('stops a restore placing its only limit slice: the found order is cancelled, not left', async () => {
+    let releaseLookup!: (value: unknown) => void;
+    lookup.mockReturnValue(new Promise((resolve) => (releaseLookup = resolve)));
+    const limit = {
+      ...row('t1', { ordersSizes: [], ordersExecuted: 3, inFlight: { size: 0.25, clientOrderId: 'c1', price: 99 } }),
+      options: { ...options, useLimitOrders: true },
+    };
+    ownership.handle('twap:state', [limit]);
+    await vi.advanceTimersByTimeAsync(0);
+    ownership.handle('twap:stop', 't1');
+    releaseLookup({ found: true, order: { id: 'o9', price: 0, type: 'limit' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map(({ op }) => op)).toEqual(['twap:state', 'twap:stop']);
+    // The venue row carried no price: the slice's own is kept.
+    expect(sent[0].data[0].state.limitSlices).toEqual([{ orderIds: ['o9'], price: 99, size: 0.25 }]);
+  });
+
+  it('drops a stopped restore whose in-flight slice was definitively never placed', async () => {
+    let releaseLookup!: (value: unknown) => void;
+    lookup.mockReturnValue(new Promise((resolve) => (releaseLookup = resolve)));
+    const limit = {
+      ...row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' } }),
+      options: { ...options, useLimitOrders: true },
+    };
+    ownership.handle('twap:state', [limit]);
+    await vi.advanceTimersByTimeAsync(0);
+    ownership.handle('twap:stop', 't1');
+    releaseLookup({ found: false, definitive: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toEqual([]);
+    expect(posts.at(-1)).toEqual({});
+  });
+
+  it('sends a persisted stopped row paused, then stops it, after a reload', async () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    ownership.handle('twap:state', [{ ...row('t1', { status: TwapStatus.Paused, limitSlices }), stopped: true }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map(({ op }) => op)).toEqual(['twap:state', 'twap:stop']);
+  });
+
+  it('names an order found during the lookup when the owner changed meanwhile', async () => {
+    let owner = { ownerId: 'A', generation: 1 };
+    let releaseLookup!: (value: unknown) => void;
+    lookup.mockReturnValue(new Promise((resolve) => (releaseLookup = resolve)));
+    const exchange = {
+      emitter: { emit: (_op: string, message: string) => errors.push(message) },
+      findOrderByClientOrderId: lookup,
+    } as unknown as Exchange;
+    const owned = new RustTwapOwnership(exchange, algos(), (rows) => posts.push(rows), () => owner);
+    const limit = {
+      ...row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' } }),
+      ownerId: 'A',
+      ownerGeneration: 1,
+      options: { ...options, useLimitOrders: true },
+    };
+    owned.handle('twap:state', [limit]);
+    await vi.advanceTimersByTimeAsync(0);
+    owner = { ownerId: 'B', generation: 1 };
+    releaseLookup({ found: true, order: { id: 'o9', price: 100, type: 'limit' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toEqual([]);
+    expect(errors).toEqual([
+      'TWAP BTCUSDT wasn’t restored because the account connection changed. Its limit orders are still open: buy 0.25 at 100 (order o9).',
+    ]);
   });
 
   it('names the resting slices of a row it drops for an owner change', () => {

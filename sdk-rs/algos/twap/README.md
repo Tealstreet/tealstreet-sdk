@@ -188,5 +188,8 @@ owner change, which may not write for another owner.
 A limit slice whose placement answers after an owner change is named the same
 way, never cancelled. On a restore, the TS wrapper adopts an in-flight slice it
 finds by client id into `limitSlices`, and a restore the user stops while it
-waits for its lock is still sent (paused, then stopped) when it holds slices, so
-the algos cancel them.
+waits for its lock is still sent (paused, then stopped) when it holds slices or
+is placing one, so the algos cancel them. That stop intent is persisted on the row
+(`stopped`, never sent to the algos), so a reload before the lock is taken keeps
+it. An order found during an owner change is named, not adopted. `inFlight` carries
+the slice's price, because some venues report a found order without one.

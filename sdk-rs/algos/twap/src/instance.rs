@@ -614,6 +614,7 @@ impl TwapInstance {
         self.state.in_flight = Some(InFlightSlice {
             size: order_size,
             client_order_id: request.client_order_id.clone(),
+            price: request.price,
         });
         self.state_changed = true;
         self.record(

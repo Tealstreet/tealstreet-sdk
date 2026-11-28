@@ -162,10 +162,14 @@ pub fn describe_slices(side: OrderSide, slices: &[LimitSlice]) -> String {
     slices
         .iter()
         .map(|slice| {
+            let at = if slice.price > 0.0 {
+                format!(" at {}", slice.price)
+            } else {
+                String::new()
+            };
             format!(
-                "{side} {} at {} (order {})",
+                "{side} {}{at} (order {})",
                 slice.size,
-                slice.price,
                 slice.order_ids.join(", ")
             )
         })

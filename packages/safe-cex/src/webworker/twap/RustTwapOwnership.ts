@@ -2,17 +2,23 @@ import type { Exchange } from '../../exchanges/base';
 import type { TwapOptions } from './TwapOptions';
 import type { TwapOwner } from './TwapOwner';
 import type { TwapState } from './TwapState';
+import type { Order } from '../../types';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 
 import { settleInFlightSlice } from './inFlightSlice';
 import { acquireTwapLock, acquireTwapLockWithin, TWAP_RESTORE_LOCK_WAIT_MS, twapLockName } from './twapLock';
 import { captureTwapOwner } from './TwapOwner';
 import { restingSlicesNote, twapRestoreRefusal } from './twapRestoreRefusal';
+import { OrderType } from '../../types';
 import { TwapStatus } from './TwapStatus';
 
-type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number };
-/** `stopped`: the user stopped it while it waited; its limit slices still need the algos' cancel. */
-type PendingRow = Row & { ownerSession: TwapOwner | null | undefined; stopped?: boolean };
+/**
+ * `stopped`: the user stopped a restore that waited for its lock while it held (or
+ * was placing) limit slices. Persisted, so a reload still sends it paused and then
+ * stops it, which is what cancels the slices; the algos never see the flag.
+ */
+type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number; stopped?: boolean };
+type PendingRow = Row & { ownerSession: TwapOwner | null | undefined };
 type PersistedTwap = Row & { id: string };
 
 /**
@@ -45,8 +51,8 @@ export class RustTwapOwnership {
     const row = typeof data === 'string' ? this.pending.get(data) : undefined;
     if (!row) return this.send(op, data);
     // A restored row awaiting its lock: resume waits for the lock. A stopped row that
-    // holds limit slices is still restored, paused, so the algos can cancel them.
-    if (op === 'twap:stop' && row.state.limitSlices?.length) {
+    // holds (or may be placing) limit slices is still restored, paused, so the algos can cancel them.
+    if (op === 'twap:stop' && (row.state.limitSlices?.length || (row.options.useLimitOrders && row.state.inFlight))) {
       row.stopped = true;
       row.state = { ...row.state, status: TwapStatus.Paused };
     } else if (op === 'twap:stop') this.pending.delete(data as string);
@@ -97,7 +103,7 @@ export class RustTwapOwnership {
     }
     let refused = false;
     for (const value of data as Partial<PersistedTwap>[]) {
-      const { id, options, state, ownerId, ownerGeneration } = value ?? {};
+      const { id, options, state, ownerId, ownerGeneration, stopped } = value ?? {};
       if (!id || id in this.rows || this.pending.has(id) || this.locks.has(id)) continue;
       const symbol = options?.activeMarket?.symbol ?? id;
       const refusal = twapRestoreRefusal(options, state, Date.now());
@@ -107,7 +113,8 @@ export class RustTwapOwnership {
         continue;
       }
       if (ownerSession !== undefined && ownerId === undefined) {
-        this.cancelForOwnerChange(id, symbol, state, 'persisted ownerId is missing');
+        // The persisted ownerId is missing.
+        this.cancelForOwnerChange(id, symbol, state);
         continue;
       }
       const row: PendingRow = {
@@ -116,6 +123,7 @@ export class RustTwapOwnership {
         ownerSession,
         ...(ownerId !== undefined ? { ownerId } : {}),
         ...(ownerGeneration !== undefined ? { ownerGeneration } : {}),
+        ...(stopped ? { stopped } : {}),
       };
       if (!this.ownerCurrent(row)) {
         this.cancelForOwnerChange(id, symbol, row.state);
@@ -155,23 +163,19 @@ export class RustTwapOwnership {
       this.publish();
       return;
     }
+    const { inFlight: _settled, ...rest } = row.state;
+    // A found limit slice rests like any other: the TWAP owns it and cancels it at its end.
+    const adopted = inFlight && isLimitSlice(row, order) ? adoptSlice(rest, order, inFlight) : rest;
     if (!this.ownerCurrent(row)) {
-      this.cancelForOwnerChange(id, symbol, row.state);
+      // Not ours to cancel under the new owner: name the found order, or say it is unconfirmed.
+      const unconfirmed =
+        inFlight && placed && !order
+          ? `. A ${inFlight.size} slice being placed couldn’t be confirmed; check your open orders`
+          : '';
+      this.cancelForOwnerChange(id, symbol, adopted, unconfirmed);
       return;
     }
     this.pending.delete(id);
-    const { inFlight: _settled, ...rest } = row.state;
-    // A found limit slice rests like any other: the TWAP owns it and cancels it at its end.
-    const adopted =
-      inFlight && order && row.options.useLimitOrders && order.price > 0
-        ? {
-            ...rest,
-            limitSlices: [
-              ...(rest.limitSlices ?? []),
-              { orderIds: [order.id], price: order.price, size: inFlight.size },
-            ],
-          }
-        : rest;
     const state: TwapState = !inFlight
       ? row.state
       : placed
@@ -180,7 +184,7 @@ export class RustTwapOwnership {
     // Its last slice was the one in flight: the TWAP is complete, unless limit slices
     // it placed still rest, which it cancels at the end of their interval.
     const { ownerSession: _ownerSession, stopped, ...restored } = row;
-    if (state.ordersSizes.length > 0 || state.limitSlices?.length) {
+    if (stopped ? state.limitSlices?.length : state.ordersSizes.length > 0 || state.limitSlices?.length) {
       this.send('twap:state', [{ id, ...restored, state }]);
       if (stopped) this.send('twap:stop', id);
     }
@@ -210,10 +214,7 @@ export class RustTwapOwnership {
   }
 
   private publish() {
-    const pending = [...this.pending].map(([id, { ownerSession: _ownerSession, stopped: _stopped, ...row }]) => [
-      id,
-      row,
-    ]);
+    const pending = [...this.pending].map(([id, { ownerSession: _ownerSession, ...row }]) => [id, row]);
     if (!this.finished) this.post({ ...this.rows, ...Object.fromEntries(pending) });
   }
 
@@ -230,12 +231,12 @@ export class RustTwapOwnership {
     );
   }
 
-  private cancelForOwnerChange(id: string, symbol: string, state: TwapState | undefined, _reason?: string) {
+  private cancelForOwnerChange(id: string, symbol: string, state: TwapState | undefined, unconfirmed = '') {
     this.pending.delete(id);
     this.release(id);
     this.exchange.emitter.emit(
       'warning',
-      `TWAP ${symbol} wasn’t restored because the account connection changed${restingSlicesNote(state)}.`,
+      `TWAP ${symbol} wasn’t restored because the account connection changed${restingSlicesNote(state)}${unconfirmed}.`,
     );
     this.publish();
   }
@@ -244,3 +245,18 @@ export class RustTwapOwnership {
     this.exchange.emitter.emit('error', message);
   }
 }
+
+const isLimitSlice = (row: Row, order: Order | undefined): order is Order =>
+  !!order && !!row.options.useLimitOrders && order.type === OrderType.Limit;
+
+const adoptSlice = (
+  state: Omit<TwapState, 'inFlight'>,
+  order: Order,
+  inFlight: NonNullable<TwapState['inFlight']>,
+): Omit<TwapState, 'inFlight'> => ({
+  ...state,
+  limitSlices: [
+    ...(state.limitSlices ?? []),
+    { orderIds: [order.id], price: order.price || inFlight.price || 0, size: inFlight.size },
+  ],
+});
