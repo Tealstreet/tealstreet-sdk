@@ -339,7 +339,8 @@ and cancel-pending intents, and caller-supplied keys on version-1 storage, whose
 survive there. On version 2 a caller-keyed row past the key window retires like any other, Unknown
 included, and the raised floor refuses its reuse as `intentRetired` / Unknown: unexpired Unknown rows
 hold pending capacity for 24 h, so without this 1,024 reconciled caller-keyed Unknowns block every
-write (AGT-106). Retirement is the host's assertion, never evidence: the SDK still
+write (AGT-106). A `cancel` arriving while retirement awaits compaction runs after it
+settles: it finds no row once retirement lands and proceeds normally if it fails. Retirement is the host's assertion, never evidence: the SDK still
 never resends, and a later receipt for that ID finds no entry.
 
 ## DELEGATED account actions

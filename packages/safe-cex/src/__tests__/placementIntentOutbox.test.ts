@@ -566,6 +566,60 @@ describe('caller-keyed row retention', () => {
     }
   });
 
+  // CodeRabbit (AGT-106): a cancel accepted while retirement awaits compaction must not be
+  // published and then deleted with the row; it runs after retirement settles instead.
+  async function overlappingCancel(f: ReturnType<typeof fixture>, abort = false) {
+    const box = await DelegatedOutbox.open(f.options);
+    const live = box.connect(connection(f, []));
+    const id = f.id();
+    await box.enqueue(params, { intentId: id });
+    box.disconnect(live); // Handed off: Unknown, and a cancel stays pending.
+    f.advance(16_000);
+    const cancelPending: boolean[] = [];
+    f.options.changed = (row) => {
+      if (row.intentId === id) cancelPending.push(row.cancelPending);
+    };
+    const compact = f.options.storage.compact;
+    let release: (() => void) | undefined;
+    f.options.storage.compact = async (scope, checkpoint) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      if (abort) throw new Error('transaction aborted');
+      return compact(scope, checkpoint);
+    };
+    const retired = box.retire(id);
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 0));
+    const canceled = box.cancel(id);
+    f.options.storage.compact = compact;
+    release();
+    return { box, id, cancelPending, retired, canceled };
+  }
+
+  it('a cancel overlapping a retirement that lands finds no row to cancel', async () => {
+    const f = fixture();
+    const { box, id, cancelPending, retired, canceled } = await overlappingCancel(f);
+    try {
+      expect(await retired).toBe(true);
+      await canceled;
+      expect(cancelPending).not.toContain(true);
+      expect(f.rows.has(id)).toBe(false);
+      expect(box.entries().some((row) => row.intentId === id)).toBe(false);
+    } finally {
+      box.close();
+    }
+  });
+
+  it('a cancel overlapping a failed retirement is still persisted', async () => {
+    const f = fixture();
+    const { box, id, retired, canceled } = await overlappingCancel(f, true);
+    try {
+      await expect(retired).rejects.toThrow('transaction aborted');
+      await canceled;
+      expect(f.rows.get(id)).toMatchObject({ state: 'unknown', cancelPending: true });
+    } finally {
+      box.close();
+    }
+  });
+
   it('upgrading legacy storage to the checkpoint frees caller rows that had filled it', async () => {
     const f = fixture(1);
     let box = await DelegatedOutbox.open(f.options);

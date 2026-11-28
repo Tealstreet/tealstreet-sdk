@@ -354,6 +354,8 @@ export class DelegatedOutbox {
   private readonly persistedIntents = new Map<string, DelegatedIntent>();
   // Only current, durably completed rows can release capacity or retire.
   private readonly completedIntents = new Map<string, DelegatedIntent>();
+  // Rows whose retirement awaits compaction; a cancel waits for it to settle.
+  private readonly retiring = new Set<string>();
   private connection?: Readonly<OutboxConnection>;
   private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
@@ -954,13 +956,18 @@ export class DelegatedOutbox {
         this.checkpointVersion === 2
           ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
           : this.retiredIntentBefore;
-      await this.options.storage.compact(this.scope, {
-        ...(this.checkpointVersion === 2
-          ? ({ version: 2, retiredIntentBefore: floor } as const)
-          : ({ version: 1 } as const)),
-        sequence: this.sequence,
-        retiredIntentIds: [intentId],
-      });
+      this.retiring.add(intentId);
+      try {
+        await this.options.storage.compact(this.scope, {
+          ...(this.checkpointVersion === 2
+            ? ({ version: 2, retiredIntentBefore: floor } as const)
+            : ({ version: 1 } as const)),
+          sequence: this.sequence,
+          retiredIntentIds: [intentId],
+        });
+      } finally {
+        this.retiring.delete(intentId);
+      }
       this.retiredIntentBefore = floor;
       this.removeIntent(row);
       return true;
@@ -968,6 +975,8 @@ export class DelegatedOutbox {
   }
 
   cancel(intentId: string): Promise<void> {
+    // Accepted mid-retirement, the cancel would be published and then deleted with the row.
+    if (this.retiring.has(intentId)) return this.serial(async () => {}).then(() => this.cancel(intentId));
     const row = this.intents.get(intentId);
     const handedOff =
       row?.state === 'sending' || row?.state === 'acknowledged' || (row?.state === 'unknown' && !row.retentionExpired);
