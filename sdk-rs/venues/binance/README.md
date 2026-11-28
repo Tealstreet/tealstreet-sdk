@@ -134,3 +134,11 @@ are preserved, and additional reads occur only when a physical page saturates.
 All pages retain that request's original read root and deadline. The fold
 reconstructs intervals after native draining and refuses an incomplete source.
 Other venues retain their existing fill-read windows.
+
+## Chart history during an IP ban
+
+A 418, or a 429 that is not `-1015`, stops `FetchCandles` until the body's
+`banned until <ms>`, else `Retry-After`, capped at 24 h. Each fetch in that
+window fails `RateLimited`/`NotSent` with `retry_after_ms` and sends nothing:
+every chart click used to send again and renew the ban (TEALSTREET-NEXT-EH0).
+The used-weight brake at 1,920 pauses background reads only, never chart history.
