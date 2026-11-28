@@ -28,6 +28,9 @@ mod identity;
 #[path = "twap/amend.rs"]
 mod amend;
 
+#[path = "twap/limit_slices.rs"]
+mod limit_slices;
+
 struct Env {
     now: f64,
     units: Vec<f64>,
