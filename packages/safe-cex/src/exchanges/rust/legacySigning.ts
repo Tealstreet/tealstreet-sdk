@@ -333,7 +333,8 @@ export const signHostedHttp = async (
       'X-MBX-APIKEY': credential,
       'Content-Type': 'application/json; charset=utf-8',
     } : {
-      'X-Referer': BROKER_ID,
+      // Bybit's broker attribution; Hyro's CORS allowlist refuses it (TEAL-22).
+      ...(name === 'hyrotrader' ? {} : { 'X-Referer': BROKER_ID }),
       'X-BAPI-RECV-WINDOW': options.extra?.recvWindow ?? RECV_WINDOW,
       'Content-Type': 'application/json; charset=utf-8',
       ...siteHeaders,

@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+# Adds a fixed-seed exemption key so tests can drive the exempt path. Enabled
+# only through this crate's own dev-dependency; never in a shipped build.
+builder-exemption-test-key = []
+
 [dependencies]
 safe-cex-engine = { workspace = true, features = ["order-locks", "serial-plans", "condition-waits", "managed-sockets"] }
 safe-cex-crypto = { workspace = true, features = ["schnorr"] }
@@ -17,3 +22,4 @@ workspace = true
 [dev-dependencies]
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 safe-cex-crypto = { workspace = true, features = ["schnorr"] }
+safe-cex-venue-lighter = { path = ".", features = ["builder-exemption-test-key"] }

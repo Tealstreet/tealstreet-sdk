@@ -41,13 +41,25 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 - Cross margin and one-way positions only. Isolated/hedged mode changes return
   typed `unsupported` / `notSent` errors before any network write; selecting the
   already-supported modes is a local success.
+- Hyro requests carry no `X-Referer`. That header is Bybit's broker
+  attribution, and Hyro's CORS allowlist (Content-Type plus the four `X-BAPI-*`
+  headers, checked 2026-11-28) omits it, so a browser refused every Hyro REST
+  call that carried it (TEAL-22). Bybit aliases keep it on public and signed
+  requests alike.
 - Signed writes use exact JSON bytes and `Content-Type: application/json`.
   Conditional `triggerDirection` is a JSON number. Bybit variants retain their
   existing wire representation.
 - Public subscribe/unsubscribe frames contain at most 10 topics per request.
-  This is a request batching limit, not certification of unlimited topics on one
-  physical simulator connection; confirm the deployed simulator's connection cap
-  with Hyro before a large beta workload.
+- One public connection holds at most 32 topics: the simulator refuses the
+  subscribe that crosses it, and every one after it (live 2026-11-28,
+  TEAL-20): `at most 32 topics per connection`. The desired set is capped at 32:
+  books, klines and trades newest-opened first, each book or kline with its own
+  symbol's ticker beside it, so opening one more evicts the oldest stream and
+  never the one just opened. A book resubscribing after a sequence gap keeps
+  its ticker and its held slot, so the gap sends only that book's unsubscribe
+  and subscribe. Tickers for other symbols in use (position or order), then
+  idle markets, fill the rest. What is left out is reported once as an Info
+  notice rather than a warning.
 - Flat position clears can omit side/leverage. Live positions still require a
   valid side and positive leverage, and accept `entryPrice` when `avgPrice` is
   absent/empty. Flat rows with missing, empty or nonpositive leverage retain the
@@ -165,7 +177,6 @@ Frequent reads while an authenticated engine exists can collect those terminal
 rows before expiry. This does not recover expired rows or provide durable capture
 while no engine is running; deeper backfill cannot close that retention gap.
 
-
 ## Later-page history failure diagnostics
 
 Closed-PnL and query history capture their closed native operation when binding
@@ -184,6 +195,7 @@ from an auxiliary order-history failure without treating a retained prefix as
 complete coverage. An earlier missing-coverage reason remains authoritative;
 first-page failures and serialization failures still reject. These diagnostics
 do not change requests, deadlines, retry policy, pacing or writes.
+
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and

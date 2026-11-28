@@ -6,8 +6,13 @@ All screenshots were captured on 2026-11-28 from a Release simulator build of te
 OTA 6) and live under `static/img/trading/mobile/app/<id>.png`. Each is imported as a module and rendered in a `text--center`
 div at `width: 250`. Retake a shot here when its screen changes.
 
-The pages describe the app as the product. They carry no web-app steps, web links or web screenshots: getting an
-invite is one line (Discord or support email), and accounts are added with an API key in the app.
+The pages present the app as the product. Getting an invite is one line (Discord or support email). Web screens
+appear only where a flow needs its desktop half: the **Cloud sync for API keys** switch and the **QR Code Sync**
+modal, recorded on tester1 in an isolated browser, with the QR blurred past scanning.
+
+Annotated steps use `src/components/AnnotatedStep` with stills in `static/img/trading/mobile/steps/`. Callout
+boxes are in iPhone points (402 × 874), copied from the app's view hierarchy (Maestro `hierarchy`), or 960 × 608
+for desktop stills. They're overlays, so a re-capture only needs the coordinates checked.
 
 Two placeholders were removed rather than captured, and their text kept:
 

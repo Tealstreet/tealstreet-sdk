@@ -316,6 +316,103 @@ describe('Rust worker engine ownership', () => {
     },
   );
 
+  it.each(['worker buffer', 'engine readiness'] as const)(
+    'drops A chaser starts from the %s after a same-name B replacement',
+    async (phase) => {
+      algosBuild = true;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = vi.fn();
+      if (phase === 'worker buffer') {
+        vi.mocked(virtualClock.start).mockImplementationOnce(async () => {
+          entered();
+          await gate;
+        });
+      } else {
+        setWasmEngineLoader(
+          vi
+            .fn()
+            .mockImplementationOnce(async () => {
+              entered();
+              await gate;
+              return { WasmEngine: ControlledEngine };
+            })
+            .mockResolvedValue({ WasmEngine: ControlledEngine }),
+        );
+      }
+      const a = createWorker();
+      const startingA = a.worker.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entered).toHaveBeenCalledTimes(1);
+      expect(sources).toHaveLength(0);
+      const payload = { op: 'chaser:start' as const, data: { symbol: 'BTCUSDT', side: OrderSide.Buy, size: 1 } };
+      a.worker.handlePayload(payload);
+      const oldExchange = a.worker.exchange;
+      if (phase === 'engine readiness') expect(oldExchange).toBeInstanceOf(RustEngineExchange);
+      a.worker.dispose();
+
+      const b = createWorker();
+      expect(await start(b.worker)).toBe(true);
+      const engineB = sources[0];
+      b.worker.handlePayload({ ...payload, data: { ...payload.data, size: 2 } });
+      expect(engineB.algoOps).toEqual([['chaser:start', { ...payload.data, size: 2 }]]);
+      const bCommands = [...engineB.commands];
+      const before = b.messages.length;
+      release();
+      expect(await startingA).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(oldExchange?.isDisposed ?? true).toBe(true);
+      expect(engineB.algoOps).toEqual([['chaser:start', { ...payload.data, size: 2 }]]);
+      expect(engineB.commands).toEqual(bCommands);
+      expect(
+        b.messages.slice(before).filter((message) => ['chaser:complete', 'error', 'warning'].includes(message.op)),
+      ).toEqual([]);
+      expect(b.worker.store.activeChasers).toEqual([]);
+      // A's expired buffer must not wake up later and select B either.
+      await vi.advanceTimersByTimeAsync(125_000);
+      expect(engineB.algoOps).toHaveLength(1);
+    },
+  );
+
+  it('fences A chaser callbacks while same-name B remains live', async () => {
+    // Master deleted the worker's mutable store and its store payloads
+    // (1e5a44b167), so only A's retained emitter callbacks remain to fence.
+    setMainAcceptsFrames(false);
+    algosBuild = true;
+    const a = createWorker();
+    expect(await start(a.worker)).toBe(true);
+    const oldExchange = a.worker.exchange!;
+    const callbacks = (
+      oldExchange.emitter as unknown as {
+        e: Record<string, Array<{ fn: (...args: any[]) => void }>>;
+      }
+    ).e;
+    const completeA = callbacks['chaser:complete'].at(-1)!.fn;
+    const warnA = callbacks.warning.at(-1)!.fn;
+    const errorA = callbacks.error.at(-1)!.fn;
+    a.worker.dispose();
+    const aBoundary = a.messages.length;
+
+    const b = createWorker();
+    expect(await start(b.worker)).toBe(true);
+    await vi.advanceTimersByTimeAsync(250);
+    const bBoundary = b.messages.length;
+    completeA({ id: 'same-id', symbol: 'BTCUSDT', filled: 7 });
+    warnA('A-only deferred notice');
+    errorA('A-only one-shot error');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(a.messages.slice(aBoundary)).toEqual([]);
+    expect(b.messages.slice(bBoundary)).toEqual([]);
+    expect(b.worker.store.activeChasers).toEqual([]);
+    b.worker.exchange!.emitter.emit('chaser:complete', { id: 'same-id', symbol: 'BTCUSDT', filled: 2 });
+    expect(b.messages.at(-1)).toMatchObject({
+      op: 'chaser:complete',
+      data: [{ id: 'same-id', symbol: 'BTCUSDT', filled: 2 }],
+    });
+  });
+
   it('reconstructs once with a fresh store, fences old callbacks and replays only live public demand', async () => {
     const { worker, messages } = createWorker();
     expect(await start(worker)).toBe(true);

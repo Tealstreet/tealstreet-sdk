@@ -206,18 +206,20 @@ export const prepareBinanceSpot = (exchange, WebSocket) => {
   prepareBinanceSpotPrivate(exchange);
 };
 
-/** Replay PM's real-time quote feed through the reference's existing handlers.
- * Derive the subscription from its own seeded catalogue, never Rust output.
- * Keep each symbol visible to strict subscription comparison.
+/** Replay PM's quote feed through the reference's existing handlers. The
+ * reference already streams `!bookTicker`; each order book it opens also carries
+ * that symbol's real-time `@bookTicker`, derived from its own depth subscriptions.
  */
 export const prepareBinancePmPublic = (exchange) => {
   const feed = exchange.publicWebsocket;
-  feed.onOpen = () => {
-    if (feed.isDisposed) return;
-    const params = exchange.store.markets.map((market) => `${market.symbol.toLowerCase()}@bookTicker`);
-    if (params.length) feed.send(JSON.stringify({ id: 1, method: 'SUBSCRIBE', params }));
-    feed.resetOrderbook();
-    feed.subscribe();
+  const send = feed.send.bind(feed);
+  feed.send = (text) => {
+    let message;
+    try { message = JSON.parse(text); } catch { return send(text); }
+    if (!['SUBSCRIBE', 'UNSUBSCRIBE'].includes(message?.method) || !Array.isArray(message.params)) return send(text);
+    const quotes = message.params.filter((topic) => typeof topic === 'string' && topic.endsWith('@depth'))
+      .map((topic) => `${topic.slice(0, -'@depth'.length)}@bookTicker`);
+    return send(quotes.length ? JSON.stringify({ ...message, params: [...message.params, ...quotes] }) : text);
   };
 };
 

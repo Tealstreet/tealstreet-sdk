@@ -51,6 +51,16 @@ account, and only with a Tealstreet-signed token (`src/builder_exemption.rs`):
 - Honoured only when the token verifies, names the account being traded,
   has not expired and expires within 400 days. Anything else keeps the fee, the
   tier check and the approval flow unchanged (fail closed).
+- Decided once per job, when it first reaches the fee gate: the tier check, the
+  approval read and every signed transaction of that job follow that decision,
+  even if the token expires or comes into range mid-job.
+- Threat model: a token covers every market of its account (no market field;
+  sub-accounts have their own indices). It has no serial, so a leaked token
+  stays valid until it expires or `KEYS` rotates, and with no issued-at time
+  the 400-day bound applies to the time remaining, not to the issued lifetime.
+- Tests drive the exempt path with a fixed-seed key that only the
+  `builder-exemption-test-key` feature accepts. Only this crate's own
+  dev-dependency enables it, and a WASM build with it fails to compile.
 - Plumbed as `lighterBuilderExemption` in the Rust registry options only; it is
   not part of the public TS `ExchangeOptions` and is never set from the terminal.
 - Offline tooling: `cargo run -p safe-cex-venue-lighter --example builder_exemption -- keygen|sign|check`.
