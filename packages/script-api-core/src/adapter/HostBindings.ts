@@ -96,6 +96,7 @@ export interface HostWriteEvent {
 
 export interface HostBindings {
   // ── Where the host keeps things ────────────────────────────────────────
+  /** Stable identity for this account's connection; replacement returns a new object. */
   getExchange(account: string): HostExchange | undefined;
   getStore(account: string): StoreData | undefined;
   /** Host-owned optimistic ids and wake/account lifetime checks, after shared rounding. */

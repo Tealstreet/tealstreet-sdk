@@ -50,6 +50,10 @@ import type {
 export type MaybePromise<T> = T | Promise<T>;
 
 export interface CoreAdapter {
+  /** Capture account owners synchronously before a run can yield; the returned
+   * check rejects a replaced or newly connected owner before write dispatch. */
+  captureAccountOwners(): (account: string) => void;
+
   // ── Ambient state ──────────────────────────────────────────────────────
   getActiveAccount(): MaybePromise<string>;
   /** Streaming-account names only. */

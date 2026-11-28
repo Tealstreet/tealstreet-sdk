@@ -161,6 +161,8 @@ export const createMockAdapter = (seed: MockSeed): MockAdapter => {
   };
 
   return {
+    // This fixture has immutable owners and no connection-replacement operation.
+    captureAccountOwners: () => () => undefined,
     getActiveAccount: () => seed.activeAccount,
     getActiveAccounts: () => seed.streamingAccounts,
     getActiveSymbol: () => seed.activeSymbol,

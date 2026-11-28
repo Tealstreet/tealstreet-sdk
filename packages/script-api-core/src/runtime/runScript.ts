@@ -182,6 +182,15 @@ export const runScript = async (record: ScriptRecord, rawArgs: string, ctx: RunC
 
     // 2. Parse args per SPEC §7.1.
     const args = parseScriptArgs(rawArgs);
+    const checkAccountOwner = ctx.adapter.captureAccountOwners();
+    const selectedAccounts = new Set<string>();
+    const assertAccountOwner = (account: string): void => {
+      selectedAccounts.add(account);
+      checkAccountOwner(account);
+    };
+    const assertSelectedOwners = (): void => {
+      for (const account of selectedAccounts) checkAccountOwner(account);
+    };
 
     // 3. Build the api object the IIFE receives.
     const sink = createScriptIoSink();
@@ -199,13 +208,19 @@ export const runScript = async (record: ScriptRecord, rawArgs: string, ctx: RunC
     }
 
     const api = buildApi({
+      assertAccountOwner,
       proxy,
       capabilities: record.capabilities,
       activeAccount,
       accountToExchange,
       sink,
       meta: buildMeta(record, ctx),
-      printingHost: ctx.adapter,
+      printingHost: {
+        print: (text, kind) => {
+          assertSelectedOwners();
+          return ctx.adapter.print(text, kind);
+        },
+      },
       runCommandDepth: ctx.runCommandDepth,
     });
 
@@ -214,13 +229,17 @@ export const runScript = async (record: ScriptRecord, rawArgs: string, ctx: RunC
     //        (CLI file loader per SPEC §5.1). Skip transpile + new Function.
     //    (b) `record.code` set → transpile via host primitive, wrap in IIFE,
     //        eval via `new Function`. Legacy / web / worker path.
-    if (record.fn) {
-      await record.fn(args, api);
-    } else if (record.code !== undefined) {
-      const wrappedBody = await compileScript(record.code, ctx.transpile);
-      await evalScript(wrappedBody, args, api);
-    } else {
-      throw new Error(`script '${record.name}': neither code nor fn is set`);
+    try {
+      if (record.fn) {
+        await record.fn(args, api);
+      } else if (record.code !== undefined) {
+        const wrappedBody = await compileScript(record.code, ctx.transpile);
+        await evalScript(wrappedBody, args, api);
+      } else {
+        throw new Error(`script '${record.name}': neither code nor fn is set`);
+      }
+    } finally {
+      assertSelectedOwners();
     }
 
     return {

@@ -19,8 +19,9 @@ const fixture = (side: PositionSide, unknown = false) => {
     tickers: [],
   };
   const writes: unknown[] = [];
+  const exchange = { name: 'mexc', placeOrder, updateOrder, store };
   const adapter = createCoreAdapter({
-    getExchange: () => ({ name: 'mexc', placeOrder, updateOrder, store }),
+    getExchange: () => exchange,
     getStore: () => store,
     onWrite: (event: unknown) => writes.push(event),
   } as never);

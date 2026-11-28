@@ -2,7 +2,7 @@ import { FrameStore } from '../../../safe-cex/src/store/frameStore';
 import { nativeFixture } from '../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import type { Market, Order, Position } from '@tealstreet/safe-cex/src/types';
 import type { CoreAdapter } from './AdapterContext';
-import type { HostBindings, HostWriteEvent } from './HostBindings';
+import type { HostBindings, HostExchange, HostWriteEvent } from './HostBindings';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -60,6 +60,11 @@ const position = (over: Partial<Position> = {}): Position => ({
   ...over,
 });
 
+const fixedExchange =
+  (exchange: HostExchange): HostBindings['getExchange'] =>
+  () =>
+    exchange;
+
 interface Fake {
   readonly host: HostBindings;
   readonly placeOrder: ReturnType<typeof vi.fn>;
@@ -78,8 +83,9 @@ const fakeHost = (over: Partial<HostBindings> & { exchangeName?: string } = {}):
     orders: [order()],
     balance: { total: 1000, free: 800, used: 200, upnl: 5 },
   };
+  const exchange = { name: (over.exchangeName ?? 'binance') as never, store, placeOrder, cancelOrders };
   const host: HostBindings = {
-    getExchange: () => ({ name: (over.exchangeName ?? 'binance') as never, store, placeOrder, cancelOrders }) as never,
+    getExchange: () => exchange as never,
     getStore: () => store as never,
     readActiveAccount: () => 'main',
     readActiveSymbol: () => 'BTCUSDT',
@@ -173,7 +179,7 @@ describe('createCoreAdapter', () => {
         outcome: 'unknown',
       });
       const placeOrders = vi.fn().mockRejectedValue(failure);
-      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders }) });
+      const { host, writes } = fakeHost({ getExchange: fixedExchange({ placeOrders }) } as never);
       const success = vi.fn();
       await createCoreAdapter(host)
         .placeOrders(batch, 'main')
@@ -200,7 +206,9 @@ describe('createCoreAdapter', () => {
         partialOrderIds: ['accepted-1'],
         outcome: 'rejected',
       });
-      const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const { host } = fakeHost({
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      } as never);
       const success = vi.fn();
       const caught = await createCoreAdapter(host)
         .placeOrders(batch, 'main')
@@ -219,7 +227,7 @@ describe('createCoreAdapter', () => {
     it('keeps ordinary failures unchanged and never reports them as success', async () => {
       const failure = new Error('batch refused before sending');
       const { host, writes } = fakeHost({
-        getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) } as never),
       });
       await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
       expect(writes).toEqual([
@@ -253,7 +261,9 @@ describe('createCoreAdapter', () => {
       );
       markErrorReported(failure);
       expect(Object.hasOwn(failure, 'errorReported')).toBe(false);
-      const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const { host } = fakeHost({
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      } as never);
       const caught = await createCoreAdapter(host)
         .placeOrders(batch, 'main')
         .catch((error: unknown) => error);
@@ -281,7 +291,9 @@ describe('createCoreAdapter', () => {
             totalOrderCount: 3,
           }),
         );
-        const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+        const { host, writes } = fakeHost({
+          getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+        } as never);
         const caught = await createCoreAdapter(host)
           .placeOrders(batch, 'main')
           .catch((error: unknown) => error);
@@ -309,7 +321,9 @@ describe('createCoreAdapter', () => {
       'leaves malformed/empty IDs unchanged (%j)',
       async ({ ids }) => {
         const failure = Object.assign(new Error('ordinary failure'), { partialOrderIds: ids, outcome: 'unknown' });
-        const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+        const { host, writes } = fakeHost({
+          getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+        } as never);
         await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
         expect(writes[0]).toMatchObject({ ok: false, error: failure.message });
         expect(writes[0]).not.toHaveProperty('partialOrderIds');
@@ -323,7 +337,9 @@ describe('createCoreAdapter', () => {
           throw new Error('unreadable metadata');
         },
       });
-      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const { host, writes } = fakeHost({
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      } as never);
       await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
       expect(writes[0]).toMatchObject({ ok: false, error: 'native message' });
     });
@@ -335,7 +351,9 @@ describe('createCoreAdapter', () => {
         partialOrderCount: -1,
         totalOrderCount: 1.5,
       });
-      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const { host, writes } = fakeHost({
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      } as never);
       const caught = await createCoreAdapter(host)
         .placeOrders(batch, 'main')
         .catch((error: unknown) => error);
@@ -348,7 +366,7 @@ describe('createCoreAdapter', () => {
 
     it('keeps successful batch IDs on the success path only', async () => {
       const { host, writes } = fakeHost({
-        getExchange: () => ({ placeOrders: vi.fn().mockResolvedValue(['id-1', 'id-2']) }),
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockResolvedValue(['id-1', 'id-2']) } as never),
       });
       await expect(createCoreAdapter(host).placeOrders(batch, 'main')).resolves.toEqual({ orderIds: ['id-1', 'id-2'] });
       expect(writes[0]).toMatchObject({ ok: true, orderIds: ['id-1', 'id-2'] });
@@ -358,7 +376,9 @@ describe('createCoreAdapter', () => {
 
     it('keeps the observer text for a plain failure record while preserving its SDK message on the wrapper', async () => {
       const failure = { message: 'serialized native message', partialOrderIds: ['accepted-1'], outcome: 'rejected' };
-      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const { host, writes } = fakeHost({
+        getExchange: fixedExchange({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      } as never);
       const caught = await createCoreAdapter(host)
         .placeOrders(batch, 'main')
         .catch((error: unknown) => error);
@@ -368,7 +388,7 @@ describe('createCoreAdapter', () => {
 
     it('keeps validation failures local and unwrapped', async () => {
       const placeOrders = vi.fn();
-      const { host } = fakeHost({ getExchange: () => ({ placeOrders }) });
+      const { host } = fakeHost({ getExchange: fixedExchange({ placeOrders }) } as never);
       await expect(createCoreAdapter(host).placeOrders([{ ...batch[0], amount: 0.04 }], 'main')).rejects.toMatchObject({
         name: 'ScriptValidationError',
       });
@@ -583,7 +603,7 @@ describe('createCoreAdapter', () => {
     // marginType)` coerces the symbol truthy and sets isolated on EVERY call,
     // which is what this did while the seam typed the argument as `unknown`.
     const changeMarginType = vi.fn(async () => undefined);
-    const { host } = fakeHost({ getExchange: () => ({ name: 'binance', changeMarginType }) as never });
+    const { host } = fakeHost({ getExchange: fixedExchange({ name: 'binance', changeMarginType }) as never } as never);
 
     await createCoreAdapter(host).setMarginType('BTCUSDT', 'cross' as never, 'main');
     expect(changeMarginType).toHaveBeenCalledWith(false, 'BTCUSDT');
@@ -595,7 +615,7 @@ describe('createCoreAdapter', () => {
   it('amends with the field the caller named, and drops an explicit undefined', async () => {
     const updateOrder = vi.fn(async () => undefined);
     const { host } = fakeHost({
-      getExchange: () => ({ name: 'binance', updateOrder, store: { orders: [order()] } }) as never,
+      getExchange: fixedExchange({ name: 'binance', updateOrder, store: { orders: [order()] } } as never),
       getStore: () => ({ orders: [order()], markets: [market()] }) as never,
     });
 
@@ -610,7 +630,7 @@ describe('createCoreAdapter', () => {
     const raw = vi.fn(async () => undefined);
     const submitOrderAmend = vi.fn(async () => undefined);
     const { host } = fakeHost({
-      getExchange: () => ({ name: 'binance', updateOrder: raw }) as never,
+      getExchange: fixedExchange({ name: 'binance', updateOrder: raw } as never),
       getStore: () => ({ orders: [order()], markets: [market()] }) as never,
       submitOrderAmend,
     });
@@ -628,8 +648,9 @@ describe('createCoreAdapter', () => {
   it('closes each matching position and reports partial ids when a later leg throws', async () => {
     const placeOrder = vi.fn().mockResolvedValueOnce(['id-1']).mockRejectedValueOnce(new Error('venue said no'));
     const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];
+    const exchange = { name: 'binance', placeOrder, store: { positions } };
     const { host, writes } = fakeHost({
-      getExchange: () => ({ name: 'binance', placeOrder, store: { positions } }) as never,
+      getExchange: () => exchange as never,
       getStore: () => ({ positions, markets: [market()] }) as never,
     });
 
@@ -639,41 +660,6 @@ describe('createCoreAdapter', () => {
     // The first leg is already live — an observer that only saw the throw
     // would report the whole close as having done nothing.
     expect(writes.at(-1)).toMatchObject({ method: 'closePosition', ok: false, orderIds: ['id-1'] });
-  });
-
-  // A reconnect disposes the account's exchange and builds a new one under the
-  // same name. `closePosition` awaits once per leg, so a hedge-mode close must
-  // re-resolve: leg 2 sent to the object leg 1 was placed on is sent to a dead
-  // exchange, and the short side silently stays open.
-  it('resolves the exchange per leg, so a replacement mid-close reaches the new one', async () => {
-    // Every `getExchange` hands back a fresh object, the way the controller does
-    // after `fullyCleanupAccount` disposes one and `registerAccount` builds its
-    // replacement. Asserting on WHICH `placeOrder` each leg used — rather than
-    // on how many times `getExchange` was called — keeps this about the
-    // invariant and not about where the pre-flight check happens to sit.
-    const used: Array<ReturnType<typeof vi.fn>> = [];
-    const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];
-    const { host } = fakeHost({
-      getExchange: () => {
-        const placeOrder = vi.fn(async () => [`id-${used.length + 1}`]);
-        return {
-          name: 'binance',
-          placeOrder: (opts: never) => {
-            used.push(placeOrder);
-            return placeOrder(opts);
-          },
-          store: { positions },
-        } as never;
-      },
-      getStore: () => ({ positions, markets: [market()] }) as never,
-    });
-
-    const result = await createCoreAdapter(host).closePosition({ symbol: 'BTCUSDT' } as never, 'main');
-
-    expect(used).toHaveLength(2);
-    // A captured handle would have sent both legs through one `placeOrder`.
-    expect(used[0]).not.toBe(used[1]);
-    expect(result.orderIds).toHaveLength(2);
   });
 
   it('sizes a bare closePosition in NATIVE contracts, not base', async () => {

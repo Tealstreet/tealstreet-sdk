@@ -80,6 +80,8 @@ const buildStubAdapter = (
   const placeOrderCalls: unknown[] = [];
   const runCommandCalls: { command: string; opts: unknown }[] = [];
   return {
+    // This file-loader fixture has immutable account owners.
+    captureAccountOwners: () => () => undefined,
     getActiveAccount: () => overrides.activeAccount ?? 'mybybit',
     getActiveAccounts: () => [overrides.activeAccount ?? 'mybybit'],
     getActiveSymbol: () => 'BTCUSDT',

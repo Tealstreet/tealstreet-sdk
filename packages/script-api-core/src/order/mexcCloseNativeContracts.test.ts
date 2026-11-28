@@ -80,8 +80,9 @@ describe('MEXC native close quantities through real pricing and downsizing', () 
     async (type) => {
       const placeOrder = vi.fn(async () => ['closed']);
       const store = { markets: [market], positions: [position(130)], orders: [], tickers: [] };
+      const exchange = { name: 'mexc', placeOrder, store };
       const host = {
-        getExchange: () => ({ name: 'mexc', placeOrder, store }),
+        getExchange: () => exchange,
         getStore: () => store,
         findMarket: () => market,
       } as unknown as HostBindings;
@@ -100,8 +101,9 @@ describe('MEXC native close quantities through real pricing and downsizing', () 
   it.each([445_001, 130.4, NaN])('refuses invalid reduce/close size %s before placement I/O', async (amount) => {
     const placeOrder = vi.fn(async () => ['closed']);
     const store = { markets: [market], positions: [position(130)], orders: [], tickers: [] };
+    const exchange = { name: 'mexc', placeOrder, store };
     const host = {
-      getExchange: () => ({ name: 'mexc', placeOrder, store }),
+      getExchange: () => exchange,
       getStore: () => store,
       findMarket: () => market,
     } as unknown as HostBindings;
@@ -209,8 +211,9 @@ describe('MEXC intrinsic protection and amendment quantities', () => {
     const submitOrderAmend = vi.fn(async () => undefined);
     const selected = exchangeName === 'mexc' ? market : { ...market, precision: { ...market.precision, amount: 1 } };
     const store = { markets: [selected], positions: [position(130)], orders: order ? [order] : [], tickers: [] };
+    const exchange = { name: exchangeName, placeOrder, updateOrder, store };
     const host = {
-      getExchange: () => ({ name: exchangeName, placeOrder, updateOrder, store }),
+      getExchange: () => exchange,
       getStore: () => store,
       findMarket: () => selected,
       ...(hosted ? { submitOrderAmend } : {}),
