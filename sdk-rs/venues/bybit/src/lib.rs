@@ -263,38 +263,8 @@ struct BookState {
     subscribers: u32,
     book: Book,
     sync: Sync,
-}
-
-/// When each public book, kline and trade stream was opened, so a feed capped
-/// at Hyro's per-connection limit keeps the newest rather than whichever a
-/// HashMap yields first.
-#[derive(Default)]
-struct StreamOrder {
-    next: u64,
-    opened: HashMap<String, u64>,
-}
-
-impl StreamOrder {
-    fn open(&mut self, key: String) {
-        self.next += 1;
-        self.opened.insert(key, self.next);
-    }
-    fn close(&mut self, key: &str) {
-        self.opened.remove(key);
-    }
-    fn opened(&self, key: &str) -> u64 {
-        self.opened.get(key).copied().unwrap_or(0)
-    }
-}
-
-fn book_stream(symbol: &str) -> String {
-    format!("book:{symbol}")
-}
-fn kline_stream(symbol: &str, interval: Interval) -> String {
-    format!("kline:{symbol}:{interval:?}")
-}
-fn trade_stream(symbol: &str) -> String {
-    format!("trade:{symbol}")
+    /// `public_opened` when the first subscriber arrived: Hyro's capped feed keeps the newest.
+    opened: u64,
 }
 
 /// The lists startup waits for before markets and tickers go into the store.
@@ -407,12 +377,14 @@ pub struct BybitLinear {
     private: Connection,
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
-    /// Kline subscriptions by (symbol, interval), counted.
-    candles: HashMap<(String, Interval), u32>,
+    /// Kline subscriptions by (symbol, interval): subscriber count and `public_opened` order.
+    candles: HashMap<(String, Interval), (u32, u64)>,
     /// Live bar per subscription, extended by trades between native klines.
     live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
-    stream_order: StreamOrder,
+    /// Opening order of public books and klines, so a feed capped at Hyro's
+    /// per-connection limit keeps the newest rather than HashMap order.
+    public_opened: u64,
     startup: Startup,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
@@ -674,7 +646,7 @@ impl BybitLinear {
             candles: HashMap::new(),
             live_candles: HashMap::new(),
             trade_subscribers: HashMap::new(),
-            stream_order: StreamOrder::default(),
+            public_opened: 0,
             startup: Startup {
                 prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
@@ -1433,7 +1405,7 @@ impl BybitLinear {
         )
     }
 
-    /// Hyro holds 32 topics per connection. The newest books, klines and trades
+    /// Hyro holds 32 topics per connection. The newest books and klines
     /// keep their slots, each book or kline with its own symbol's ticker beside
     /// it; tickers for other symbols in use, then idle markets, fill the rest.
     /// A book resubscribing after a sequence gap is out of the set only for its
@@ -1446,33 +1418,19 @@ impl BybitLinear {
         for (symbol, state) in &self.books {
             if Category::for_symbol(symbol) == self.category {
                 streams.push((
-                    self.stream_order.opened(&book_stream(symbol)),
+                    state.opened,
                     Self::book_topic(self.paths.book_depth, symbol),
                     Some(symbol),
                     matches!(state.sync, Sync::Resubscribing(_)),
                 ));
             }
         }
-        for (symbol, interval) in self.candles.keys() {
+        // Hyro has no trade feed (`fetch_candles` subscribes none), so only books and klines.
+        for ((symbol, interval), (_, opened)) in &self.candles {
             if let Some(topic) = Self::kline_topic(symbol, *interval)
                 && self.owns_symbol(symbol)
             {
-                streams.push((
-                    self.stream_order.opened(&kline_stream(symbol, *interval)),
-                    topic,
-                    Some(symbol),
-                    false,
-                ));
-            }
-        }
-        for symbol in self.trade_subscribers.keys() {
-            if self.owns_symbol(symbol) {
-                streams.push((
-                    self.stream_order.opened(&trade_stream(symbol)),
-                    format!("publicTrade.{symbol}"),
-                    None,
-                    false,
-                ));
+                streams.push((*opened, topic, Some(symbol), false));
             }
         }
         streams.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -1521,19 +1479,15 @@ impl BybitLinear {
             self.public.tickers_capped = true;
             // Every Hyro catalogue exceeds its 32-topic connection, so the cap
             // is expected there rather than a warning.
-            if self.variant.is_hyro() {
-                cx.notice(
-                    Level::Info,
-                    code::SUBSCRIPTION_REJECTED,
-                    "HyroTrader streams at most 32 public topics per connection; tickers for symbols not in use are not streamed",
-                );
-            } else {
-                cx.notice(
-                    Level::Warn,
-                    code::SUBSCRIPTION_REJECTED,
-                    "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
-                );
-            }
+            cx.notice(
+                if self.variant.is_hyro() {
+                    Level::Info
+                } else {
+                    Level::Warn
+                },
+                code::SUBSCRIPTION_REJECTED,
+                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+            );
         }
         if let Err(error) = cx.set_socket_interests(feed, interests) {
             self.socket_failed(cx, error);
@@ -2355,10 +2309,12 @@ impl BybitLinear {
                 subscribers: 0,
                 book: Book::default(),
                 sync: Sync::Waiting,
+                opened: 0,
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
-            self.stream_order.open(book_stream(&symbol));
+            self.public_opened += 1;
+            state.opened = self.public_opened;
             self.subscribe(
                 cx,
                 "subscribe",
@@ -2380,7 +2336,6 @@ impl BybitLinear {
             {
                 cx.clear_timer(timer);
             }
-            self.stream_order.close(&book_stream(symbol));
             self.subscribe(
                 cx,
                 "unsubscribe",
@@ -2419,33 +2374,31 @@ impl BybitLinear {
         }
         let key = (symbol.clone(), interval);
         if add {
-            let count = self.candles.entry(key).or_insert(0);
-            *count += 1;
-            if *count == 1 {
-                self.stream_order.open(kline_stream(&symbol, interval));
+            let count = self.candles.entry(key).or_insert((0, 0));
+            count.0 += 1;
+            if count.0 == 1 {
+                self.public_opened += 1;
+                count.1 = self.public_opened;
                 let mut topics: Vec<String> = kline.into_iter().collect();
                 if trades {
                     let subscribers = self.trade_subscribers.entry(symbol.clone()).or_insert(0);
                     *subscribers += 1;
                     if *subscribers == 1 {
-                        self.stream_order.open(trade_stream(&symbol));
                         topics.push(format!("publicTrade.{symbol}"));
                     }
                 }
                 self.subscribe(cx, "subscribe", &topics);
             }
         } else if let Some(count) = self.candles.get_mut(&key) {
-            *count -= 1;
-            if *count == 0 {
+            count.0 -= 1;
+            if count.0 == 0 {
                 self.candles.remove(&key);
                 self.live_candles.remove(&key);
-                self.stream_order.close(&kline_stream(&symbol, interval));
                 let mut topics: Vec<String> = kline.into_iter().collect();
                 if trades && let Some(subscribers) = self.trade_subscribers.get_mut(&symbol) {
                     *subscribers -= 1;
                     if *subscribers == 0 {
                         self.trade_subscribers.remove(&symbol);
-                        self.stream_order.close(&trade_stream(&symbol));
                         topics.push(format!("publicTrade.{symbol}"));
                     }
                 }
@@ -4029,6 +3982,7 @@ mod public_decoder_tests {
                 subscribers: 1,
                 book: Book::default(),
                 sync: Sync::Waiting,
+                opened: 0,
             },
         );
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
