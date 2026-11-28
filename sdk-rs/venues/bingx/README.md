@@ -146,6 +146,8 @@ reduce-only LIMIT price move, cancels the original, requires a target-matching
 terminal cancellation with zero execution, then places; native cancelReplace
 remains only for unguarded LIMIT moves. A refused cancel leaves the original; a
 refused placement after a proven cancel is Unprotected with a re-place warning.
+The placement's final Claim refuses if the cancelled original changed or filled
+after its proof, and its ACK must name a fresh id on the edited symbol.
 Ambiguous replies and guarded rate limits are Unknown, with no resend or put-back.
 A missing or stale requested receipt triggers one unsigned Daily (Last) or
 Premium (Mark) preflight read, bounded to 20 s with no retry, before destructive

@@ -41,9 +41,15 @@ replaceTriggerOrderPrice, which optionally checked Store Mark without an age gat
 A target-matching terminal cancellation with explicit zero execution is required
 before placing; an empty code-0 object, missing execution proof, a foreign
 identity/symbol or a contradictory streamed fill is Unknown and places nothing.
-Complete native parameters are preserved when available, including closing and
-guaranteed-stop flags and the original quantity. Native flags that cannot be
-preserved invalidate amendment metadata before cancellation.
+The replacement's own final Claim re-checks the cancelled original: a fill or
+other change learned after the cancel proof refuses the placement. Its ACK must
+name a fresh order id (not the cancelled original's) on the edited or an omitted
+symbol, or the edit is Unknown and nothing more is sent.
+Stop and trigger replacements keep the complete native parameters, including the
+original quantity and closing/guaranteed-stop flags. A reduce-only LIMIT keeps
+`positionId`, `priceProtect` and `stopGuaranteed` from a matching native snapshot;
+a flag it cannot carry refuses the edit before cancellation, as does any other
+native flag that cannot be preserved.
 
 Nothing is ever placed automatically after a failure. A refused cancel leaves the
 original open. After a proven cancellation, a definitive replacement refusal
