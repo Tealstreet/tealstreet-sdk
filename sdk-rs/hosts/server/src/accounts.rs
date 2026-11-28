@@ -229,6 +229,8 @@ pub enum Disposal {
     SocketClosed,
     /// Its last socket deliberately moved under an active drain.
     Moving,
+    /// A verified explicit COSIGNED choice replaced the DELEGATED resident and erased its key.
+    ModeReleased,
 }
 
 impl Disposal {
@@ -246,6 +248,7 @@ impl Disposal {
             Self::JoinFailed => "join_failed",
             Self::SocketClosed => "socket_closed",
             Self::Moving => "moving",
+            Self::ModeReleased => "mode_released",
         }
     }
 
@@ -1818,82 +1821,99 @@ impl Registry {
         {
             return Err("The account registration changed; settings were not applied".into());
         }
-        if let Some(account) = existing {
-            if probed {
-                if account.is_public()
-                    || !same_handover_settings(&account.fingerprint, &fingerprint)
-                {
-                    return Err(settings::VERIFIED_SETTINGS_DIFFER.into());
-                }
-                attempt.authority.check_admission()?;
-                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
-                if let Some(proof) = attempt._probe.as_ref() {
-                    proof.check_resident_public(&account)?;
-                }
-                if let Some(expected) = &attempt.authority.proved_registration {
-                    let actual = account
-                        .signing
-                        .public_binding(Family::Schnorr)
-                        .map_err(|_| "Signer registration unavailable")?
-                        .ok_or("Signer registration unavailable")?;
-                    if actual.as_bytes() != expected.as_bytes() {
-                        return Err("Signer registration changed during verification".into());
-                    }
-                }
-                if delegated && account.delegated().is_none() {
-                    let resident = match setup {
-                        Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
-                        _ => {
-                            return Err(crate::envelope::ModeTransitionRefusal::Unavailable
-                                .reason()
-                                .into());
-                        }
-                    };
-                    attempt.authority.check_admission()?;
-                    if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
-                        return Err("Account is retiring; account not attached".into());
-                    }
-                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
-                    {
-                        (Some(proof), _) => account
-                            .signing
-                            .upgrade_proven(resident, Some(&proof.public)),
-                        (None, Some(public)) => {
-                            account.signing.upgrade_proven(resident, Some(public))
-                        }
-                        (None, None) => account.signing.upgrade(resident),
-                    }
-                    .map_err(|reason| reason.reason().to_owned())?;
-                    if upgraded {
-                        account.broadcast_signing_mode();
-                    }
-                }
-                if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
-                    return Err("account stopped".into());
-                }
-                return Ok(account);
-            }
-            if !account.is_public() && account.delegated().is_some() != delegated {
-                return Err("Account signing mode differs; account not attached".into());
-            }
-            if account.fingerprint == fingerprint && account.is_public() == public_only {
-                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
-                if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
-                    return Err("account stopped".into());
-                }
-                return Ok(account);
-            }
-            if apply.is_none()
-                && let Some(refusal) =
-                    self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+        'existing: {
+            let Some(account) = existing else {
+                break 'existing;
+            };
             {
-                return Err(refusal);
-            }
-            if apply.is_none() {
-                self.dispose(
-                    &account,
-                    Disposal::rebuild(account.is_public(), public_only),
-                );
+                if probed {
+                    if account.is_public()
+                        || !same_handover_settings(&account.fingerprint, &fingerprint)
+                    {
+                        return Err(settings::VERIFIED_SETTINGS_DIFFER.into());
+                    }
+                    attempt.authority.check_admission()?;
+                    crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                    if let Some(proof) = attempt._probe.as_ref() {
+                        proof.check_resident_public(&account)?;
+                    }
+                    if let Some(expected) = &attempt.authority.proved_registration {
+                        let actual = account
+                            .signing
+                            .public_binding(Family::Schnorr)
+                            .map_err(|_| "Signer registration unavailable")?
+                            .ok_or("Signer registration unavailable")?;
+                        if actual.as_bytes() != expected.as_bytes() {
+                            return Err("Signer registration changed during verification".into());
+                        }
+                    }
+                    if !delegated
+                        && init.release_delegated == Some(true)
+                        && account.delegated().is_some()
+                    {
+                        attempt.authority.check_admission()?;
+                        self.release_delegated(&account, outbox.clone());
+                        break 'existing;
+                    }
+                    if delegated && account.delegated().is_none() {
+                        let resident = match setup {
+                            Some(DelegatedSetup::Pair(pair)) => {
+                                prepare_delegated(init, pair)?.resident
+                            }
+                            _ => {
+                                return Err(crate::envelope::ModeTransitionRefusal::Unavailable
+                                    .reason()
+                                    .into());
+                            }
+                        };
+                        attempt.authority.check_admission()?;
+                        if account.handle.disposal_cause().is_some()
+                            || !account.running.io_allowed()
+                        {
+                            return Err("Account is retiring; account not attached".into());
+                        }
+                        let upgraded =
+                            match (public, attempt.authority.proved_registration.as_deref()) {
+                                (Some(proof), _) => account
+                                    .signing
+                                    .upgrade_proven(resident, Some(&proof.public)),
+                                (None, Some(public)) => {
+                                    account.signing.upgrade_proven(resident, Some(public))
+                                }
+                                (None, None) => account.signing.upgrade(resident),
+                            }
+                            .map_err(|reason| reason.reason().to_owned())?;
+                        if upgraded {
+                            account.broadcast_signing_mode();
+                        }
+                    }
+                    if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
+                        return Err("account stopped".into());
+                    }
+                    return Ok(account);
+                }
+                if !account.is_public() && account.delegated().is_some() != delegated {
+                    return Err("Account signing mode differs; account not attached".into());
+                }
+                if account.fingerprint == fingerprint && account.is_public() == public_only {
+                    crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                    if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
+                        return Err("account stopped".into());
+                    }
+                    return Ok(account);
+                }
+                if apply.is_none()
+                    && let Some(refusal) =
+                        self.rebuild_refusal_for_mode(user, init, public_only, holder, delegated)
+                {
+                    return Err(refusal);
+                }
+                if apply.is_none() {
+                    self.dispose(
+                        &account,
+                        Disposal::rebuild(account.is_public(), public_only),
+                    );
+                }
             }
         }
         let live = Live {
@@ -2712,6 +2732,21 @@ impl Registry {
             account,
             disposal,
             "its key or connection settings changed",
+            Some(tell_through(account, vec![outbox])),
+        );
+    }
+
+    /// The newest explicit mode choice wins (Sam, 2026-11-15): a verified COSIGNED join
+    /// erases the DELEGATED resident's key and stops its algos, telling the joining page.
+    /// Resting venue orders stay; the caller then builds the account as COSIGNED.
+    fn release_delegated(&self, account: &Arc<Account>, outbox: Outbox) {
+        if let Some(resident) = &account.delegated() {
+            resident.revoke();
+        }
+        self.dispose_for(
+            account,
+            Disposal::ModeReleased,
+            "Cosigned was selected",
             Some(tell_through(account, vec![outbox])),
         );
     }

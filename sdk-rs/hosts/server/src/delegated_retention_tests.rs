@@ -1659,3 +1659,105 @@ async fn without_a_notifier_retention_arms_no_warning_and_queues_nothing() {
         })
         .await;
 }
+
+fn cosigned_join(release: bool) -> InitPayload {
+    InitPayload {
+        account_name: "synthetic-main".into(),
+        exchange_name: "bybit".into(),
+        key: "synthetic-key".into(),
+        signing_mode: Some("cosigned".into()),
+        release_delegated: release.then_some(true),
+        ..Default::default()
+    }
+}
+
+async fn verified_cosigned_join(
+    registry: &Arc<Registry>,
+    init: &InitPayload,
+) -> Result<Arc<Account>, crate::delegated::probe::ProbeRefusal> {
+    let permit = registry
+        .probe_permit("A", init)
+        .unwrap()
+        .verified_fixture(9);
+    registry
+        .obtain_probed_join(
+            "A",
+            init,
+            9,
+            Some(("synthetic-valid-token".into(), u64::MAX)),
+            Arc::new(|_| true),
+            None,
+            permit,
+        )
+        .await
+}
+
+// Sam 2026-11-15, "picking one switches at once": the newest explicit choice wins.
+#[tokio::test]
+async fn an_explicit_cosigned_join_erases_the_delegated_key_and_audits_the_algo_stop() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            crate::audit::CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+            let registry = tests::registry();
+            let (resident_account, inbox) = resident(&registry, "A");
+            let resident_account = testing::run_algos(
+                resident_account,
+                safe_cex_remote_signer::SignerLink::new(0, Arc::new(|_| false)),
+                inbox,
+            );
+            let provider = resident_account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+
+            let joined = verified_cosigned_join(&registry, &cosigned_join(true))
+                .await
+                .unwrap();
+            assert!(!Arc::ptr_eq(&joined, &resident_account));
+            assert!(
+                joined.delegated().is_none(),
+                "the rebuilt account signs through the browser"
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported,
+                "the resident key is erased, not parked"
+            );
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+            }
+            let lines = crate::audit::CAPTURED.with(|lines| lines.borrow_mut().take().unwrap());
+            let stop = lines
+                .iter()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|line| line["op"] == "terminateAll")
+                .expect("the resident's algo stop is audited");
+            assert_eq!(stop["origin"], "Cosigned was selected");
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_cosigned_join_without_release_still_attaches_to_the_delegated_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (resident_account, mut inbox) = resident(&registry, "A");
+            let provider = resident_account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            let joined = verified_cosigned_join(&registry, &cosigned_join(false))
+                .await
+                .unwrap();
+            assert!(Arc::ptr_eq(&joined, &resident_account));
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.dispose(&joined, Disposal::PageDisposed);
+        })
+        .await;
+}

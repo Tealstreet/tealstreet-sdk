@@ -141,7 +141,13 @@ construction also retains original typed identity facts bound to the same provid
 venue and serialized refs; JSON must never restore ScalarOnly credential absence.
 Public mode is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
-to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
+to a DELEGATED resident without downgrading it, unless its init carries
+`releaseDelegated: true` (an explicit Cosigned choice; the newest explicit mode
+choice wins, Sam 2026-11-15). Only after that join's possession proof does
+`release_delegated` revoke the resident key, stop its algos with the audited
+reason "Cosigned was selected" (`Disposal::ModeReleased`) and rebuild the account
+as COSIGNED for the joining socket; resting venue orders stay. In-place handover
+that keeps algos running is not implemented. A proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
 Public-key handovers locally match the candidate to the original provider's
 completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr

@@ -24,6 +24,10 @@ pub struct InitPayload {
     /// Connection-local, like `sealed`; never a setting or fingerprint field.
     #[serde(default, skip_serializing)]
     pub resume: Option<bool>,
+    /// An explicit COSIGNED choice: once this join proves possession, a DELEGATED resident is
+    /// stopped and its key erased instead of being joined. Connection-local, like `resume`.
+    #[serde(default, skip_serializing)]
+    pub release_delegated: Option<bool>,
     /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
     #[serde(default, skip_serializing)]
     pub resume_proof: Option<String>,
