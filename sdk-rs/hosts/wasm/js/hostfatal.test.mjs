@@ -117,6 +117,63 @@ test('real WASM unreachable is contained without poisoning a sibling host', asyn
   sibling.host.dispose();
 });
 
+// wasm-bindgen's glue for a `&mut self` export: the borrow is released only when
+// Rust returns, so a JS throw that unwinds through the wasm frames leaves it held.
+async function borrowGuardedEngine(thrown) {
+  // (module (import "e" "f" (func)) (func (export "go") call 0))
+  const bytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 2, 7, 1, 1, 101, 1, 102, 0, 0,
+    3, 2, 1, 0, 7, 6, 1, 2, 103, 111, 0, 1, 10, 6, 1, 4, 0, 16, 0, 11]);
+  let fail = true;
+  const { instance } = await WebAssembly.instantiate(bytes, { e: { f: () => { if (fail) { fail = false; throw thrown; } } } });
+  let borrowed = false;
+  let entries = 0;
+  const guarded = () => {
+    entries++;
+    if (borrowed) throw new Error('recursive use of an object detected which would lead to unsafe aliasing in rust');
+    borrowed = true;
+    instance.exports.go();
+    borrowed = false;
+    return '';
+  };
+  return { overrides: { wsMessageBytes: guarded, wsMessage: guarded, timer: guarded, command: guarded }, entries: () => entries };
+}
+
+// Firefox reports exhaustion as the bare string 'out of memory' (TEALSTREET-NEXT-EGS), and
+// 'too much recursion' as an InternalError rather than V8's RangeError.
+for (const [label, thrown] of [['a non-Error throw (SpiderMonkey OOM)', 'out of memory'],
+  ['a SpiderMonkey InternalError', Object.assign(new Error('too much recursion'), { name: 'InternalError' })]]) {
+  test(`${label} unwinding through wasm retires the engine before its held borrow is re-entered`, async () => {
+    const guard = await borrowGuardedEngine(thrown);
+    const r = rig(guard.overrides);
+    r.host.execute(socketAction);
+    r.host.execute({ op: 'setTimer', timer: 3, at: 124 });
+    const timer = r.timers.values().next().value;
+    const callbacks = r.sockets[0].callbacks;
+    assert.doesNotThrow(() => callbacks.onMessage('first'));
+    assert.equal(r.host.dead, true);
+    assert.equal(r.host.deadError.cause, thrown);
+    assert.equal(r.host.deadError.kind, 'internal');
+    assert.equal(r.deaths.length, 1);
+    // No later entry reaches the poisoned borrow (TEALSTREET-NEXT-EGR/EGT).
+    assert.doesNotThrow(() => { callbacks.onMessage('second'); timer?.(); });
+    await assert.rejects(r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'c-1' }] }), EngineDeadError);
+    assert.equal(guard.entries(), 1);
+    assert.equal(r.host.sockets.size, 0);
+    assert.equal(r.host.timers.size, 0);
+  });
+}
+
+test('the wasm-bindgen borrow guard itself retires the engine', async () => {
+  const guard = new Error('recursive use of an object detected which would lead to unsafe aliasing in rust');
+  let entries = 0;
+  const r = rig({ command() { entries++; throw guard; } });
+  await assert.rejects(r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'c-1' }] }), (error) =>
+    error instanceof EngineDeadError && error.cause === guard && error.outcome === 'unknown');
+  await assert.rejects(r.host.command({ op: 'getAccount' }), EngineDeadError);
+  assert.equal(entries, 1);
+  assert.equal(r.deaths.length, 1);
+});
+
 test('fatal cleanup settles all pending operations with unknown write outcomes despite broken cleanup', async () => {
   let httpSignal;
   let finishHttp;

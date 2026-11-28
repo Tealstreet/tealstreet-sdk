@@ -419,6 +419,15 @@ export class EngineDeadError extends Error {
   }
 }
 
+// Rust-returned errors are thrown by the glue after the borrow is released. Any
+// other throw unwound through wasm frames with the `&mut self` borrow still held,
+// so every later entry would fail wasm-bindgen's guard; retire the engine instead.
+const BORROW_GUARD = /^(recursive use of an object detected|attempted to take ownership of Rust value while it was borrowed|null pointer passed to rust)/;
+const engineUnusable = (error) => !(error instanceof Error)
+  || (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
+  || error instanceof RangeError || error.name === 'InternalError'
+  || BORROW_GUARD.test(error.message);
+
 export class EngineHost {
   constructor(engine, transport, handlers = {}, options = {}) {
     this.commandTimeoutMs = commandTimeout(options.commandTimeoutMs === undefined ? DEFAULT_COMMAND_TIMEOUT_MS : options.commandTimeoutMs);
@@ -587,9 +596,7 @@ export class EngineHost {
       return result;
     } catch (error) {
       // Do not inspect Rust state after a trap: its mutable borrow may be held.
-      const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
-        || error instanceof RangeError;
-      if (!fatal) throw error;
+      if (!engineUnusable(error)) throw error;
       this.failEngine(error);
     }
   }

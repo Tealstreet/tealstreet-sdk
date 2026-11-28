@@ -187,7 +187,12 @@ from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
 labels non-GET methods `orderWrite` regardless of hints while honoring the
 explicit remaining engine deadline. Labels grant no send or retry authority.
 Timeouts name class, budget and elapsed milliseconds, including host diagnostics
-when engine expiry wins the timer race. HOW readiness remains capped at 30 s
+when engine expiry wins the timer race. A read's expiry also gives the venue's
+`request.failed` report `kind=timeout` when the venue attached none, so hosts
+handle it as a transient read failure instead of an unclassified error; write
+expiries stay unclassified and visible. Note `class=orderRead` covers every
+credentialed background read and command reads such as candles, not only open
+orders. HOW readiness remains capped at 30 s
 inside the same original deadline. Legacy GET paths use exact catalogue/history/
 order components; unknown paths use the 20 s read default and non-GET requests
 conservatively use the short write default. Explicit transport deadlines win.

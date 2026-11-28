@@ -1862,6 +1862,17 @@ rounded up to a KiB.
 | --- | ---: | ---: | ---: |
 | binance | 2434062 | 2434048 | 2445312 |
 
+## 2026-11-27 — #3832 read-timeout kind needs no further binance raise
+
+#3832 makes `expire_http_timer` add `kind=timeout` to a read's `request.failed`
+report when the venue attached none, so hosts handle an expired read as a
+transient failure. Alone it measured 63 B over the old binance ceiling (PR run
+46063758660: "venue wasm 2434111 exceeds 2434048 bytes", merge `c64a334a6f` of PR
+head `e59edfd2fc` into master `cba454176e`) and raised binance to 2445312, the
+same value #3829 already set above. Merging master keeps that single raise: both
+changes add 77 B over the base, which leaves the family under 2445312 with about
+11 KB of reserve. No cap changes here.
+
 ## 2026-11-27 — #3828 nested cancelReplace proof raises the bingx cap
 
 #3828 decodes BingX's live cancelReplace `cancelResponse` row (a third nested
