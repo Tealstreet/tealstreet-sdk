@@ -293,6 +293,17 @@ describe('RustTwapOwnership restore', () => {
     ]);
   });
 
+  it('names the slices of a running TWAP when the engine dies', () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    const { id, ...running } = row('t1', { limitSlices });
+    ownership.receive({ [id]: running });
+    ownership.finish();
+    expect(errors).toEqual([
+      'TWAP BTCUSDT stopped when trading was interrupted. Its limit orders are still open: buy 0.25 at 100 (order o1).',
+    ]);
+    expect(posts.at(-1)).toEqual({});
+  });
+
   it('names the slices of a restore still waiting when the engine dies', async () => {
     const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
     lookup.mockReturnValue(new Promise(() => {}));
@@ -300,7 +311,7 @@ describe('RustTwapOwnership restore', () => {
     await vi.advanceTimersByTimeAsync(0);
     ownership.finish();
     expect(errors).toEqual([
-      'TWAP BTCUSDT stopped before it was restored. Its limit orders are still open: buy 0.25 at 100 (order o1).',
+      'TWAP BTCUSDT stopped when trading was interrupted. Its limit orders are still open: buy 0.25 at 100 (order o1).',
     ]);
   });
 

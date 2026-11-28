@@ -84,10 +84,11 @@ export class RustTwapOwnership {
   finish() {
     if (this.finished) return;
     const persisted = Object.keys(this.rows).length > 0 || this.pending.size > 0;
-    // A restore still waiting never reached the algos, so nothing will cancel its slices.
-    for (const [id, { options, state }] of this.pending) {
+    // A dead engine cancels nothing, and a restore still waiting never reached it: name
+    // every slice, since main restores none of these rows.
+    for (const [id, { options, state }] of [...Object.entries(this.rows), ...this.pending]) {
       const note = `${restingSlicesNote(state)}${inFlightLimitNote(options, state)}`;
-      if (note) this.refuse(`TWAP ${options.activeMarket?.symbol ?? id} stopped before it was restored${note}.`);
+      if (note) this.refuse(`TWAP ${options.activeMarket?.symbol ?? id} stopped when trading was interrupted${note}.`);
     }
     this.dispose();
     if (persisted) this.post({});
