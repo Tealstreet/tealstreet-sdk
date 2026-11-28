@@ -391,3 +391,20 @@ loaded record. If compaction fails, memory retains the records and flush retries
 later. Enqueue returns its durable intent ID independently of unrelated retirement,
 including after a physical handoff. Hosts use one active outbox per scope and
 close it before replacing it.
+
+Caller-keyed rows (`enqueue(params, { intentId })`, the action intent as the outbox
+and router-ledger key) need the version-2 checkpoint: `load` returns
+`{version:2, sequence, retiredIntentBefore, intents}` and `compact` receives the same
+`retiredIntentBefore`, persisted with `max(previous, new)` in the same transaction.
+Version-1 storage cannot persist that replay fence, so it keeps every caller-keyed
+row reserved and caller-keyed traffic eventually fills the 1,056-row total. On
+version 2, settled caller rows retire like any other completed row once their
+UUIDv7 time is past the box key window (10 s old + 5 s ahead), raising the floor;
+a forgotten caller ID below it refuses as `intentRetired` / Unknown. Pending and
+unexpired Unknown rows never retire for capacity, and still join below the floor.
+Unexpired Unknown rows count against the 1,024 pending cap for 24 h, so a host that
+has reconciled one releases it with `retire(intentId)`. On version 2 that accepts a
+caller-keyed row once it is past the key window and raises the floor; on version 1
+it refuses every caller-keyed row.
+A host may upgrade a version-1 store by returning version 2 with floor 0; the next
+open retires the reserved rows that are past the window.
