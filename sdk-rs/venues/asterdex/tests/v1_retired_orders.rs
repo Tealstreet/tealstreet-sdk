@@ -38,17 +38,25 @@ fn reply(
 
 /// Runs startup, answering every read but open orders, and returns that pending read.
 fn starting(options: Options) -> (Engine<AsterDex>, HttpRequest) {
+    let (engine, orders) = holding(options, "/openOrders");
+    assert!(engine.store().loaded().balance && engine.store().loaded().positions);
+    assert!(!engine.store().loaded().orders);
+    (engine, orders)
+}
+
+/// Runs startup, answering every read but the one at `held`, and returns that pending read.
+fn holding(options: Options, held: &str) -> (Engine<AsterDex>, HttpRequest) {
     let mut engine = support::engine(options);
     engine.start(NOW);
     let mut pending = support::drain(&mut engine, NOW);
-    let mut orders = None;
+    let mut target = None;
     for _ in 0..16 {
         let mut next = Vec::new();
         for action in pending {
             if let Action::Http(request) = action {
                 let at = path(&request);
-                if at.ends_with("/openOrders") {
-                    orders = Some(request);
+                if at.ends_with(held) && target.is_none() {
+                    target = Some(request);
                     continue;
                 }
                 let body = if at.ends_with("/time") {
@@ -69,10 +77,16 @@ fn starting(options: Options) -> (Engine<AsterDex>, HttpRequest) {
         }
         pending = next;
     }
-    let orders = orders.expect("native startup must read open orders");
-    assert!(engine.store().loaded().balance && engine.store().loaded().positions);
-    assert!(!engine.store().loaded().orders);
-    (engine, orders)
+    let target = target.unwrap_or_else(|| panic!("native startup must read {held}"));
+    (engine, target)
+}
+
+fn v1() -> Options {
+    Options {
+        key: Some("synthetic-key".into()),
+        secret: Some("synthetic-material".into()),
+        ..Default::default()
+    }
 }
 
 fn failures(actions: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
@@ -87,11 +101,7 @@ fn failures(actions: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
 
 #[test]
 fn retired_v1_order_route_ends_startup_with_its_cause() {
-    let (mut engine, orders) = starting(Options {
-        key: Some("synthetic-key".into()),
-        secret: Some("synthetic-material".into()),
-        ..Default::default()
-    });
+    let (mut engine, orders) = starting(v1());
     assert!(orders.url.contains("/fapi/v1/openOrders"));
     let done = reply(&mut engine, &orders, 404, NOT_FOUND);
     let failures = failures(&done);
@@ -117,4 +127,21 @@ fn v3_order_read_404_keeps_its_existing_retry() {
         failures(&done).is_empty(),
         "V3 still serves its order routes"
     );
+}
+
+#[test]
+fn v1_balance_and_position_404s_keep_their_retry() {
+    // Aster still serves these V1 routes: a 404 there is transient, never a refused key.
+    for (held, route) in [
+        ("/account", "/fapi/v4/account"),
+        ("/positionRisk", "/fapi/v1/positionRisk"),
+    ] {
+        let (mut engine, read) = holding(v1(), held);
+        assert!(read.url.contains(route), "{}", read.url);
+        let done = reply(&mut engine, &read, 404, NOT_FOUND);
+        assert!(
+            failures(&done).is_empty(),
+            "{route} 404 must not end startup"
+        );
+    }
 }
