@@ -14,6 +14,8 @@ import ShotTabMarket from '/img/trading/mobile/app/tab-market.png';
 import ShotTabPortfolio from '/img/trading/mobile/app/tab-portfolio.png';
 import ShotTabNews from '/img/trading/mobile/app/tab-news.png';
 import ShotCloudJobs from '/img/trading/mobile/app/cloud-jobs.png';
+import { MobileClip } from '@site/src/components/MobileShowcase';
+import { AnnotatedStep, Steps } from '@site/src/components/AnnotatedStep';
 
 The app has three areas you'll use all the time:
 
@@ -57,6 +59,8 @@ top bar and account bar stay in place.
     <img src={ShotTabMarket} alt="The Market tab on All Markets" style={{ width: 250 }} />
 </div>
 
+<MobileClip name="markets" label="Filtering and searching the Market tab" />
+
 ### Pro
 
 Being rebuilt. It currently shows **Coming soon**. Use the **Trade** tab in the meantime.
@@ -70,6 +74,8 @@ An overview of your account: **Adjusted Balance**, **Holdings**, **Margin** (**A
     <img src={ShotTabPortfolio} alt="The Portfolio tab" style={{ width: 250 }} />
 </div>
 
+<MobileClip name="portfolio" label="The Portfolio tab with a position and its stops" />
+
 ### News
 
 Tealstreet's live news feed, with **Everything** and **Traders** tabs (plus **Custom** if you've set up your own
@@ -78,6 +84,8 @@ list). Feed and filter options are under **Settings → News Trading**.
 <div class="text--center">
     <img src={ShotTabNews} alt="The News tab on Everything" style={{ width: 250 }} />
 </div>
+
+<MobileClip name="news" label="Scrolling the live Traders feed" />
 
 ## The side panel
 
@@ -90,21 +98,45 @@ Tap the Tealstreet logo at the top-left. Your name or email is at the top, and t
 | **Price alerts**      | Your price alerts. The number in brackets is how many are active.                               |
 | **Order history**     | Past orders.                                                                                    |
 | **Cloud jobs**        | Accounts, chasers and TWAPs running on Tealstreet's servers (below). The number in brackets is how many jobs are running. |
-| **Check for Updates** | Look for an in-app update now. See [App updates](./getting-started.mdx#4-app-updates).             |
+| **Check for Updates** | Look for an in-app update now. See [App updates](./getting-started.mdx#3-app-updates).             |
 | **Log Out**           | Sign out of Tealstreet on this phone.                                                           |
 
 ## Price alerts
 
 Get a push notification on your phone when a price crosses your level. Each alert fires once, then switches off.
 
-1. Open **Price alerts** from the side panel, or tap the bell in the account bar on the **Trade** tab.
-2. Under **New alert**, pick the exchange from the row at the top.
-3. Type the symbol (the field's hint shows that exchange's symbol format), choose **Above** or **Below**, and enter
-   the price.
-4. Tap **Create alert**. It appears under **Active alerts**.
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Fill in the alert"
+  image="/img/trading/mobile/steps/alert-form.jpg"
+  alt="The Price alerts screen with the New alert form"
+  callouts={[{ n: 1, x: 90, y: 194, w: 52, h: 26 }, { n: 2, x: 22, y: 258, w: 358, h: 36 }, { n: 3, x: 22, y: 298, w: 358, h: 72 }]}
+>
+
+Open **Price alerts** from the side panel or the bell in the account bar. Pick the exchange (1), type the symbol (2), choose **Above** or **Below** and enter the price (3).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Create it"
+  image="/img/trading/mobile/steps/alert-form.jpg"
+  alt="The Create alert button"
+  callouts={[{ n: 1, x: 21, y: 372, w: 360, h: 38 }]}
+>
+
+Tap **Create alert** (1). It appears under **Active alerts** and fires once, as a push to this phone.
+
+</AnnotatedStep>
+
+</Steps>
 
 You can also tap **+** on the chart at a price, then the bell on the card, to start an alert at that price. Allow notifications for Tealstreet when your
 phone asks. Without notification permission, alerts can't reach you.
+
+<MobileClip name="alert" label="Creating a price alert on SOLUSDT" />
 
 ## Cloud jobs
 
@@ -115,6 +147,36 @@ working after you close the app. In the app's own words:
 > closed. An account keeps running for up to 48 h after your last device disconnects, or less when it trades through
 > a proxy. Then its jobs stop and its key is erased. Stopping a chaser cancels its working order; your other resting
 > orders and positions stay.
+
+### Start a TWAP and watch it
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Close with a TWAP"
+  image="/img/trading/mobile/steps/job-twap.jpg"
+  alt="Quick Actions on its Close tab, with TWAP 1m and TWAP 5m"
+  callouts={[{ n: 1, x: 198, y: 674, w: 196, h: 22 }, { n: 2, x: 4, y: 698, w: 390, h: 22 }]}
+>
+
+Swipe a position left, tap **Actions**, open the **Close** tab, and choose **TWAP 1m** (1) or **TWAP 5m** (2). The close is split into 10 slices, and each slice must be above the exchange's minimum order, so a very small position can't be closed by TWAP.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="See it on Cloud jobs"
+  image="/img/trading/mobile/steps/job-running.jpg"
+  alt="The Cloud jobs screen with a TWAP running"
+  callouts={[{ n: 1, x: 10, y: 280, w: 378, h: 92 }, { n: 2, x: 16, y: 375, w: 112, h: 27 }]}
+>
+
+Side panel → **Cloud jobs** shows the job and its progress (1). **Pause** and **Stop** (2) control it. It keeps running on Tealstreet's servers after you close the app.
+
+</AnnotatedStep>
+
+</Steps>
 
 The **Cloud jobs** screen lists each account and its running jobs:
 
@@ -130,13 +192,15 @@ and open positions stay on the exchange either way.
     <img src={ShotCloudJobs} alt="The Cloud jobs screen with one account running in the cloud" style={{ width: 250 }} />
 </div>
 
+<MobileClip name="cloud-jobs" label="Closing a position with a TWAP and watching it on Cloud jobs" />
+
 ## Settings
 
 | Group        | Sections                                                                                                         |
 | ------------ | ---------------------------------------------------------------------------------------------------------------- |
 | **Accounts** | **Accounts**: API keys, connected exchanges and **Cloud sync**. **Exchange**: per-exchange overrides.             |
-| **Trading**  | **General**: defaults shared with the desktop app. **Place Order**: order form layout. **Chart**: chart engine, candles and indicators. **News Trading**: feeds, filters and quick orders. **Notifications**: push notifications to this phone. |
+| **Trading**  | **General**: trading defaults. **Place Order**: order form layout. **Chart**: chart engine, candles and indicators. **News Trading**: feeds, filters and quick orders. **Notifications**: push notifications to this phone. |
 | **App**      | **Mobile**: density, haptics and this device. **Performance**: render rate and battery. **Languages**: interface language. |
 | **Advanced** | **Developer**: diagnostics and debug tooling.                                                                     |
 
-The **General** section holds trading defaults that are shared with the desktop app.
+The **General** section holds your trading defaults.

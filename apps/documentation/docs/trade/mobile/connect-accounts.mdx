@@ -1,6 +1,6 @@
 ---
 title: Connecting Your Exchange Accounts
-description: Bring your exchange API keys from the Tealstreet web app to the mobile app, or add a key by hand
+description: Get your exchange API keys onto the Tealstreet mobile app with cloud sync, a QR code, or by hand
 sidebar_position: 2
 hide_title: false
 draft: false
@@ -9,233 +9,260 @@ hide_table_of_contents: false
 
 ---
 
-import ShotSetupYourAccount from '/img/trading/mobile/app/setup-your-account.png';
-import ShotWebQrModal from '/img/trading/mobile/app/web-qr-modal.png';
-import ShotQrScanner from '/img/trading/mobile/app/qr-scanner.png';
-import ShotManualKeyForm from '/img/trading/mobile/app/manual-key-form.png';
+import { AnnotatedStep, Steps } from '@site/src/components/AnnotatedStep';
 
-The mobile app trades through the same exchange API keys you use on the web. You can bring your existing keys
-across from your computer in a few taps, or add a key by hand.
+Tealstreet trades through API keys from your exchange. There are three ways to get them onto your phone:
+
+| Way                                         | Use it when                                                                  |
+| ------------------------------------------- | ---------------------------------------------------------------------------- |
+| [Cloud key sync](#cloud-key-sync)           | You already use Tealstreet on your computer. Your keys appear on their own.  |
+| [Scan a QR code](#scan-a-qr-code)           | You want one account from your computer, without turning on cloud sync.      |
+| [Enter a key by hand](#enter-a-key-by-hand) | You're new, or the key isn't in Tealstreet yet.                              |
 
 :::warning Sign in first
-Sign in on the phone before you import anything (see [Getting started](./getting-started.mdx#3-sign-in)). Imported
-keys are saved to your Tealstreet account on this phone. If you're signed out, the import stops with
-"you are signed out on this phone". See [Troubleshooting](#troubleshooting) below.
+Sign in on the phone before you add a key (see [Getting started](./getting-started.mdx#2-sign-in)). Keys are saved
+to your Tealstreet account.
 :::
 
-## Open the setup screen
+## Cloud key sync
 
-- **Any time:** tap the **Tealstreet logo** at the top-left, then **API keys**. This opens your account list
-  (**Settings → Accounts**). Tap **Add account**: the last row of the list, or the button under
-  **No exchange accounts yet** if you have none.
-- **Your first account only:** while you have no accounts, the account bar under the top bar shows an
-  **Add an API key** pill. It disappears once you have an account, so use the side panel for every account after that.
+Cloud sync keeps the same API keys on every device you sign in on. Your keys are encrypted on your device with a
+**cloud sync password** before they're stored, and Tealstreet never sees that password.
 
-Both open **Set Up Your Account**, which offers four options:
-
-| Option                        | Use it when                                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| **Scan QR Code from Web**     | You have Tealstreet open on a computer. The quickest and safest way to import. |
-| **Import JSON from Web**      | You have an `accounts.json` export from the web app on this phone.             |
-| **Paste from Clipboard**      | You copied an account in the web app and your phone shares its clipboard.      |
-| **Manually Enter API Keys**   | You want to type or paste a key and secret from your exchange yourself.        |
-
-<div class="text--center">
-    <img src={ShotSetupYourAccount} alt="The Set Up Your Account sheet with its four options" style={{ width: 250 }} />
-</div>
-
-## Option 1: Scan a QR code from the web app
-
-On your computer:
-
-1. Open Tealstreet and go to **Settings → Accounts**.
-2. Find the account you want on your phone. Either click the **QR icon** (tooltip **QR Code Sync**) in that row's
-   **Actions** column, or click **Edit** (the pen icon) and open the **QR Code Sync** section.
-3. Click **Show QR code**.
-
-On your phone:
-
-1. In **Set Up Your Account**, tap **Scan QR Code from Web**.
-2. Allow camera access if asked.
-3. Point the camera at the code on your computer screen. When the import finishes you'll see **Import successful**,
-   and the account appears in your account list.
-
-One QR code carries one account. For the next account, open **Set Up Your Account** again from the side panel
-(**API keys → Add account**) and repeat.
-
-:::caution Treat the QR code like a password
-The code contains that account's API key and secret. Only show it when nobody else can see your screen, and only
-scan it with your own phone. Close it when you're done.
+:::info Turn it on first
+Cloud sync must be on for your account: in the Tealstreet web app, open **Settings → Accounts** and turn on **Cloud
+sync for API keys**. It's one setting for your whole account. Each device then asks for your cloud sync password once.
 :::
 
-<div class="text--center">
-    <img src={ShotWebQrModal} alt="The web QR Code Sync modal before the code is shown" style={{ width: 500 }} />
-</div>
+<Steps>
 
-<div class="text--center">
-    <img src={ShotQrScanner} alt="The QR Scanner screen" style={{ width: 250 }} />
-</div>
+<AnnotatedStep
+  n={1}
+  title="On your computer: turn on cloud sync"
+  device="desktop"
+  image="/img/trading/mobile/steps/sync-web-switch.jpg"
+  alt="The web app's Settings, Accounts page with the Cloud sync for API keys switch"
+  callouts={[{ n: 1, x: 221, y: 507, w: 731, h: 94 }, { x: 913, y: 530 }]}
+>
 
-If the web app says **"This account has too much data for a QR code"**, use Option 3 (paste) for that account.
+In the web app, open **Settings → Accounts** and flip **Cloud sync for API keys** on.
 
-## Option 2: Import a JSON file from the web app
+</AnnotatedStep>
 
-1. On your computer, go to **Settings → Accounts** and click **Export**. This downloads `accounts.json` with all your
-   accounts.
-2. Get the file onto your phone through a channel you control, such as AirDrop or your own cloud drive.
-3. In **Set Up Your Account**, tap **Import JSON from Web** and pick the file.
+<AnnotatedStep
+  n={2}
+  title="Choose a cloud sync password"
+  device="desktop"
+  image="/img/trading/mobile/steps/sync-web-password.jpg"
+  alt="The Turn on cloud sync dialog with the password fields filled in"
+  callouts={[
+    { n: 1, x: 222, y: 186, w: 512, h: 112 },
+    { n: 2, x: 222, y: 492, w: 512, h: 30 },
+    { n: 3, x: 560, y: 580, w: 170, h: 28 },
+  ]}
+>
 
-:::danger accounts.json contains your secrets in plain text
-Never send it by email, Telegram, Discord or any other chat. Delete it from your computer, your phone and any cloud
-drive once the import has worked.
-:::
+Type the password twice (1), tick that it can't be recovered (2), then **Turn on cloud sync** (3). Keep the password
+somewhere safe: if you lose it, you lose access to your synced keys.
 
-## Option 3: Paste from the clipboard
+</AnnotatedStep>
 
-1. On your computer, go to **Settings → Accounts** and click the **copy icon** (tooltip **Copy**) in the account's
-   **Actions** column.
-2. Make sure the copied text reaches your phone's clipboard. On Apple devices signed in to the same Apple ID,
-   Universal Clipboard does this automatically.
-3. In **Set Up Your Account**, tap **Paste from Clipboard**. The app reads the clipboard once, then clears it.
+<AnnotatedStep
+  n={3}
+  title="On your phone: unlock cloud sync"
+  image="/img/trading/mobile/steps/sync-unlock.jpg"
+  alt="The app's Unlock cloud sync prompt"
+  callouts={[
+    { n: 1, x: 44, y: 434, w: 314, h: 37 },
+    { n: 2, x: 305, y: 491, w: 53, h: 29 },
+  ]}
+>
 
-Don't move the copied text through a chat app or notes app. It contains your API secret.
+Open the app. It asks for your cloud sync password once: type it (1) and tap **Unlock** (2). Unlocking takes a few
+seconds.
 
-## Option 4: Enter an API key by hand
+</AnnotatedStep>
 
-Use this for a brand-new key, or for an exchange you haven't set up on the web.
+<AnnotatedStep
+  n={4}
+  title="Your keys are here"
+  image="/img/trading/mobile/steps/sync-accounts.jpg"
+  alt="Settings, Accounts in the app with the synced account connected and cloud sync up to date"
+  callouts={[
+    { n: 1, x: 12, y: 122, w: 378, h: 56 },
+    { n: 2, x: 49, y: 405, w: 90, h: 26 },
+  ]}
+>
 
-1. In **Set Up Your Account**, tap **Manually Enter API Keys**.
-2. Pick your exchange. Use **Search** or the category tabs to find it. Tapping an exchange opens its form.
-3. Fill in the form (**Set Up _Exchange_**):
-    - **Name**: any label you like, for example `Bybit main`.
-    - **API Key** and **API Key Secret** from your exchange. Some exchanges also need an **API Key Passphrase**, a
-      **Subaccount**, or a wallet field. The form only shows the fields your exchange needs.
-    - **Mainnet** (real funds) or testnet/demo, and **Perps** or **Perps + Spot**, where the exchange offers them.
-    - If your key uses an IP whitelist, tick **Use Tealstreet IPs** and add the IPs shown (**Copy Tealstreet IPs**) to
-      the key on your exchange.
-4. Tap **Done**. Tealstreet checks the key with the exchange before saving it.
+Every account from your other devices is now on the phone (1) and connects on its own. **Settings → Accounts**
+shows **Up to date** (2). Keys you add or remove on any device now change everywhere.
 
-For step-by-step help creating a key on a particular exchange, see the [Connect](/docs/connect/api-general) guides.
-They apply to mobile too.
+</AnnotatedStep>
 
-<div class="text--center">
-    <img src={ShotManualKeyForm} alt="The Set Up Bybit form with empty fields" style={{ width: 250 }} />
-</div>
+</Steps>
+
+## Scan a QR code
+
+A QR code carries one account from the web app to your phone. Treat it like a password: it contains the API key and
+secret.
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="On your computer: open QR Code Sync"
+  device="desktop"
+  image="/img/trading/mobile/steps/qr-web-icon.jpg"
+  alt="The web app's Settings, Accounts list with the QR Code Sync icon in the Actions column"
+  callouts={[{ n: 1, x: 840, y: 139 }]}
+>
+
+In the web app, open **Settings → Accounts** and click the **QR icon** (**QR Code Sync**) in the account's
+**Actions** column.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Keep the code on screen"
+  device="desktop"
+  image="/img/trading/mobile/steps/qr-web-modal.jpg"
+  alt="The QR Code Sync dialog. The code is blurred here."
+  callouts={[
+    { n: 1, x: 298, y: 116, w: 366, h: 46 },
+    { n: 2, x: 318, y: 224, w: 326, h: 326 },
+  ]}
+>
+
+The dialog says what to do on the phone (1) and shows the code (2). It's blurred here; yours is sharp. Only scan it
+with your own phone.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="On your phone: Scan QR Code from Web"
+  image="/img/trading/mobile/steps/qr-add-account.jpg"
+  alt="The app's Add account sheet"
+  callouts={[{ n: 1, x: 12, y: 580, w: 378, h: 52 }]}
+>
+
+Tap **Add an API key** (or side panel → **API keys** → **Add account**), then **Scan QR Code from Web**.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="Point the camera at the code"
+  image="/img/trading/mobile/steps/qr-scanner.jpg"
+  alt="The app's QR Scanner screen"
+  callouts={[{ n: 1, x: 76, y: 312, w: 250, h: 250 }]}
+>
+
+Line the code up in the frame. When the import finishes you'll see **Import successful**, and the account connects.
+Allow camera access if the phone asks.
+
+</AnnotatedStep>
+
+</Steps>
+
+## Enter a key by hand
+
+Create the key in your exchange's API settings first. Give it **read** and **trade** permissions, never withdrawal.
+For step-by-step help on a particular exchange, see the [Connect](/docs/connect/api-general) guides.
+
+<Steps>
+
+<AnnotatedStep
+  n={1}
+  title="Manually Enter API Keys"
+  image="/img/trading/mobile/steps/qr-add-account.jpg"
+  alt="The app's Add account sheet"
+  callouts={[{ n: 1, x: 12, y: 736, w: 378, h: 52 }]}
+>
+
+Tap **Add an API key** (or side panel → **API keys** → **Add account**), then **Manually Enter API Keys**.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={2}
+  title="Pick your exchange"
+  image="/img/trading/mobile/steps/key-exchanges.jpg"
+  alt="The Set Up Your Account exchange list"
+  callouts={[{ n: 1, x: 12, y: 217, w: 181, h: 56 }]}
+>
+
+Find your exchange with **Search** or the category tabs, and tap it.
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={3}
+  title="Fill in the key"
+  image="/img/trading/mobile/steps/key-form.jpg"
+  alt="The Set Up Bybit form"
+  callouts={[
+    { n: 1, x: 12, y: 490, w: 330, h: 40 },
+    { n: 2, x: 12, y: 543, w: 220, h: 24 },
+    { n: 3, x: 12, y: 681, w: 378, h: 104 },
+    { n: 4, x: 12, y: 800, w: 378, h: 50 },
+  ]}
+>
+
+Give the account a **Name** (1). If your key uses an IP whitelist, tick **Use Tealstreet IPs** (2) and add the IPs it
+shows to the key on your exchange. Paste the **API Key** and **API Key Secret** (3); some exchanges also need a
+passphrase. Tap **Done** (4).
+
+</AnnotatedStep>
+
+<AnnotatedStep
+  n={4}
+  title="Connected"
+  image="/img/trading/mobile/steps/key-connected.jpg"
+  alt="Settings, Accounts with the new account connected"
+  callouts={[{ n: 1, x: 12, y: 178, w: 378, h: 56 }]}
+>
+
+Tealstreet checks the key with the exchange before saving it. The account shows **Connected** (1).
+
+</AnnotatedStep>
+
+</Steps>
 
 ## Editing or removing an account
 
-Open **Settings → Accounts** (side panel → **API keys**). Each account in the list opens its edit form, where you can
-change its name, keys and options.
-
-- To edit, tap the account's row.
-- To remove, use **Delete** at the bottom of the account's edit form. The app asks you to confirm first.
-  Removing an account here doesn't touch the exchange: the key stays valid there until you delete it on the exchange.
-
-## Keeping keys in sync across devices
-
-If you use **Cloud sync** on the web (see [Cloud Sync for API Keys](/docs/connect/cloud-sync)), you can load the
-same keys on your phone instead of importing them one by one:
-
-1. Open **Settings → Accounts** on the phone and find **Cloud sync**.
-2. Turn it on and enter your **Cloud sync password** when asked (**Unlock cloud sync**).
-
-If the app says **"You have API keys in the old cloud backup. Turn on cloud sync from Tealstreet on your computer
-first, so they move into sync."**, turn on cloud sync on your computer first, then come back to the phone.
+Open **Settings → Accounts** (side panel → **API keys**). Tap an account's row to change its name, keys and options.
+**Delete Account** at the bottom of its form removes it from Tealstreet after you confirm; the key stays valid on the
+exchange until you delete it there.
 
 ## Troubleshooting
 
-Import problems show an **Import Error** alert with an **OK** button. Here is what each message means and what to do.
-A few import results are a notice at the top of the screen instead of an alert; they are marked below.
-
-### "Your account export is fine, but you are signed out on this phone. Sign in again, then import."
-
-Your QR code, file or pasted text is fine. The phone isn't signed in to Tealstreet, so it has nowhere to save the
-account.
-
-1. Tap **Sign In** on the alert and sign in.
-2. If you were already signed in and still get this message, your session has gone stale. Tap the
-   **Tealstreet logo** at the top-left, tap **Log Out**, wait for the app to restart, then tap the **sign-in icon** at
-   the top-right and sign in again.
-3. Run the import again: scan the QR code again, or re-copy and paste.
-
-### "Your account export is fine, but this phone could not save it: …"
-
-The data is fine, but the phone refused to save it. The reason follows the colon:
-
-- **An account with this name already exists**: rename the account on the web (or delete the old copy on the
-  phone), then import again.
-- **Account storage is still loading. Please try again.**: wait a few seconds and import again.
-- **Your sign-in changed. Please try again.**: you signed in or out during the import. Import again.
-
-If the message ends with "(…). Please try again, and tell us if it keeps happening", try once more. If it happens
-again, [contact support](./faq.mdx#reporting-a-problem) with the text of the message.
-
-### "Clipboard is empty. Copy your account data on the web app first."
-
-Nothing reached the phone's clipboard. Click the account's **copy icon** on the web again, and check that your phone shares the
-computer's clipboard. If it doesn't, use the QR code instead.
-
-### "Could not read the clipboard. Please try again."
-
-Your phone blocked the paste. Try again, and allow pasting if the phone asks.
-
-### "Invalid JSON format"
-
-What you scanned, pasted or picked isn't a Tealstreet account export. You'll see this for a QR code that isn't a
-Tealstreet account code, for clipboard text that isn't a copied account, or for a file that isn't `accounts.json`.
-
-- **QR code:** on the web, make sure you clicked **Show QR code** in **QR Code Sync**, then scan that code.
-- **Clipboard:** click the account's **copy icon** on the web again, then paste straight away.
-- **File:** pick the `accounts.json` file from the web app's **Export** button. A file that was opened and edited
-  may no longer import.
-
-### "Data must be an account object or array of accounts" or "Empty array - no accounts to import"
-
-The text or file is valid JSON but holds no accounts. Export or copy the account from the web app again.
-
-### "Account #1 missing fields: …", "Account #1 Unknown exchange: …" or "Invalid account field types…"
-
-The export is damaged or edited, or comes from somewhere other than Tealstreet. Export or copy the account from the
-web app again.
-
-### "That file is empty…" or "Could not read that file…"
-
-The file picker returned an empty or unreadable file. Pick the `accounts.json` from the web app's **Export** button
-again.
-
-### "Invalid QR Code"
-
-The scan failed partway. Scan the code again.
-
-### "_Exchange_ isn't available on mobile yet."
-
-You imported a single account on an exchange the mobile app doesn't support yet. Nothing was saved. Keep using that
-account on the web.
-
-### Notice: "Import successful … accounts were imported but will not connect on mobile"
-
-This is a notice, not an error. Your import worked, but some of the accounts are on exchanges the mobile app doesn't
-support yet. They're kept but won't connect on the phone. Your other accounts work normally.
-
-### Notice: "Import successful Saved as …: this phone already keeps an account by that name from an earlier sign-in."
-
-This is a notice, not an error. The phone already had an older, hidden account with the same name, so the import
-was saved under a new name such as `Main (2)`. You can rename it in **Settings → Accounts**.
-
 ### The key was saved but won't connect ("Error validating…")
 
-When you add a key by hand, Tealstreet checks it with the exchange. If you see:
-
+- **"The account is not connected because its API key was not accepted. Check the … Tealstreet IP addresses and key
+  permissions"**: the key has an IP whitelist. Tick **Use Tealstreet IPs** and add those IPs to the key on your
+  exchange.
 - **"Couldn't read this account's balance. Check the API key permissions and try again."**: the key needs read and
-  trade permissions on the exchange, and the right IP whitelist if you use one.
+  trade permissions.
 - **"Couldn't reach Tealstreet's servers…"** or **"The exchange took too long…"**: a connection problem. Try again
   in a moment.
 - **"Please input your …"**: a required field is empty.
 
+### "Couldn't unlock cloud sync"
+
+Check the password and your connection, then try again. The cloud sync password is not your Tealstreet login
+password. If you've lost it, use **Reset cloud sync** on a device that's still unlocked.
+
+### "Invalid QR Code" or "Invalid JSON format"
+
+The scan failed, or the code isn't a Tealstreet account code. In the web app, open **QR Code Sync** again and scan
+the code it shows.
+
 ### The camera won't open
 
 If you see **"Camera access is required to scan QR codes."**, tap **Open Settings** and allow camera access for
-Tealstreet, then come back and tap **Try Again**.
+Tealstreet, then try again.
 
 ## Next
 
