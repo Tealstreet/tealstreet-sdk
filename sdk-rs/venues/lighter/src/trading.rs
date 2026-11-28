@@ -69,6 +69,9 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     builder_stage: u8,
+    /// The builder (or exemption) decided once when the job first reaches the
+    /// fee gate, so the gate, approval and signing never disagree mid-job.
+    builder: Option<Option<sign::Builder>>,
     retried_nonce: bool,
     amend: Option<Order>,
     protection: Option<protection::Edit>,
@@ -845,6 +848,7 @@ impl Lighter {
             steps,
             ids: vec![],
             builder_stage: 0,
+            builder: None,
             retried_nonce: false,
             amend,
             protection,
@@ -892,6 +896,15 @@ impl Lighter {
             })
     }
 
+    /// The active job's latched builder; set by the fee gate before any signing.
+    fn job_builder(&self) -> Option<sign::Builder> {
+        self.trading
+            .active
+            .as_ref()
+            .and_then(|job| job.builder)
+            .expect("builder decided at the fee gate")
+    }
+
     /// True only for a valid Tealstreet-signed exemption naming this account on
     /// this network, before its expiry. Never on testnet: no exemption domain names it.
     fn builder_exempt(&self, now_ms: f64) -> bool {
@@ -906,7 +919,7 @@ impl Lighter {
         } else {
             "mainnet"
         };
-        crate::builder_exemption::verify(token, network, crate::builder_exemption::KEYS)
+        crate::builder_exemption::verify_accepted(token, network)
             .is_ok_and(|exemption| exemption.covers(self.account.account_index, now_ms))
     }
 
@@ -1138,7 +1151,16 @@ impl Lighter {
             self.trade_finish(cx, not_sent("Lighter account is not loaded yet"));
             return;
         }
-        if self.builder(cx.now).is_some()
+        let builder = match self.trading.active.as_ref().unwrap().builder {
+            Some(decided) => decided,
+            None => {
+                let decided = self.builder(cx.now);
+                self.trading.active.as_mut().unwrap().builder = Some(decided);
+                decided
+            }
+        };
+        let job = self.trading.active.as_ref().unwrap();
+        if builder.is_some()
             && job
                 .steps
                 .iter()
@@ -1305,7 +1327,7 @@ impl Lighter {
         match self.trading.active.as_ref().unwrap().steps.front().unwrap() {
             Step::Position { .. } | Step::CancelProof | Step::RestoreProof => unreachable!(),
             Step::Place(orders) => {
-                let builder = self.builder(cx.now);
+                let builder = self.job_builder();
                 Ok((
                     orders
                         .iter()
@@ -1321,7 +1343,7 @@ impl Lighter {
                 vec![sign::Transaction::Grouped {
                     grouping: *grouping,
                     orders: orders.iter().map(|p| p.native.clone()).collect(),
-                    builder: self.builder(cx.now),
+                    builder: self.job_builder(),
                 }],
                 Effect::Place,
             )),
@@ -1462,29 +1484,28 @@ impl Lighter {
                     && let Ok(approval) = serde_json::from_str::<ApprovalReply>(response.body)
                     && approval.code.as_ref().and_then(Number::integer) == Some(200)
                 {
-                    // An exemption that took effect during the read needs no approval.
-                    let valid = self.builder(cx.now).is_none_or(|builder| {
-                        approval
-                            .accounts
-                            .iter()
-                            .chain(approval.account.iter())
-                            .flat_map(|a| &a.approved_integrators)
-                            .any(|a| {
-                                a.account_index.integer() == Some(builder.account_index)
-                                    && a.approval_expiry
-                                        .integer()
-                                        .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
-                                    && a.max_perps_maker_fee
-                                        .as_ref()
-                                        .and_then(Number::integer)
-                                        .unwrap_or(0)
-                                        >= u64::from(builder.maker_fee)
-                                    && a.max_perps_taker_fee
-                                        .as_ref()
-                                        .and_then(Number::integer)
-                                        .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
-                            })
-                    });
+                    // Approval is read only for a job whose latched decision kept the fee.
+                    let builder = self.job_builder().unwrap();
+                    let valid = approval
+                        .accounts
+                        .iter()
+                        .chain(approval.account.iter())
+                        .flat_map(|a| &a.approved_integrators)
+                        .any(|a| {
+                            a.account_index.integer() == Some(builder.account_index)
+                                && a.approval_expiry
+                                    .integer()
+                                    .is_some_and(|expiry| expiry as f64 > cx.protocol_now())
+                                && a.max_perps_maker_fee
+                                    .as_ref()
+                                    .and_then(Number::integer)
+                                    .unwrap_or(0)
+                                    >= u64::from(builder.maker_fee)
+                                && a.max_perps_taker_fee
+                                    .as_ref()
+                                    .and_then(Number::integer)
+                                    .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
+                        });
                     if !valid {
                         self.trade_finish(cx, not_sent(APPROVAL_MESSAGE));
                         return;
