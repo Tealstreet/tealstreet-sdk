@@ -1784,5 +1784,9 @@ fn v3_place_404_keeps_its_existing_classification() {
     assert!(request.url.contains("/fapi/v3/order?"));
     h.reply_status(request, 404, RETIRED_ROUTE);
     let (_, error) = h.failures.last().expect("the write fails visibly");
-    assert!(!error.message.contains("V3 API wallet"), "{}", error.message);
+    assert!(
+        !error.message.contains("V3 API wallet"),
+        "{}",
+        error.message
+    );
 }
