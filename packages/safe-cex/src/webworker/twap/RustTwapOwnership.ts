@@ -184,7 +184,7 @@ export class RustTwapOwnership {
     const state: TwapState = !inFlight
       ? row.state
       : placed
-        ? { ...adopted, ordersExecuted: rest.ordersExecuted + 1 }
+        ? { ...adopted, ordersExecuted: rest.ordersExecuted + 1, nextOrderAt: lastIntervalEnd(row, adopted) }
         : { ...rest, ordersSizes: [inFlight.size, ...rest.ordersSizes] };
     // Its last slice was the one in flight: the TWAP is complete, unless limit slices
     // it placed still rest, which it cancels at the end of their interval.
@@ -271,3 +271,9 @@ const adoptSlice = (
     { orderIds: [order.id], price: order.price || inFlight.price || 0, size: inFlight.size },
   ],
 });
+
+/** An adopted last slice still gets its own interval to fill before the TWAP ends and cancels it. */
+const lastIntervalEnd = (row: Row, state: Omit<TwapState, 'inFlight'>): number =>
+  state.ordersSizes.length === 0 && state.limitSlices !== row.state.limitSlices
+    ? state.nextOrderAt + (row.options.duration / row.options.ordersCount) * 60_000
+    : state.nextOrderAt;

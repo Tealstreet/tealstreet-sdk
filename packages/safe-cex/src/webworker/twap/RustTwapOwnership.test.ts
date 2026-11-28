@@ -186,6 +186,8 @@ describe('RustTwapOwnership restore', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sent[0].data[0].state.limitSlices).toEqual([{ orderIds: ['o9'], price: 100, size: 0.25 }]);
     expect(sent[0].data[0].state.ordersExecuted).toBe(2);
+    // Its last slice: it rests one interval (10 min / 4 slices) before the end cancels it.
+    expect(sent[0].data[0].state.nextOrderAt).toBe(limit.state.nextOrderAt + 150_000);
   });
 
   it('restores a row stopped while it waited, paused then stopped, when it holds limit slices', async () => {
@@ -251,7 +253,12 @@ describe('RustTwapOwnership restore', () => {
       emitter: { emit: (_op: string, message: string) => errors.push(message) },
       findOrderByClientOrderId: lookup,
     } as unknown as Exchange;
-    const owned = new RustTwapOwnership(exchange, algos(), (rows) => posts.push(rows), () => owner);
+    const owned = new RustTwapOwnership(
+      exchange,
+      algos(),
+      (rows) => posts.push(rows),
+      () => owner,
+    );
     const limit = {
       ...row('t1', { inFlight: { size: 0.25, clientOrderId: 'c1' } }),
       ownerId: 'A',
