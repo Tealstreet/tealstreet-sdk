@@ -1,4 +1,4 @@
 {
   "status": "excluded",
-  "reason": "Production metadata disables this venue; native Hosted REST origin and private-startup proof are not built. Keep its live beta roster entry."
+  "reason": "Production metadata disables this venue; the native Hosted REST origin serves DELEGATED, but private-startup proof is not built. Keep its live beta roster entry."
 }

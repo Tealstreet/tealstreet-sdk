@@ -463,6 +463,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
     ("mexc", "https://api.mexc.com", None),
     ("kraken", "https://futures.kraken.com", None),
     ("hyrotrader", "https://sim-tealstreet.hyro.site", None),
+    ("bitrue", "https://fapi.bitrue.com", None),
 ];
 
 #[test]

@@ -62,6 +62,11 @@ refuses `NoBaseUrl`: Kraken [retired the legacy demo](https://support.kraken.com
 and the native engine maps no supported replacement sandbox. Kraken Spot and the
 COSIGNED private-startup proof catalog are unchanged.
 
+Hosted Bitrue perpetuals resolve `https://fapi.bitrue.com` through the existing
+Japan HOW policy, which every saved proxy/tunnel flag and region normalizes to.
+Bitrue has no sandbox: hosted testnet refuses `NoBaseUrl`. Its native public and
+listen-key private sockets and the COSIGNED proof catalog are unchanged.
+
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts

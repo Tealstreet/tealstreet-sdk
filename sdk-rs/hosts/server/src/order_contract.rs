@@ -172,6 +172,8 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
         // AGT-50: numeric-only Backpack/GRVT and no-ID HyroTrader cannot carry
         // this UUID; use the existing null-receipt path without a lossy mapping.
         "backpack" | "grvt" | "hyrotrader" => None,
+        // Bitrue caps caller IDs at 31 characters, below both lossless forms (36 and 32).
+        "bitrue" => None,
         _ => Some(intent.to_owned()),
     }
 }

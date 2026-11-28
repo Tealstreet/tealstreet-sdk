@@ -440,6 +440,8 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         ),
         "woo" => pick("https://api.woox.io", "https://api.staging.woox.io"),
         "bitunix" => "https://fapi.bitunix.com",
+        // Bitrue futures has no sandbox; never use its live origin for a hosted testnet account.
+        "bitrue" if !testnet => "https://fapi.bitrue.com",
         // MEXC has no sandbox; never use its live origin for a hosted testnet account.
         "mexc" if !testnet => "https://api.mexc.com",
         // The legacy Futures demo is retired; no supported hosted sandbox is mapped.

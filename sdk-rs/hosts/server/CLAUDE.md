@@ -398,7 +398,8 @@ before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
 to accept it before the box emits one. The router UUID/fingerprint ledger
 remains primary dedupe in every case. Backpack and GRVT also omit the caller ID: their numeric fields cannot carry
 the UUID losslessly. HyroTrader omits it because the native codec supports no
-caller IDs. Those native validators are unchanged; explicit unsupported caller
+caller IDs. Bitrue omits it because its adapter caps caller IDs at 31 characters,
+below both lossless forms. Those native validators are unchanged; explicit unsupported caller
 IDs still refuse. Bybit protection also omits its unsupported caller ID and
 reports null, as do orders whose adapter refuses a caller ID by shape
 (`trigger_refuses_caller_id`: BloFin, Phemex, OKX, Bitget, KuCoin, Bitunix, ApeX Omni,

@@ -75,8 +75,8 @@ fn bybit_delegated_prepares_injected_private_provider_options() {
 
 #[test]
 fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
-    // Hyro mainnet is now hosted; compiled Bitrue retains the missing-origin control.
-    for venue in ["bitrue", "txflow", "unknown"] {
+    // Hyro mainnet and Bitrue are now hosted; compiled TxFlow retains the missing-origin control.
+    for venue in ["txflow", "unknown"] {
         assert!(
             !safe_cex_exchange_server::delegated::enabled(venue),
             "{venue}: missing-origin fixture must be unhosted"
