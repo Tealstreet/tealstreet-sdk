@@ -1585,6 +1585,21 @@ fn hyro_garbage_order_price_still_refuses_the_snapshot() {
     assert!(!h.closed.is_empty());
 }
 
+/// A live stop-limit executes at its own price, so an empty one is refused
+/// even beside a positive trigger: the trigger would stand in for the limit
+/// and an edit would drop it (CodeRabbit on #3838).
+#[test]
+fn hyro_live_stop_limit_with_empty_price_refuses_the_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let row = HYRO_UNTRIGGERED_STOP.replace(r#""orderType":"Market""#, r#""orderType":"Limit""#);
+    h.respond("/v5/order/realtime", 200, &hyro_orders(&[&row]));
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.closed.is_empty());
+}
+
 /// An empty price is admitted only beside a positive trigger. A zero-priced
 /// stop would be "restored" as `stopLoss:"0"` by a refused protective edit,
 /// clearing the position's protection (TEAL-21 review).

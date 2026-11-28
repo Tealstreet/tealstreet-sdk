@@ -61,8 +61,8 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
 - Untriggered stops and position stops report `"price":""` (Bybit sends
   `"0"`), without `triggerDirection`, `closeOnTrigger` or `cumExecValue`. On a
   live row an empty or absent price is admitted only beside a positive trigger,
-  which prices the order; a present non-numeric price still refuses the
-  snapshot. A live Hyro stop, take-profit or conditional mapped at price zero is
+  which prices the order, and never on a stop-limit, which executes at its own
+  price; a present non-numeric price still refuses the snapshot. A live Hyro stop, take-profit or conditional mapped at price zero is
   refused too: a refused protective edit puts the stop back at that price, and
   `stopLoss:"0"` would clear the position's protection. Terminal rows are never
   edited and need neither; one with no price keeps the stored order's price, or

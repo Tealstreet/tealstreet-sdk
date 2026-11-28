@@ -406,10 +406,11 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         && float_of(&row.qty).is_finite()
         // Hyro reports `"price":""` on untriggered stops and position stops,
         // where Bybit sends "0"; a live one is then priced by a positive
-        // trigger (TEAL-21). Terminal rows are never edited, so need none.
+        // trigger (TEAL-21), unless it is a stop-limit, which needs its own
+        // price. Terminal rows are never edited, so need neither.
         && optional_numeric(&row.price)
         && (present(&row.price).is_some()
-            || float_of(&row.trigger_price) > 0.0
+            || (float_of(&row.trigger_price) > 0.0 && present(&row.order_type) != Some("Limit"))
             || order_status(&row.order_status) != Some(OrderStatus::Open))
         && [
             &row.cum_exec_qty,
