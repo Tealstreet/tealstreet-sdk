@@ -73,6 +73,9 @@ pub struct Daily<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookTickerRest<'a> {
+    /// Same order-book update id as the stream's `u`; only PM compares it.
+    #[serde(default)]
+    pub last_update_id: u64,
     #[serde(borrow)]
     pub symbol: Str<'a>,
     #[serde(borrow)]
@@ -143,6 +146,9 @@ pub struct MarkPriceEvent<'a> {
 
 #[derive(Deserialize)]
 pub struct BookTickerEvent<'a> {
+    /// Order-book update id; only PM book symbols compare it.
+    #[serde(default)]
+    pub u: u64,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(borrow)]

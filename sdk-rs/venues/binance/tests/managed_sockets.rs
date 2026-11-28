@@ -297,11 +297,7 @@ fn subscription_receipt_observes_aggregate_and_portfolio_book_tickers() {
         } else {
             ready()
         };
-        let key = if portfolio {
-            "btcusdt@bookTicker"
-        } else {
-            "!bookTicker"
-        };
+        let key = "!bookTicker";
         let socket = h.socket("/public/ws").unwrap();
         assert!(
             h.sent
@@ -321,4 +317,34 @@ fn subscription_receipt_observes_aggregate_and_portfolio_book_tickers() {
         assert!(ticker.2.is_nan());
         assert_eq!(receipt, (3, 1.), "portfolio={portfolio}");
     }
+}
+
+/// AGT-175: only a PM symbol with an open book has its own real-time quote topic.
+#[test]
+fn portfolio_book_symbol_receipt_lands_on_its_own_quote_topic() {
+    let mut h = Harness::started(Options {
+        variant: Variant::PortfolioMargin,
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.load_public();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"e":"bookTicker","u":5,"s":"BTCUSDT","b":"98","a":"102"}"#,
+    });
+    let rows = subscription_receipts(h.engine.snapshot_frame(h.now + 1.));
+    let symbol = rows
+        .iter()
+        .find(|r| r.0.ends_with("btcusdt@bookTicker"))
+        .unwrap();
+    assert_eq!((symbol.1, symbol.2), (3, 1.));
+    let aggregate = rows.iter().find(|r| r.0.ends_with("!bookTicker")).unwrap();
+    assert!(
+        aggregate.2.is_nan(),
+        "a book symbol's quote is its own topic"
+    );
 }
