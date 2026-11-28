@@ -45,9 +45,12 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   Conditional `triggerDirection` is a JSON number. Bybit variants retain their
   existing wire representation.
 - Public subscribe/unsubscribe frames contain at most 10 topics per request.
-  This is a request batching limit, not certification of unlimited topics on one
-  physical simulator connection; confirm the deployed simulator's connection cap
-  with Hyro before a large beta workload.
+- One public connection holds at most 32 topics: the simulator refuses the
+  subscribe that crosses it, and every one after it, with `at most 32 topics
+  per connection` (live 2026-11-28, TEAL-20). The desired set is capped at 32,
+  books, candles and trades first; tickers fill the rest, symbols in use (book,
+  candles, trades, position or order) before idle markets. Idle tickers are not
+  streamed, reported once as an Info notice rather than a warning.
 - Flat position clears can omit side/leverage. Live positions still require a
   valid side and positive leverage, and accept `entryPrice` when `avgPrice` is
   absent/empty. Flat rows with missing, empty or nonpositive leverage retain the

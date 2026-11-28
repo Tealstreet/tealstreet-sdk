@@ -87,6 +87,9 @@ const PUBLIC_SILENCE_MS: f64 = 60_000.0;
 /// Bybit closes a public socket that subscribes too fast: ten topics per
 /// message, one message per pace interval.
 const TOPICS_PER_SUBSCRIBE: usize = 10;
+/// Hyro's public socket refuses every subscribe past 32 topics on one
+/// connection ("at most 32 topics per connection", live 2026-11-28, TEAL-20).
+const HYRO_TOPICS_PER_CONNECTION: usize = 32;
 const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
@@ -1331,19 +1334,35 @@ impl BybitLinear {
         Some(Channel::Public)
     }
 
-    /// The current category's ticker topics from the store.
+    /// The current category's ticker topics from the store. Under Hyro's
+    /// connection cap, symbols the account is using come first: order sizing
+    /// reads their ticker.
     fn ticker_topics(&self, cx: &Cx<'_, Pending>) -> Vec<String> {
-        cx.store
+        let markets = cx
+            .store
             .markets()
             .iter()
-            .filter(|m| self.owns_symbol(&m.symbol))
+            .filter(|m| self.owns_symbol(&m.symbol));
+        if !self.variant.is_hyro() {
+            return markets.map(|m| format!("tickers.{}", m.symbol)).collect();
+        }
+        let in_use = |symbol: &str| {
+            self.books.contains_key(symbol)
+                || self.candles.keys().any(|(s, _)| s == symbol)
+                || self.trade_subscribers.contains_key(symbol)
+                || cx.store.positions().iter().any(|p| p.symbol == symbol)
+                || cx.store.orders().iter().any(|o| o.symbol == symbol)
+        };
+        let (mut used, rest): (Vec<_>, Vec<_>) = markets.partition(|m| in_use(&m.symbol));
+        used.extend(rest);
+        used.into_iter()
             .map(|m| format!("tickers.{}", m.symbol))
             .collect()
     }
 
     /// The current category's public topics: live books, candles, trades, then
-    /// tickers. Tickers are capped so the requested topics always fit the
-    /// engine's interest bound; the bool reports a cap.
+    /// tickers. The set is capped to the engine's interest bound, or Hyro's
+    /// per-connection limit, tickers first; the bool reports a cap.
     fn public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
         let mut topics: Vec<String> = Vec::new();
         let spot = self.variant.is_spot();
@@ -1367,9 +1386,18 @@ impl BybitLinear {
                 .filter(|symbol| self.owns_symbol(symbol))
                 .map(|symbol| format!("publicTrade.{symbol}")),
         );
+        let mut capped = false;
+        let limit = if self.variant.is_hyro() {
+            // Past the cap Hyro refuses the book too, so even requested topics trim.
+            capped = topics.len() > HYRO_TOPICS_PER_CONNECTION;
+            topics.truncate(HYRO_TOPICS_PER_CONNECTION);
+            HYRO_TOPICS_PER_CONNECTION
+        } else {
+            MAX_INTERESTS
+        };
         let tickers = self.ticker_topics(cx);
-        let room = MAX_INTERESTS.saturating_sub(topics.len());
-        let capped = tickers.len() > room;
+        let room = limit.saturating_sub(topics.len());
+        capped |= tickers.len() > room;
         topics.extend(tickers.into_iter().take(room));
         (
             topics.into_iter().map(Interest::from_wire_args).collect(),
@@ -1384,11 +1412,21 @@ impl BybitLinear {
         let (interests, capped) = self.public_interests(cx);
         if capped && !self.public.tickers_capped {
             self.public.tickers_capped = true;
-            cx.notice(
-                Level::Warn,
-                code::SUBSCRIPTION_REJECTED,
-                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
-            );
+            // Every Hyro catalogue exceeds its 32-topic connection, so the cap
+            // is expected there rather than a warning.
+            if self.variant.is_hyro() {
+                cx.notice(
+                    Level::Info,
+                    code::SUBSCRIPTION_REJECTED,
+                    "HyroTrader streams at most 32 public topics per connection; tickers for symbols not in use are not streamed",
+                );
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+                );
+            }
         }
         if let Err(error) = cx.set_socket_interests(feed, interests) {
             self.socket_failed(cx, error);

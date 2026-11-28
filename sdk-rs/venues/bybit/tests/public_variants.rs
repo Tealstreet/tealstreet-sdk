@@ -608,3 +608,83 @@ fn hyro_v1_configured_simulator_hosts_override_bybit_demo_and_testnet() {
         );
     }
 }
+
+/// `markets` linear USDT perpetuals named `M0USDT`, `M1USDT`, ...
+fn many_instruments(markets: usize) -> String {
+    let rows: Vec<String> = (0..markets)
+        .map(|i| {
+            format!(
+                r#"{{"symbol":"M{i}USDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"M{i}","quoteCoin":"USDT","deliveryTime":"0","leverageFilter":{{"minLeverage":"1","maxLeverage":"100.00","leverageStep":"0.01"}},"priceFilter":{{"minPrice":"0.01","maxPrice":"199999.98","tickSize":"0.01"}},"lotSizeFilter":{{"maxOrderQty":"7240.00","minOrderQty":"0.01","qtyStep":"0.01"}},"settleCoin":"USDT"}}"#
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"category":"linear","list":[{}],"nextPageCursor":""}},"retExtInfo":{{}},"time":1735809771618}}"#,
+        rows.join(",")
+    )
+}
+
+/// Replays the subscribe/unsubscribe frames sent on the public socket and
+/// returns the live topic set after the last frame and its largest size.
+fn live_public_topics(h: &Harness) -> (std::collections::BTreeSet<String>, usize) {
+    let mut live = std::collections::BTreeSet::new();
+    let mut peak = 0;
+    for text in h.sent_on("/v5/public/linear") {
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let Some(args) = frame["args"].as_array() else {
+            continue;
+        };
+        for arg in args.iter().map(|a| a.as_str().unwrap().to_owned()) {
+            match frame["op"].as_str() {
+                Some("subscribe") => live.insert(arg),
+                Some("unsubscribe") => live.remove(&arg),
+                _ => false,
+            };
+        }
+        peak = peak.max(live.len());
+    }
+    (live, peak)
+}
+
+/// Hyro refuses the subscribe that takes one connection past 32 topics, and
+/// every one after it (live 2026-11-28: 32 accepted, the 33rd refused with
+/// "at most 32 topics per connection", TEAL-20). Forty markets would ask for
+/// 41 topics; the live set must stay at 32 and keep the book being viewed.
+#[test]
+fn hyro_public_feed_never_asks_one_connection_for_more_than_32_topics() {
+    let mut h = Harness::started(public_options(Variant::Hyrotrader));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, peak) = live_public_topics(&h);
+    assert!(peak <= 32, "Hyro connection reached {peak} topics");
+    assert_eq!(live.len(), 32);
+    assert!(
+        live.iter()
+            .any(|t| t.starts_with("orderbook.") && t.ends_with(".M39USDT")),
+        "{live:?}"
+    );
+    // The viewed symbol's ticker is kept ahead of idle markets: sizing reads it.
+    assert!(live.contains("tickers.M39USDT"), "{live:?}");
+    let notices: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("at most 32 public topics"))
+        .collect();
+    assert_eq!(notices.len(), 1, "{:?}", h.logs);
+}
+
+/// The 32-topic cap is Hyro's alone: Bybit streams every ticker it lists.
+#[test]
+fn bybit_public_feed_is_not_held_to_hyros_connection_cap() {
+    let mut h = Harness::started(public_options(Variant::Linear));
+    load(&mut h, "linear", &many_instruments(40), TICKERS, true);
+    h.command(Command::SubscribeOrderBook {
+        symbol: "M39USDT".into(),
+    });
+    h.advance(2_000.0);
+    let (live, _) = live_public_topics(&h);
+    assert_eq!(live.len(), 41, "{live:?}");
+}
