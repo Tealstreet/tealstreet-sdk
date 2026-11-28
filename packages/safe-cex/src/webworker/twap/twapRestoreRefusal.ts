@@ -1,6 +1,7 @@
 import type { TwapOptions } from './TwapOptions';
 import type { TwapState } from './TwapState';
 
+import { OrderSide } from '../../types';
 import { TwapStatus } from './TwapStatus';
 
 /** How long past its next slice a restored running TWAP may still resume. */
@@ -26,8 +27,11 @@ export const twapRestoreRefusal = (
   if (state.status === TwapStatus.Completed) return 'it already completed';
   if (state.status === TwapStatus.Idle) return 'it never started';
   const sizes = state.ordersSizes;
-  // A last slice still being placed is settled on restore, not refused.
-  if (!Array.isArray(sizes) || (sizes.length === 0 && !state.inFlight)) return 'no slices remain';
+  // A last slice still being placed is settled on restore, not refused, and resting
+  // limit slices in their last interval are the TWAP's to cancel when it ends.
+  if (!Array.isArray(sizes) || (sizes.length === 0 && !state.inFlight && !state.limitSlices?.length)) {
+    return 'no slices remain';
+  }
   if (!sizes.every((size) => Number.isFinite(size) && size >= 0)) return 'its slice sizes are invalid';
   if (!(Number.isFinite(options.size) && options.size > 0)) return 'its size is invalid';
   const inFlight = state.inFlight;
@@ -49,4 +53,13 @@ export const twapRestoreRefusal = (
     }
   }
   return undefined;
+};
+
+/** A row that is not restored leaves its limit slices to the user: name them. */
+export const restingSlicesNote = (state: TwapState | undefined): string => {
+  const slices = state?.limitSlices;
+  if (!state || !slices?.length) return '';
+  const side = state.side === OrderSide.Sell ? 'sell' : 'buy';
+  const named = slices.map((slice) => `${side} ${slice.size} at ${slice.price} (order ${slice.orderIds.join(', ')})`);
+  return `. Its limit orders are still open: ${named.join('; ')}`;
 };

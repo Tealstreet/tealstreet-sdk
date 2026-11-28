@@ -165,6 +165,23 @@ describe('RustTwapOwnership restore', () => {
     expect(held.size).toBe(0);
   });
 
+  it('restores a TWAP in its last interval so it can cancel its resting limit slices', async () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    ownership.handle('twap:state', [row('t1', { ordersSizes: [], ordersExecuted: 4, limitSlices })]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent[0].data[0].state.limitSlices).toEqual(limitSlices);
+    expect(errors).toEqual([]);
+  });
+
+  it('names the resting limit slices of a row it refuses', () => {
+    const limitSlices = [{ orderIds: ['o1'], price: 100, size: 0.25 }];
+    ownership.handle('twap:state', [row('old', { nextOrderAt: Date.now() - 3_600_000, limitSlices })]);
+    expect(errors).toEqual([
+      'TWAP BTCUSDT not restored: its saved schedule has expired. Its limit orders are still open: buy 0.25 at 100 (order o1)',
+    ]);
+    expect(sent).toEqual([]);
+  });
+
   it('applies stop and pause to a row still waiting for its lock', async () => {
     held.set(twapLockName('acct', 't1'), 'previous-worker');
     held.set(twapLockName('acct', 't2'), 'previous-worker');

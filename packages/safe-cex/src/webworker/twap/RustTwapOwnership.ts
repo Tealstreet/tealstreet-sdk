@@ -7,7 +7,7 @@ import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { inFlightSlicePlaced } from './inFlightSlice';
 import { acquireTwapLock, acquireTwapLockWithin, TWAP_RESTORE_LOCK_WAIT_MS, twapLockName } from './twapLock';
 import { captureTwapOwner } from './TwapOwner';
-import { twapRestoreRefusal } from './twapRestoreRefusal';
+import { restingSlicesNote, twapRestoreRefusal } from './twapRestoreRefusal';
 import { TwapStatus } from './TwapStatus';
 
 type Row = { options: TwapOptions; state: TwapState; ownerId?: string; ownerGeneration?: number };
@@ -97,7 +97,7 @@ export class RustTwapOwnership {
       const symbol = options?.activeMarket?.symbol ?? id;
       const refusal = twapRestoreRefusal(options, state, Date.now());
       if (refusal) {
-        this.refuse(`TWAP ${symbol} not restored: ${refusal}`);
+        this.refuse(`TWAP ${symbol} not restored: ${refusal}${restingSlicesNote(state)}`);
         refused = true;
         continue;
       }
@@ -161,9 +161,10 @@ export class RustTwapOwnership {
       : placed
         ? { ...rest, ordersExecuted: rest.ordersExecuted + 1 }
         : { ...rest, ordersSizes: [inFlight.size, ...rest.ordersSizes] };
-    // Its last slice was the one in flight: the TWAP is complete.
+    // Its last slice was the one in flight: the TWAP is complete, unless limit slices
+    // it placed still rest, which it cancels at the end of their interval.
     const { ownerSession: _ownerSession, ...restored } = row;
-    if (state.ordersSizes.length > 0) this.send('twap:state', [{ id, ...restored, state }]);
+    if (state.ordersSizes.length > 0 || state.limitSlices?.length) this.send('twap:state', [{ id, ...restored, state }]);
     // The algos refused it, or it already completed.
     if (!(id in this.rows)) this.release(id);
     this.publish();

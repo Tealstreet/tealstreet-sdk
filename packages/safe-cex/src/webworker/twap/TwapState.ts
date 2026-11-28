@@ -25,4 +25,15 @@ export interface TwapState {
    * it looks the order up by `clientOrderId` instead of placing it again.
    */
   inFlight?: { size: number; clientOrderId?: string };
+  /**
+   * Direct limit slices the Rust TWAP placed and still owns; it cancels whatever of
+   * them rests when it ends, so a restore carries them. Only the native algos write it.
+   */
+  limitSlices?: TwapLimitSlice[];
+}
+
+export interface TwapLimitSlice {
+  orderIds: string[];
+  price: number;
+  size: number;
 }
