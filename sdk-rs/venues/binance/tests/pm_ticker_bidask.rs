@@ -213,3 +213,67 @@ fn pm_catalogue_retry_adds_markets_without_new_quote_subscriptions() {
     assert_eq!((eth.bid, eth.ask), (149.8, 150.0));
     assert_eq!((btc.bid, btc.ask), (99.9, 100.1));
 }
+
+/// A partial catalogue retries discovery; its ticker refresh is the only later REST seed.
+fn pm_refreshing_catalogue() -> Harness {
+    let mut h = Harness::started(Options {
+        variant: Variant::PortfolioMargin,
+        public_data_only: true,
+        ..Options::default()
+    });
+    let mut info: Value = serde_json::from_str(support::EXCHANGE_INFO).unwrap();
+    info["symbols"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"symbol":"malformed"}));
+    h.respond("/fapi/v1/exchangeInfo", 200, &info.to_string());
+    seed(&mut h);
+    let socket = h.socket("/public/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    h
+}
+
+fn refresh_seed(h: &mut Harness, update_id: u64, bid: &str, ask: &str) {
+    h.advance(1000.0);
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    let book = json!([{
+        "lastUpdateId": update_id,
+        "symbol": "BTCUSDT",
+        "bidPrice": bid,
+        "askPrice": ask,
+    }]);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, &book.to_string());
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+}
+
+#[test]
+fn pm_refresh_seed_older_than_the_applied_quote_keeps_the_streamed_quote() {
+    let mut h = pm_refreshing_catalogue();
+    h.message("/public/ws", &quote("BTCUSDT", 160, "99.8", "100.0"));
+    refresh_seed(&mut h, 150, "99.5", "99.7");
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.8, 100.0));
+
+    h.message("/public/ws", &quote("BTCUSDT", 155, "99.6", "99.8"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.8, 100.0));
+}
+
+#[test]
+fn pm_refresh_seed_newer_than_the_applied_quote_moves_the_watermark() {
+    let mut h = pm_refreshing_catalogue();
+    h.message("/public/ws", &quote("BTCUSDT", 160, "99.8", "100.0"));
+    refresh_seed(&mut h, 200, "99.9", "100.1");
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.9, 100.1));
+
+    // A 5s all-market sample taken before the REST read is older than the seed.
+    h.message("/public/ws", &quote("BTCUSDT", 170, "99.6", "99.8"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.9, 100.1));
+
+    h.message("/public/ws", &quote("BTCUSDT", 210, "100.0", "100.2"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (100.0, 100.2));
+}
