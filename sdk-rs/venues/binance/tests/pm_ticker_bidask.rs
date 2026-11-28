@@ -130,6 +130,20 @@ fn pm_older_all_market_sample_does_not_overwrite_a_newer_symbol_quote() {
 }
 
 #[test]
+fn pm_book_resubscribe_keeps_the_applied_quote_watermark() {
+    let mut h = pm();
+    subscribe_book(&mut h);
+    h.message("/public/ws", &quote("BTCUSDT", 160, "99.8", "100.0"));
+    h.event(Event::Command(Command::UnsubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    subscribe_book(&mut h);
+    h.message("/public/ws", &quote("BTCUSDT", 150, "99.5", "99.7"));
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.bid, ticker.ask), (99.8, 100.0));
+}
+
+#[test]
 fn pm_reconnect_replays_the_all_market_and_book_quote_topics() {
     let mut h = pm();
     subscribe_book(&mut h);

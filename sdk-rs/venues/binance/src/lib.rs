@@ -220,8 +220,6 @@ struct BookState {
     sync: Sync,
     generation: u64,
     failures: u32,
-    /// PM only: the newest quote update applied from either book-ticker stream.
-    quote_update_id: u64,
 }
 
 /// Diffs buffered while a snapshot is in flight; beyond this the snapshot is stale.
@@ -261,6 +259,9 @@ pub struct BinanceFutures {
     private: Connection,
     spot_tickers: Vec<Connection>,
     books: HashMap<String, BookState>,
+    /// PM only: the newest quote update applied per symbol from either book-ticker
+    /// stream. It outlives book subscriptions, whose resubscribe would reset it.
+    quote_update_ids: HashMap<String, u64>,
     /// Removing and re-adding a book must not reuse an in-flight snapshot ID.
     snapshot_generation: u64,
     candles: HashMap<(String, Interval), u32>,
@@ -323,6 +324,7 @@ impl BinanceFutures {
             private: Connection::new(true),
             spot_tickers: Vec::new(),
             books: HashMap::new(),
+            quote_update_ids: HashMap::new(),
             snapshot_generation: 0,
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
@@ -926,17 +928,17 @@ impl BinanceFutures {
         match event_type(text) {
             Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
-                    let book = self
-                        .options
-                        .portfolio_margin
-                        .then(|| self.books.get_mut(&*event.s))
-                        .flatten();
-                    if let Some(state) = book {
-                        // Both streams carry this symbol; a 5s sample can be older.
-                        if event.u < state.quote_update_id {
-                            return;
+                    if self.options.portfolio_margin {
+                        // Both streams carry an open book's symbol; a 5s sample can be older.
+                        match self.quote_update_ids.get_mut(&*event.s) {
+                            Some(applied) if event.u < *applied => return,
+                            Some(applied) => *applied = event.u,
+                            None => {
+                                self.quote_update_ids.insert(event.s.to_string(), event.u);
+                            }
                         }
-                        state.quote_update_id = event.u;
+                    }
+                    if self.options.portfolio_margin && self.books.contains_key(&*event.s) {
                         cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
                     } else if self.is_spot() {
                         cx.record_socket_symbol_topic(&event.s, &["@bookTicker"]);
@@ -1237,7 +1239,6 @@ impl BinanceFutures {
                 sync: Sync::Idle,
                 generation: 0,
                 failures: 0,
-                quote_update_id: 0,
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
