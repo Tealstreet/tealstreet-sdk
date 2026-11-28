@@ -235,6 +235,8 @@ struct TickerSeed {
     tickers: Vec<Ticker>,
     /// Which sources have reported each market.
     reported: Vec<u8>,
+    /// Each market's REST book-ticker update id (0 when absent).
+    book_update_ids: Vec<u64>,
     /// Which sources have finished.
     finished: u8,
     failed: bool,
@@ -794,6 +796,7 @@ impl BinanceFutures {
                 })
                 .collect(),
             reported: vec![0; cx.store.markets().len()],
+            book_update_ids: vec![0; cx.store.markets().len()],
             finished: 0,
             failed: false,
         };
@@ -881,15 +884,16 @@ impl BinanceFutures {
         let seed = std::mem::take(&mut self.ticker_seed);
         self.ticker_reading = false;
         let refresh = std::mem::take(&mut self.ticker_refresh_pending);
-        let mut tickers: Vec<Ticker> = if seed.failed {
-            Vec::new()
+        let (mut tickers, book_update_ids): (Vec<Ticker>, Vec<u64>) = if seed.failed {
+            Default::default()
         } else {
             seed.tickers
                 .into_iter()
                 .zip(seed.reported)
-                .filter(|(_, reported)| *reported == required)
-                .map(|(ticker, _)| ticker)
-                .collect()
+                .zip(seed.book_update_ids)
+                .filter(|((_, reported), _)| *reported == required)
+                .map(|((ticker, _), id)| (ticker, id))
+                .unzip()
         };
         cx.notice(
             Level::Info,
@@ -899,7 +903,11 @@ impl BinanceFutures {
                 tickers.len().min(cx.store.markets().len())
             ),
         );
+        let rest_quotes: Vec<(f64, f64)> = tickers.iter().map(|t| (t.bid, t.ask)).collect();
         self.live_tickers.finish(cx.store, &mut tickers);
+        if self.options.portfolio_margin {
+            self.reconcile_seeded_quotes(cx, &mut tickers, &rest_quotes, &book_update_ids);
+        }
         cx.store.set_tickers(tickers);
         self.revalue_pending_wallet(cx);
         if !self.credentials.has_primary() {
@@ -921,6 +929,32 @@ impl BinanceFutures {
         }
         if refresh {
             self.start_ticker_seed(cx);
+        }
+    }
+
+    /// PM: the stored quote and its update-id watermark come from one source, so
+    /// a seed never replaces a newer streamed quote and older samples stay rejected.
+    fn reconcile_seeded_quotes(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        tickers: &mut [Ticker],
+        rest_quotes: &[(f64, f64)],
+        book_update_ids: &[u64],
+    ) {
+        for ((ticker, &(bid, ask)), &rest_id) in
+            tickers.iter_mut().zip(rest_quotes).zip(book_update_ids)
+        {
+            let streamed = cx.store.ticker(&ticker.symbol).filter(|_| {
+                self.quote_update_ids
+                    .get(&ticker.symbol)
+                    .is_some_and(|&applied| applied > rest_id)
+            });
+            if let Some(streamed) = streamed {
+                (ticker.bid, ticker.ask) = (streamed.bid, streamed.ask);
+            } else {
+                (ticker.bid, ticker.ask) = (bid, ask);
+                self.quote_update_ids.insert(ticker.symbol.clone(), rest_id);
+            }
         }
     }
 
@@ -1898,6 +1932,13 @@ impl Venue for BinanceFutures {
                         t.bid = num::parse(&b.bid_price);
                         t.ask = num::parse(&b.ask_price);
                     });
+                    if let Some(id) = cx
+                        .store
+                        .market_index(&b.symbol)
+                        .and_then(|index| self.ticker_seed.book_update_ids.get_mut(index as usize))
+                    {
+                        *id = b.last_update_id;
+                    }
                 }
             }
             Pending::PremiumIndex => {

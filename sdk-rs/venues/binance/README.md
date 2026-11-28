@@ -11,7 +11,8 @@ and individual symbol book tickers as real time. An open book's ticker therefore
 stays level with its independently streamed depth book during a price move. Both
 streams deliver that symbol, so a quote older than the last applied update id
 (`u`) is ignored. That id is kept per symbol across book unsubscribe and
-resubscribe. See [Binance's public stream documentation](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/ws-streams/public).
+resubscribe. A REST seed carries the same id as `lastUpdateId`: a seed older than
+the applied stream quote keeps that quote, and a newer one moves the id with it. See [Binance's public stream documentation](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/ws-streams/public).
 
 PM streamed every market's own book ticker until AGT-175. That came to about 950
 subscriptions and over 10,000 frames a second for each account. Each quiet market
